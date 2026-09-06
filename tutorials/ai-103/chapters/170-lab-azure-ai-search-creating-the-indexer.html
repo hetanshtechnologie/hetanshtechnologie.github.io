@@ -1,0 +1,137 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>170. Lab - Azure AI Search - Creating the indexer - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 170</span>
+<h1>Lab - Azure AI Search - Creating the indexer</h1>
+<p>The index exists and the data source points at your blob container, but nothing has moved between them. The <strong>indexer</strong> is the worker that reads documents from the data source, maps their content into the index fields, and writes the results. In this lab you create that indexer, run it, and confirm the documents land in the index.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>The <strong>data source</strong> <code>docs-datasource</code> from the earlier data-source lab.</li>
+<li>The <strong>index</strong> <code>docs-index</code> created in the previous lab.</li>
+<li>The search service name, admin key, and resource group variables (<code>$searchName</code>, <code>$adminKey</code>, <code>$rg</code>).</li>
+<li>At least one PDF uploaded to the <code>docs</code> blob container.</li>
+</ul>
+
+<h2>Step 1 - Understand What the Indexer Needs</h2>
+<p>An indexer definition has four key parts:</p>
+<ul>
+<li><strong>dataSourceName</strong> — which data source to read from.</li>
+<li><strong>targetIndexName</strong> — which index to write into.</li>
+<li><strong>fieldMappings</strong> — how source document fields become index fields.</li>
+<li><strong>schedule</strong> — optional, so the indexer re-runs automatically when documents change.</li>
+</ul>
+<p>When the indexer reads a blob, it produces default fields such as <code>metadata_storage_path</code>, <code>metadata_storage_name</code>, and the raw file text in <code>content</code>. The field mappings tell Azure AI Search which source value belongs in each index field.</p>
+
+<h2>Step 2 - Write the Indexer Definition</h2>
+<p>Save the following as <code>indexer.json</code>. It maps the blob content to the index's <code>content</code> field and stores the source path in <code>metadata_storage_path</code>:</p>
+<pre><code>{
+  "name": "docs-indexer",
+  "dataSourceName": "docs-datasource",
+  "targetIndexName": "docs-index",
+  "fieldMappings": [
+    {
+      "sourceFieldName": "content",
+      "targetFieldName": "content"
+    },
+    {
+      "sourceFieldName": "metadata_storage_name",
+      "targetFieldName": "title"
+    },
+    {
+      "sourceFieldName": "metadata_storage_path",
+      "targetFieldName": "metadata_storage_path"
+    }
+  ],
+  "parameters": {
+    "batchSize": 25,
+    "maxFailedItems": 10,
+    "maxFailedItemsPerBatch": 10,
+    "configuration": {
+      "parsingMode": "default"
+    }
+  },
+  "schedule": {
+    "interval": "PT6H"
+  }
+}
+</code></pre>
+
+<div class="note">
+<p>The <code>content</code> field produced by a blob indexer is the extracted text of the document. The default parsing mode works for plain text and simple PDFs. Advanced extraction — layout, tables, and OCR for scanned pages — is added in the skillset lab.</p>
+</div>
+
+<h2>Step 3 - Create the Indexer</h2>
+<p>Create the indexer by sending the definition to the service. As with the index, the Azure CLI reads the whole JSON payload with <code>--indexer-json</code>:</p>
+<pre><code>az search indexer create `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-indexer `
+  --indexer-json (Get-Content -Raw indexer.json)
+</code></pre>
+
+<div class="tip">
+<p>Run the indexer immediately after creating it rather than waiting for the schedule. The scheduled run only picks up changes going forward; the first run should happen now so the initial documents are indexed without delay:</p>
+<pre><code>az search indexer run `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-indexer
+</code></pre>
+</div>
+
+<h2>Step 4 - Check the Indexer Status</h2>
+<p>Indexing is asynchronous, so you must poll for completion. Show the indexer status and its last run results:</p>
+<pre><code>az search indexer show `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-indexer
+</code></pre>
+<p>Look for the <code>lastResult</code> block. <code>"status": "success"</code> with a document count equal to the number of blobs you uploaded means the run worked. A status of <code>transientFailure</code> or <code>inProgress</code> needs another look after a few seconds.</p>
+
+<h2>Step 5 - Confirm Documents in the Index</h2>
+<p>The real proof is that the index now holds documents. Get the document count:</p>
+<pre><code>az rest --method get `
+  --uri "https://$searchName.search.windows.net/indexes/docs-index/stats?api-version=2023-11-01" `
+  --headers "api-key=$adminKey"
+</code></pre>
+<p>The response contains a <code>documentCount</code> value. If it matches your uploaded files, the pipeline works: blob in, document out.</p>
+
+<div class="warn">
+<p>If the document count stays at zero, the most common cause is a parsing failure on a scanned or image-only PDF. The default parser cannot extract text from scanned pages, so the file is skipped. Check <code>lastResult.errors</code> and <code>lastResult.warnings</code> in the indexer status to see exactly which files failed and why.</p>
+</div>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>Invalid data source</code></td><td>Data source name typo</td><td>List data sources and confirm the exact name matches.</td></tr>
+<tr><td><code>Invalid target index</code></td><td>Index name mismatch</td><td>List indexes and compare with <code>targetIndexName</code>.</td></tr>
+<tr><td>Zero documents indexed</td><td>Unsupported file type or empty container</td><td>Check <code>lastResult.errors</code>; confirm blobs exist in the container.</td></tr>
+<tr><td>Indexer stuck <code>inProgress</code></td><td>Large files or slow extraction</td><td>Wait and re-run <code>az search indexer show</code>; raise <code>batchSize</code> carefully.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You created an indexer that reads from the blob data source, mapped its fields into the search index, ran it, and verified both the run status and the document count. The pipeline data source, index, and indexer is complete: content now flows automatically from blob storage into searchable documents. In the next lab you query that index.</p>
+<nav>
+<a href="169-lab-azure-ai-search-creating-the-index.html">&larr; Previous: Lab - Azure AI Search - Creating the index</a><a href="171-lab-azure-ai-search-queries.html">Next: Lab - Azure AI Search - Queries &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

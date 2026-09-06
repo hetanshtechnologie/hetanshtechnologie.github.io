@@ -1,0 +1,947 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 4: Variables, Outputs &amp; Data Sources — Terraform eBook</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+
+<h1>Chapter 4: Variables, Outputs &amp; Data Sources</h1>
+
+<p class="toc"><strong>Table of Contents</strong></p>
+<ol class="toc">
+  <li><a href="#variable-declarations">Variable Declarations</a></li>
+  <li><a href="#variable-validation">Variable Validation Blocks</a></li>
+  <li><a href="#variable-assignment">Variable Assignment Methods</a></li>
+  <li><a href="#sensitive-variables">Sensitive Variables</a></li>
+  <li><a href="#output-values">Output Values</a></li>
+  <li><a href="#output-formatting">Output Formatting &amp; Data Sources for Outputs</a></li>
+  <li><a href="#data-sources">Data Sources in Depth</a></li>
+  <li><a href="#locals">Local Values</a></li>
+  <li><a href="#expressions">Expressions</a></li>
+  <li><a href="#functions">Built-in Functions</a></li>
+  <li><a href="#summary">Summary &amp; Checklist</a></li>
+</ol>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="variable-declarations">1. Variable Declarations</h2>
+
+<p>Variables are the input mechanism for Terraform modules. Every <code>variable</code> block declares a named input that can be set by callers. Terraform supports several primitive and composite types.</p>
+
+<h3>String</h3>
+<pre><code>variable "resource_group_name" {
+  description = "Name of the Azure Resource Group"
+  type        = string
+  default     = "rg-terraform-demo"
+}</code></pre>
+
+<h3>Number</h3>
+<pre><code>variable "instance_count" {
+  description = "Number of VM instances to create"
+  type        = number
+  default     = 2
+}</code></pre>
+
+<h3>Boolean</h3>
+<pre><code>variable "enable_accelerated_networking" {
+  description = "Enable accelerated networking on NICs"
+  type        = bool
+  default     = false
+}</code></pre>
+
+<h3>List</h3>
+<pre><code>variable "subnet_prefixes" {
+  description = "List of subnet CIDR blocks"
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+}</code></pre>
+
+<h3>Map</h3>
+<pre><code>variable "vm_sizes" {
+  description = "Map of environment to VM size"
+  type        = map(string)
+  default = {
+    dev  = "Standard_B2s"
+    staging = "Standard_D2s_v3"
+    prod = "Standard_D4s_v3"
+  }
+}</code></pre>
+
+<h3>Object</h3>
+<pre><code>variable "database_config" {
+  description = "Database configuration block"
+  type = object({
+    sku_name      = string
+    storage_mb    = number
+    version       = string
+    backup_enabled = bool
+  })
+  default = {
+    sku_name       = "GP_Standard_D2s_v3"
+    storage_mb     = 32768
+    version        = "14"
+    backup_enabled = true
+  }
+}</code></pre>
+
+<h3>Tuple</h3>
+<pre><code>variable "cidr_ranges" {
+  description = "Exactly three CIDR ranges in order"
+  type = tuple([string, string, string])
+  default = ["10.0.0.0/16", "10.0.1.0/24", "10.0.2.0/24"]
+}</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Use <code>tuple</code> when you need a fixed-length list with specific types at each position. Use <code>list</code> when items can vary but share the same type.
+</div>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="variable-validation">2. Variable Validation Blocks</h2>
+
+<p>Validation blocks let you enforce rules on input values <em>before</em> Terraform plans or applies. A failed validation stops execution with a clear error message.</p>
+
+<pre><code>variable "environment" {
+  description = "Deployment environment"
+  type        = string
+
+  validation {
+    condition     = contains(["dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be one of: dev, staging, prod."
+  }
+}
+
+variable "admin_email" {
+  description = "Administrator email address"
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+$", var.admin_email))
+    error_message = "Must be a valid email address."
+  }
+}
+
+variable "instance_count" {
+  description = "Number of instances (1-10)"
+  type        = number
+
+  validation {
+    condition     = var.instance_count >= 1 && var.instance_count <= 10
+    error_message = "Instance count must be between 1 and 10."
+  }
+}
+
+variable "vnet_address_space" {
+  description = "VNet CIDR block"
+  type        = string
+
+  validation {
+    condition     = can(cidrhost(var.vnet_address_space, 0))
+    error_message = "Must be a valid CIDR block (e.g. 10.0.0.0/16)."
+  }
+}
+
+variable "tags" {
+  description = "Resource tags"
+  type = object({
+    environment = string
+    cost_center = string
+  })
+
+  validation {
+    condition     = length(var.tags.environment) > 0
+    error_message = "Environment tag must not be empty."
+  }
+}</code></pre>
+
+<div class="tip">
+  <strong>Tip:</strong> You can use <code>can()</code> inside validation conditions to test whether an expression succeeds without producing an error. This is especially handy for regex and function calls.
+</div>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="variable-assignment">3. Variable Assignment Methods</h2>
+
+<p>Terraform resolves variables through a well-defined precedence order (lowest to highest):</p>
+
+<div class="diagram">
+<pre><code>1. Default values in variable blocks
+2. terraform.tfvars file
+3. *.auto.tfvars files (alphabetical order)
+4. -var-file="custom.tfvars" flag
+5. -var "name=value" flag
+6. TF_VAR_name environment variable
+7. Interactive input (when -input is enabled)
+8. Non-interactive input via CI/CD pipeline variables</code></pre>
+</div>
+
+<h3>terraform.tfvars</h3>
+<pre><code># terraform.tfvars
+resource_group_name = "rg-production"
+instance_count      = 4
+enable_accelerated_networking = true
+subnet_prefixes     = ["10.0.1.0/24", "10.0.2.0/24"]
+environment         = "prod"
+
+tags = {
+  environment = "production"
+  cost_center = "CC-4200"
+}</code></pre>
+
+<h3>Auto-loaded .auto.tfvars</h3>
+<pre><code># networking.auto.tfvars  (loaded automatically)
+vnet_address_space = "10.0.0.0/16"
+dns_servers        = ["168.63.129.16", "8.8.8.8"]</code></pre>
+
+<h3>Custom tfvars file via flag</h3>
+<pre><code>terraform plan -var-file="environments/prod.tfvars"
+terraform apply -var-file="environments/staging.tfvars"</code></pre>
+
+<h3>-var flag</h3>
+<pre><code>terraform plan -var="environment=dev" -var="instance_count=1"</code></pre>
+
+<h3>Environment variables</h3>
+<pre><code># PowerShell
+$env:TF_VAR_environment = "dev"
+$env:TF_VAR_instance_count = "1"
+terraform plan
+
+# Bash
+export TF_VAR_environment="dev"
+export TF_VAR_instance_count="1"
+terraform plan</code></pre>
+
+<div class="warning">
+  <strong>Warning:</strong> Never commit <code>terraform.tfvars</code> files containing secrets to version control. Add them to <code>.gitignore</code> and use <code>*.tfvars.example</code> files as templates.
+</div>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="sensitive-variables">4. Sensitive Variables</h2>
+
+<p>Marking a variable as <code>sensitive</code> prevents Terraform from displaying its value in plan output, apply output, and state file diffs.</p>
+
+<pre><code>variable "db_password" {
+  description = "Azure SQL admin password"
+  type        = string
+  sensitive   = true
+}
+
+variable "api_key" {
+  description = "Third-party API key"
+  type        = string
+  sensitive   = true
+}</code></pre>
+
+<p>In plan output, sensitive values appear as <code>(sensitive value)</code>:</p>
+<pre><code># Terraform will display:
+  + admin_password = (sensitive value)
+
+# Instead of:
+  + admin_password = "MyP@ssw0rd!"</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Even with <code>sensitive = true</code>, the value is still stored in Terraform state. For truly secret data, use a secrets manager (Azure Key Vault, AWS Secrets Manager, HashiCorp Vault) and reference via data sources.
+</div>
+
+<h3>Using Azure Key Vault for secrets</h3>
+<pre><code>data "azurerm_key_vault_secret" "db_password" {
+  name         = "db-admin-password"
+  key_vault_id = data.azurerm_key_vault.main.id
+}
+
+resource "azurerm_mssql_database" "main" {
+  name      = "mydb"
+  server_id = azurerm_mssql_server.main.id
+
+  administrator_login          = "sqladmin"
+  administrator_login_password = data.azurerm_key_vault_secret.db_password.value
+}</code></pre>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="output-values">5. Output Values</h2>
+
+<p>Outputs expose computed values to the user after <code>terraform apply</code>. They are also how child modules pass data back to their callers.</p>
+
+<h3>Basic outputs</h3>
+<pre><code>output "public_ip_address" {
+  description = "Public IP of the web server"
+  value       = azurerm_public_ip.web.ip_address
+}
+
+output "connection_string" {
+  description = "Database connection string"
+  value       = "Server=${azurerm_mssql_server.main.fully_qualified_domain_name};Database=mydb;User Id=sqladmin;Password=****"
+  sensitive   = true
+}
+
+output "subnet_ids" {
+  description = "List of created subnet IDs"
+  value       = azurerm_subnet.subnets[*].id
+}
+
+output "environment_summary" {
+  description = "Summary of deployed environment"
+  value = {
+    name        = var.environment
+    region      = var.location
+    vm_count    = var.instance_count
+    vnet_cidr   = var.vnet_address_space
+  }
+}</code></pre>
+
+<h3>Using outputs from root module</h3>
+<pre><code># After apply, view outputs:
+terraform output
+
+# View a specific output:
+terraform output public_ip_address
+
+# JSON format (useful for piping):
+terraform output -json public_ip_address</code></pre>
+
+<h3>Referencing outputs from a child module</h3>
+<pre><code>module "networking" {
+  source = "./modules/networking"
+
+  vnet_name           = "vnet-main"
+  address_space       = "10.0.0.0/16"
+  subnet_definitions  = var.subnet_definitions
+}
+
+# Access child module outputs
+resource "azurerm_network_interface" "web" {
+  ip_configuration {
+    subnet_id = module.networking.subnet_ids["web"]
+  }
+}
+
+# Re-export a child output at the root
+output "vnet_id" {
+  description = "ID of the virtual network"
+  value       = module.networking.vnet_id
+}</code></pre>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="output-formatting">6. Output Formatting &amp; Data Sources for Outputs</h2>
+
+<p>Terraform outputs can be formatted and consumed by external tools and scripts.</p>
+
+<pre><code># Output as JSON for scripting
+terraform output -json
+
+# Filter a single output
+terraform output -raw public_ip_address
+
+# Format as table
+terraform output -json | python -m json.tool</code></pre>
+
+<p>When using <code>-raw</code>, the value is printed without quotes or JSON wrapping, making it ideal for shell scripts:</p>
+<pre><code>#!/bin/bash
+# Get the public IP and SSH into the VM
+IP=$(terraform output -raw public_ip_address)
+ssh azureadmin@$IP</code></pre>
+
+<p>Outputs can also be consumed by <code>terraform_remote_state</code> data sources in other configurations:</p>
+<pre><code>data "terraform_remote_state" "networking" {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = "rg-terraform-state"
+    storage_account_name = "stterraformstate"
+    container_name       = "tfstate"
+    key                  = "networking.tfstate"
+  }
+}
+
+resource "azurerm_network_interface" "web" {
+  ip_configuration {
+    subnet_id = data.terraform_remote_state.networking.outputs.subnet_ids["web"]
+  }
+}</code></pre>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="data-sources">7. Data Sources in Depth</h2>
+
+<p>Data sources let Terraform read information from external systems (cloud providers, APIs, other Terraform states) without managing those resources. They are declared with <code>data</code> blocks and referenced with <code>data.&lt;type&gt;.&lt;name&gt;</code>.</p>
+
+<h3>Azure examples</h3>
+<pre><code># Look up the current subscription
+data "azurerm_subscription" "current" {}
+
+# Look up an existing resource group
+data "azurerm_resource_group" "existing" {
+  name = "rg-existing-resources"
+}
+
+# Look up the latest Ubuntu image
+data "azurerm_platform_image" "ubuntu" {
+  location  = var.location
+  publisher = "Canonical"
+  offer     = "0001-com-ubuntu-server-jammy"
+  sku       = "22_04-lts-gen2"
+}
+
+# Look up available VM sizes in a region
+data "azurerm_virtual_machine_sizes" "available" {
+  location = var.location
+}
+
+# Filter for GPU-capable sizes
+locals {
+  gpu_sizes = [
+    for s in data.azurerm_virtual_machine_sizes.available.names :
+    s
+    if can(regex("Standard_NC", s))
+  ]
+}
+
+# Look up current client IP for NSG rules
+data "http" "my_ip" {
+  url = "https://ifconfig.me"
+}
+
+resource "azurerm_network_security_rule" "allow_ssh" {
+  name                       = "allow-ssh"
+  priority                   = 100
+  direction                  = "Inbound"
+  access                     = "Allow"
+  protocol                   = "Tcp"
+  source_port_range          = "*"
+  destination_port_range     = "22"
+  source_address_prefix      = "${data.http.my_ip.response_body}/32"
+  destination_address_prefix = "*"
+  resource_group_name        = azurerm_resource_group.main.name
+  network_security_group_name = azurerm_network_security_group.main.name
+}</code></pre>
+
+<h3>AWS examples</h3>
+<pre><code># Look up the latest Amazon Linux 2 AMI
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+# Look up available AZs
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+# Look up a VPC by tag
+data "aws_vpc" "main" {
+  tags = {
+    Name = "production-vpc"
+  }
+}
+
+# Look up subnets in the VPC
+data "aws_subnets" "private" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.main.id]
+  }
+
+  tags = {
+    Tier = "private"
+  }
+}
+
+# Look up the current AWS caller identity
+data "aws_caller_identity" "current" {}
+
+# Reference in a resource
+resource "aws_instance" "web" {
+  ami           = data.aws_ami.amazon_linux.id
+  instance_type = var.vm_size
+  subnet_id     = data.aws_subnets.private.ids[0]
+
+  tags = {
+    Name = "web-server"
+  }
+}</code></pre>
+
+<h3>GCP examples</h3>
+<pre><code># Look up the latest Debian image
+data "google_compute_image" "debian" {
+  family  = "debian-12"
+  project = "debian-cloud"
+}
+
+# Look up available zones in a region
+data "google_compute_zones" "available" {
+  region = var.region
+  status = "UP"
+}
+
+# Look up an existing project
+data "google_project" "current" {}
+
+# Look up IAM policy
+data "google_iam_policy" "bucket_admin" {
+  binding {
+    role    = "roles/storage.admin"
+    members = [
+      "serviceAccount:${google_service_account.app.email}",
+    ]
+  }
+}
+
+resource "google_compute_instance" "web" {
+  name         = "web-server"
+  machine_type = "e2-medium"
+  zone         = data.google_compute_zones.available.names[0]
+
+  boot_disk {
+    initialize_params {
+      image = data.google_compute_image.debian.self_link
+    }
+  }
+
+  network_interface {
+    network = "default"
+    access_config {}
+  }
+}</code></pre>
+
+<div class="note">
+  <strong>Note:</strong> Data sources are evaluated during <code>terraform plan</code>. If the data source references an external resource that doesn't exist or has incorrect filters, the plan will fail before any changes are made.
+</div>
+
+<h3>Using <code>for_each</code> with data sources</h3>
+<pre><code>data "azurerm_client_config" "current" {}
+
+data "azurerm_key_vault" "environments" {
+  for_each = toset(["dev", "staging", "prod"])
+
+  name                = "kv-${each.key}"
+  resource_group_name = "rg-${each.key}"
+}
+
+locals {
+  key_vault_ids = {
+    for k, v in data.azurerm_key_vault.environments :
+    k => v.id
+  }
+}
+
+output "key_vault_ids" {
+  value = local.key_vault_ids
+}</code></pre>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="locals">8. Local Values</h2>
+
+<p><code>locals</code> assign names to expressions so you can use them multiple times without repeating the logic. They are not inputs — they are computed values within a module.</p>
+
+<pre><code>locals {
+  # Common tags applied to every resource
+  common_tags = merge(var.tags, {
+    environment = var.environment
+    managed_by  = "terraform"
+    project     = var.project_name
+    created_at  = timestamp()
+  })
+
+  # Derived naming convention
+  name_prefix = "${var.project_name}-${var.environment}"
+
+  # Computed CIDR calculations
+  subnet_cidrs = {
+    for i, cidr in var.subnet_prefixes :
+    "subnet-${i + 1}" => {
+      cidr = cidr
+      name = "${local.name_prefix}-subnet-${i + 1}"
+    }
+  }
+
+  # Filter data source results
+  production_subnets = [
+    for s in data.aws_subnets.all.ids :
+    s
+    if can(regex("prod", s))
+  ]
+}
+
+resource "azurerm_linux_virtual_machine" "main" {
+  name                = "${local.name_prefix}-vm"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+  size                = var.vm_size
+  admin_username      = var.admin_username
+
+  tags = local.common_tags
+}
+
+resource "azurerm_virtual_network" "main" {
+  name                = "${local.name_prefix}-vnet"
+  address_space       = [var.vnet_address_space]
+  resource_group_name = var.resource_group_name
+  location            = var.location
+
+  tags = local.common_tags
+}</code></pre>
+
+<div class="tip">
+  <strong>Tip:</strong> <code>local</code> values are only available within the module where they are defined. Use <code>output</code> to expose derived values to callers.
+</div>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="expressions">9. Expressions</h2>
+
+<h3>String Interpolation</h3>
+<pre><code>locals {
+  server_name = "${local.name_prefix}-web-${var.instance_index}"
+  fqdn        = "${var.hostname}.${var.domain}"
+  bucket_name = "data-${var.environment}-${data.aws_caller_identity.current.account_id}"
+}</code></pre>
+
+<h3>Heredoc (multi-line strings)</h3>
+<pre><code>resource "azurerm_virtual_machine_extension" "cloud_init" {
+  name                 = "cloud-init"
+  virtual_machine_id   = azurerm_linux_virtual_machine.main.id
+  publisher            = "Microsoft.Azure.Extensions"
+  type                 = "CustomScript"
+  type_handler_version = "2.1"
+
+  settings = jsonencode({
+    commandToExecute = <<-EOT
+      #!/bin/bash
+      apt-get update -y
+      apt-get install -y nginx
+      systemctl enable nginx
+      systemctl start nginx
+    EOT
+  })
+}</code></pre>
+
+<h3>Conditional Expressions</h3>
+<pre><code>resource "azurerm_linux_virtual_machine" "main" {
+  size = var.environment == "prod" ? "Standard_D4s_v3" : "Standard_B2s"
+
+  os_disk {
+    caching              = var.environment == "prod" ? "ReadWrite" : "None"
+    storage_account_type = var.environment == "prod" ? "Premium_LRS" : "Standard_LRS"
+  }
+}
+
+resource "azurerm_public_ip" "web" {
+  count = var.enable_public_ip ? 1 : 0
+
+  name                = "${local.name_prefix}-pip"
+  allocation_method   = "Static"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+}</code></pre>
+
+<h3>For Expressions</h3>
+<pre><code>locals {
+  # List comprehension
+  upper_regions = [for r in var.regions : upper(r)]
+
+  # Map comprehension
+  subnet_name_to_id = { for s in azurerm_subnet.subnets : s.name => s.id }
+
+  # Filtered list
+  prod_subnets = [for s in var.subnets : s if s.environment == "prod"]
+
+  # Nested for
+  all_rules = flatten([
+    for port in var.allowed_ports : [
+      for source in var.source_addresses : {
+        port   = port
+        source = source
+      }
+    ]
+  ])
+}</code></pre>
+
+<h3>Splat Expressions</h3>
+<pre><code># Get all subnet IDs
+output "all_subnet_ids" {
+  value = azurerm_subnet.subnets[*].id
+}
+
+# Get specific attribute from all instances
+output "all_private_ips" {
+  value = azurerm_network_interface.web[*].private_ip_address
+}
+
+# Filtered splat
+output "prod_subnet_ids" {
+  value = [
+    for s in azurerm_subnet.subnets :
+    s.id
+    if s.name ~= "prod"
+  ]
+}</code></pre>
+
+<h3>The <code>dynamic</code> Block</h3>
+<pre><code>variable "ingress_rules" {
+  type = list(object({
+    port        = number
+    cidr        = string
+    description = string
+  }))
+}
+
+resource "azurerm_network_security_group" "web" {
+  name                = "nsg-web"
+  resource_group_name = var.resource_group_name
+  location            = var.location
+
+  dynamic "security_rule" {
+    for_each = var.ingress_rules
+
+    content {
+      name                       = "allow-port-${security_rule.value.port}"
+      priority                   = 100 + index(var.ingress_rules, security_rule.value)
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = tostring(security_rule.value.port)
+      source_address_prefix      = security_rule.value.cidr
+      destination_address_prefix = "*"
+      description                = security_rule.value.description
+    }
+  }
+}</code></pre>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="functions">10. Built-in Functions</h2>
+
+<p>Terraform provides a rich set of built-in functions. You cannot define custom functions — all functions are provided by Terraform itself.</p>
+
+<h3>File &amp; Template Functions</h3>
+<pre><code># Read a file into a string
+resource "azurerm_linux_virtual_machine_extension" "script" {
+  settings = jsonencode({
+    script = file("${path.module}/scripts/init.sh")
+  })
+}
+
+# Render a template with variable substitution
+locals {
+  cloud_init = templatefile("${path.module}/templates/cloud-init.yaml.tpl", {
+    hostname     = var.hostname
+    packages     = ["nginx", "curl", "jq"]
+    db_host      = azurerm_mssql_server.main.fully_qualified_domain_name
+    db_name      = "appdb"
+  })
+}
+
+# templatefile template (cloud-init.yaml.tpl):
+# #cloud-config
+# hostname: ${hostname}
+# packages:
+%{ for pkg in packages ~}
+#   - ${pkg}
+%{ endfor ~}
+# runcmd:
+#   - echo "DB host: ${db_host}"</code></pre>
+
+<h3>Collection Functions</h3>
+<pre><code>locals {
+  # length — count items in a list, map, or string
+  num_subnets = length(var.subnet_prefixes)
+
+  # lookup — get a value from a map with a default
+  vm_size = lookup(var.vm_sizes, var.environment, "Standard_B2s")
+
+  # merge — combine multiple maps (last wins)
+  all_tags = merge(var.default_tags, var.environment_tags, { project = var.project_name })
+
+  # concat — combine multiple lists
+  all_cidrs = concat(var.public_cidrs, var.private_cidrs)
+
+  # element — get item at index (wraps around)
+  first_subnet = element(var.subnet_prefixes, 0)
+
+  # flatten — flatten nested lists
+  all_ports = flatten([var.http_ports, var.https_ports, var.ssh_ports])
+
+  # distinct — remove duplicates
+  unique_regions = distinct(concat(var.primary_regions, var.secondary_regions))
+
+  # contains — check if list contains value
+  is_prod = contains(["prod", "production"], var.environment)
+
+  # sort — sort a list
+  sorted_subnets = sort(var.subnet_prefixes)
+
+  # zipmap — create a map from two lists
+  subnet_map = zipmap(
+    [for i in range(length(var.subnet_prefixes)) : "subnet-${i + 1}"],
+    var.subnet_prefixes
+  )
+
+  # keys / values
+  environment_names = keys(var.vm_sizes)
+  size_values       = values(var.vm_sizes)
+}</code></pre>
+
+<h3>String Functions</h3>
+<pre><code>locals {
+  # format
+  vm_name = format("%s-web-%03d", var.project_name, var.instance_index)
+
+  # join
+  cidr_string = join(", ", var.subnet_prefixes)
+
+  # split
+  regions_list = split(",", var.regions_csv)
+
+  # lower / upper / title
+  env_lower = lower(var.environment)
+  env_upper = upper(var.environment)
+  env_title = title(var.environment)
+
+  # substr
+  short_name = substr(var.project_name, 0, 10)
+
+  # replace
+  safe_name = replace(var.project_name, "/[^a-z0-9]/", "")
+
+  # regex
+  has_prod = can(regex("prod", var.environment))
+
+  # trimspace
+  clean_input = trimspace(var.user_input)
+}</code></pre>
+
+<h3>Numeric &amp; Date Functions</h3>
+<pre><code>locals {
+  # min / max
+  min_storage = max(var.min_storage_gb, 100)
+
+  # ceil / floor / round
+  replica_count = ceil(var.total_capacity / var.capacity_per_replica)
+
+  # parseInt
+  port_number = tonumber(var.port_string)
+
+  # timestamp
+  creation_time = timestamp()
+
+  # formatdate
+  backup_label = formatdate("YYYY-MM-DD-hhmm", timestamp())
+
+  # timeadd
+  expiration = timeadd(timestamp(), "720h")  # 30 days from now
+}</code></pre>
+
+<h3>Encoding &amp; Crypto Functions</h3>
+<pre><code>locals {
+  # base64encode / decode
+  init_script_b64 = base64encode(file("${path.module}/scripts/init.sh"))
+
+  # jsonencode / decode
+  config_json = jsonencode({
+    name     = var.project_name
+    services = var.service_list
+  })
+  parsed_config = jsondecode(data.http.api_response.body)
+
+  # sha256
+  config_hash = sha256(file("${path.module}/config.yaml"))
+
+  # uuid
+  unique_id = uuid()
+}</code></pre>
+
+<h3>Type Conversion Functions</h3>
+<pre><code>locals {
+  # tolist / toset
+  unique_ports = toset(var.port_list)
+  back_to_list = tolist(local.unique_ports)
+
+  # tomap
+  string_map = tomap({
+    key1 = "value1"
+    key2 = "value2"
+  })
+
+  # tonumber / tostring / tobool
+  port_int    = tonumber("8080")
+  count_str   = tostring(var.instance_count)
+  flag_bool   = tobool("true")
+}</code></pre>
+
+<div class="warning">
+  <strong>Warning:</strong> Some functions like <code>timestamp()</code> and <code>uuid()</code> produce different values on every plan, which can cause Terraform to show perpetual diffs. Use them carefully, ideally only in creation-time resources.
+</div>
+
+<!-- ──────────────────────────────────────────── -->
+<h2 id="summary">11. Summary &amp; Checklist</h2>
+
+<div class="diagram">
+<pre><code>┌──────────────────────────────────────────────────────────────┐
+│              Variables, Outputs & Data Sources                │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Variables          Outputs              Data Sources         │
+│  ─────────          ───────              ────────────         │
+│  • string           • descriptions       • azurerm_*         │
+│  • number           • sensitive flag     • aws_*             │
+│  • bool             • -raw flag          • google_*          │
+│  • list             • JSON format        • http              │
+│  • map              • remote_state       • templatefile      │
+│  • object                                 • terraform_remote  │
+│  • tuple            Locals               │   _state          │
+│  • validation       ───────                                     │
+│                     • merge tags          Expressions         │
+│  Assignment         • computed values     ───────────         │
+│  ──────────         • derived names       • interpolation     │
+│  • .tfvars          • filter data         • conditional       │
+│  • .auto.tfvars                            • for              │
+│  • -var flag        Functions             • splat             │
+│  • TF_VAR_* env     ───────               • dynamic          │
+│  • interactive      • file / templatefile                      │
+│                     • lookup / merge       Built-in Funcs     │
+│                     • concat / element     ──────────────     │
+│                     • length / contains    70+ functions      │
+│                     • formatdate / uuid    available          │
+└──────────────────────────────────────────────────────────────┘</code></pre>
+</div>
+
+<h3>Chapter 4 Checklist</h3>
+
+<div class="exercise">
+<p><strong>Before moving on, confirm you can:</strong></p>
+<ul>
+  <li>Declare variables of every supported type (string, number, bool, list, map, object, tuple)</li>
+  <li>Write validation blocks with <code>condition</code> and <code>error_message</code></li>
+  <li>Set variables via <code>terraform.tfvars</code>, <code>.auto.tfvars</code>, <code>-var</code>, <code>-var-file</code>, and environment variables</li>
+  <li>Mark sensitive variables and understand state implications</li>
+  <li>Define outputs with descriptions and the <code>sensitive</code> flag</li>
+  <li>Consume outputs via <code>terraform output</code> and <code>terraform_remote_state</code></li>
+  <li>Write data sources for Azure, AWS, and GCP</li>
+  <li>Use <code>locals</code> for computed values, common tags, and derived naming</li>
+  <li>Use interpolation, conditionals, for expressions, splat expressions, and dynamic blocks</li>
+  <li>Apply built-in functions: <code>file</code>, <code>templatefile</code>, <code>lookup</code>, <code>merge</code>, <code>concat</code>, <code>element</code>, <code>length</code>, <code>format</code>, and more</li>
+  <li>Understand variable resolution precedence</li>
+</ul>
+</div>
+
+<div class="tip">
+  <strong>Coming up next:</strong> In <a href="5-state-management.html">Chapter 5: State Management</a>, we'll learn how Terraform tracks resource state, how to use remote backends, and best practices for state locking and team workflows.
+</div>
+
+<div style="display:flex;justify-content:space-between;margin-top:2rem;padding-top:1rem;border-top:1px solid #e5e7eb;">
+  <a href="3-providers-resources.html" style="color:#7c3aed;text-decoration:none;">&larr; Previous: Providers &amp; Resources</a>
+  <a href="5-state-management.html" style="color:#7c3aed;text-decoration:none;">Next: State Management &rarr;</a>
+</div>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/feedback.js"></script>
+<script src="../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

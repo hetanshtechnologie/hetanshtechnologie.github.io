@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Storage - Android Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 11</span>
+    <h1>Storage &amp; Data Persistence</h1>
+
+    <h2>SharedPreferences</h2>
+    <pre><code>// Save data
+val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+prefs.edit().apply {
+    putString("username", "Alice")
+    putInt("age", 30)
+    putBoolean("isLoggedIn", true)
+    apply() // Async
+}
+
+// Read data
+val username = prefs.getString("username", "")
+val isLoggedIn = prefs.getBoolean("isLoggedIn", false)
+
+// DataStore (modern replacement)
+val dataStore = context.createDataStore(name = "settings")
+val EXAMPLE_COUNTER = intPreferencesKey("example_counter")
+val exampleCounterFlow: Flow&lt;Int&gt; = dataStore.data.map { it[EXAMPLE_COUNTER] ?: 0 }
+
+suspend fun incrementCounter() {
+    dataStore.edit { it[EXAMPLE_COUNTER] = (it[EXAMPLE_COUNTER] ?: 0) + 1 }
+}</code></pre>
+
+    <h2>SQLite with Room</h2>
+    <p>Room is the recommended abstraction layer over SQLite.</p>
+
+    <pre><code>// Entity
+@Entity(tableName = "notes")
+data class Note(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val title: String,
+    val content: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+// DAO
+@Dao
+interface NoteDao {
+    @Query("SELECT * FROM notes ORDER BY timestamp DESC")
+    fun getAllNotes(): LiveData&lt;List&lt;Note&gt;&gt;
+
+    @Insert
+    suspend fun insert(note: Note)
+
+    @Update
+    suspend fun update(note: Note)
+
+    @Delete
+    suspend fun delete(note: Note)
+
+    @Query("SELECT * FROM notes WHERE id = :id")
+    suspend fun getNoteById(id: Int): Note?
+}
+
+// Database
+@Database(entities = [Note::class], version = 1)
+abstract class NoteDatabase : RoomDatabase() {
+    abstract fun noteDao(): NoteDao
+
+    companion object {
+        @Volatile
+        private var INSTANCE: NoteDatabase? = null
+
+        fun getInstance(context: Context): NoteDatabase {
+            return INSTANCE ?: synchronized(this) {
+                Room.databaseBuilder(
+                    context.applicationContext,
+                    NoteDatabase::class.java,
+                    "note_database"
+                ).build().also { INSTANCE = it }
+            }
+        }
+    }
+}
+
+// Usage
+val dao = NoteDatabase.getInstance(this).noteDao()
+viewModelScope.launch {
+    dao.insert(Note(title = "My Note", content = "Hello Room!"))
+}</code></pre>
+
+    <h2>File Storage</h2>
+    <pre><code>// Internal storage (private to the app)
+fun writeToInternalFile(filename: String, content: String) {
+    openFileOutput(filename, Context.MODE_PRIVATE).use {
+        it.write(content.toByteArray())
+    }
+}
+
+fun readFromInternalFile(filename: String): String {
+    return openFileInput(filename).bufferedReader().readText()
+}
+
+// External storage (requires permission for public files)
+&lt;uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+    android:maxSdkVersion="28" /&gt;
+
+fun saveToDownloads(content: String, filename: String) {
+    val downloadsDir = Environment.getExternalStoragePublicDirectory(
+        Environment.DIRECTORY_DOWNLOADS
+    )
+    val file = File(downloadsDir, filename)
+    file.writeText(content)
+}
+
+// Scoped storage (Android 10+)
+fun saveToAppSpecificExternal() {
+    val file = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "data.txt")
+    file.writeText("Hello, scoped storage!")
+}</code></pre>
+
+    <h2>JSON &amp; XML Parsing</h2>
+    <pre><code>// JSON with Gson/Moshi
+// implementation("com.squareup.moshi:moshi-kotlin:1.15.0")
+
+@JsonClass(generateAdapter = true)
+data class User(val id: Int, val name: String, val email: String)
+
+val moshi = Moshi.Builder().build()
+val adapter = moshi.adapter(User::class.java)
+
+// Serialize
+val user = User(1, "Alice", "alice@example.com")
+val json = adapter.toJson(user)
+
+// Deserialize
+val userFromJson = adapter.fromJson(json)
+
+// XML Pull Parser
+fun parseXml(xml: String) {
+    val parser = XmlPullParserFactory.newInstance().newPullParser()
+    parser.setInput(StringReader(xml))
+    var eventType = parser.eventType
+    while (eventType != XmlPullParser.END_DOCUMENT) {
+        if (eventType == XmlPullParser.START_TAG && parser.name == "item") {
+            val name = parser.getAttributeValue(null, "name")
+            println("Item: $name")
+        }
+        eventType = parser.next()
+    }
+}</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create a notes app using Room database. Users can add, edit, and delete notes. Each note has a title, content, and timestamp. Display notes in a RecyclerView sorted by most recent. Show a dialog to confirm before deleting. Persist the last opened note ID using DataStore.
+    </div>
+
+    <nav>
+      <a href="10-services.html">&larr; Previous: Services &amp; Background Tasks</a>
+      <a href="../">Back to Index</a>
+      <a href="12-networking.html">Next: Networking &amp; APIs &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

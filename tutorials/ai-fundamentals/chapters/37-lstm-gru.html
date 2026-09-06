@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 37: LSTM &amp; GRU Networks | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 37</span>
+    <h1>LSTM &amp; GRU Networks</h1>
+
+    <p>The plain RNN remembers recent words well but forgets distant ones because its gradients vanish across time. Long short-term memory (LSTM) networks solve this by giving the network an explicit, controllable memory, and gated recurrent units (GRU) do the same with fewer moving parts. This chapter dissects both architectures, then builds a character-level text generator from scratch and wraps it in a web app.</p>
+
+    <h2>Why LSTM RNNs</h2>
+    <p>The vanilla RNN update <code>h_t = activation(W @ [h_prev, x_t])</code> overwrites its memory at every step, so old information is inevitably washed out. LSTM instead keeps a separate cell state that information can flow through almost untouched — and three gates decide when to write, read, and clear it. Because the cell state is updated by addition rather than overwriting, gradients can travel backward through it without shrinking, which is why LSTM trains reliably on long sequences.</p>
+
+    <h2>The LSTM Architecture</h2>
+    <p>An LSTM cell maintains two vectors: the cell state <code>C_t</code>, its long-term memory, and the hidden state <code>h_t</code>, which is the visible output. Three gates — forget, input, and output — each use a sigmoid to produce a number between 0 and 1 that acts like a tap on the information flow.</p>
+
+    <h2>The Forget Gate</h2>
+    <p>The forget gate looks at the previous hidden state and the current input, and decides how much of the old cell state to keep:</p>
+    <pre><code>f_t = sigmoid(W_f @ [h_prev, x_t] + b_f)
+C_t = f_t * C_prev   # multiply old memory by the forget tap</code></pre>
+    <p>A forget value of 1 preserves the memory; 0 wipes it. In a language model this is how the network drops a plural subject once it has seen the matching verb.</p>
+
+    <h2>The Input Gate and Candidate Memory</h2>
+    <p>Where the forget gate erases, the input gate writes. It works in two pieces: a sigmoid gate decides how strongly to accept new information, and a <code>tanh</code> layer produces the candidate values <code>C_tilde</code>. The two are multiplied and added to the cell state:</p>
+    <pre><code>i_t = sigmoid(W_i @ [h_prev, x_t] + b_i)
+C_tilde = tanh(W_c @ [h_prev, x_t] + b_c)
+C_t = C_t + i_t * C_tilde</code></pre>
+
+    <h2>The Output Gate</h2>
+    <p>The output gate decides what the cell reveals as the hidden state. The cell state is pushed through <code>tanh</code> to compress it into <code>(-1, 1)</code>, then scaled by the gate:</p>
+    <pre><code>o_t = sigmoid(W_o @ [h_prev, x_t] + b_o)
+h_t = o_t * tanh(C_t)</code></pre>
+    <p>So <code>h_t</code> is the "reported" memory, and the next step uses it as the input context.</p>
+    <div class="note">
+        <strong>Intuition:</strong> forget gate deletes, input gate writes, output gate reads. Every step the cell chooses which of the three to do and by how much.
+    </div>
+
+    <h2>The Training Process in LSTM</h2>
+    <p>LSTMs train with backpropagation through time exactly like plain RNNs, but the additive cell-state updates keep the gradient signal strong across many steps. Practical training still uses the same machinery: an optimizer (Adam is standard), a loss function, mini-batches, and monitoring on a validation split to stop before overfitting.</p>
+
+    <h2>Variants of LSTM</h2>
+    <ul>
+        <li><strong>Peephole LSTM:</strong> lets the gates look at the cell state directly, not just the hidden state.</li>
+        <li><strong>Bidirectional LSTM:</strong> two LSTM passes, one forward and one backward, whose outputs are merged — perfect for tasks where both contexts matter (like classification of a whole sentence).</li>
+        <li><strong>Stacked LSTM:</strong> multiple LSTM layers on top of each other, letting the network learn hierarchical abstractions.</li>
+        <li><strong>GRU:</strong> a simplified cousin that merges the forget and input gates; covered next.</li>
+    </ul>
+
+    <h2>The GRU RNN Complete In-Depth Intuition</h2>
+    <p>The GRU removes the separate cell state and uses only the hidden state, controlled by two gates. The <strong>update gate</strong> decides how much of the past to carry forward, and the <strong>reset gate</strong> decides how much of the past to forget when building the new candidate. Fewer operations mean fewer parameters and faster training, at a small cost in expressiveness on very long sequences.</p>
+    <pre><code>z_t = sigmoid(W_z @ [h_prev, x_t] + b_z)   # update gate
+r_t = sigmoid(W_r @ [h_prev, x_t] + b_r)   # reset gate
+h_tilde = tanh(W_h @ [r_t * h_prev, x_t] + b_h)
+h_t = (1 - z_t) * h_prev + z_t * h_tilde</code></pre>
+
+    <h2>A Text Generation Problem Statement</h2>
+    <p>Our project: generate new text in the style of a classic public-domain book. The model reads characters one at a time and predicts the next character. Because the training data is small, the network trains in minutes on a CPU — the ideal scale for learning the full pipeline by hand.</p>
+
+    <h2>Data Collection and Data Processing</h2>
+    <ol>
+        <li>Load a plain-text book (for example from Project Gutenberg) and lowercase it.</li>
+        <li>Build a character-to-index mapping and index-to-character mapping over the distinct characters.</li>
+        <li>Create training sequences of fixed length: each input is <code>maxlen</code> characters, and the label is the character that follows them.</li>
+        <li>Convert labels to one-hot vectors so softmax cross-entropy can measure the error.</li>
+    </ol>
+    <pre><code>text = open("book.txt").read().lower()
+chars = sorted(set(text))
+char2idx = {c: i for i, c in enumerate(chars)}
+idx2char = {i: c for i, c in enumerate(chars)}
+
+seqs, labels = [], []
+for i in range(0, len(text) - maxlen, 1):
+    seqs.append([char2idx[c] for c in text[i:i+maxlen]])
+    labels.append(char2idx[text[i+maxlen]])</code></pre>
+
+    <h2>LSTM Neural Network Model Training</h2>
+    <pre><code>model = keras.Sequential([
+    keras.layers.Input(shape=(maxlen,)),
+    keras.layers.Embedding(len(chars), 64),
+    keras.layers.LSTM(128),
+    keras.layers.Dense(len(chars), activation="softmax"),
+])
+model.compile(optimizer="adam", loss="sparse_categorical_crossentropy")
+model.fit(X, y, epochs=50, batch_size=128)</code></pre>
+    <p>Each epoch the loss tells us how many bits of uncertainty remain about the next character. With 50+ characters to choose from, a loss near 3.9 is random guessing, and anything meaningfully below that means the model is learning real patterns.</p>
+
+    <h2>Predictions from the LSTM Model</h2>
+    <p>To generate, seed the model with a warm-up string, predict a probability distribution over the next character, sample from it (with a temperature knob), append the character, and roll the window forward.</p>
+    <pre><code>def sample(preds, temperature=0.7):
+    preds = np.log(preds) / temperature
+    exp = np.exp(preds - preds.max())
+    return idx2char[np.random.choice(len(exp), p=exp / exp.sum())]
+
+seed = list(text[:maxlen])
+for _ in range(500):
+    x = np.array([[char2idx[c] for c in seed[-maxlen:]]])
+    probs = model.predict(x, verbose=0)[0]
+    nxt = sample(probs)
+    seed.append(nxt)
+print("".join(seed[maxlen:]))</code></pre>
+    <div class="info">
+        <strong>Temperature:</strong> low values (0.2) produce repetitive, safe text; high values (1.2) produce wild, sometimes nonsense text. Around 0.7 gives a good creative balance.
+    </div>
+
+    <h2>Streamlit Web App Integration with the Trained LSTM Model</h2>
+    <p>Save the model with <code>model.save</code> and stash the character mappings with <code>joblib</code>. The app loads them, lets the user type a seed phrase and pick a temperature, then streams generated text:</p>
+    <pre><code>import streamlit as st
+st.title("Shakespeare-ish Text Generator")
+seed = st.text_input("Seed phrase", "to be or not to be")
+temp = st.slider("Creativity (temperature)", 0.2, 1.5, 0.7)
+if st.button("Generate"):
+    st.code(generate(model, seed, temp, n=500))</code></pre>
+    <p>Deploy to Streamlit Community Cloud with <code>requirements.txt</code> containing <code>tensorflow</code>, <code>streamlit</code>, <code>numpy</code>, and <code>joblib</code>.</p>
+
+    <h2>GRU RNN Variant Practical Implementation</h2>
+    <p>Swapping the layer is a one-line change, and it is the fastest way to feel the difference between the two architectures:</p>
+    <pre><code>model.add(keras.layers.GRU(128))  # instead of keras.layers.LSTM(128)</code></pre>
+    <p>Train the same text generator with GRU and compare: training runs faster, and the generated text quality is usually comparable on this dataset.</p>
+
+    <h2>Bidirectional RNN Architecture and Intuition</h2>
+    <p>A unidirectional RNN reads left to right, so it cannot know about words that appear later. A bidirectional RNN runs two passes — one forward, one backward — and merges their outputs, so every position is informed by both sides of the sequence. That is ideal for sentiment or named-entity recognition over full sentences, but it is useless for streaming prediction, because the backward pass needs the whole sequence first.</p>
+    <pre><code>model.add(keras.layers.Bidirectional(keras.layers.LSTM(64)))</code></pre>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> Build the character-level text generator with an LSTM, train it, and sample text at temperatures 0.3, 0.7, and 1.2. Rewrite the model using a GRU and compare training time and output quality. Finally, wrap the generator in a Streamlit app, deploy it, and share your best generated sentence.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="36-rnn.html">Prev: Recurrent Neural Networks</a>
+        <a href="38-attention-transformers.html">Next: Attention &amp; Transformers</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

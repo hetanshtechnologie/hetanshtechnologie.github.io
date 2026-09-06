@@ -1,0 +1,115 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>248. Lab - Retrieval Augmented Generation - Azure Search service - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 248</span>
+<h1>Lab - Retrieval Augmented Generation - Azure Search service</h1>
+<p>Your documents now sit in Blob Storage. This lab adds the search layer: Azure AI Search, the service that makes those documents findable. You will provision the service, check its search capabilities, and define the index that will hold the retrieved content in the next lab.</p>
+
+<h2>What Azure AI Search Provides</h2>
+<p>Azure AI Search is a managed search service that supports the retrieval half of RAG. It stores your indexed content and answers similarity queries against it. For a RAG pipeline you care about two capabilities:</p>
+<ul>
+<li><strong>Vector search:</strong> finding documents by semantic similarity using embeddings.</li>
+<li><strong>Keyword (lexical) search:</strong> exact term matching for names, codes, and numbers.</li>
+</ul>
+<p>Combining both, with a semantic ranker to reorder results, is the most reliable retrieval setup for RAG.</p>
+
+<h2>Step 1: Create the Search Service</h2>
+<div class="exercise">
+<h3>Exercise 1: Provision Azure AI Search</h3>
+<p>Continue in the same resource group from the previous lab and run:</p>
+<pre><code>az search service create \
+  --name "ai103-rag-search" \
+  --resource-group "ai103-rag-rg" \
+  --location "eastus" \
+  --sku basic
+</code></pre>
+<p>Note two things from the output: the service <strong>endpoint</strong> (something like <code>https://ai103-rag-search.search.windows.net</code>) and the <strong>admin key</strong> you can fetch next:</p>
+<pre><code>az search admin-key show \
+  --service-name "ai103-rag-search" \
+  --resource-group "ai103-rag-rg" \
+  --query primaryKey
+</code></pre>
+<p>Record the endpoint and key — the index and indexer in the following labs need them.</p>
+</div>
+
+<div class="tip">
+<p>If the <code>basic</code> tier is unavailable in your region, try a different region or use the free tier if your subscription qualifies. Basic and free both support vector and semantic search, which is all this course needs.</p>
+</div>
+
+<h2>Step 2: Confirm Semantic Search Is Available</h2>
+<p>Semantic search on Azure AI Search works by attaching a <em>semantic configuration</em> to an index, naming which fields hold the title and content. It also requires the service tier to support the feature. Verify your tier supports it:</p>
+<pre><code>az resource show \
+  --ids "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/ai103-rag-rg/providers/Microsoft.Search/searchServices/ai103-rag-search" \
+  --query "properties.semanticSearch"
+</code></pre>
+<p>A value of <code>free</code> or <code>standard</code> means semantic ranking is enabled. An empty value means the tier does not support it — in that case the labs still work with keyword and vector search alone.</p>
+
+<h2>Step 3: Define the Index</h2>
+<p>An index is the schema of your searchable content. For the documents in the next lab, a useful index declares fields for the source file, the chunked text, and the vector embedding:</p>
+<div class="exercise">
+<h3>Exercise 2: Review the index schema</h3>
+<p>Create <code>index.json</code> in your lab folder. This is the document the next lab will submit to the search service:</p>
+<pre><code>{
+  "name": "rag-index",
+  "fields": [
+    {"name": "id", "type": "Edm.String", "key": true, "searchable": false},
+    {"name": "content", "type": "Edm.String", "searchable": true, "retrievable": true},
+    {"name": "title", "type": "Edm.String", "searchable": true, "retrievable": true},
+    {"name": "metadata_storage_name", "type": "Edm.String", "searchable": true, "retrievable": true},
+    {"name": "content_vector", "type": "Collection(Edm.Single)", "searchable": true,
+     "dimensions": 1536, "vectorSearchProfile": "rag-profile"}
+  ],
+  "vectorSearch": {
+    "algorithms": [
+      {"name": "rag-hnsw", "kind": "hnsw",
+       "hnswParameters": {"metric": "cosine"}}
+    ],
+    "profiles": [
+      {"name": "rag-profile", "algorithm": "rag-hnsw"}
+    ]
+  }
+}
+</code></pre>
+<p>The important pieces: <code>id</code> is the document key, <code>content</code> holds the chunked text, <code>content_vector</code> holds a 1536-dimension embedding (the size produced by many embedding models), and the HNSW profile configures vector similarity search.</p>
+</div>
+
+<div class="note">
+<p>The vector dimension must match the embedding model you use. If you plan to embed with a model that returns a different vector size — some return 3072 — adjust <code>dimensions</code> accordingly. An index created with the wrong dimension will reject the documents you try to push into it.</p>
+</div>
+
+<h2>Step 4: Create the Index from the Command Line</h2>
+<p>Submit the schema to the service. Azure AI Search uses its own REST API, so the call is a PUT request with an admin key in the header:</p>
+<pre><code>curl -X PUT "https://ai103-rag-search.search.windows.net/indexes/rag-index?api-version=2023-11-01" \
+  -H "Content-Type: application/json" \
+  -H "api-key: YOUR_SEARCH_ADMIN_KEY" \
+  --data "@index.json"
+</code></pre>
+<p>On Windows PowerShell, <code>curl</code> is an alias for <code>Invoke-WebRequest</code> in older versions. If you get a parse error, use <code>curl.exe</code> explicitly or run the command from a bash terminal.</p>
+
+<div class="tip">
+<p>The index is just a schema — creating it costs nothing and stores nothing yet. Recreating it later is cheap and is actually the normal way to fix a schema mistake, so do not be shy about deleting and re-creating the index as you iterate.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You provisioned an Azure AI Search service, verified that semantic search is enabled, and defined the <code>rag-index</code> schema with text, metadata, and vector fields. The search service now exists as an empty container ready to be filled. In the next lab you will connect it to your Blob Storage container and run the indexing job that populates it.</p>
+<nav>
+<a href="247-lab-retrieval-augmented-generation-azure-blob-service.html">&larr; Previous: Lab - Retrieval Augmented Generation - Azure Blob service</a><a href="249-lab-retrieval-augmented-generation-implementation.html">Next: Lab - Retrieval Augmented Generation - Implementation &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

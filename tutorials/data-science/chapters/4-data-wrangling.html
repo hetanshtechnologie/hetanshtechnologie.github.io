@@ -1,0 +1,156 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>4. Data Wrangling &amp; Cleaning - Data Science Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>4. Data Wrangling &amp; Cleaning</h1>
+<p class="tag">Chapter 4</p>
+
+<h2>Why Cleaning Takes Most of Your Time</h2>
+<p>Real data is messy: missing values, inconsistent formats, duplicates, outliers, and impossible values. Practitioners commonly spend 60&ndash;80% of a project cleaning and preparing data. This chapter gives you a repeatable checklist.</p>
+
+<h2>The Wrangling Checklist</h2>
+<ol>
+<li>Look at the shape and types (<code>df.info()</code>).</li>
+<li>Check for missing values (<code>df.isna().sum()</code>).</li>
+<li>Remove or fix duplicates (<code>df.duplicated()</code>).</li>
+<li>Standardize formats (dates, strings, categoricals).</li>
+<li>Handle outliers and impossible values.</li>
+<li>Engineer the columns you need (Ch. 15).</li>
+</ol>
+
+<h2>First Look</h2>
+<pre><code>import pandas as pd
+df = pd.read_csv("data/customers.csv")
+
+df.info()                    # columns, non-null counts, dtypes
+df.isna().sum()              # missing values per column
+df.nunique()                 # distinct values per column
+df.duplicated().sum()        # duplicate rows
+</code></pre>
+
+<h2>Handling Missing Values</h2>
+<p>Missingness matters: <em>why</em> a value is missing changes what you should do.</p>
+<table>
+<tr><th>Type</th><th>Meaning</th><th>Common Strategy</th></tr>
+<tr><td>Missing at random</td><td>Unrelated to the value itself</td><td>Drop rows or impute</td></tr>
+<tr><td>Missing systematically</td><td>Related to the value (rich people don't answer income)</td><td>Add an "is missing" flag; model separately</td></tr>
+<tr><td>Not applicable</td><td>Absence has meaning (no phone = no mobile)</td><td>Fill with a sentinel like <code>"none"</code></td></tr>
+</table>
+
+<pre><code># How much is missing
+missing = df.isna().sum()
+print(missing[missing &gt; 0])
+
+# Drop rows missing a critical column
+df = df.dropna(subset=["customer_id"])
+
+# Impute numeric columns with the median (robust to outliers)
+for col in ["income", "age"]:
+    df[col] = df[col].fillna(df[col].median())
+
+# Impute categorical columns with the mode
+df["city"] = df["city"].fillna(df["city"].mode()[0])
+</code></pre>
+
+<div class="warn">
+<strong>Do not impute blindly:</strong> imputation adds information you invented. For machine learning, a principled approach is to keep missingness and model it (a missing-value indicator column, or a model that handles <code>NaN</code> natively such as many tree models).
+</div>
+
+<h2>Duplicates</h2>
+<pre><code># Show duplicate rows
+print(df[df.duplicated()])
+
+# Drop exact duplicates
+df = df.drop_duplicates()
+
+# Drop duplicates on a key column, keeping the latest
+df = df.sort_values("created_at").drop_duplicates(subset=["customer_id"], keep="last")
+</code></pre>
+
+<div class="info">
+<strong>Duplicates are not always bad:</strong> in transactional data, two identical rows may be legitimate (two identical purchases). Only dedupe when the rows truly represent the same entity.
+</div>
+
+<h2>Types, Dates &amp; Strings</h2>
+<pre><code># Convert to proper types
+df["price"] = pd.to_numeric(df["price"], errors="coerce")
+df["joined"] = pd.to_datetime(df["joined"], errors="coerce")
+
+# Clean strings
+df["city"] = (df["city"]
+              .str.strip()            # trim whitespace
+              .str.lower()            # normalize case
+              .str.replace(r"\s+", "_", regex=True))
+
+# Fix inconsistent categorical values
+mapping = {"M": "Male", "F": "Female", "m": "Male", "f": "Female", "O": "Other"}
+df["gender"] = df["gender"].map(mapping)
+
+# Extract date parts
+df["year"] = df["joined"].dt.year
+df["weekday"] = df["joined"].dt.day_name()
+</code></pre>
+
+<h2>Outliers &amp; Impossible Values</h2>
+<p>First decide whether a value is <em>an error</em> or <em>an extreme but real observation</em>. A salary of ₹1,00,00,000 may be real; an age of 250 is impossible.</p>
+<pre><code># Summary statistics expose impossibilities
+print(df.describe())
+
+# Flag impossible values
+df.loc[df["age"] &gt; 120, "age"] = pd.NA
+
+# The IQR rule — a rough outlier screen (not a definition of "bad")
+q1, q3 = df["spend"].quantile([0.25, 0.75])
+iqr = q3 - q1
+outside = (df["spend"] &lt; q1 - 1.5 * iqr) | (df["spend"] &gt; q3 + 1.5 * iqr)
+print(df.loc[outside, "spend"])
+</code></pre>
+
+<div class="warn">
+<strong>Never silently delete outliers.</strong> An outlier often marks a data error, a segment worth studying, or a fraud signal. Investigate before you drop, and document the decision.
+</div>
+
+<h2>Normalization &amp; Encoding</h2>
+<p>Numeric features on different scales distort distance-based algorithms and can slow training.</p>
+<pre><code>from sklearn.preprocessing import StandardScaler, MinMaxScaler
+
+# Standardize to mean 0, std 1 (default for many models)
+scaler = StandardScaler()
+df[["income", "age"]] = scaler.fit_transform(df[["income", "age"]])
+
+# Min-max scale to [0,1]
+df[["income", "age"]] = MinMaxScaler().fit_transform(df[["income", "age"]])
+</code></pre>
+<p>Categorical features must be converted to numbers for most algorithms:</p>
+<pre><code># One-hot encoding: city -> city_mumbai, city_delhi, ...
+df = pd.get_dummies(df, columns=["city"], prefix="city")
+
+# Ordinal encoding for ordered categories
+from sklearn.preprocessing import OrdinalEncoder
+df["education"] = OrdinalEncoder().fit_transform(df[["education"]])
+</code></pre>
+
+<h2>Save Clean Data Separately</h2>
+<p>Keep raw data untouched and write the cleaned version to a new file. This preserves provenance and lets you re-run cleaning when you improve your logic.</p>
+<pre><code>df.to_parquet("data/clean/customers.parquet")
+# or df.to_csv("data/clean/customers.csv", index=False)
+</code></pre>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Take any messy public dataset (a CSV with missing values works well). Apply the full checklist: inspect, handle missing values with a documented strategy, dedupe, fix types and strings, flag outliers (don't delete), and save the cleaned result. Write down every decision you made in a notebook markdown cell.
+</div>
+
+<nav>
+  <span></span>
+  <a href="../index.html">Back to Index</a>
+  <a href="5-eda.html">Next: Exploratory Data Analysis &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

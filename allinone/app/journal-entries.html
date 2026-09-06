@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Journal Entries — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Journal Entries</span>
+    </div>
+    <div>
+      <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+    </div>
+  </nav>
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">Journal Entries</h1>
+      <button onclick="showAddForm()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">+ New Entry</button>
+    </div>
+    <div id="alert"></div>
+
+    <div id="form-section" class="hidden bg-white rounded-xl shadow-sm border p-6 mb-6">
+      <h2 id="form-title" class="font-bold text-lg mb-4">New Journal Entry</h2>
+      <form id="je-form">
+        <div class="grid grid-cols-3 gap-4 mb-4">
+          <div><label class="block text-sm font-semibold mb-1">Date</label><input type="date" id="entry_date" class="w-full border rounded-lg px-3 py-2 text-sm" required></div>
+          <div><label class="block text-sm font-semibold mb-1">Reference</label><input type="text" id="reference" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+          <div><label class="block text-sm font-semibold mb-1">Type</label><select id="entry_type" class="w-full border rounded-lg px-3 py-2 text-sm"><option value="manual">Manual</option><option value="payment">Payment</option><option value="contra">Contra</option><option value="gst">GST</option></select></div>
+        </div>
+        <div class="mb-4"><label class="block text-sm font-semibold mb-1">Description</label><input type="text" id="description" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+
+        <h3 class="font-semibold mb-2">Lines</h3>
+        <table class="w-full text-sm mb-4">
+          <thead><tr class="bg-gray-50 border-b"><th class="p-2 text-left font-semibold">Account</th><th class="p-2 text-right font-semibold">Debit</th><th class="p-2 text-right font-semibold">Credit</th><th class="p-2 font-semibold">Description</th><th class="p-2"></th></tr></thead>
+          <tbody id="lines-body"></tbody>
+        </table>
+        <button type="button" onclick="addLine()" class="bg-gray-100 text-gray-700 px-3 py-1.5 rounded text-sm hover:bg-gray-200 mb-4">+ Add Line</button>
+
+        <div class="border-t pt-4 flex justify-between text-sm">
+          <div>Total Debit: <span id="total-dr" class="font-bold">₹0.00</span></div>
+          <div>Total Credit: <span id="total-cr" class="font-bold">₹0.00</span></div>
+        </div>
+        <p id="balance-msg" class="text-sm mt-1"></p>
+        <button type="submit" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">Post Entry</button>
+      </form>
+    </div>
+
+    <div id="loading" class="text-gray-500 mb-4">Loading...</div>
+    <div id="entries-section" class="hidden bg-white rounded-xl shadow-sm border overflow-x-auto"></div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let lineCounter = 0;
+    let accounts = [];
+
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin();
+      if (!user) return;
+      const orgId = await getOrgId();
+      if (!orgId) return;
+
+      document.getElementById('entry_date').value = new Date().toISOString().split('T')[0];
+
+      const { data: accts } = await erp.from('chart_of_accounts').select('id, code, name').eq('org_id', orgId).eq('is_active', true).order('code');
+      accounts = accts || [];
+
+      await loadEntries();
+
+      document.getElementById('je-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        try {
+          const { data: { user } } = await erp.auth.getUser();
+          const orgId = await getOrgId();
+
+          const lines = [];
+          document.querySelectorAll('#lines-body tr').forEach(tr => {
+            const acct = tr.querySelector('select').value;
+            const dr = parseFloat(tr.querySelector('.dr').value) || 0;
+            const cr = parseFloat(tr.querySelector('.cr').value) || 0;
+            const desc = tr.querySelector('.line-desc').value;
+            if (acct && (dr || cr)) lines.push({ account_id: parseInt(acct), debit: dr, credit: cr, description: desc });
+          });
+
+          if (!lines.length) throw new Error('Add at least one line.');
+          const totalDr = lines.reduce((s, l) => s + l.debit, 0);
+          const totalCr = lines.reduce((s, l) => s + l.credit, 0);
+          if (Math.abs(totalDr - totalCr) > 0.01) throw new Error('Debit and credit must balance.');
+
+          const { data: entry, error: eErr } = await erp.from('journal_entries').insert({
+            org_id: orgId, entry_date: document.getElementById('entry_date').value,
+            reference: document.getElementById('reference').value.trim(),
+            description: document.getElementById('description').value.trim(),
+            entry_type: document.getElementById('entry_type').value,
+            created_by: user.id
+          }).select().single();
+          if (eErr) throw eErr;
+
+          const lineIns = lines.map(l => ({ ...l, entry_id: entry.id }));
+          const { error: lErr } = await erp.from('journal_lines').insert(lineIns);
+          if (lErr) throw lErr;
+
+          showAlert('Journal entry posted!', 'success');
+          hideForm(); await loadEntries();
+        } catch (err) { showAlert(err.message, 'error'); }
+      });
+    });
+
+    function addLine(data) {
+      lineCounter++;
+      const tbody = document.getElementById('lines-body');
+      const tr = document.createElement('tr');
+      tr.className = 'border-b';
+      const opts = accounts.map(a => `<option value="${a.id}" ${data && data.account_id == a.id ? 'selected' : ''}>${escapeHtml(a.code)} - ${escapeHtml(a.name)}</option>`).join('');
+      tr.innerHTML = `
+        <td class="p-1"><select class="w-56 border rounded px-2 py-1 text-xs">${opts}</select></td>
+        <td class="p-1"><input type="number" class="dr w-28 border rounded px-2 py-1 text-xs" value="${data ? data.debit : 0}" step="0.01" onchange="recalcBalance()"></td>
+        <td class="p-1"><input type="number" class="cr w-28 border rounded px-2 py-1 text-xs" value="${data ? data.credit : 0}" step="0.01" onchange="recalcBalance()"></td>
+        <td class="p-1"><input type="text" class="line-desc w-40 border rounded px-2 py-1 text-xs" value="${data ? (data.description || '') : ''}"></td>
+        <td class="p-1"><button type="button" onclick="this.closest('tr').remove();recalcBalance();" class="text-red-500 text-xs">X</button></td>
+      `;
+      tbody.appendChild(tr);
+      recalcBalance();
+    }
+
+    function recalcBalance() {
+      let dr = 0, cr = 0;
+      document.querySelectorAll('#lines-body tr').forEach(tr => {
+        dr += parseFloat(tr.querySelector('.dr').value) || 0;
+        cr += parseFloat(tr.querySelector('.cr').value) || 0;
+      });
+      document.getElementById('total-dr').textContent = '₹' + dr.toFixed(2);
+      document.getElementById('total-cr').textContent = '₹' + cr.toFixed(2);
+      const diff = Math.abs(dr - cr);
+      const msg = document.getElementById('balance-msg');
+      if (diff > 0.01) msg.innerHTML = '<span class="text-red-500">Difference: ₹' + diff.toFixed(2) + ' (not balanced)</span>';
+      else msg.innerHTML = '<span class="text-green-600">Balanced ✓</span>';
+    }
+
+    function showAddForm() { document.getElementById('form-title').textContent = 'New Journal Entry'; document.getElementById('je-form').reset(); document.getElementById('lines-body').innerHTML = ''; addLine(); addLine(); document.getElementById('form-section').classList.remove('hidden'); }
+    function hideForm() { document.getElementById('form-section').classList.add('hidden'); }
+
+    async function loadEntries() {
+      const orgId = await getOrgId();
+      if (!orgId) return;
+      const { data, error } = await erp.from('journal_entries').select('*').eq('org_id', orgId).order('created_at', { ascending: false }).limit(50);
+      if (error) { document.getElementById('loading').textContent = 'Error: ' + error.message; return; }
+      document.getElementById('loading').classList.add('hidden');
+      const div = document.getElementById('entries-section'); div.classList.remove('hidden');
+      if (!data || !data.length) { div.innerHTML = '<div class="p-6 text-gray-500 text-center">No journal entries yet.</div>'; return; }
+      div.innerHTML = `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b text-left"><th class="p-3 font-semibold">Date</th><th class="p-3 font-semibold">Reference</th><th class="p-3 font-semibold">Description</th><th class="p-3 font-semibold">Type</th><th class="p-3 font-semibold">Actions</th></tr></thead><tbody>${data.map(e => `<tr class="border-b hover:bg-gray-50"><td class="p-3 text-xs">${formatDate(e.entry_date)}</td><td class="p-3 font-mono text-xs">${escapeHtml(e.reference || '-')}</td><td class="p-3">${escapeHtml(e.description || '')}</td><td class="p-3"><span class="badge">${e.entry_type}</span></td><td class="p-3"><a href="javascript:void(0)" onclick="viewEntry(${e.id})" class="text-blue-600 hover:underline text-xs">View</a></td></tr>`).join('')}</tbody></table>`;
+    }
+
+    async function viewEntry(id) {
+      const { data: entry } = await erp.from('journal_entries').select('*').eq('id', id).single();
+      const { data: lines } = await erp.from('journal_lines').select('*, chart_of_accounts(code, name)').eq('entry_id', id);
+      if (!entry) return;
+
+      let html = `<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick="if(event.target===this)closeModal()"><div class="bg-white rounded-xl shadow-xl max-w-3xl w-full mx-4 max-h-screen overflow-y-auto p-6" onclick="event.stopPropagation()">
+        <div class="flex justify-between items-center mb-4"><h2 class="font-bold text-lg">Journal Entry</h2><button onclick="closeModal()" class="text-gray-500 hover:text-black text-xl">&times;</button></div>
+        <div class="grid grid-cols-2 gap-4 mb-4 text-sm">
+          <div><span class="text-gray-500">Date:</span> ${formatDate(entry.entry_date)}</div>
+          <div><span class="text-gray-500">Reference:</span> ${escapeHtml(entry.reference || '-')}</div>
+          <div><span class="text-gray-500">Type:</span> ${entry.entry_type}</div>
+          <div><span class="text-gray-500">Description:</span> ${escapeHtml(entry.description || '')}</div>
+        </div>
+        <table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="p-2 text-left font-semibold">Account</th><th class="p-2 text-right font-semibold">Debit</th><th class="p-2 text-right font-semibold">Credit</th></tr></thead><tbody>`;
+      (lines || []).forEach(l => {
+        html += `<tr class="border-b"><td class="p-2">${escapeHtml(l.chart_of_accounts?.code || '')} - ${escapeHtml(l.chart_of_accounts?.name || '')}</td><td class="p-2 text-right">${formatCurrency(l.debit)}</td><td class="p-2 text-right">${formatCurrency(l.credit)}</td></tr>`;
+      });
+      html += `</tbody></table></div></div>`;
+
+      const m = document.createElement('div');
+      m.innerHTML = html;
+      document.body.appendChild(m);
+      window.closeModal = () => m.remove();
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

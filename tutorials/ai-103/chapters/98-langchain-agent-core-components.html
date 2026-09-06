@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>98. LangChain Agent Core Components - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 98</span>
+<h1>LangChain Agent Core Components</h1>
+<p>In the previous chapter you saw LangChain's basic building blocks and a simple chain. This chapter adds the piece that turns a chain into an agent: a decision loop that lets the model call tools, inspect results, and keep going until the task is done. We will break down the core components of a LangChain agent — the model, the prompt, tools, memory, and the agent runner — and see how they work together with a concrete example.</p>
+
+<h2>What Makes an Agent Different from a Chain</h2>
+<p>A chain is a fixed sequence: every input flows through the same steps. An agent is a loop: the model decides what to do next, your code executes the chosen tool, the result returns to the model, and the loop repeats until the model decides the task is complete. The difference is that the path is chosen by the model at runtime rather than fixed at design time.</p>
+
+<table>
+<tr><th>Aspect</th><th>Chain</th><th>Agent</th></tr>
+<tr><td>Flow</td><td>Fixed sequence of steps</td><td>Model-driven loop</td></tr>
+<tr><td>Tools</td><td>Called by fixed code</td><td>Chosen by the model as needed</td></tr>
+<tr><td>End condition</td><td>Last step</td><td>Model decides it is done</td></tr>
+<tr><td>Best for</td><td>Predictable pipelines</td><td>Tasks needing decisions and tools</td></tr>
+</table>
+
+<h2>The Five Core Components</h2>
+<p>Every LangChain agent is assembled from the same five parts:</p>
+
+<ol>
+<li><strong>The model:</strong> the chat model that reasons and decides. It must support tool calling, because that is how it requests actions.</li>
+<li><strong>The prompt:</strong> the instructions that define the agent's role, rules, and how it should use its tools.</li>
+<li><strong>Tools:</strong> functions exposed to the model with names, descriptions, and argument schemas. A search function, a calculator, or an API call all become tools.</li>
+<li><strong>Memory:</strong> the conversation state the agent uses to remember what happened earlier in the exchange.</li>
+<li><strong>The agent runner:</strong> the loop that alternates between asking the model for the next action and executing that action.</li>
+</ol>
+
+<div class="note">
+<p>Tools are the component that most dramatically changes behaviour. Without tools, an agent is just a chat model in a loop; with tools, it can look things up, compute, and act on external systems.</p>
+</div>
+
+<h2>Defining a Tool</h2>
+<p>A tool is an ordinary Python function plus a schema that tells the model what it does. LangChain builds the schema from the function signature and docstring. Here is a small tool that returns the number of items in a product catalog:</p>
+
+<pre><code>from langchain_core.tools import tool
+
+
+@tool
+def catalog_count(category: str) -&gt; int:
+    """Return the number of products in the given category."""
+    counts = {"laptops": 24, "phones": 18, "accessories": 57}
+    return counts.get(category, 0)
+</code></pre>
+
+<p>The docstring becomes the tool's description, and the parameter type becomes its argument schema. The model reads both when deciding whether to call the tool and what arguments to pass.</p>
+
+<h2>Connecting the Model and Tools</h2>
+<p>Once you have a chat model and a tool, you bind the tools to the model. Binding tells the model that these tools exist and are callable in this conversation:</p>
+
+<pre><code>from langchain_openai import AzureChatOpenAI
+import os
+
+chat = AzureChatOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+    model="YOUR_DEPLOYMENT_NAME",
+)
+
+tools = [catalog_count]
+chat_with_tools = chat.bind_tools(tools)
+</code></pre>
+
+<h2>Building the Agent with a Runner</h2>
+<p>LangChain provides agents that wire the loop for you. The modern approach is <code>create_agent</code>, which takes the model, the tools, and the system prompt and returns a ready-to-invoke agent:</p>
+
+<pre><code>from langchain.agents import create_agent
+
+agent_prompt = (
+    "You are a store assistant. Use the catalog_count tool to answer "
+    "questions about product availability. If the category is unknown, "
+    "say so honestly."
+)
+
+agent = create_agent(
+    model=chat,
+    tools=tools,
+    prompt=agent_prompt,
+)
+
+result = agent.invoke({"messages": [("user", "How many phones do you carry?")]})
+print(result["messages"][-1].content)
+</code></pre>
+
+<p>Inside <code>invoke</code>, the runner executes the loop: the model sees the user question and the tool description, requests a call to <code>catalog_count("phones")</code>, your side executes the function, the result returns to the model, and the model writes the final answer.</p>
+
+<div class="tip">
+<p>To see the loop in action, stream the agent's execution instead of waiting for the final answer. LangChain's tracing integration can also log every step of the loop to Application Insights, so you can review which tools ran and why.</p>
+</div>
+
+<h2>Why Tool Schemas Matter</h2>
+<p>The model never sees your Python code — it sees the tool's name, description, and parameter schema. That means quality of the description directly controls whether the model calls the tool correctly:</p>
+<ul>
+<li>Name the tool with a verb-noun pair such as <code>lookup_stock</code>.</li>
+<li>Describe what it returns and when to use it.</li>
+<li>Keep argument schemas small and typed.</li>
+</ul>
+
+<div class="warn">
+<p>Tools give the model power to act. Every tool you attach should validate its inputs and be safe to call with unexpected arguments, because the model decides when to call it. Log tool invocations so a surprising sequence of calls is visible in your traces.</p>
+</div>
+
+<h2>Summary</h2>
+<p>A LangChain agent combines five components: a tool-calling model, a system prompt, tools with schemas, memory, and an agent runner that loops until the task is done. You defined a tool from a Python function, bound it to a chat model, and invoked a full agent with <code>create_agent</code>. The next lab gets you hands-on with building an agent in LangChain from scratch.</p>
+<nav>
+<a href="97-introduction-to-langchain.html">&larr; Previous: Introduction to LangChain</a><a href="99-lab-getting-started-with-langchain.html">Next: Lab - Getting started with LangChain &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

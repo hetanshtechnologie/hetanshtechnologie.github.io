@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ecosystem - Food Chains</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.food-chain{display:flex;gap:8px;align-items:center;justify-content:center;margin:10px 0;flex-wrap:wrap;min-height:60px}
+.chain-slot{width:70px;height:70px;border:2px dashed #475569;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:2rem;transition:all .2s;cursor:pointer}
+.chain-slot.filled{border-style:solid;border-color:#38bdf8}
+.chain-slot.correct{border-color:#22c55e}
+.chain-slot.wrong{border-color:#ef4444;animation:shake .3s}
+.chain-arrow{font-size:1.5rem;color:#f59e0b}
+.card{background:#1e293b;border-radius:16px;padding:20px;max-width:600px;width:100%;text-align:center;border:2px solid #334155}
+.q-text{font-size:1rem;margin:10px 0}
+.organism-pool{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:10px 0}
+.organism{background:#1e293b;border:2px solid #475569;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:.85rem;transition:all .2s;user-select:none}
+.organism:hover{border-color:#38bdf8}
+.organism.selected{border-color:#facc15;background:#1e3a5f}
+.organism.used{opacity:.3;pointer-events:none}
+.fb{margin-top:10px;padding:10px;border-radius:8px;font-size:.9rem;min-height:2em}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+.level-title{font-size:.85rem;color:#94a3b8}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.trophic-info{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:8px 0;font-size:.75rem}
+.trophic-pill{padding:4px 10px;border-radius:12px;border:1px solid #475569;color:#94a3b8}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🌿 Ecosystem — Food Chains</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>⛓️ Chain: <b id="chain-num">1</b>/<b id="chain-total">3</b></span>
+</div>
+<div class="level-title" id="level-title">Forest Ecosystem</div>
+<div class="food-chain" id="chain"></div>
+<div class="trophic-info" id="trophic-info"></div>
+<div class="card">
+<div class="q-text" id="qtext"></div>
+<div class="organism-pool" id="pool"></div>
+<div class="fb" id="fb"></div>
+</div>
+<div style="display:flex;gap:10px">
+<button class="btn sec" onclick="resetChain()">↺ Reset</button>
+<button class="btn sec" onclick="skipChain()">⏭ Skip</button>
+</div>
+</div>
+<script>
+let score=0,level=1,chainNum=0,selected=null,currentChain=[];
+const ecosystems=[
+  {name:'🌲 Forest Ecosystem',chains:[
+    {chain:['🌱','🐛','🐦','🦅'],desc:'Build a forest food chain: producer → primary consumer → secondary consumer → top predator'},
+    {chain:['🍄','🐛','🐸','🐍'],desc:'Forest decomposer chain: who eats whom?'},
+    {chain:['🌱','🦌','🐺'],desc:'Simple forest chain: plant → herbivore → carnivore'},
+  ]},
+  {name:'🌊 Ocean Ecosystem',chains:[
+    {chain:['🌊','🐟','🦈'],desc:'Build an ocean food chain from plankton to apex predator'},
+    {chain:['☀️','🌿','🦐','🦑','🐋'],desc:'Deep ocean chain with 5 levels'},
+    {chain:['🌊','🦀','🦭','🐋'],desc:'Arctic ocean food chain'},
+  ]},
+  {name:'🏜️ Desert Ecosystem',chains:[
+    {chain:['🌵','🦎','🦅'],desc:'Desert food chain: cactus to raptor'},
+    {chain:['🌱','🐛','🦂','🦎','🦅'],desc:'Complex desert chain'},
+    {chain:['🌵','🐭','🐍','🦅'],desc:'Desert rodent chain'},
+  ]},
+  {name:'🌾 Grassland Ecosystem',chains:[
+    {chain:['🌱','🦓','🦁'],desc:'African savanna chain'},
+    {chain:['🌿','🐛','🐸','🐍','🦅'],desc:'Grassland insect chain'},
+    {chain:['🌾','🐁','🦊','🐺'],desc:'European grassland chain'},
+  ]},
+  {name:'❄️ Arctic Ecosystem',chains:[
+    {chain:['🌊','🐟','🦭','🐻‍❄️'],desc:'Arctic marine chain'},
+    {chain:['❄️','🌿','🦌','🐺'],desc:'Arctic tundra chain'},
+    {chain:['🌊','🦐','🐧','🦭','🐋'],desc:'Antarctic chain'},
+  ]},
+];
+let currentEco,currentChains;
+
+function initRound(){
+  let ecoIdx=(level-1)%ecosystems.length;
+  currentEco=ecosystems[ecoIdx];
+  currentChains=[...currentEco.chains].sort(()=>Math.random()-0.5);
+  chainNum=0;
+  document.getElementById('level-title').textContent=currentEco.name;
+  document.getElementById('chain-total').textContent=currentChains.length;
+  showChain();
+}
+
+function showChain(){
+  if(chainNum>=currentChains.length){showEcoComplete();return}
+  document.getElementById('chain-num').textContent=chainNum+1;
+  currentChain=currentChains[chainNum];
+  selected=null;
+  // build chain slots
+  const chainEl=document.getElementById('chain');chainEl.innerHTML='';
+  currentChain.chain.forEach((org,i)=>{
+    if(i>0)chainEl.innerHTML+='<span class="chain-arrow">→</span>';
+    let slot=document.createElement('div');slot.className='chain-slot';slot.dataset.idx=i;
+    slot.innerHTML='<span style="color:#475569">?</span>';
+    slot.onclick=()=>placeOrganism(i);
+    chainEl.appendChild(slot);
+  });
+  // trophic info
+  const trophicLabels=['Producer 🌱','Primary Consumer 🐛','Secondary Consumer 🐦','Tertiary Consumer 🦅','Apex Predator 👑'];
+  let ti='';currentChain.chain.forEach((_,i)=>{if(i<trophicLabels.length)ti+='<span class="trophic-pill">'+trophicLabels[i]+'</span>'});
+  document.getElementById('trophic-info').innerHTML=ti;
+  // pool
+  let pool=[...currentChain.chain].sort(()=>Math.random()-0.5);
+  // add distractors
+  let allOrgs=['🌱','🐛','🐦','🦅','🐟','🦈','🌵','🦎','🦌','🐺','🌊','🦐','🍄','🐸','🐍','🦓','🦁','🌿','🐁','🦊','❄️','🦭','🐻‍❄️','🐋','🦑','🦂','🌾','🐧'];
+  let extras=allOrgs.filter(o=>!pool.includes(o)).sort(()=>Math.random()-0.5).slice(0,3);
+  pool=[...pool,...extras].sort(()=>Math.random()-0.5);
+  const poolEl=document.getElementById('pool');poolEl.innerHTML='';
+  pool.forEach(org=>{
+    const b=document.createElement('button');b.className='organism';b.textContent=org;
+    b.onclick=()=>{poolEl.querySelectorAll('.organism').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');selected={el:b,org}};
+    poolEl.appendChild(b);
+  });
+  document.getElementById('qtext').textContent=currentChain.desc;
+  document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';
+}
+
+let placedCount=0;
+function placeOrganism(idx){
+  if(!selected)return;
+  let slots=document.querySelectorAll('.chain-slot');
+  if(slots[idx].classList.contains('correct'))return;
+  if(selected.org===currentChain.chain[idx]){
+    slots[idx].classList.add('filled','correct');slots[idx].innerHTML=selected.org;
+    selected.el.classList.add('used');selected.el.classList.remove('selected');
+    let pts=10+level*5;score+=pts;
+    document.getElementById('fb').innerHTML='✅ Correct position! <b>+'+pts+' pts</b>';
+    document.getElementById('fb').style.background='rgba(34,197,94,0.15)';
+    selected=null;
+    // check if all filled
+    let allFilled=[...slots].every(s=>s.classList.contains('correct'));
+    if(allFilled){
+      setTimeout(()=>{chainNum++;showChain()},1200);
+    }
+  }else{
+    slots[idx].classList.add('wrong');setTimeout(()=>slots[idx].classList.remove('wrong'),400);
+    document.getElementById('fb').innerHTML='❌ Wrong! Check the feeding order.';
+    document.getElementById('fb').style.background='rgba(239,68,68,0.15)';
+  }
+  document.getElementById('score').textContent=score;
+}
+
+function showEcoComplete(){
+  document.getElementById('chain').innerHTML='<div style="font-size:2rem">🎉 '+currentEco.name+' Complete!</div>';
+  document.getElementById('trophic-info').innerHTML='';
+  document.getElementById('qtext').innerHTML='Score: '+score;
+  document.getElementById('pool').innerHTML='<button class="btn" onclick="nextEco()">Next Ecosystem ⬆️</button> <button class="btn sec" onclick="restart()">↺ Restart</button>';
+  document.getElementById('fb').textContent='';
+}
+
+function resetChain(){showChain()}
+function skipChain(){chainNum++;showChain()}
+function nextEco(){level++;chainNum=0;document.getElementById('level').textContent=level;initRound()}
+function restart(){score=0;level=1;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;initRound()}
+initRound();
+</script>
+</body>
+</html>

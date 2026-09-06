@@ -1,0 +1,149 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>21. Lab - Using the Web Search Tool - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 21</span>
+<h1>Lab - Using the Web Search Tool</h1>
+<p>In this lab you will connect a web search tool to a deployed model using the function-calling loop. The model will decide when current information is needed, call the search tool, and use the returned results to answer the question. The pattern you build here is the same one used for any tool: database queries, APIs, or internal systems.</p>
+
+<h2>What You Need</h2>
+<ul>
+<li>Your endpoint and key environment variables.</li>
+<li>A deployed chat model, for example <code>gpt-4o-mini</code>.</li>
+<li>The <code>openai</code> SDK installed, as in the earlier labs.</li>
+</ul>
+
+<h2>Design the Tool Schema</h2>
+<p>Create <code>web_search_tool.py</code> in a new folder <code>ai103-lab21</code>. The tool is declared with a schema so the model knows it exists and how to call it:</p>
+
+<pre><code>from openai import AzureOpenAI
+import json
+import os
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the public web and return a short summary of results.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query to run."}
+                },
+                "required": ["query"],
+            },
+        },
+    }
+]
+</code></pre>
+
+<h2>Implement the Tool</h2>
+<p>Next, write the Python function the model can trigger. In this lab the function returns placeholder text; in a real project it would call a search provider's API.</p>
+
+<pre><code>def web_search(query: str) -&gt; str:
+    # Replace this with a real call to a search API in production.
+    return f"Top results for '{query}': placeholder result text returned by your search provider."
+</code></pre>
+
+<div class="tip">
+<p>A real implementation would send the query to a search API, parse the returned snippets, and return just the top few titles and summaries. That keeps the model's context window small and the answer fast.</p>
+</div>
+
+<h2>Run the Tool-Call Loop</h2>
+<p>Add the loop that lets the model call the tool and then answer using the result:</p>
+
+<pre><code>messages = [
+    {"role": "system", "content": "Use the web_search tool whenever the question asks about current information."},
+    {"role": "user", "content": "What was the result of the most recent general election in your country?"},
+]
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=messages,
+    tools=tools,
+)
+
+message = response.choices[0].message
+messages.append(message)
+
+if message.tool_calls:
+    for call in message.tool_calls:
+        print("Tool requested:", call.function.name, call.function.arguments)
+        arguments = json.loads(call.function.arguments)
+        result = web_search(arguments["query"])
+        messages.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": result,
+        })
+
+final_response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=messages,
+    tools=tools,
+)
+print(final_response.choices[0].message.content)
+</code></pre>
+
+<h2>Run and Observe</h2>
+<div class="exercise">
+<h3>Step 1 - Run the script</h3>
+<pre><code>python web_search_tool.py
+</code></pre>
+
+<h3>Step 2 - Watch the two-stage output</h3>
+<p>First you will see a line printed by your code: <code>Tool requested: web_search {"query": "..."}</code>. That is the model deciding it needs fresh data. Then the final answer appears, written using the placeholder search result. If the model decides it already knows the answer, it will skip the tool and answer directly.</p>
+
+<h3>Step 3 - Experiment</h3>
+<p>Change the system prompt to force tool use for every question, and try a question the model certainly knows, such as <em>"What is the capital of France?"</em>. Watch how a stronger prompt makes the model reach for the tool even when it does not need it.</p>
+</div>
+
+<h2>Connecting a Real Search Provider</h2>
+<p>To turn the placeholder into real results, replace the body of <code>web_search</code> with a call to a search API. Azure provides search and grounding services that can be wired into agents; the general pattern is the same:</p>
+<ol>
+<li>Send the query to the provider's API with your provider key.</li>
+<li>Parse the response into a compact list of titles and snippets.</li>
+<li>Return that list as the tool result string.</li>
+</ol>
+
+<div class="warn">
+<p>Store provider keys in environment variables, never in the script. A leaked search key can be used to spend money or access private data.</p>
+</div>
+
+<h2>Common Issues</h2>
+<ul>
+<li><strong>The model never calls the tool:</strong> strengthen the system prompt or make the question obviously time-sensitive.</li>
+<li><strong><code>tool_call_id</code> mismatch:</strong> copy the exact id from the tool call into the tool message.</li>
+<li><strong>Malformed arguments:</strong> the model sometimes returns arguments as a string; always run <code>json.loads</code> and validate before use.</li>
+<li><strong>Loop never ends:</strong> add a safety counter that stops after a few iterations.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>You have implemented the full tool-call loop: a schema that advertises the tool, a Python function that plays its part, and a two-stage exchange where the model requests the tool and then answers using its output. This exact pattern powers web search and extends unchanged to any other function you want to hand the model.</p>
+<nav>
+<a href="20-tools-and-models.html">&larr; Previous: Tools and Models</a><a href="22-lab-code-interpreter-tool.html">Next: Lab - Code Interpreter Tool &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

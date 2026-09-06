@@ -1,0 +1,269 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brick Breaker</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+<style>
+body { margin: 0; background: #0f172a; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+canvas { display: block; margin: 0 auto; }
+</style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen">
+<a href="index.html" class="absolute top-4 left-4 text-blue-400 hover:text-blue-300 text-sm font-semibold">&larr; Back to Games</a>
+<div class="text-center mb-2">
+  <h1 class="text-2xl font-bold text-white">BRICK BREAKER</h1>
+</div>
+<div class="flex gap-8 mb-2 text-sm">
+  <div class="text-center"><span class="text-gray-400">Score: </span><span id="score" class="text-yellow-400 font-bold text-lg">0</span></div>
+  <div class="text-center"><span class="text-gray-400">Lives: </span><span id="lives" class="text-red-400 font-bold text-lg">3</span></div>
+  <div class="text-center"><span class="text-gray-400">Level: </span><span id="level" class="text-green-400 font-bold text-lg">1</span></div>
+</div>
+<canvas id="gameCanvas"></canvas>
+<div id="overlay" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-10">
+  <div class="text-center bg-gray-900 p-8 rounded-xl border border-gray-700 shadow-2xl">
+    <h2 id="overlayTitle" class="text-3xl font-bold text-white mb-4">BRICK BREAKER</h2>
+    <p id="overlayMsg" class="text-gray-300 mb-6">Break all the bricks!</p>
+    <button id="startBtn" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-lg transition">START</button>
+  </div>
+</div>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = 640, H = 480;
+canvas.width = W;
+canvas.height = H;
+
+let state = 'menu';
+let score = 0, lives = 3, level = 1;
+let animId;
+
+const paddleW = 90, paddleH = 12;
+let paddleX = W / 2 - paddleW / 2;
+const paddleY = H - 30;
+let mouseX = W / 2;
+
+let ballX, ballY, ballVX, ballVY, ballR = 6;
+let ballSpeed = 4;
+let ballLaunched = false;
+
+const brickRows = 6, brickCols = 8;
+const brickW = 70, brickH = 20, brickPad = 4;
+const brickOffX = (W - (brickCols * (brickW + brickPad) - brickPad)) / 2;
+const brickOffY = 40;
+let bricks = [];
+
+const rowColors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7'];
+const rowPoints = [60, 50, 40, 30, 20, 10];
+
+function createBricks() {
+  bricks = [];
+  for (let r = 0; r < brickRows; r++) {
+    bricks[r] = [];
+    for (let c = 0; c < brickCols; c++) {
+      bricks[r][c] = { alive: true };
+    }
+  }
+}
+
+function resetBallPos() {
+  ballX = W / 2;
+  ballY = paddleY - ballR - 2;
+  ballVX = 0;
+  ballVY = 0;
+  ballLaunched = false;
+}
+
+function launchBall() {
+  if (!ballLaunched) {
+    let angle = -Math.PI / 2 + (Math.random() * 0.6 - 0.3);
+    ballVX = ballSpeed * Math.cos(angle);
+    ballVY = ballSpeed * Math.sin(angle);
+    ballLaunched = true;
+  }
+}
+
+function resetGame() {
+  score = 0; lives = 3; level = 1;
+  document.getElementById('score').textContent = '0';
+  document.getElementById('lives').textContent = '3';
+  document.getElementById('level').textContent = '1';
+  createBricks();
+  resetBallPos();
+  state = 'playing';
+}
+
+function nextLevel() {
+  level++;
+  document.getElementById('level').textContent = level;
+  ballSpeed = Math.min(4 + level * 0.5, 8);
+  createBricks();
+  resetBallPos();
+}
+
+function drawPaddle() {
+  let grad = ctx.createLinearGradient(paddleX, paddleY, paddleX, paddleY + paddleH);
+  grad.addColorStop(0, '#60a5fa');
+  grad.addColorStop(1, '#2563eb');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.roundRect(paddleX, paddleY, paddleW, paddleH, 4);
+  ctx.fill();
+}
+
+function drawBall() {
+  ctx.fillStyle = '#fbbf24';
+  ctx.shadowColor = '#fbbf24';
+  ctx.shadowBlur = 10;
+  ctx.beginPath();
+  ctx.arc(ballX, ballY, ballR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function drawBricks() {
+  for (let r = 0; r < brickRows; r++) {
+    for (let c = 0; c < brickCols; c++) {
+      if (!bricks[r][c].alive) continue;
+      let x = brickOffX + c * (brickW + brickPad);
+      let y = brickOffY + r * (brickH + brickPad);
+      ctx.fillStyle = rowColors[r];
+      ctx.beginPath();
+      ctx.roundRect(x, y, brickW, brickH, 3);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+}
+
+function update() {
+  if (state !== 'playing') return;
+
+  paddleX = mouseX - paddleW / 2;
+  paddleX = Math.max(0, Math.min(W - paddleW, paddleX));
+
+  if (!ballLaunched) {
+    ballX = paddleX + paddleW / 2;
+    ballY = paddleY - ballR - 2;
+    return;
+  }
+
+  ballX += ballVX;
+  ballY += ballVY;
+
+  if (ballX - ballR <= 0) { ballX = ballR; ballVX *= -1; }
+  if (ballX + ballR >= W) { ballX = W - ballR; ballVX *= -1; }
+  if (ballY - ballR <= 0) { ballY = ballR; ballVY *= -1; }
+
+  if (ballY + ballR >= H) {
+    lives--;
+    document.getElementById('lives').textContent = lives;
+    if (lives <= 0) {
+      state = 'over';
+      document.getElementById('overlayTitle').textContent = 'GAME OVER';
+      document.getElementById('overlayMsg').textContent = 'Final Score: ' + score;
+      document.getElementById('startBtn').textContent = 'RESTART';
+      document.getElementById('overlay').classList.remove('hidden');
+      return;
+    }
+    resetBallPos();
+    return;
+  }
+
+  if (ballVY > 0 && ballY + ballR >= paddleY && ballY + ballR <= paddleY + paddleH + 4 &&
+      ballX >= paddleX && ballX <= paddleX + paddleW) {
+    let hitPos = (ballX - paddleX) / paddleW;
+    let angle = (hitPos - 0.5) * Math.PI / 3;
+    let spd = Math.sqrt(ballVX * ballVX + ballVY * ballVY);
+    ballVX = spd * Math.sin(angle);
+    ballVY = -Math.abs(spd * Math.cos(angle));
+    ballY = paddleY - ballR;
+  }
+
+  for (let r = 0; r < brickRows; r++) {
+    for (let c = 0; c < brickCols; c++) {
+      if (!bricks[r][c].alive) continue;
+      let bx = brickOffX + c * (brickW + brickPad);
+      let by = brickOffY + r * (brickH + brickPad);
+      if (ballX + ballR > bx && ballX - ballR < bx + brickW && ballY + ballR > by && ballY - ballR < by + brickH) {
+        bricks[r][c].alive = false;
+        score += rowPoints[r];
+        document.getElementById('score').textContent = score;
+        let overlapLeft = (ballX + ballR) - bx;
+        let overlapRight = (bx + brickW) - (ballX - ballR);
+        let overlapTop = (ballY + ballR) - by;
+        let overlapBottom = (by + brickH) - (ballY - ballR);
+        let minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
+        if (minOverlap === overlapLeft || minOverlap === overlapRight) ballVX *= -1;
+        else ballVY *= -1;
+
+        let allGone = true;
+        for (let rr = 0; rr < brickRows; rr++)
+          for (let cc = 0; cc < brickCols; cc++)
+            if (bricks[rr][cc].alive) allGone = false;
+        if (allGone) { nextLevel(); }
+        return;
+      }
+    }
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, W, H);
+  drawBricks();
+  drawPaddle();
+  drawBall();
+}
+
+function gameLoop() {
+  update();
+  draw();
+  animId = requestAnimationFrame(gameLoop);
+}
+
+canvas.addEventListener('mousemove', e => {
+  let rect = canvas.getBoundingClientRect();
+  mouseX = (e.clientX - rect.left) * (W / rect.width);
+});
+
+canvas.addEventListener('click', () => {
+  if (state === 'playing') launchBall();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); if (state === 'playing') launchBall(); }
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('overlay').classList.add('hidden');
+  resetGame();
+  if (animId) cancelAnimationFrame(animId);
+  gameLoop();
+});
+
+createBricks();
+resetBallPos();
+draw();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

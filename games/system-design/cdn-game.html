@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CDN Placement Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:1000px;margin:24px auto;padding:0 16px}
+.world-map{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;position:relative;min-height:300px}
+.region{position:absolute;background:#334155;border:2px solid #475569;border-radius:10px;padding:10px;text-align:center;cursor:pointer;transition:all .2s;font-size:11px;min-width:80px}
+.region:hover{border-color:#38bdf8}
+.region.active{border-color:#38bdf8;background:rgba(56,189,248,.1)}
+.region.cached{border-color:#4ade80;background:rgba(74,222,128,.1)}
+.region h4{font-size:12px;margin-bottom:4px}
+.region .users{color:#94a3b8;font-size:10px}
+.origin-server{position:absolute;background:#f87171;border:2px solid #f87171;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;z-index:2}
+.asset-list{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0}
+.asset-list h3{font-size:14px;margin-bottom:12px}
+.assets{display:flex;gap:8px;flex-wrap:wrap}
+.asset{background:#334155;border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;border:2px solid transparent;transition:all .2s;user-select:none}
+.asset:hover{border-color:#38bdf8}
+.asset.selected{border-color:#38bdf8;background:rgba(56,189,248,.1)}
+.asset.placed{border-color:#4ade80;background:rgba(74,222,128,.1);opacity:.7}
+.asset .size{color:#94a3b8;font-size:10px}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.latency-bar{margin-top:6px;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.latency-fill{height:100%;border-radius:2px;transition:width .3s}
+.stats-row{display:flex;justify-content:center;gap:24px;margin:12px 0;font-size:13px;color:#94a3b8}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>CDN Placement Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/12</div>
+<div class="hud-item"><span id="cache-hit">0%</span>Cache Hit</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="world-map" id="world-map"></div>
+<div class="asset-list">
+<h3 id="asset-title">Select Asset to Cache</h3>
+<div class="assets" id="assets"></div>
+</div>
+<div class="choices" id="choices"></div>
+<div class="stats-row">
+<span>Origin Latency: <b id="origin-lat">200ms</b></span>
+<span>CDN Latency: <b id="cdn-lat">20ms</b></span>
+<span>Bandwidth Saved: <b id="bw-saved">0%</b></span>
+</div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>CDN Architect!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=12,hits=0,total=0,answered=false;
+const regions=[
+{name:"US East",x:20,y:40,users:"1.2M users",latency:20},
+{name:"US West",x:10,y:35,users:"800K users",latency:25},
+{name:"Europe",x:48,y:25,users:"2.1M users",latency:30},
+{name:"Asia Pacific",x:75,y:45,users:"3.5M users",latency:35},
+{name:"South America",x:25,y:70,users:"600K users",latency:40},
+{name:"Middle East",x:55,y:40,users:"400K users",latency:45},
+{name:"Africa",x:50,y:65,users:"300K users",latency:50}
+];
+const assets=[
+{name:"main.css",size:"45KB",type:"static",cacheable:true,hitRate:95},
+{name:"app.js",size:"2.1MB",type:"static",cacheable:true,hitRate:90},
+{name:"hero-banner.jpg",size:"340KB",type:"image",cacheable:true,hitRate:85},
+{name:"user-avatar.png",size:"80KB",type:"dynamic",cacheable:false,hitRate:30},
+{name:"api/data.json",size:"12KB",type:"api",cacheable:false,hitRate:15},
+{name:"logo.svg",size:"5KB",type:"static",cacheable:true,hitRate:99},
+{name:"fonts.woff2",size:"120KB",type:"static",cacheable:true,hitRate:97},
+{name:"video-intro.mp4",size:"8MB",type:"media",cacheable:true,hitRate:80},
+{name:"search-results.json",size:"20KB",type:"dynamic",cacheable:false,hitRate:10},
+{name:"favicon.ico",size:"1KB",type:"static",cacheable:true,hitRate:99},
+{name:"analytics.js",size:"30KB",type:"static",cacheable:true,hitRate:88},
+{name:"config.json",size:"2KB",type:"dynamic",cacheable:true,hitRate:70}
+];
+const scenarios=[
+{asset:"main.css",desc:"Critical CSS for page rendering. Accessed by every page view.",best:"All regions",reason:"CSS is small, static, and needed by everyone — cache on all edge nodes."},
+{asset:"app.js",desc:"Large JavaScript bundle. High traffic from all regions.",best:"All regions",reason:"JS bundle is the main app — cache everywhere for fast loads."},
+{asset:"hero-banner.jpg",desc:"Homepage hero image. Most traffic from US and Europe.",best:"US + Europe",reason:"Image is region-specific — cache where traffic originates."},
+{asset:"user-avatar.png",desc:"User-uploaded avatars. Each user has unique image.",best:"No caching",reason:"Dynamic content per user — not suitable for CDN caching."},
+{asset:"api/data.json",desc:"Real-time data that changes every second.",best:"No caching",reason:"Dynamic API response — caching would serve stale data."},
+{asset:"logo.svg",desc:"Company logo used on all pages. Static content.",best:"All regions",reason:"Small static asset with 100% cacheability — cache everywhere."},
+{asset:"fonts.woff2",desc:"Custom fonts for the design system. Accessed on every page.",best:"All regions",reason:"Fonts are static and needed globally — perfect for CDN."},
+{asset:"video-intro.mp4",desc:"Product demo video. Heavy bandwidth usage.",best:"High-traffic regions",reason:"Large file — cache on nodes with highest traffic to save bandwidth."},
+{asset:"search-results.json",desc:"Search results with personalization. Changes per user.",best:"No caching",reason:"Personalized content — CDN caching would show wrong results."},
+{asset:"favicon.ico",desc:"Browser tab icon. Small, static, rarely changes.",best:"All regions",reason:"Tiny static file — cache everywhere for consistency."},
+{asset:"analytics.js",desc:"Analytics tracking script. Loaded on every page.",best:"All regions",reason:"Static script needed globally — cache on all edges."},
+{asset:"config.json",desc:"App configuration that changes on deployment.",best:"High-traffic regions",reason:"Semi-static config — cache on high-traffic nodes with short TTL."}
+];
+let cachedRegions=new Set();
+function init(){score=0;round=0;hits=0;total=0;cachedRegions.clear();renderMap();startRound();}
+function renderMap(){
+const map=document.getElementById('world-map');
+map.innerHTML=regions.map((r,i)=>`<div class="region ${cachedRegions.has(i)?'cached':''}" style="left:${r.x}%;top:${r.y}%" id="reg-${i}"><h4>${r.name}</h4><div class="users">${r.users}</div><div class="latency-bar"><div class="latency-fill" style="width:${cachedRegions.has(i)?30:r.latency}%;background:${cachedRegions.has(i)?'#4ade80':'#f87171'}"></div></div></div>`).join('')+'<div class="origin-server" style="left:45%;top:55%">Origin</div>';
+}
+function startRound(){
+answered=false;cachedRegions.clear();
+const s=scenarios[round%scenarios.length];
+document.getElementById('asset-title').textContent=`Asset: ${s.asset}`;
+document.getElementById('asset-desc').textContent=s.desc;
+document.getElementById('assets').innerHTML=assets.map(a=>`<div class="asset ${a.name===s.asset?'selected':''} ${a.name===s.asset?'':''}"><div>${a.name}</div><div class="size">${a.size} · ${a.type}</div></div>`).join('');
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+// Add clickable regions to cache
+regions.forEach((r,i)=>{
+const el=document.getElementById('reg-'+i);
+el.onclick=()=>{if(answered)return;cachedRegions.has(i)?cachedRegions.delete(i):cachedRegions.add(i);renderMap();};
+});
+document.getElementById('choices').innerHTML=['All regions','US + Europe','High-traffic regions','No caching'].map(c=>`<button class="choice-btn" onclick="answer('${c}','${s.best}','${s.reason}')">${c}</button>`).join('');
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;total++;
+const isCorrect=chosen===correct;
+if(isCorrect){score+=10;hits++;}
+else{score=Math.max(0,score-3);}
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+document.getElementById('cache-hit').textContent=total?Math.round(hits/total*100)+'%':'0%';
+document.getElementById('bw-saved').textContent=total?Math.round(hits/total*70)+'%':'0%';
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;document.getElementById('cache-hit').textContent='0%';
+}
+init();
+</script>
+</body>
+</html>

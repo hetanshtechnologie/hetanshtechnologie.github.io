@@ -1,0 +1,66 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>8. Serving Architecture — ML System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>8. Serving Architecture</h1>
+<p>The serving architecture delivers predictions to consumers with low latency and high availability.</p>
+<h2>Components</h2>
+<img src="../images/inference-pipeline.svg" alt="Inference pipeline showing API gateway, feature fetch, model server, cache, fallback, and monitoring">
+<table>
+<tr><th>Component</th><th>Role</th><th>Technology Options</th></tr>
+<tr><td>Load Balancer</td><td>Distribute requests across replicas</td><td>Nginx, HAProxy, AWS ALB</td></tr>
+<tr><td>API Gateway</td><td>Auth, rate-limiting, request validation</td><td>Kong, Envoy, AWS API Gateway</td></tr>
+<tr><td>Inference Server</td><td>Run model, handle batching</td><td>Triton, TorchServe, vLLM, TGI</td></tr>
+<tr><td>Feature Cache</td><td>Low-latency feature lookup</td><td>Redis, Memcached</td></tr>
+<tr><td>Prediction Cache</td><td>Cache identical requests</td><td>Redis, custom in-memory</td></tr>
+<tr><td>Model Loader</td><td>Load/unload model versions</td><td>Model registry API + local disk</td></tr>
+<tr><td>Logging</td><td>Async log predictions + features</td><td>Kafka, S3, ELK</td></tr>
+</table>
+<h2>Request Flow</h2>
+<pre><code># End-to-end serving flow
+1. Client → Load Balancer → API Gateway
+2. Gateway validates auth token and rate limit
+3. Gateway routes to inference service
+4. Inference service:
+   a. Parse request, extract features
+   b. Check prediction cache (hash of features)
+      - Hit → return cached prediction (skip steps c-e)
+   c. Fetch missing features from online feature store (Redis)
+   d. Run model inference (GPU/CPU)
+   e. Log prediction + features to Kafka (async)
+5. Return response to client</code></pre>
+<h2>Inference Server Types</h2>
+<ul>
+<li><strong>GPU inference:</strong> NVIDIA Triton supports dynamic batching, model ensembles, and multiple frameworks (TensorRT, ONNX, PyTorch, TensorFlow).</li>
+<li><strong>LLM inference:</strong> vLLM uses PagedAttention for efficient KV-cache management, supports continuous batching for high throughput.</li>
+<li><strong>CPU inference:</strong> ONNX Runtime optimized for CPU, good for smaller models or when GPU is not available.</li>
+</ul>
+<h2>Dynamic Batching</h2>
+<p>Groups multiple inference requests into a single batch to maximize GPU utilization.</p>
+<pre><code># Dynamic batching
+Config: max_batch_size=32, max_delay=10ms
+Request A arrives at t=0:  queue (1 request)
+Request B arrives at t=2:  queue (2 requests)
+Request C arrives at t=5:  queue (3 requests)
+At t=10: batch of 3 sent to GPU
+GPU processes batch (same cost as processing 1 request, ~3x throughput)</code></pre>
+<div class="exercise"><strong>Exercise:</strong> You are serving a text classification model (BERT-based, ~440M params) at 5,000 QPS with a p99 latency SLA of 150ms. Design the serving architecture: how many replicas, what hardware per replica (GPU/CPU/RAM), what batching strategy, what caching layers, and how do you handle traffic spikes?</div>
+<nav><a href="7-training-architecture.html">&larr; Previous</a><a href="../index.html">Index</a><a href="9-caching.html">Next: Caching Strategies &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sliding Window Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:900px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.3rem}
+.array-container{display:flex;gap:6px;justify-content:center;align-items:flex-end;height:280px;padding:20px;background:#1e293b;border-radius:12px;margin-bottom:20px;position:relative}
+.bar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;transition:all .3s;border-radius:6px 6px 0 0}
+.bar-inner{width:52px;border-radius:6px 6px 0 0;transition:all .4s}
+.bar-label{font-size:15px;font-weight:700;margin-bottom:6px}
+.bar-index{font-size:11px;color:#94a3b8;margin-top:4px}
+.bar.in-window .bar-inner{box-shadow:0 0 16px #38bdf8;background:#38bdf8!important}
+.bar.in-window .bar-label{color:#0f172a}
+.bar.best .bar-inner{box-shadow:0 0 20px #22c55e;background:#22c55e!important}
+.window-info{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:20px}
+.info-box{background:#1e293b;border-radius:12px;padding:12px 20px;text-align:center}
+.info-box h3{color:#94a3b8;font-size:.8rem;margin-bottom:4px}
+.info-box .val{color:#38bdf8;font-size:1.3rem;font-weight:700}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.choice-btn{display:block;width:100%;padding:12px 20px;margin-bottom:8px;background:#334155;color:#e2e8f0;border:2px solid #475569;border-radius:8px;font-size:1rem;cursor:pointer;text-align:left;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.choice-btn.correct{border-color:#22c55e;background:#14532d}
+.choice-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:12px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&#8592; Home</a><h1>Sliding Window Game</h1></div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Round: <span class="score-val" id="round">1</span></span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="window-info">
+    <div class="info-box"><h3>Window Size (k)</h3><div class="val" id="kVal">-</div></div>
+    <div class="info-box"><h3>Current Sum</h3><div class="val" id="curSum">-</div></div>
+    <div class="info-box"><h3>Max Sum</h3><div class="val" id="maxSum">-</div></div>
+    <div class="info-box"><h3>Window Position</h3><div class="val" id="winPos">-</div></div>
+  </div>
+  <div class="array-container" id="arrayContainer"></div>
+  <div class="instructions"><h2>How to Play</h2><p>Find the maximum sum subarray of size k. The window slides one position at a time. Predict the next window sum or identify the max!</p></div>
+  <div id="messageArea"></div>
+  <div id="choicesArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startRound()">Start Round</button>
+    <button class="btn btn-secondary" id="stepBtn" onclick="doStep()" style="display:none">Step Window</button>
+    <button class="btn btn-secondary" id="resetBtn" onclick="resetAll()" style="display:none">New Array</button>
+  </div>
+</div>
+<script>
+let arr=[],k=0,winStart=0,curSum=0,maxSum=0,maxPos=0,score=0,round=1,streak=0;
+
+function genArr(n=10){return Array.from({length:n},()=>Math.floor(Math.random()*30)+1)}
+
+function render(hl={}){
+  const c=document.getElementById('arrayContainer');c.innerHTML='';const mx=Math.max(...arr);
+  arr.forEach((v,i)=>{
+    const b=document.createElement('div');b.className='bar';
+    if(i>=winStart&&i<winStart+k)b.classList.add('in-window');
+    if(hl.best===i)b.classList.add('best');
+    const h=(v/mx)*220;
+    b.innerHTML=`<span class="bar-label">${v}</span><div class="bar-inner" style="height:${h}px;background:hsl(${200+i*10},60%,48%)"></div><span class="bar-index">[${i}]</span>`;
+    c.appendChild(b);
+  });
+}
+
+function updateScore(ok){if(ok){score+=10+streak*5;streak++}else{streak=0}document.getElementById('score').textContent=score;document.getElementById('streak').textContent=streak}
+
+function calcMaxSum(){
+  let ms=0,mp=0;let s=0;for(let i=0;i<k;i++)s+=arr[i];ms=s;
+  for(let i=1;i<=arr.length-k;i++){s=s-arr[i-1]+arr[i+k-1];if(s>ms){ms=s;mp=i}}
+  return{ms,mp};
+}
+
+function startRound(){
+  arr=genArr(10);k=Math.floor(Math.random()*3)+3;
+  winStart=0;curSum=arr.slice(0,k).reduce((a,b)=>a+b,0);
+  const opt=calcMaxSum();maxSum=opt.ms;maxPos=opt.mp;
+  render();updateInfo();
+  document.getElementById('startBtn').style.display='none';
+  ['stepBtn','resetBtn'].forEach(id=>document.getElementById(id).style.display='');
+  document.getElementById('round').textContent=round;
+  document.getElementById('messageArea').innerHTML='';
+  document.getElementById('kVal').textContent=k;
+  showQ();
+}
+
+function updateInfo(){
+  document.getElementById('curSum').textContent=curSum;
+  document.getElementById('maxSum').textContent='?';
+  document.getElementById('winPos').textContent=`[${winStart}..${winStart+k-1}]`;
+}
+
+function showQ(){
+  if(winStart>arr.length-k){
+    render({best:maxPos});
+    document.getElementById('maxSum').textContent=maxSum;
+    document.getElementById('messageArea').innerHTML=`<div class="message correct">Max window sum = ${maxSum} at position [${maxPos}..${maxPos+k-1}]</div>`;
+    document.getElementById('choicesArea').innerHTML='';
+    round++;document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Next Round';
+    ['stepBtn','resetBtn'].forEach(id=>document.getElementById(id).style.display='none');
+    return;
+  }
+  const nextSum=curSum-arr[winStart]+(winStart+k<arr.length?arr[winStart+k]:0);
+  const choices=[
+    {text:`New sum = ${nextSum} (slide right: -${arr[winStart]} + ${winStart+k<arr.length?arr[winStart+k]:'overflow'})`,correct:winStart<arr.length-k},
+    {text:`New sum = ${curSum+arr[winStart]} (add left element)`,correct:false},
+    {text:`New sum = ${curSum} (window stays same)`,correct:false},
+    {text:`Window at end — stop here`,correct:winStart>=arr.length-k}
+  ].sort(()=>Math.random()-.5);
+  let html=`<p style="margin-bottom:8px;color:#94a3b8">Window [${winStart}..${winStart+k-1}], sum=${curSum}. What happens next?</p>`;
+  choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answer(${c.correct},this)">${c.text}</button>`});
+  document.getElementById('choicesArea').innerHTML=html;
+}
+
+function answer(ok,el){
+  document.querySelectorAll('.choice-btn').forEach(b=>b.disabled=true);
+  el.classList.add(ok?'correct':'wrong');
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Correct! +'+(10+streak*5)+' points':'Wrong!'}</div>`;
+  updateScore(ok);
+  setTimeout(()=>doStep(),700);
+}
+
+function doStep(){
+  document.getElementById('messageArea').innerHTML='';
+  if(winStart>=arr.length-k){showQ();return}
+  curSum=curSum-arr[winStart]+arr[winStart+k];
+  winStart++;
+  render();updateInfo();showQ();
+}
+
+function resetAll(){
+  document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Start Round';
+  ['stepBtn','resetBtn'].forEach(id=>document.getElementById(id).style.display='none');
+  document.getElementById('choicesArea').innerHTML='';document.getElementById('messageArea').innerHTML='';
+  document.getElementById('arrayContainer').innerHTML='';
+  ['kVal','curSum','maxSum','winPos'].forEach(id=>document.getElementById(id).textContent='-');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chemistry Lab</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.lab-area{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.beaker{width:120px;height:160px;border:3px solid #475569;border-top:none;border-radius:0 0 16px 16px;background:#0f172a;position:relative;cursor:pointer;transition:all .2s;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:8px}
+.beaker:hover{border-color:#38bdf8}
+.beaker.selected{border-color:#facc15;box-shadow:0 0 12px rgba(250,204,21,0.3)}
+.beaker-label{text-align:center;font-size:.8rem;margin-top:6px;color:#94a3b8}
+.beaker-emoji{font-size:2rem}
+.beaker-fill{width:100%;position:absolute;bottom:0;border-radius:0 0 13px 13px;transition:height .3s}
+.mix-zone{width:160px;height:180px;border:3px solid #475569;border-radius:16px;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.mix-emoji{font-size:3rem}
+.mix-label{font-size:.8rem;color:#94a3b8}
+.card{background:#1e293b;border-radius:16px;padding:20px;max-width:600px;width:100%;text-align:center;border:2px solid #334155}
+.q-text{font-size:1rem;margin:10px 0;line-height:1.4}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.opt{background:#0f172a;color:#e2e8f0;border:2px solid #475569;padding:12px;border-radius:8px;font-size:.85rem;cursor:pointer;transition:all .2s}
+.opt:hover{border-color:#38bdf8}
+.opt.correct{border-color:#22c55e;background:rgba(34,197,94,0.15)}
+.opt.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15)}
+.opt.disabled{pointer-events:none;opacity:.7}
+.fb{margin-top:10px;padding:10px;border-radius:8px;font-size:.9rem;min-height:2em}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+.reaction-result{font-size:4rem;margin:8px 0;text-align:center}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🧪 Chemistry Lab</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/10</span>
+</div>
+<div class="lab-area" id="lab"></div>
+<div class="card">
+<div class="reaction-result" id="result">🧪</div>
+<div class="q-text" id="qtext"></div>
+<div class="opts" id="opts"></div>
+<div class="fb" id="fb"></div>
+</div>
+<button class="btn" id="next-btn" style="display:none" onclick="nextQ()">Next ➡️</button>
+</div>
+<script>
+let score=0,level=1,qNum=0,answered=false;
+const questions=[
+  {chem1:'💧',chem2:'🔵',react:'Vinegar + Baking Soda → ?',result:'🫧💨',q:'What happens when vinegar mixes with baking soda?',opts:['Fizzing (CO₂ gas produced)','Nothing happens','Gets very hot','Turns black'],ans:0,explain:'Acetic acid + sodium bicarbonate → CO₂ gas (fizzing!) + water + sodium acetate.'},
+  {chem1:'🔴',chem2:'🟡',react:'Iron + Copper Sulfate → ?',result:'🟤🔵',q:'What products form when iron is placed in copper sulfate solution?',opts:['Iron sulfate + copper','No reaction','Iron oxide + sulfur','Copper oxide + iron'],ans:0,explain:'Fe + CuSO₄ → FeSO₄ + Cu. Iron displaces copper (more reactive metal).'},
+  {chem1:'🟢',chem2:'⚪',react:'Acid + Metal → ?',result:'🫧💨',q:'What gas is produced when acid reacts with metal?',opts:['Hydrogen gas (H₂)','Oxygen gas','Carbon dioxide','Nitrogen'],ans:0,explain:'Acid + metal → salt + hydrogen gas. The bubbles are H₂!'},
+  {chem1:'🟡',chem2:'🔴',react:'Lead Nitrate + Potassium Iodide → ?',result:'🟡⬇️',q:'What happens when these solutions are mixed?',opts:['Yellow precipitate forms','Solution turns blue','Gets very hot','Nothing happens'],ans:0,explain:'Pb(NO₃)₂ + 2KI → PbI₂↓ (yellow precipitate) + 2KNO₃.'},
+  {chem1:'🔵',chem2:'⚪',react:'Copper Sulfate + Sodium Hydroxide → ?',result:'🔵⬇️',q:'What precipitate forms?',opts:['Copper hydroxide (blue)','Sodium sulfate','Copper oxide','No precipitate'],ans:0,explain:'CuSO₄ + 2NaOH → Cu(OH)₂↓ (blue) + Na₂SO₄.'},
+  {chem1:'🟢',chem2:'🟡',react:'Zinc + Hydrochloric Acid → ?',result:'🫧',q:'What gas is evolved?',opts:['Hydrogen','Chlorine','Oxygen','Carbon dioxide'],ans:0,explain:'Zn + 2HCl → ZnCl₂ + H₂↑. Zinc reacts with acid to produce hydrogen gas.'},
+  {chem1:'🔴',chem2:'🔵',react:'Sodium + Water → ?',result:'🔥💨',q:'What is observed when sodium reacts with water?',opts:['Explosive reaction with flame','Slow dissolution','No visible change','Green flame'],ans:0,explain:'2Na + 2H₂O → 2NaOH + H₂↑. Violently exothermic — can ignite hydrogen!'},
+  {chem1:'⚪',chem2:'🟡',react:'Silver Nitrate + NaCl → ?',result:'⚪⬇️',q:'What precipitate forms?',opts:['Silver chloride (white)','Sodium nitrate','Silver oxide','No precipitate'],ans:0,explain:'AgNO₃ + NaCl → AgCl↓ (white precipitate) + NaNO₃.'},
+  {chem1:'🟡',chem2:'🟢',react:'Mg + HCl → ?',result:'🫧',q:'What gas does magnesium produce with acid?',opts:['Hydrogen','Chlorine','Helium','CO₂'],ans:0,explain:'Mg + 2HCl → MgCl₂ + H₂↑. Vigorous bubbling!'},
+  {chem1:'🔵',chem2:'🔴',react:'NaOH + HCl → ?',result:'💧',q:'What type of reaction is this?',opts:['Neutralization (acid + base)','Single displacement','Decomposition','Combustion'],ans:0,explain:'NaOH + HCl → NaCl + H₂O. Acid + base → salt + water.'},
+  {chem1:'🟢',chem2:'🟡',react:'CaCO₃ + HCl → ?',result:'🫧💨',q:'What gas is produced when limestone reacts with acid?',opts:['Carbon dioxide','Hydrogen','Oxygen','Methane'],ans:0,explain:'CaCO₃ + 2HCl → CaCl₂ + H₂O + CO₂↑. Classic CO₂ test!'},
+  {chem1:'🔴',chem2:'⚪',react:'Cu + AgNO₃ → ?',result:'⚪⬇️',q:'What happens when copper is placed in silver nitrate?',opts:['Silver crystals form on copper','Nothing happens','Blue precipitate','Gas produced'],ans:0,explain:'Cu + 2AgNO₃ → Cu(NO₃)₂ + 2Ag↓. Copper displaces silver (more reactive).'},
+];
+let shuffled=[...questions].sort(()=>Math.random()-0.5);
+
+function showLab(){
+  let q=shuffled[qNum];
+  let lab=document.getElementById('lab');
+  lab.innerHTML=`
+    <div class="beaker" style="border-color:#ef4444"><div class="beaker-fill" style="height:60%;background:rgba(239,68,68,0.3)"></div><div class="beaker-emoji">${q.chem1}</div><div class="beaker-label">Chemical A</div></div>
+    <div style="font-size:2rem;display:flex;align-items:center;color:#f59e0b">+</div>
+    <div class="beaker" style="border-color:#3b82f6"><div class="beaker-fill" style="height:60%;background:rgba(59,130,246,0.3)"></div><div class="beaker-emoji">${q.chem2}</div><div class="beaker-label">Chemical B</div></div>`;
+}
+
+function showQ(){
+  if(qNum>=10){showResults();return}
+  answered=false;
+  document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';
+  document.getElementById('next-btn').style.display='none';
+  document.getElementById('qnum').textContent=qNum+1;
+  let q=shuffled[qNum];
+  document.getElementById('result').textContent=q.result;
+  document.getElementById('qtext').textContent=q.react+' '+q.q;
+  showLab();
+  const opts=document.getElementById('opts');opts.innerHTML='';
+  q.opts.forEach((o,i)=>{const b=document.createElement('button');b.className='opt';b.textContent=o;b.onclick=()=>check(i);opts.appendChild(b)});
+}
+
+function check(i){
+  if(answered)return;answered=true;
+  let q=shuffled[qNum];
+  document.querySelectorAll('.opt').forEach((b,j)=>{if(j===q.ans)b.classList.add('correct');if(j===i&&i!==q.ans)b.classList.add('wrong')});
+  let fb=document.getElementById('fb');
+  if(i===q.ans){let pts=10+level*5;score+=pts;fb.innerHTML='✅ '+q.explain+' <b>+'+pts+' pts</b>';fb.style.background='rgba(34,197,94,0.15)'}
+  else{fb.innerHTML='❌ '+q.explain;fb.style.background='rgba(239,68,68,0.15)'}
+  document.getElementById('score').textContent=score;document.getElementById('next-btn').style.display='inline-block';
+}
+
+function nextQ(){qNum++;showQ()}
+function showResults(){
+  document.getElementById('lab').innerHTML='';document.getElementById('result').textContent='🏆';
+  document.getElementById('qtext').innerHTML='Level '+level+' Complete! Score: '+score;
+  document.getElementById('opts').innerHTML='<button class="btn" onclick="nextLevel()">Next Level ⬆️</button> <button class="btn sec" onclick="restart()">↺ Restart</button>';
+  document.getElementById('fb').textContent='';document.getElementById('next-btn').style.display='none';
+}
+function nextLevel(){level++;qNum=0;shuffled=[...questions].sort(()=>Math.random()-0.5);document.getElementById('level').textContent=level;showQ()}
+function restart(){score=0;level=1;qNum=0;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;shuffled=[...questions].sort(()=>Math.random()-0.5);showQ()}
+showQ();
+</script>
+</body>
+</html>

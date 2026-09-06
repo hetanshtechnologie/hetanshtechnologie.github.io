@@ -1,0 +1,214 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pong</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+<style>
+body { margin: 0; background: #1a1a2e; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+canvas { display: block; margin: 0 auto; }
+</style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen">
+<a href="index.html" class="absolute top-4 left-4 text-blue-400 hover:text-blue-300 text-sm font-semibold">&larr; Back to Games</a>
+<div class="text-center mb-3">
+  <h1 class="text-3xl font-bold text-white">PONG</h1>
+  <p class="text-gray-400 text-sm mt-1">First to 10 wins! Use mouse or arrow keys.</p>
+</div>
+<div id="scoreboard" class="flex gap-12 mb-3">
+  <div class="text-center">
+    <div class="text-xs text-gray-400 uppercase tracking-wider">Player</div>
+    <div id="playerScore" class="text-4xl font-bold text-blue-400">0</div>
+  </div>
+  <div class="text-center">
+    <div class="text-xs text-gray-400 uppercase tracking-wider">AI</div>
+    <div id="aiScore" class="text-4xl font-bold text-red-400">0</div>
+  </div>
+</div>
+<canvas id="pongCanvas"></canvas>
+<div id="overlay" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-10">
+  <div class="text-center bg-gray-900 p-8 rounded-xl border border-gray-700 shadow-2xl">
+    <h2 id="overlayTitle" class="text-3xl font-bold text-white mb-4">PONG</h2>
+    <p id="overlayMsg" class="text-gray-300 mb-6">First to 10 wins!</p>
+    <button id="startBtn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-8 rounded-lg transition">START</button>
+  </div>
+</div>
+<script>
+const canvas = document.getElementById('pongCanvas');
+const ctx = canvas.getContext('2d');
+const W = 700, H = 400;
+canvas.width = W;
+canvas.height = H;
+
+let state = 'menu';
+let playerScore = 0, aiScore = 0;
+let animId;
+
+const paddleW = 12, paddleH = 80;
+let playerY = H / 2 - paddleH / 2;
+let aiY = H / 2 - paddleH / 2;
+const aiSpeed = 3.5;
+const paddleSpeed = 6;
+
+let ballX, ballY, ballVX, ballVY, ballR = 7;
+let baseSpeed = 5;
+let speedMult = 1;
+let keys = {};
+
+function resetBall(dir) {
+  ballX = W / 2;
+  ballY = H / 2;
+  let angle = (Math.random() * 0.8 - 0.4);
+  let spd = baseSpeed * speedMult;
+  ballVX = spd * dir * Math.cos(angle);
+  ballVY = spd * Math.sin(angle);
+}
+
+function resetGame() {
+  playerScore = 0;
+  aiScore = 0;
+  speedMult = 1;
+  document.getElementById('playerScore').textContent = '0';
+  document.getElementById('aiScore').textContent = '0';
+  playerY = H / 2 - paddleH / 2;
+  aiY = H / 2 - paddleH / 2;
+  resetBall(1);
+  state = 'playing';
+}
+
+function draw() {
+  ctx.fillStyle = '#16213e';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.setLineDash([10, 10]);
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(W / 2, 0);
+  ctx.lineTo(W / 2, H);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = '#60a5fa';
+  ctx.fillRect(20, playerY, paddleW, paddleH);
+
+  ctx.fillStyle = '#f87171';
+  ctx.fillRect(W - 20 - paddleW, aiY, paddleW, paddleH);
+
+  ctx.fillStyle = '#e2e8f0';
+  ctx.beginPath();
+  ctx.arc(ballX, ballY, ballR, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function update() {
+  if (state !== 'playing') return;
+
+  if (keys['ArrowUp'] || keys['w']) playerY -= paddleSpeed;
+  if (keys['ArrowDown'] || keys['s']) playerY += paddleSpeed;
+  playerY = Math.max(0, Math.min(H - paddleH, playerY));
+
+  let aiCenter = aiY + paddleH / 2;
+  let diff = ballY - aiCenter;
+  if (Math.abs(diff) > 10) {
+    aiY += Math.sign(diff) * Math.min(Math.abs(diff), aiSpeed);
+  }
+  aiY = Math.max(0, Math.min(H - paddleH, aiY));
+
+  ballX += ballVX;
+  ballY += ballVY;
+
+  if (ballY - ballR <= 0) { ballY = ballR; ballVY *= -1; }
+  if (ballY + ballR >= H) { ballY = H - ballR; ballVY *= -1; }
+
+  let px = 20, py = playerY;
+  if (ballX - ballR <= px + paddleW && ballX + ballR >= px && ballY >= py && ballY <= py + paddleH && ballVX < 0) {
+    let hitPos = (ballY - py) / paddleH;
+    let angle = (hitPos - 0.5) * Math.PI / 3;
+    let spd = Math.sqrt(ballVX * ballVX + ballVY * ballVY);
+    speedMult = Math.min(speedMult + 0.05, 2.5);
+    spd = baseSpeed * speedMult;
+    ballVX = spd * Math.cos(angle);
+    ballVY = spd * Math.sin(angle);
+    ballX = px + paddleW + ballR;
+  }
+
+  let ax = W - 20 - paddleW, ay = aiY;
+  if (ballX + ballR >= ax && ballX - ballR <= ax + paddleW && ballY >= ay && ballY <= ay + paddleH && ballVX > 0) {
+    let hitPos = (ballY - ay) / paddleH;
+    let angle = (hitPos - 0.5) * Math.PI / 3;
+    let spd = Math.sqrt(ballVX * ballVX + ballVY * ballVY);
+    speedMult = Math.min(speedMult + 0.05, 2.5);
+    spd = baseSpeed * speedMult;
+    ballVX = -spd * Math.cos(angle);
+    ballVY = spd * Math.sin(angle);
+    ballX = ax - ballR;
+  }
+
+  if (ballX < -20) {
+    aiScore++;
+    document.getElementById('aiScore').textContent = aiScore;
+    if (aiScore >= 10) { endGame('AI Wins!'); return; }
+    resetBall(-1);
+  }
+  if (ballX > W + 20) {
+    playerScore++;
+    document.getElementById('playerScore').textContent = playerScore;
+    if (playerScore >= 10) { endGame('You Win!'); return; }
+    resetBall(1);
+  }
+}
+
+function endGame(msg) {
+  state = 'over';
+  document.getElementById('overlayTitle').textContent = msg;
+  document.getElementById('overlayMsg').textContent = 'Press to play again';
+  document.getElementById('startBtn').textContent = 'RESTART';
+  document.getElementById('overlay').classList.remove('hidden');
+}
+
+function gameLoop() {
+  update();
+  draw();
+  animId = requestAnimationFrame(gameLoop);
+}
+
+document.addEventListener('keydown', e => { keys[e.key] = true; });
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+canvas.addEventListener('mousemove', e => {
+  let rect = canvas.getBoundingClientRect();
+  let scaleY = H / rect.height;
+  playerY = (e.clientY - rect.top) * scaleY - paddleH / 2;
+  playerY = Math.max(0, Math.min(H - paddleH, playerY));
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('overlay').classList.add('hidden');
+  resetGame();
+  if (animId) cancelAnimationFrame(animId);
+  gameLoop();
+});
+
+resetBall(1);
+draw();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

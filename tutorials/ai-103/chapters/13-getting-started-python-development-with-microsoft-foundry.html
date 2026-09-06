@@ -1,0 +1,160 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>13. Getting Started Python Development with Microsoft Foundry - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 13</span>
+<h1>Getting Started Python Development with Microsoft Foundry</h1>
+<p>Everything you have done in the portal — deploying models, testing prompts, inspecting endpoints — becomes far more powerful when you drive it from Python. This chapter lays the groundwork for all the coding that follows: how Python projects talk to Foundry, how to structure a project, and how to make your first authenticated call to a deployed model.</p>
+
+<h2>How Python Talks to Foundry</h2>
+<p>Your Python application calls a deployed model over HTTPS using its endpoint and key. There are two popular ways to make that call:</p>
+<ul>
+<li><strong>The Azure AI Inference SDK:</strong> A Python library that provides a consistent client for chat, embeddings, and other model types across Foundry deployments.</li>
+<li><strong>Direct REST requests:</strong> Plain HTTP calls using a library such as <code>requests</code> or the standard <code>urllib</code>, with no SDK dependency.</li>
+</ul>
+<p>Both approaches work, and both authenticate the same way: the endpoint URL plus an API key in the request header. The SDK just wraps that HTTP call in convenient Python objects.</p>
+
+<div class="note">
+<p>The names of SDK packages change over time as the platform evolves. When you install, prefer the packages the current Foundry documentation points to — this course shows the general pattern, and the pattern (a client pointed at your endpoint, authenticated with your key) is stable even when a package name changes.</p>
+</div>
+
+<h2>Project Structure</h2>
+<p>Keep your work organized from the start. A minimal, clean structure for this course looks like this:</p>
+
+<pre><code>ai103-labs/
+|-- .env                # secrets live here, never committed
+|-- requirements.txt    # package list
+|-- src/
+|   |-- config.py       # loads endpoint and key from the environment
+|   `-- chat.py         # your first model-calling script
+`-- README.md</code></pre>
+
+<div class="warn">
+<p>Never hardcode an endpoint key in a Python file. Keys pasted into source code end up in version control, and versions of source code leak. Load them from environment variables or a local <code>.env</code> file that your version control ignores.</p>
+</div>
+
+<h2>Configuration First</h2>
+<p>Write a small configuration module that reads your endpoint and key once, so every script in your project shares the same connection values. A typical implementation loads values from a <code>.env</code> file:</p>
+
+<pre><code># src/config.py
+import os
+from pathlib import Path
+
+def load_env(path=".env"):
+    """Load KEY=VALUE lines from a .env file into the environment."""
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+
+load_env()
+
+ENDPOINT = os.getenv("AZURE_FOUNDRY_ENDPOINT")
+KEY = os.getenv("AZURE_FOUNDRY_KEY")
+DEPLOYMENT = os.getenv("AZURE_FOUNDRY_DEPLOYMENT")</code></pre>
+
+<p>And the matching <code>.env</code> file, which you fill with real values from your Foundry deployment page:</p>
+
+<pre><code># .env  (never commit this file)
+AZURE_FOUNDRY_ENDPOINT=https://YOUR_RESOURCE.cognitiveservices.azure.com/
+AZURE_FOUNDRY_KEY=YOUR_KEY
+AZURE_FOUNDRY_DEPLOYMENT=YOUR_DEPLOYMENT_NAME</code></pre>
+
+<h2>Your First Chat Call</h2>
+<p>The simplest useful script sends one chat message and prints the model's reply. Written with plain <code>requests</code>, it makes every step visible:</p>
+
+<pre><code># src/chat.py
+import json
+import requests
+from config import ENDPOINT, KEY, DEPLOYMENT
+
+url = (
+    f"{ENDPOINT.rstrip('/')}/openai/deployments/{DEPLOYMENT}"
+    "/chat/completions?api-version=2024-06-01"
+)
+
+payload = {
+    "messages": [
+        {"role": "system", "content": "You are a concise assistant."},
+        {"role": "user", "content": "What is retrieval augmented generation?"},
+    ],
+    "max_tokens": 200,
+}
+
+resp = requests.post(url, headers={"api-key": KEY}, json=payload)
+resp.raise_for_status()
+
+data = resp.json()
+print(data["choices"][0]["message"]["content"])
+print("Tokens used:", data["usage"])</code></pre>
+
+<div class="tip">
+<p>Always call <code>raise_for_status()</code> (or the SDK equivalent) after the request. It turns a silent failure into a clear exception, which is exactly what you want while debugging. Handle HTTP 4xx and 5xx errors explicitly, because a model endpoint is a network call like any other.</p>
+</div>
+
+<h2>Turning the Call into a Reusable Function</h2>
+<p>Production code does not sprinkle raw requests everywhere. Wrap the call in a function your application can reuse, with sensible defaults and clear parameters:</p>
+
+<pre><code># src/client.py
+import requests
+from config import ENDPOINT, KEY, DEPLOYMENT
+
+def chat(messages, temperature=0.7, max_tokens=200):
+    url = (
+        f"{ENDPOINT.rstrip('/')}/openai/deployments/{DEPLOYMENT}"
+        "/chat/completions?api-version=2024-06-01"
+    )
+    payload = {
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    resp = requests.post(url, headers={"api-key": KEY}, json=payload, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+    return {
+        "content": data["choices"][0]["message"]["content"],
+        "usage": data.get("usage"),
+        "finish_reason": data["choices"][0].get("finish_reason"),
+    }</code></pre>
+
+<h2>Common First-Call Mistakes</h2>
+<p>These are the mistakes beginners hit most often, so you can skip them:</p>
+<ul>
+<li><strong>Wrong deployment name:</strong> The <code>model</code> field in the request must be your <em>deployment</em> name, not the model card name.</li>
+<li><strong>Missing <code>/openai/deployments/</code> path segment:</strong> The URL shape matters; copy it from the deployment page rather than reconstructing it from memory.</li>
+<li><strong>Stale API version:</strong> Use the version string the portal shows in its sample request.</li>
+<li><strong>Key with a stray newline:</strong> When copying keys from the portal into a <code>.env</code> file, trailing whitespace breaks authentication silently. Strip values in your loader.</li>
+<li><strong>Not reading the error body:</strong> The endpoint explains its own failures — always print the full error text.</li>
+</ul>
+
+<div class="warn">
+<p>Timeouts are the invisible killer of model calls. Chat models can take tens of seconds on long requests, so set an explicit timeout of 60 seconds or more rather than relying on a default that may fire too early. Also remember that model responses are non-deterministic — a retry can return a slightly different answer, so design your tests to tolerate variation.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Python talks to Foundry through plain HTTPS calls authenticated with your endpoint and key. You learned to keep secrets in environment variables, structure a small project, write your first chat call, and wrap it in a reusable function. You also know the most common first-call mistakes. In the next chapter you will install Python and VS Code to build this environment on your own machine.</p>
+<nav>
+<a href="12-debugging-model-deployments.html">&larr; Previous: Debugging model deployments</a><a href="14-installing-python-and-vs-code.html">Next: Installing Python and VS Code &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>267. OpenAI - Tools - Image Generation - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 267</span>
+<h1>OpenAI - Tools - Image Generation</h1>
+<p>In the previous chapter you saw the general idea behind tools: the model decides that it needs information or an action it cannot produce itself, and it asks your application to supply that piece through a structured request. Image generation is one of the tools that the API can invoke <em>for you</em>. Instead of writing code that calls an image endpoint directly and then asking the model to react to the result, you declare an image generation tool, and the model requests the image at the moment it decides the conversation needs one. This chapter explains how that tool works and how you read its output.</p>
+
+<h2>What the Image Generation Tool Does</h2>
+<p>The image generation tool gives the model the ability to create pictures on demand. When you attach the tool to a request, the model can decide — based on your instructions and the conversation — that producing an image is the right way to respond. The tool takes a text description as its effective input and returns a freshly generated image.</p>
+<p>This is different from a hand-coded flow where you detect a keyword, call an image API yourself, download the result, and hand it back to the model. With the tool, the model performs that coordination. Your code still receives the image, but the decision about <em>when</em> to generate one is made by the model inside the same response.</p>
+
+<h2>Declaring the Tool</h2>
+<p>You attach the tool by adding an entry to the <code>tools</code> list in your request. Each entry declares the tool type, a name your code can recognize, a description the model reads to decide when to use it, and a couple of settings that shape the output.</p>
+
+<pre><code>from openai import OpenAI
+import os
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+response = client.responses.create(
+    model="gpt-5",
+    instructions="You are a designer who creates product illustrations on request.",
+    input="Generate an image of a hiking backpack for our product page.",
+    tools=[
+        {
+            "type": "image_generation",
+            "name": "image_gen",
+            "description": "Creates an image from a detailed text description.",
+            "input_size": 1024,
+            "output_format": "png",
+        }
+    ],
+)</code></pre>
+
+<p>The same declaration looks like this if you prefer to call the REST API directly:</p>
+
+<pre><code>{
+  "model": "gpt-5",
+  "input": "A red fox standing in a snowy forest at dusk",
+  "tools": [
+    {
+      "type": "image_generation",
+      "name": "image_gen",
+      "description": "Generates an image from a detailed text description.",
+      "input_size": 1024,
+      "output_format": "png"
+    }
+  ]
+}</code></pre>
+
+<h2>Understanding the Tool Settings</h2>
+<p>Two settings deserve attention because they shape the images you get back:</p>
+<ul>
+<li><strong><code>input_size</code></strong> — the edge length of the generated image in pixels. A single number such as <code>1024</code> produces a square image at that resolution. Larger sizes use more compute, so choose the smallest size that satisfies your use case.</li>
+<li><strong><code>output_format</code></strong> — the encoding of the returned image, commonly <code>png</code> or <code>jpeg</code>. PNG preserves detail and supports transparency; JPEG produces smaller files at a slight quality cost.</li>
+</ul>
+
+<div class="tip">
+<p>Keep the description on the tool short and behavioral: tell the model <em>when</em> to use the tool and <em>what</em> it produces. The fine detail of the image itself belongs in the conversation, not in the tool schema.</p>
+</div>
+
+<h2>How the Model Decides to Use the Tool</h2>
+<p>The model does not generate an image automatically just because the tool is attached. It weighs the request against your instructions and picks the tool only when producing an image is genuinely the best response. If you ask a purely textual question while an image tool is attached, the model answers with text and never touches the tool.</p>
+<p>This decision making is why tool schemas carry descriptions: the model reads them to learn what each tool does. A precise description, such as "creates product illustrations" instead of "creates images", steers the model toward appropriate use and away from generating images for every question.</p>
+
+<h2>Reading the Tool Output</h2>
+<p>When the model generates an image, the response contains a new output item for it. Your code walks the output list and looks for the image item, then either displays the returned URL or saves the base64-encoded image data to a file.</p>
+
+<pre><code>for item in response.output:
+    if item.type == "image":
+        # The exact attribute depends on your SDK version;
+        # it is typically a public URL or base64 image data.
+        if getattr(item, "url", None):
+            print("Image URL:", item.url)
+        else:
+            print("Image saved as base64 data, length:", len(item.image_base64))</code></pre>
+
+<div class="note">
+<p>The Responses API groups everything that happened during the call into one <code>output</code> list: the reasoning, the tool call, and the generated artifact. Iterating the list and switching on the item type is the reliable pattern, because the order of items is not guaranteed.</p>
+</div>
+
+<h2>Tool-Driven vs. Direct Image Generation</h2>
+<p>There are two legitimate ways to generate images with these models, and the choice depends on who decides.</p>
+
+<table>
+<tr><th>Approach</th><th>Who decides</th><th>Best when</th></tr>
+<tr><td>Direct image API call</td><td>Your code</td><td>You know in advance that every request must produce an image, such as a form that always renders a logo</td></tr>
+<tr><td>Image generation tool</td><td>The model</td><td>The conversation is open-ended and the model should decide when an image helps</td></tr>
+</table>
+
+<p>In a workflow where images are always required, a direct call is simpler and cheaper to reason about. In an assistant that mixes text answers with occasional images, the tool keeps the decision logic inside the model where it naturally belongs.</p>
+
+<h2>Responsible Use</h2>
+<p>Generated images carry the same risks as any generative output, plus a few of their own:</p>
+<ul>
+<li>Models can depict real people or brands in ways you should not assume are accurate or permissible.</li>
+<li>Images intended to mislead or impersonate require the same scrutiny as synthetic text.</li>
+<li>Audit the prompts your application sends. User-supplied descriptions can be used to attempt to bypass your content policies.</li>
+</ul>
+
+<div class="warn">
+<p>Never let a generated image be presented as a real photograph of a real event or person without a clear label. Add visible watermarks or disclaimers in applications where users could confuse synthetic images with reality.</p>
+</div>
+
+<h2>Summary</h2>
+<p>The image generation tool moves the decision of when to create an image into the model. You declare the tool with a name, a description, a size, and a format; the model calls it during the response; and your code finds the generated image in the output items. Use the tool when the model should control whether an image is needed, and use direct calls when every request must produce one.</p>
+<nav>
+<a href="266-openai-concept-of-using-tools.html">&larr; Previous: OpenAI - Concept of using Tools</a><a href="268-openai-tools-web-search.html">Next: OpenAI - Tools - Web Search &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>268. OpenAI - Tools - Web Search - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 268</span>
+<h1>OpenAI - Tools - Web Search</h1>
+<p>The image generation tool showed you a tool that creates new content. The web search tool does the opposite: it fetches content from the outside world. Language models are trained on data that ends at a fixed point in time, so questions about current prices, breaking news, sports results, or live events are outside their knowledge. The web search tool bridges that gap by letting the model run a real search against the public web and answer using the pages it finds — with citations your application can surface to the user.</p>
+
+<h2>What the Web Search Tool Does</h2>
+<p>When you attach the web search tool to a request, the model can decide to run a search during its response. The model formulates a query, the search runs against current web content, and the results are folded into the context the model uses to compose its final answer. From your code's point of view it is one call: you ask, and the response already contains the grounded answer.</p>
+<p>This removes the manual retrieval loop you would otherwise build yourself — detect that the question is time-sensitive, call a search provider, paste snippets into the prompt, and re-ask the model. The tool automates all of those steps inside the API.</p>
+
+<h2>Declaring the Tool</h2>
+<p>Add a <code>web_search</code> entry to the <code>tools</code> list. Beyond the usual name and description, the tool accepts options that control how broadly it searches and which region it targets.</p>
+
+<pre><code>from openai import OpenAI
+import os
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+response = client.responses.create(
+    model="gpt-5",
+    input="What was the most recent major version release of Python?",
+    tools=[
+        {
+            "type": "web_search",
+            "name": "web_search",
+            "description": "Searches the public web for current and factual information.",
+            "search_context_size": "medium",
+            "user_location": {
+                "type": "approximate",
+                "approximate": {"country": "US", "city": "Seattle", "region": "WA"},
+            },
+        }
+    ],
+)</code></pre>
+
+<h2>Understanding the Options</h2>
+<ul>
+<li><strong><code>search_context_size</code></strong> — how many results the search returns and feeds into the model. Small keeps the answer fast and cheap; high gives the model more material, which helps with complex questions at a higher cost.</li>
+<li><strong><code>user_location</code></strong> — an approximate location used to bias results. This matters for questions whose answer depends on where you are, such as "which movie is showing near me tonight" or "what is the weather right now".</li>
+</ul>
+
+<div class="tip">
+<p>Supply a location only when answers actually depend on geography. Biasing every query toward one region can reduce result quality for genuinely global questions.</p>
+</div>
+
+<h2>What Comes Back in the Response</h2>
+<p>The response contains two kinds of evidence that the search ran:</p>
+<ul>
+<li>A <strong>web search call item</strong> in the output list that records the query that was executed, so you can see exactly what the model searched for.</li>
+<li><strong>Annotations on the text answer</strong> that tie parts of the reply back to the web pages they came from, typically including titles and URLs.</li>
+</ul>
+
+<pre><code>for item in response.output:
+    if item.type == "web_search_call":
+        print("The model searched for:", item.query)
+
+print(response.output_text)</code></pre>
+
+<div class="note">
+<p>Annotations are your best tool for accountability. When a user sees a claim sourced from the web, presenting the underlying links alongside the answer lets them verify it for themselves and builds trust in your application.</p>
+</div>
+
+<h2>Retrieval with Citations</h2>
+<p>The key benefit of the web search tool is grounded output with traceable sources. A model answering from memory can sound confident and be wrong; a model answering from search results can point at the pages behind each claim. In applications where factual accuracy matters — news summaries, research assistants, or customer-facing answers about your own industry — being able to show the source is often a hard requirement.</p>
+<p>You can feed the returned citations straight into your user interface. Each annotation maps a snippet of the answer to a source page, which lets you render references inline beneath the relevant sentence rather than dumping a generic list of links at the end.</p>
+
+<h2>Comparing the Built-in Tool to a Custom Search Function</h2>
+
+<table>
+<tr><th>Aspect</th><th>Built-in web search tool</th><th>Custom search function tool</th></tr>
+<tr><td>Setup effort</td><td>Declare the tool, done</td><td>Write schema, implement the function, wire a provider key</td></tr>
+<tr><td>Where the search runs</td><td>Managed by the API</td><td>In your own code, against your provider</td></tr>
+<tr><td>Citations</td><td>Returned with the response</td><td>You build and format them yourself</td></tr>
+<tr><td>Control</td><td>Options limited to context size and location</td><td>Full control of ranking, filtering, and budget</td></tr>
+</table>
+
+<p>Use the built-in tool when you want grounded answers fast with minimal plumbing. Use a custom function when you need to search a private index, enforce strict filtering, or integrate a provider you already pay for.</p>
+
+<h2>Practical Considerations</h2>
+<ul>
+<li>Search results count as extra context, which increases latency and cost. Keep <code>search_context_size</code> as small as your question tolerates.</li>
+<li>Web content is unvetted. The model can still be misled by a low-quality page, so verify critical facts in high-stakes applications.</li>
+<li>Your own content filtering still applies. A search-driven answer should pass the same safety checks as any other response before it reaches a user.</li>
+</ul>
+
+<div class="warn">
+<p>Do not assume that a result with a citation is true — the citation proves where the information came from, not that the information is correct. For critical answers, your application should apply its own verification where feasible.</p>
+</div>
+
+<h2>Summary</h2>
+<p>The web search tool lets a model answer questions that require current information by running a real web search inside the response. You declare the tool with a context size and an optional location, and the model decides when to search, returning both the answer and the citations behind it. For applications where accurate, traceable answers matter, this tool replaces a hand-built retrieval loop with a single API call.</p>
+<nav>
+<a href="267-openai-tools-image-generation.html">&larr; Previous: OpenAI - Tools - Image Generation</a><a href="269-section-quiz.html">Next: Section Quiz &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

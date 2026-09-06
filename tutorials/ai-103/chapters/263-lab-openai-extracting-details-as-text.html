@@ -1,0 +1,115 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>263. Lab - OpenAI - Extracting details as text - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 263</span>
+<h1>Lab - OpenAI - Extracting details as text</h1>
+<p>Before we dive into JSON schemas, it is worth seeing what happens when you simply ask a model to extract details and reply as free-form text. This lab walks you through an extraction task using the Responses API without any structured-output constraints. You will see exactly why that approach is unreliable, which motivates the structured techniques in the following labs.</p>
+
+<h2>The Extraction Task</h2>
+<p>We will ask the model to pull structured facts out of a short customer email:</p>
+<pre><code>email_text = """
+Hi there,
+My name is Priya Patel and I ordered a blue wireless
+mouse on March 3rd. It has not arrived yet. Can you
+check the status? My order number is 58492.
+Thanks,
+Priya
+"""</code></pre>
+
+<h2>Extracting with a Plain Prompt</h2>
+<div class="exercise">
+<h3>Step 1 — Create the script</h3>
+<p>Create a file named <code>extract_plain.py</code>:</p>
+<pre><code>from openai import OpenAI
+
+client = OpenAI(api_key="YOUR_API_KEY")
+
+email_text = """
+Hi there,
+My name is Priya Patel and I ordered a blue wireless
+mouse on March 3rd. It has not arrived yet. Can you
+check the status? My order number is 58492.
+Thanks,
+Priya
+"""
+
+response = client.responses.create(
+    model="gpt-4o-mini",
+    instructions="Extract the customer name, product, order number, and issue from the message.",
+    input=email_text,
+)
+
+print(response.output_text)</code></pre>
+
+<h3>Step 2 — Run it a few times</h3>
+<pre><code>python extract_plain.py</code></pre>
+<p>Run the script two or three times and compare the outputs.</p>
+</div>
+
+<h2>What You Will Notice</h2>
+<p>The answers are usually <em>informative</em> but not <em>consistent</em>. You may see variations like:</p>
+<ul>
+<li>The order number formatted as <code>58492</code>, <code>#58492</code>, or <code>order 58492</code>.</li>
+<li>The name written as <code>Priya Patel</code> or wrapped in an extra sentence such as <em>"The customer is Priya."</em></li>
+<li>Extra commentary explaining the extraction, mixed in with the facts.</li>
+<li>Field order changing between runs.</li>
+</ul>
+<p>None of these outputs are wrong, which is exactly the problem: a parser would need to handle every variation.</p>
+
+<div class="note">
+<p>This variability is not a bug. The model is doing what you asked — producing helpful text. The lesson is that "helpful text" is the wrong target when your code needs fixed fields. You must change the request itself, not the parser.</p>
+</div>
+
+<h2>Forcing JSON Shape in the Prompt</h2>
+<p>A common intermediate step is to demand JSON inside the prompt. It improves the odds, but still leaves room for error:</p>
+<pre><code>response = client.responses.create(
+    model="gpt-4o-mini",
+    instructions=(
+        "Extract these fields and reply only as JSON with keys "
+        "name, product, order_number, and issue."
+    ),
+    input=email_text,
+)
+
+print(response.output_text)</code></pre>
+<p>Try it and notice that the output is usually valid JSON — but occasionally the model adds markdown code fences, wraps the object in a sentence, or drops a key. The <em>format</em> is still not contractually guaranteed.</p>
+
+<h2>Parsing the Text Result</h2>
+<p>If you must handle free-form output, you can attempt JSON parsing with a fallback, but this only patches the symptom:</p>
+<pre><code>import json
+import re
+
+text = response.output_text
+
+match = re.search(r"\{.*\}", text, re.DOTALL)
+if match:
+    data = json.loads(match.group(0))
+    print(data.get("name"))
+    print(data.get("order_number"))
+else:
+    print("No JSON object found in the response.")</code></pre>
+<p>This works often and breaks quietly. The structured-output labs that follow remove the need for this kind of guesswork entirely.</p>
+
+<h2>Summary</h2>
+<p>You extracted details with a plain prompt and saw the output vary in format, ordering, and extra commentary. Prompt-level requests for JSON improve consistency but do not guarantee it. This experiment sets up the next two labs, where schemas enforce the shape at the API level.</p>
+<nav>
+<a href="262-lab-openai-understanding-structured-outputs.html">&larr; Previous: Lab - OpenAI - Understanding Structured Outputs</a><a href="264-lab-openai-structured-output-trying-to-use-the-responses-api.html">Next: Lab - OpenAI - Structured Output - Trying to use the Responses API &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

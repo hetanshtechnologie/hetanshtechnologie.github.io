@@ -1,0 +1,118 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>86. Improving Response Completeness - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 86</span>
+<h1>Improving Response Completeness</h1>
+<p>A model can give a perfectly grammatical answer that still fails the user — because it answered only part of the question, skipped a required section, or stopped too early. This chapter looks at response completeness: what it means, why models are often incomplete, how to measure it, and which techniques reliably push the score up. In a grounded agent, completeness is rarely a model flaw; it is usually a sign that the prompt, the retrieved context, or the output contract is not demanding the full answer.</p>
+
+<h2>What Response Completeness Means</h2>
+<p>Completeness asks a simple question: <em>did the answer cover everything the user asked for?</em> A complete answer addresses every part of the request, includes the specific facts that were requested, and follows the agreed format without omitting required fields. An incomplete answer might be wrong only by omission — it is not contradictory, it just leaves gaps.</p>
+<p>Completeness differs from accuracy. Accuracy is about being correct; completeness is about being exhaustive. Both matter. A support answer that is correct but silent on the customer's second question is incomplete, and the customer will have to ask again. In an LLM-as-a-judge evaluation, a separate completeness evaluator reads the request and the response and scores how fully the response satisfies the request.</p>
+
+<table>
+<tr><th>Dimension</th><th>Question it answers</th></tr>
+<tr><td>Accuracy</td><td>Is the content correct?</td></tr>
+<tr><td>Completeness</td><td>Did it cover everything requested?</td></tr>
+<tr><td>Groundedness</td><td>Is it supported by the supplied context?</td></tr>
+<tr><td>Relevance</td><td>Does it address the user's actual question?</td></tr>
+</table>
+
+<h2>Why Responses Come Out Incomplete</h2>
+<p>Several common causes produce partial answers. Recognizing them tells you where to intervene:</p>
+<ul>
+<li><strong>Multi-part questions:</strong> the user asks three things at once and the model answers only the most salient one.</li>
+<li><strong>Missing context:</strong> retrieval returns chunks that cover the first topic but not the others, so the model has no material for the rest.</li>
+<li><strong>Token limits:</strong> <code>max_tokens</code> cuts the answer off mid-sentence, so the last sections never appear.</li>
+<li><strong>Vague instructions:</strong> the system prompt never demands a full answer, so the model stops after its first pass.</li>
+<li><strong>Format constraints:</strong> a required JSON schema has optional-looking fields the model skips.</li>
+</ul>
+
+<div class="note">
+<p>Incomplete answers often show up in evaluations as a <em>completeness</em> score that is lower than accuracy. When accuracy is fine but completeness lags, the model has the right material and simply is not being pushed to use all of it.</p>
+</div>
+
+<h2>Techniques That Improve Completeness</h2>
+<p>Treat completeness as a prompt and pipeline problem. The techniques below are ordered from cheapest to most involved:</p>
+
+<table>
+<tr><th>Technique</th><th>What you do</th><th>When to use it</th></tr>
+<tr><td>Require exhaustive coverage</td><td>Add instructions to cover every question part and list any unanswered parts</td><td>Always; it costs nothing</td></tr>
+<tr><td>Expand retrieved context</td><td>Retrieve more chunks or use hybrid search so all topics are represented</td><td>When answers miss topics entirely</td></tr>
+<tr><td>Raise the output budget</td><td>Increase <code>max_tokens</code> and watch <code>finish_reason</code></td><td>When answers are truncated</td></tr>
+<tr><td>Structured output contract</td><td>Demand a JSON schema that lists every required field</td><td>When downstream code needs all fields</td></tr>
+<tr><td>Decompose the question</td><td>Have the model split the question into sub-questions and answer each one</td><td>When users ask multi-part questions</td></tr>
+</table>
+
+<h2>Making the Prompt Demand Completeness</h2>
+<p>The cheapest win is a system prompt that makes covering everything a hard rule. A small rewrite changes behaviour noticeably:</p>
+<pre><code># Weak
+You are a support assistant. Answer the user's question.
+
+# Stronger
+You are a support assistant.
+- Identify every distinct question or request in the user's message.
+- Answer each one explicitly, in the order it was asked.
+- If a part cannot be answered, say so and explain why.
+- Do not stop after the first question.
+</code></pre>
+
+<h2>Detecting Truncation in Your Code</h2>
+<p>When the model stops because it ran out of output tokens, the API tells you. Checking <code>finish_reason</code> catches truncated answers before users do:</p>
+<pre><code>from openai import AzureOpenAI
+import os
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    max_tokens=500,
+    messages=[
+        {"role": "system", "content": "Cover every part of the user's question."},
+        {"role": "user", "content": "List the pros and cons of migrating to the cloud and the main risks."},
+    ],
+)
+
+if response.choices[0].finish_reason == "length":
+    print("Answer truncated - increase max_tokens or shorten the request")
+else:
+    print(response.choices[0].message.content)
+</code></pre>
+
+<div class="tip">
+<p>Log <code>finish_reason</code> along with every completion. A rising share of <code>length</code> results across your traffic is a strong early sign that your output budget is too small for the answers your prompts now demand.</p>
+</div>
+
+<h2>Measuring Completeness with an Evaluator</h2>
+<p>Once the prompt techniques are in place, verify them with a completeness evaluator in Foundry. Feed it a set of sample questions and check the score distribution before and after your change. Improvement should be visible in the aggregate, not just in one cherry-picked example. Keep a small golden set of representative multi-part questions so the measurement is stable across runs.</p>
+
+<div class="warn">
+<p>Do not tune for completeness by making answers longer without reason. A bloated answer can satisfy an evaluator while hurting the user experience. Target the specific gaps your evaluation exposes, then re-run to confirm you fixed them without damaging other dimensions such as fluency and conciseness.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Response completeness measures whether an answer covers everything the user asked for. The usual culprits are vague prompts, thin retrieval, truncated output, and weak output contracts. You fix them with explicit coverage rules, richer context, bigger output budgets, structured output, and question decomposition — then verify the change with a completeness evaluator. The next chapter moves from response quality to the plumbing beneath it: diagnostic settings and resource-level monitoring.</p>
+<nav>
+<a href="85-lab-enabling-continuous-evaluation-on-an-agent-creating-the-evaluation.html">&larr; Previous: Lab - Enabling Continuous Evaluation on an Agent -Creating the evaluation</a><a href="87-diagnostic-settings-and-resource-level-monitoring.html">Next: Diagnostic Settings and Resource-Level Monitoring &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

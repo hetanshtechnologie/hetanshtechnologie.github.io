@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 16: Data Cleaning &amp; Feature Engineering | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 16</span>
+    <h1>Data Cleaning &amp; Feature Engineering</h1>
+
+    <h2>Why Cleaning Comes First</h2>
+    <p>Real datasets are messy. They arrive with missing cells, impossible values, duplicated rows, inconsistent labels, and severe class imbalances. The old saying &ldquo;garbage in, garbage out&rdquo; is literal in machine learning: a model is only as good as the data it trains on, and most of a data scientist&apos;s working hours are spent preparing data rather than fitting models. This chapter covers the highest-impact cleaning and feature-engineering moves.</p>
+
+    <h2>Handling Missing Values</h2>
+    <p>Missing data appears as NaN or None, and every modelling library either errors out or silently misbehaves on it, so you must decide what to do. The three main strategies:</p>
+    <ul>
+        <li><strong>Drop:</strong> remove rows or columns with missing values. Use <code>dropna()</code> when the missing rows are few or when a column is missing almost everything. But dropping throws away information — be careful not to delete the rare rows you actually need.</li>
+        <li><strong>Impute with a constant or statistic:</strong> fill missing values with the mean, median, mode, or a fixed value. Medians are safer than means when outliers exist. Simple and effective for many models.</li>
+        <li><strong>Model-based imputation:</strong> estimate missing values from the other columns (k-nearest-neighbors imputation or iterative imputation). More expensive but preserves relationships.</li>
+    </ul>
+    <p>Before choosing, always ask <em>why</em> the data is missing. If values are missing because of a systematic bias (e.g., only low-income respondents refuse to state income), the missingness itself may carry signal — a technique called missing-not-at-random handling, where you keep a &ldquo;was missing&rdquo; indicator column.</p>
+    <pre><code>import pandas as pd
+
+df = pd.DataFrame({"age": [25, None, 34, 41, None],
+                   "city": ["Delhi", "Pune", None, "Delhi", "Pune"]})
+
+# Fill numeric column with its median
+df["age"] = df["age"].fillna(df["age"].median())
+# Fill categorical column with the mode
+df["city"] = df["city"].fillna(df["city"].mode()[0])
+print(df)</code></pre>
+
+    <h2>Handling Imbalanced Datasets</h2>
+    <p>An imbalanced dataset has one class vastly outnumbered by another — think fraud detection (a fraction of 1% are frauds) or rare-disease screening. A naive model that always predicts the majority class can score 99% accuracy while failing completely at its real job. This is why accuracy is a poor metric on imbalanced data; precision, recall, F1, and ROC-AUC tell the true story.</p>
+    <p>Practical strategies, from easiest to most involved:</p>
+    <ul>
+        <li><strong>Resampling:</strong> oversample the minority class (randomly duplicate its rows) or undersample the majority class (drop rows randomly). Undersampling can discard useful data; naive oversampling can overfit.</li>
+        <li><strong>Class weights:</strong> many algorithms accept a <code>class_weight</code> parameter that penalizes mistakes on the minority class more heavily — no data changes needed.</li>
+        <li><strong>Evaluation by the right metric:</strong> switch from accuracy to precision/recall and inspect the confusion matrix.</li>
+        <li><strong>Synthetic generation:</strong> create new minority samples rather than duplicating existing ones — SMOTE, next.</li>
+    </ul>
+    <div class="note">
+        <strong>Rule of thumb:</strong> resample the training set only, never the test set. The test set must mirror the real-world class distribution or your evaluation will lie to you.
+    </div>
+
+    <h2>Handling Imbalanced Datasets with SMOTE</h2>
+    <p><strong>SMOTE</strong> (Synthetic Minority Over-sampling Technique) fixes naive oversampling by creating <em>new</em> minority-class rows instead of copying old ones. The algorithm works in feature space:</p>
+    <ol>
+        <li>Pick a minority-class sample.</li>
+        <li>Find its k nearest neighbors from the same class.</li>
+        <li>Choose one neighbor at random and draw a synthetic point along the straight line between the two samples (or slightly interpolate).</li>
+    </ol>
+    <p>Because each synthetic point is a blend of two real ones, SMOTE adds variety to the feature space instead of memorizing duplicates. In practice it is usually combined with light undersampling of the majority class (SMOTE-ENN or SMOTE-Tomek) to clean noisy borderline samples.</p>
+    <pre><code>from imblearn.over_sampling import SMOTE
+from sklearn.model_selection import train_test_split
+
+X = df.drop("target", axis=1)
+y = df["target"]
+X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, random_state=42)
+
+smote = SMOTE(random_state=42)
+X_train_sm, y_train_sm = smote.fit_resample(X_train, y_train)</code></pre>
+
+    <h2>Handling Outliers Using Python</h2>
+    <p>Outliers are extreme values that sit far from the rest of the data. Some are errors (a negative age), while others are genuine rare events (a billionaire in an income study). Deciding which kind you have is a judgement call that should be informed by your domain, not done blindly.</p>
+    <p>Three common detection methods:</p>
+    <ul>
+        <li><strong>Z-score:</strong> flag values more than 3 standard deviations from the mean. Works fine for roughly Normal data.</li>
+        <li><strong>IQR rule:</strong> flag values below Q1 &#8722; 1.5&times;IQR or above Q3 + 1.5&times;IQR. Robust to skewed data.</li>
+        <li><strong>Isolation Forest or Local Outlier Factor:</strong> model-based approaches that work on many columns at once (we cover these in the anomaly-detection chapter).</li>
+    </ul>
+    <pre><code>import numpy as np
+
+values = np.array([10, 12, 11, 13, 12, 11, 98])
+q1, q3 = np.percentile(values, [25, 75])
+iqr = q3 - q1
+lower = q1 - 1.5 * iqr
+upper = q3 + 1.5 * iqr
+outliers = values[(values &lt; lower) | (values &gt; upper)]
+print("Flagged outliers:", outliers)</code></pre>
+    <p>After detection you can cap them (clip values to a percentile like the 1st and 99th), transform them away (log scale tames the right tail), or remove them — but before deleting anything, make sure the rows are truly bad and not simply surprising.</p>
+
+    <h2>Data Encoding: Turning Text into Numbers</h2>
+    <p>Machine learning models consume numbers, so categorical columns must be converted. Which encoding you pick changes the model&apos;s assumptions and its performance, so it deserves real thought.</p>
+
+    <h2>Nominal (One-Hot) Encoding</h2>
+    <p><strong>One-hot encoding (OHE)</strong> creates one binary column per category: a 1 in exactly one of them for each row, and 0 elsewhere. City values like {Delhi, Pune, Mumbai} become three columns. This makes sense for <em>nominal</em> categories where no ordering exists — the model should treat &ldquo;Delhi&rdquo; as categorically different from &ldquo;Pune,&rdquo; not as &ldquo;more&rdquo; or &ldquo;less.&rdquo;</p>
+    <pre><code>df_encoded = pd.get_dummies(df, columns=["city"])
+print(df_encoded.head())</code></pre>
+    <p>Two caveats: with high-cardinality columns (hundreds of cities), one-hot encoding explodes the feature count — and the model has to spend capacity on meaningless combinations. Also, since each category becomes an independent binary column, OHE throws away the information that different cities are different degrees of similar.</p>
+
+    <h2>Label and Ordinal Encoding</h2>
+    <p><strong>Label encoding</strong> replaces each category with a plain integer (Delhi&rarr;0, Pune&rarr;1, Mumbai&rarr;2). It is compact but dangerous for nominal data: the model may interpret 1 &lt; 2 as &ldquo;Pune is between Delhi and Mumbai,&rdquo; an ordering that does not exist. Use label encoding only for the target variable in classification or when the category truly has no other sensible treatment.</p>
+    <p><strong>Ordinal encoding</strong> is the honest version of the same idea for <em>ordinal</em> categories — those with a natural, meaningful order. Ratings like {Low, Medium, High} map cleanly to {0, 1, 2} because &ldquo;Medium&rdquo; genuinely sits between &ldquo;Low&rdquo; and &ldquo;High.&rdquo; As long as the order is real, ordinal encoding is compact, preserves the ranking, and often beats one-hot encoding for tree-based models.</p>
+    <pre><code>from sklearn.preprocessing import OrdinalEncoder
+
+encoder = OrdinalEncoder(categories=[["Low", "Medium", "High"]])
+df["priority"] = encoder.fit_transform(df[["priority"]])</code></pre>
+
+    <h2>Target-Guided Ordinal Encoding</h2>
+    <p>Plain ordinal encoding assigns ranks 0, 1, 2 regardless of how the categories relate to your target. <strong>Target-guided encoding</strong> (also called target encoding) instead maps each category to a number derived from the target — typically the mean of the target among rows in that category. If &ldquo;High&rdquo; priority customers churn at 80% while &ldquo;Low&rdquo; churn at 10%, those numbers become the encoded values, teaching the model the real relationship.</p>
+    <p>There is one sharp risk: <em>data leakage</em>. If you encode a category using the target mean computed over the whole dataset — including the test rows — the model sees target information it should not, and your test performance will be flattering and fake. The standard fix is a <strong>smoothing + out-of-fold</strong> approach:</p>
+    <ul>
+        <li>Add a smoothing weight so categories with few rows shrink toward the global target mean.</li>
+        <li>Compute each fold&apos;s encoding from the other folds only, never from the fold being validated.</li>
+    </ul>
+    <pre><code>def smoothed_target_encoding(df, col, target, prior, alpha=10):
+    agg = df.groupby(col)[target].agg(["mean", "count"])
+    code = (agg["count"] * agg["mean"] + alpha * prior) / (agg["count"] + alpha)
+    return df[col].map(code)</code></pre>
+    <div class="info">
+        <strong>Choosing wisely:</strong> one-hot encoding is the safe default for low-cardinality nominal data; ordinal encoding for ranked categories; target encoding for high-cardinality categoricals when used carefully with cross-validation. Tree models tolerate label-encoded categories surprisingly well, but linear models and neural networks demand OHE or target encoding.
+    </div>
+    <div class="exercise">
+        <strong>Exercise:</strong> Load a CSV of your own (or make one with two numeric columns, a nominal column, and an ordinal column). Apply the three missing-value strategies and compare row counts. Inject a couple of extreme values into a numeric column, detect them with both the IQR rule and a Z-score threshold, and decide which to clip vs drop. Then build a pipeline that one-hot encodes the nominal column, ordinal-encodes the ordinal column, and compare it against a target-encoded version — and check whether the target encoding leaks into the test set.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="15-hypothesis-testing.html">Prev: Hypothesis Testing &amp; Inference</a>
+        <a href="17-eda-case-studies.html">Next: EDA Case Studies</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

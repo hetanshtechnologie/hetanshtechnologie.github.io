@@ -1,0 +1,73 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>10. Caching — AI System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>10. Caching</h1>
+<p>Caching is critical for AI system performance. Unlike traditional web caching, AI systems have multiple distinct caching opportunities.</p>
+<h2>1. Feature Cache</h2>
+<p>Feature computation can be expensive (e.g., computing a 7-day rolling average). Cache computed features so they are not recomputed for every request.</p>
+<pre><code># Feature cache flow
+Request: predict for user_id=42
+Check feature cache (Redis): key = "features:user:42"
+  Hit → return cached features (2ms)
+  Miss → compute features from raw data (100ms)
+         → store in cache with TTL (e.g., 5 min)
+         → return features</code></pre>
+<p><strong>Cache invalidation:</strong> Invalidate feature cache when underlying data changes (e.g., user completes a purchase → invalidate purchase-related features).</p>
+<h2>2. Model Cache</h2>
+<p>Keep model weights loaded in GPU/CPU memory. Avoid reloading for every request. This is standard in inference servers but worth explicit design.</p>
+<ul>
+<li><strong>GPU memory:</strong> Load model once, serve many requests. Use dynamic batching to maximize utilization.</li>
+<li><strong>Model versioning:</strong> Load multiple model versions simultaneously for A/B testing. Cache warm models.</li>
+<li><strong>LoRA adapter cache:</strong> Cache recently used LoRA adapters in GPU memory; evict least recently used.</li>
+</ul>
+<h2>3. Prediction Cache</h2>
+<p>Cache identical prediction requests. Highly effective when the same input is requested multiple times (e.g., popular product recommendations, cached embedding computations).</p>
+<pre><code># Prediction cache design
+Hash(request features) → lookup in prediction cache (Redis/SearchCache)
+  Hit → return cached prediction, skip model inference
+  Miss → run model, cache prediction with TTL
+
+Cache key: hash(features + model_version + model_id)
+Cache value: serialized prediction + confidence score
+Eviction: LRU + TTL-based expiration</code></pre>
+<h2>4. Semantic Cache</h2>
+<p>For LLM-powered applications, semantic cache stores and retrieves results based on <em>meaning</em>, not exact match. Uses embeddings to find similar questions.</p>
+<pre><code># Semantic cache (LLM response caching)
+New query: "What's the weather in Tokyo?"
+Embed query → vector (256-dim)
+Search vector DB for similar queries (cosine similarity > 0.95)
+  Hit → return cached response (no LLM call)
+  Miss → call LLM, store (query, response, embedding) in cache
+
+Benefits: Cache hits for rephrased questions
+Cost: Embedding computation (cheap) vs LLM call (expensive)</code></pre>
+<h2>Cache Strategy Decision Tree</h2>
+<table>
+<tr><th>Caching Need</th><th>Recommended Store</th><th>TTL</th><th>Eviction</th></tr>
+<tr><td>Feature cache</td><td>Redis / Memcached</td><td>Minutes</td><td>TTL + write-through invalidation</td></tr>
+<tr><td>Model weights</td><td>GPU memory / RAM</td><td>Uptime of server</td><td>LRU (for multi-model serving)</td></tr>
+<tr><td>Exact prediction cache</td><td>Redis with TTL</td><td>Minutes—hours</td><td>LRU + TTL</td></tr>
+<tr><td>Semantic cache</td><td>Vector DB (Pinecone, Qdrant)</td><td>Hours—days</td><td>Similarity threshold + TTL</td></tr>
+</table>
+<div class="note"><strong>Pro tip:</strong> Cache hit ratio is a key observability metric. If your prediction cache hit ratio is below 20%, the cache may be doing more harm than good (overhead of check exceeding benefit). Tune TTL and eviction policies based on observed patterns.</div>
+<div class="exercise"><strong>Exercise:</strong> Design a caching strategy for a real-time product recommendation system with 10M users. Each user sees 20 products on their homepage. Features include: user demographics, recent purchases, trending items. Which cache types would you use? What are your cache keys and TTLs? How do you invalidate when a user makes a purchase?</div>
+<nav><a href="9-scalability.html">&larr; Previous</a><a href="../index.html">Index</a><a href="11-indexing.html">Next: Indexing &amp; Retrieval &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

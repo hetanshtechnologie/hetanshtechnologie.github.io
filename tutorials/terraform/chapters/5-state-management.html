@@ -1,0 +1,597 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 5: State Management — Terraform eBook</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+
+<h1>Chapter 5: State Management &amp; Remote Backends</h1>
+
+<p>State is the heart of Terraform. Every resource you create, every attribute you reference, every dependency between objects — all of it lives in a single JSON file called the <strong>state file</strong>. Understanding state is not optional; it is the difference between a smooth workflow and hours of debugging. In this chapter you will learn what state contains, why local state is risky, how to use remote backends, and the best practices that keep teams productive.</p>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.1 &ensp; What Is Terraform State?</h2>
+
+<p>When Terraform runs <code>plan</code> or <code>apply</code>, it compares two things:</p>
+
+<ol>
+  <li><strong>Your configuration</strong> — the HCL files you write.</li>
+  <li><strong>The current state</strong> — a JSON record of every resource Terraform currently manages.</li>
+</ol>
+
+<p>Terraform uses the state to build a <strong>resource graph</strong>, determine the correct order of operations, and know which real-world objects map to which blocks in your code. Without state, Terraform would have no way to know that <code>azurerm_linux_web_app.myapp</code> corresponds to a specific App Service instance in Azure.</p>
+
+<div class="diagram">
+<pre>
+┌──────────────────┐       ┌────────────────┐       ┌──────────────────┐
+│  HCL Config      │       │  State File    │       │  Real Infrastructure │
+│  *.tf            │──────▶│  terraform.tf  │──────▶│  Azure / AWS / GCP   │
+│                  │       │  .state        │       │                       │
+└──────────────────┘       └────────────────┘       └──────────────────────┘
+        ▲                          │                         │
+        │          Terraform       │         Provider        │
+        └────  plan / apply  ◀─────┘       read / write  ◀──┘
+</pre>
+</div>
+
+<p>Key points about state:</p>
+<ul>
+  <li>State maps configuration blocks to real infrastructure IDs (e.g., <code>/subscriptions/…/resourceGroups/myRG</code>).</li>
+  <li>It stores metadata: dependency order, provider version used at creation time, and resource attributes returned by the API.</li>
+  <li>Terraform <strong>never</strong> automatically deletes resources — if you remove a block from your config, the state still holds the resource until you run <code>apply</code>.</li>
+</ul>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.2 &ensp; State File Structure</h2>
+
+<p>The state file is plain JSON. Here is a simplified excerpt from a typical <code>terraform.tfstate</code>:</p>
+
+<pre><code>{
+  "version": 4,
+  "terraform_version": "1.7.0",
+  "serial": 42,
+  "lineage": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "outputs": {
+    "resource_group_name": {
+      "value": "rg-demo",
+      "type": "string"
+    }
+  },
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "azurerm_resource_group",
+      "name": "main",
+      "each": "single",
+      "provider": "provider[\"registry.terraform.io/hashicorp/azurerm\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "id": "/subscriptions/xxx/resourceGroups/rg-demo",
+            "name": "rg-demo",
+            "location": "eastus",
+            "tags": { "env": "dev" }
+          }
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+<table>
+  <thead>
+    <tr><th>Field</th><th>Purpose</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>version</code></td><td>State file format version (currently 4)</td></tr>
+    <tr><td><code>serial</code></td><td>Increments on every change; used for locking</td></tr>
+    <tr><td><code>lineage</code></td><td>Unique ID generated when state is created; used to detect corruption</td></tr>
+    <tr><td><code>outputs</code></td><td>Values exported by <code>output</code> blocks</td></tr>
+    <tr><td><code>resources</code></td><td>Every managed resource, its attributes, and dependencies</td></tr>
+  </tbody>
+</table>
+
+<p>You should <strong>never</strong> edit the state file by hand. Use <code>terraform state</code> commands instead.</p>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.3 &ensp; Local State (The Default)</h2>
+
+<p>By default, Terraform writes the state file to your <strong>working directory</strong> as <code>terraform.tfstate</code>. This is convenient for learning but dangerous for any shared project.</p>
+
+<h3>Why local state is risky</h3>
+
+<table>
+  <thead>
+    <tr><th>Risk</th><th>Consequence</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Not in version control</td><td>Colleagues cannot see current infrastructure</td></tr>
+    <tr><td>Only one person holds the state</td><td>Concurrent runs overwrite each other silently</td></tr>
+    <tr><td>No locking</td><td>Two <code>apply</code> commands at the same time can corrupt state</td></tr>
+    <tr><td>Not encrypted</td><td>Secrets (passwords, connection strings) may appear in plain text</td></tr>
+    <tr><td>Deleted with the repo</td><td>Full loss of infrastructure record</td></tr>
+  </tbody>
+</table>
+
+<p>A <code>.gitignore</code> should always exclude local state:</p>
+
+<pre><code># .gitignore
+terraform.tfstate
+terraform.tfstate.*
+.terraform/
+.terraform.lock.hcl</code></pre>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.4 &ensp; Remote Backends</h2>
+
+<p>Remote backends store state in a durable, shared location with optional locking. Terraform supports several backends natively. The three most popular for cloud teams are Azure Blob Storage, AWS S3, and Google Cloud Storage.</p>
+
+<h3>5.4.1 &ensp; Azure Blob Storage (<code>azurerm</code>)</h3>
+
+<pre><code>terraform {
+  backend "azurerm" {
+    resource_group_name  = "rg-terraform-state"
+    storage_account_name = "stterraformstate"
+    container_name       = "tfstate"
+    key                  = "prod.terraform.tfstate"
+    use_azuread_auth     = true
+  }
+}</code></pre>
+
+<p>Prerequisites:</p>
+<ul>
+  <li>A Resource Group, Storage Account, and Blob Container must exist before running <code>terraform init</code>.</li>
+  <li><code>use_azuread_auth = true</code> uses Azure AD tokens instead of access keys — recommended for production.</li>
+  <li>The <code>key</code> is the blob name; use different keys for different environments (e.g., <code>dev.tfstate</code>, <code>prod.tfstate</code>).</li>
+</ul>
+
+<p>The Terraform resources to create the state container:</p>
+
+<pre><code>resource "azurerm_resource_group" "state" {
+  name     = "rg-terraform-state"
+  location = "eastus"
+}
+
+resource "azurerm_storage_account" "state" {
+  name                     = "stterraformstate"
+  resource_group_name      = azurerm_resource_group.state.name
+  location                 = azurerm_resource_group.state.location
+  account_tier             = "Standard"
+  account_replication_type = "ZRS"
+
+  min_tls_version = "TLS1_2"
+
+  blob_properties {
+    versioning_enabled = true
+    delete_retention_policy {
+      days = 90
+    }
+  }
+}
+
+resource "azurerm_storage_container" "state" {
+  name                  = "tfstate"
+  storage_account_name  = azurerm_storage_account.state.name
+  container_access_type = "private"
+}</code></pre>
+
+<h3>5.4.2 &ensp; AWS S3 (<code>s3</code>)</h3>
+
+<pre><code>terraform {
+  backend "s3" {
+    bucket         = "mycompany-terraform-state"
+    key            = "network/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}</code></pre>
+
+<p>Key points:</p>
+<ul>
+  <li><code>dynamodb_table</code> enables state locking. Create the DynamoDB table with a partition key of <code>LockID</code>.</li>
+  <li><code>encrypt = true</code> enables server-side encryption with AES-256.</li>
+  <li>Consider enabling <code>versioning</code> and <code>force_destroy = false</code> on the bucket for safety.</li>
+</ul>
+
+<h3>5.4.3 &ensp; Google Cloud Storage (<code>gcs</code>)</h3>
+
+<pre><code>terraform {
+  backend "gcs" {
+    bucket = "mycompany-terraform-state"
+    prefix = "network"
+  }
+}</code></pre>
+
+<p>GCS backends support locking by default when you have the <code>cloud-platform</code> scope. Use a dedicated bucket for state, never share it with application data.</p>
+
+<h3>5.4.4 &ensp; Terraform Cloud / HCP Terraform</h3>
+
+<pre><code>terraform {
+  cloud {
+    organization = "mycompany"
+    workspaces {
+      name = "network-prod"
+    }
+  }
+}</code></pre>
+
+<p>Terraform Cloud provides a managed backend with state storage, locking, audit logs, and policy enforcement — ideal for teams that want a fully managed solution.</p>
+
+<div class="diagram">
+<pre>
+┌──────────────────────────────────────────────────────────────┐
+│                  Remote Backend Comparison                   │
+├──────────────┬───────────┬──────────┬──────────┬────────────┤
+│              │ Azure Blob │ AWS S3   │ GCS      │ Terraform  │
+│              │ (azurerm)  │ (s3)     │          │ Cloud      │
+├──────────────┼───────────┼──────────┼──────────┼────────────┤
+│ Locking      │ ✅ via    │ ✅ via   │ ✅ built-│ ✅ built-  │
+│              │ blob lease│ DynamoDB │ in       │ in         │
+├──────────────┼───────────┼──────────┼──────────┼────────────┤
+│ Encryption   │ ✅ at rest│ ✅ AES-  │ ✅ at    │ ✅ at rest │
+│              │ + TLS     │ 256      │ rest     │ + TLS      │
+├──────────────┼───────────┼──────────┼──────────┼────────────┤
+│ Versioning   │ ✅ blob   │ ✅ bucket│ ✅ object│ ✅ built-  │
+│              │ versioning│ versioning│ version  │ in         │
+├──────────────┼───────────┼──────────┼──────────┼────────────┤
+│ Audit Log    │ via Azure │ via      │ via      │ ✅ built-  │
+│              │ Monitor   │ CloudTrail│ GCP Logs│ in         │
+├──────────────┼───────────┼──────────┼──────────┼────────────┤
+│ Cost         │ pennies/mo│ pennies/mo│ pennies/mo│ free tier  │
+│              │           │          │          │ then $$/seat│
+├──────────────┼───────────┼──────────┼──────────┼────────────┤
+│ Best For     │ Azure     │ AWS      │ GCP      │ Managed    │
+│              │ shops     │ shops    │ shops    │ workflows  │
+└──────────────┴───────────┴──────────┴──────────┴────────────┘
+</pre>
+</div>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.5 &ensp; Backend Configuration &amp; Locking</h2>
+
+<p>When you first configure a remote backend, you must migrate the local state:</p>
+
+<pre><code># Step 1: Add backend block to your configuration
+# Step 2: Run init — Terraform will prompt you
+terraform init
+
+# Output:
+# Backend configuration has changed!
+# Do you want to copy existing state to the new backend?
+#   Pre-existing state:  0 resources
+#   New backend:         0 resources
+# Enter a value: yes</code></pre>
+
+<p>Once migrated, the local <code>terraform.tfstate</code> file is no longer used. All operations target the remote store.</p>
+
+<h3>How locking works</h3>
+
+<p>When you run <code>terraform apply</code>:</p>
+<ol>
+  <li>Terraform acquires a lock on the state file.</li>
+  <li>If another user holds the lock, Terraform waits (or fails with <code>Error: state locked</code>).</li>
+  <li>After a successful apply, the lock is released and the state is written.</li>
+</ol>
+
+<p>If a run crashes mid-apply, the lock may be stuck. You can force-unlock:</p>
+
+<pre><code># Only use this if you are sure no other run is active!
+terraform force-unlock LOCK_ID</code></pre>
+
+<h3>Overriding backend configuration at runtime</h3>
+
+<p>You can supply backend values on the command line without editing the HCL — useful in CI/CD pipelines:</p>
+
+<pre><code>terraform init \
+  -backend-config="resource_group_name=rg-terraform-state" \
+  -backend-config="storage_account_name=stterraformstate" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=staging.terraform.tfstate"</code></pre>
+
+<p>This pattern lets you reuse a single backend block across dev, staging, and prod by varying <code>key</code> and credentials.</p>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.6 &ensp; State Operations</h2>
+
+<p>Terraform provides a rich set of sub-commands to manipulate state without editing the JSON. Master these to recover from misconfigurations and manage infrastructure changes safely.</p>
+
+<h3>5.6.1 &ensp; <code>terraform state list</code></h3>
+
+<p>Lists every resource tracked in state:</p>
+
+<pre><code>$ terraform state list
+azurerm_resource_group.main
+azurerm_linux_web_app.myapp
+azurerm_service_plan.plan
+azurerm_app_service_plan.staging</code></pre>
+
+<h3>5.6.2 &ensp; <code>terraform state show</code></h3>
+
+<p>Displays all attributes for a specific resource:</p>
+
+<pre><code>$ terraform state show azurerm_linux_web_app.myapp
+
+# azurerm_linux_web_app.myapp:
+resource "azurerm_linux_web_app" "myapp" {
+    id                = "/subscriptions/.../webApps/myapp"
+    name              = "myapp"
+    location          = "eastus"
+    https_only        = true
+    site_config {}
+}</code></pre>
+
+<h3>5.6.3 &ensp; <code>terraform state mv</code></h3>
+
+<p>Renames or moves a resource in state. Essential when refactoring code (e.g., moving a resource into a module):</p>
+
+<pre><code># Rename a resource
+terraform state mv azurerm_resource_group.old_name azurerm_resource_group.new_name
+
+# Move into a module
+terraform state mv azurerm_linux_web_app.myapp module.web.azurerm_linux_web_app.myapp
+
+# Move between state files (import from another)
+terraform state mv -state=old.tfstate -state-out=new.tfstate \
+  azurerm_linux_web_app.myapp azurerm_linux_web_app.myapp</code></pre>
+
+<h3>5.6.4 &ensp; <code>terraform state rm</code></h3>
+
+<p>Removes a resource from state <strong>without deleting it</strong>. Use when you want to stop managing a resource via Terraform:</p>
+
+<pre><code># Stop managing a resource but leave it running
+terraform state rm azurerm_linux_web_app.legacy
+
+# Remove an entire module from state
+terraform state rm module.legacy_web</code></pre>
+
+<h3>5.6.5 &ensp; <code>terraform import</code></h3>
+
+<p>Brings an existing resource under Terraform management. You write the HCL block first, then import the real object:</p>
+
+<pre><code># 1. Add the resource block to your config
+resource "azurerm_linux_web_app" "imported" {
+  name                = "existing-app"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  service_plan_id     = azurerm_service_plan.plan.id
+  site_config {}
+}
+
+# 2. Import it
+terraform import azurerm_linux_web_app.imported \
+  /subscriptions/xxx/resourceGroups/rg-demo/providers/Microsoft.Web/sites/existing-app
+
+# 3. Run plan — Terraform will show any drift
+terraform plan</code></pre>
+
+<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px;border-radius:6px;margin:16px 0;">
+  <strong>Tip:</strong> As of Terraform 1.5+, you can use <code>import</code> blocks directly in HCL, eliminating the need for the separate command:
+</div>
+
+<pre><code>import {
+  to = azurerm_linux_web_app.imported
+  id = "/subscriptions/xxx/resourceGroups/rg-demo/providers/Microsoft.Web/sites/existing-app"
+}</code></pre>
+
+<h3>5.6.6 &ensp; <code>terraform state pull</code> and <code>terraform state push</code></h3>
+
+<p>For advanced scenarios you can download or upload the raw state JSON:</p>
+
+<pre><code># Download state as JSON
+terraform state pull > state-backup.json
+
+# Upload a modified state (use with extreme caution)
+terraform state push state-backup.json</code></pre>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.7 &ensp; State File Encryption &amp; Security</h2>
+
+<p>State files often contain sensitive values — database passwords, API keys, TLS certificates, and connection strings. Securing them is critical.</p>
+
+<h3>Encryption at rest</h3>
+
+<table>
+  <thead>
+    <tr><th>Backend</th><th>How to encrypt</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Azure Blob</td><td>Enabled by default with Microsoft-managed keys; use CMK for stricter control</td></tr>
+    <tr><td>AWS S3</td><td><code>encrypt = true</code> in the backend config; consider SSE-KMS with a dedicated key</td></tr>
+    <tr><td>GCS</td><td>Enabled by default; configure <code>encryption_service_account</code> for CMEK</td></tr>
+  </tbody>
+</table>
+
+<h3>Encryption in transit</h3>
+
+<p>All remote backends communicate over HTTPS/TLS. Ensure your CI/CD runners are on trusted networks.</p>
+
+<h3>Access control</h3>
+
+<pre><code># Example: Azure RBAC for state storage — only Terraform service principal can read/write
+resource "azurerm_role_assignment" "tf_contributor" {
+  scope                = azurerm_storage_account.state.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azuread_service_principal.tf_sp.id
+}</code></pre>
+
+<p>Best practices for state security:</p>
+<ul>
+  <li>Use <strong>least-privilege</strong> — only the CI/CD identity and a small set of admins should access state.</li>
+  <li>Enable <strong>Azure Storage analytics</strong> / <strong>CloudTrail</strong> / <strong>GCP Cloud Audit</strong> to log every state access.</li>
+  <li>Mark the state container as <strong>private</strong> — no anonymous access.</li>
+  <li>Use the <code>sensitive</code> attribute on outputs to prevent accidental display, but remember it is only a display guard — the raw value is still in state.</li>
+  <li>Consider using <strong>external secrets</strong> (Azure Key Vault, AWS Secrets Manager, GCP Secret Manager) for passwords instead of writing them to Terraform at all.</li>
+</ul>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.8 &ensp; Drift Detection</h2>
+
+<p><strong>Configuration drift</strong> occurs when someone manually changes infrastructure outside Terraform (via a portal, CLI, or another tool). Drift detection finds these changes so you can decide whether to update state or revert the manual change.</p>
+
+<h3>Detecting drift</h3>
+
+<pre><code># Plain plan shows drift as additions, deletions, and in-place changes
+terraform plan
+
+# Output excerpt:
+# azurerm_linux_web_app.myapp has changed
+#   ~ site_config {
+#       - ftps_state = "Disabled"
+#       + ftps_state = "FtpsOnly"
+#     }
+
+# JSON output for programmatic analysis
+terraform plan -out=plan.json -detailed-exitcode
+echo $?  # 0 = no change, 1 = error, 2 = changes present</code></pre>
+
+<h3>Automated drift detection</h3>
+
+<p>Schedule a pipeline job that runs <code>terraform plan</code> on a regular cadence and alerts the team when drift is detected:</p>
+
+<pre><code># Azure DevOps / GitHub Actions pattern
+steps:
+  - name: Terraform Plan
+    run: terraform plan -detailed-exitcode -no-color
+    continue-on-error: true
+    id: plan
+
+  - name: Alert on drift
+    if: steps.plan.outcome == 'failure'
+    run: |
+      echo "::warning::Infrastructure drift detected! Review the plan output."</code></pre>
+
+<h3>Remediating drift</h3>
+
+<ol>
+  <li><strong>Revert the manual change</strong> — let Terraform reapply the desired state.</li>
+  <li><strong>Accept the change</strong> — update your HCL to match the new reality and run <code>apply</code>.</li>
+  <li><strong>Ignore specific attributes</strong> — use <code>lifecycle { ignore_changes = [...] }</code> for fields that are intentionally managed outside Terraform.</li>
+</ol>
+
+<pre><code>resource "azurerm_linux_web_app" "myapp" {
+  # ...
+  lifecycle {
+    ignore_changes = [
+      app_settings["WEBSITE_RUN_FROM_PACKAGE"],
+    ]
+  }
+}</code></pre>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.9 &ensp; Best Practices for Team State Management</h2>
+
+<p>When multiple engineers share a Terraform codebase, state management becomes a discipline. Follow these rules to avoid pain.</p>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Practice</th><th>Why It Matters</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>Always use a remote backend</td><td>Eliminates single-person state, enables locking</td></tr>
+    <tr><td>2</td><td>Separate state per environment</td><td>A dev <code>apply</code> must never touch prod resources</td></tr>
+    <tr><td>3</td><td>Separate state per team/component</td><td>Reduces blast radius and lock contention</td></tr>
+    <tr><td>4</td><td>Never use <code>force-unlock</code> casually</td><td>Forcing a unlock while someone else is applying can corrupt state</td></tr>
+    <tr><td>5</td><td>Enable versioning on state storage</td><td>Allows rollback if state is accidentally corrupted</td></tr>
+    <tr><td>6</td><td>Restrict access with IAM/RBAC</td><td>Only CI/CD and authorized admins should read/write state</td></tr>
+    <tr><td>7</td><td>Audit state access</td><td>Know who touched state and when</td></tr>
+    <tr><td>8</td><td>Use <code>terraform state mv</code> for refactors</td><td>Maintains resource identity across code reorganization</td></tr>
+    <tr><td>9</td><td>Never <code>terraform state rm</code> without planning</td><td>Removing from state silently orphans the real resource</td></tr>
+    <tr><td>10</td><td>Back up state before bulk operations</td><td><code>terraform state pull</code> to a file; you can always <code>push</code> back</td></tr>
+  </tbody>
+</table>
+
+<h3>State file organization patterns</h3>
+
+<div class="diagram">
+<pre>
+Pattern A: One state per environment
+├── environments/
+│   ├── dev/         → state key: dev.terraform.tfstate
+│   ├── staging/     → state key: staging.terraform.tfstate
+│   └── prod/        → state key: prod.terraform.tfstate
+
+Pattern B: Component-based state (larger teams)
+├── components/
+│   ├── networking/  → state key: networking.terraform.tfstate
+│   ├── database/    → state key: database.terraform.tfstate
+│   └── app/         → state key: app.terraform.tfstate
+
+Pattern C: Workspace-based (Terraform Cloud)
+├── Workspace per environment, managed via VCS integration
+└── Policies enforce naming and placement
+</pre>
+</div>
+
+<h3>Working with multiple state files</h3>
+
+<p>When components have separate state files, reference outputs from one workspace in another using <code>terraform_remote_state</code> or <code>data "terraform_remote_state"</code>:</p>
+
+<pre><code>data "terraform_remote_state" "networking" {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = "rg-terraform-state"
+    storage_account_name = "stterraformstate"
+    container_name       = "tfstate"
+    key                  = "networking.terraform.tfstate"
+  }
+}
+
+# Use outputs from the networking state
+resource "azurerm_linux_web_app" "myapp" {
+  # ...
+  virtual_network_subnet_id = data.terraform_remote_state.networking.outputs.subnet_id
+}</code></pre>
+
+<!-- ──────────────────────────────────────────────── -->
+<h2>5.10 &ensp; Summary &amp; Checklist</h2>
+
+<p>State is the bridge between your HCL code and real-world infrastructure. Treat it with the same care you give to production databases.</p>
+
+<h3>What you learned</h3>
+
+<ul>
+  <li>State tracks the mapping between configuration and real resources.</li>
+  <li>Local state is fine for prototyping but dangerous for teams.</li>
+  <li>Remote backends (Azure, AWS, GCS, Terraform Cloud) provide durability, locking, and encryption.</li>
+  <li><code>terraform state</code> sub-commands let you list, show, move, remove, import, pull, and push state safely.</li>
+  <li>Encryption at rest and in transit is essential because state contains secrets.</li>
+  <li>Drift detection catches manual changes and keeps your infrastructure predictable.</li>
+</ul>
+
+<h3>Chapter 5 Checklist</h3>
+
+<table>
+  <thead>
+    <tr><th>Task</th><th>Done?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Remote backend configured for every project</td><td>☐</td></tr>
+    <tr><td>State separated by environment</td><td>☐</td></tr>
+    <tr><td>State locking enabled (DynamoDB / blob lease / built-in)</td><td>☐</td></tr>
+    <tr><td>State storage has versioning enabled</td><td>☐</td></tr>
+    <tr><td>State storage encrypted at rest</td><td>☐</td></tr>
+    <tr><td>IAM/RBAC restricted to CI/CD + authorized users only</td><td>☐</td></tr>
+    <tr><td>Audit logging enabled for state bucket/container</td><td>☐</td></tr>
+    <tr><td><code>.gitignore</code> excludes local state files</td><td>☐</td></tr>
+    <tr><td>Drift detection running on a schedule</td><td>☐</td></tr>
+    <tr><td>Team documented on <code>state mv</code> and <code>state rm</code> procedures</td><td>☐</td></tr>
+  </tbody>
+</table>
+
+<p>In the next chapter we will explore <strong>Modules</strong> — reusable, composable building blocks that let you share Terraform patterns across projects and teams.</p>
+
+<div style="display:flex;justify-content:space-between;margin-top:40px;padding-top:20px;border-top:1px solid #e5e7eb;">
+  <a href="4-variables-outputs.html" style="color:#7c3aed;text-decoration:none;font-size:.9rem;">&larr; Ch 4: Variables &amp; Outputs</a>
+  <a href="6-modules.html" style="color:#7c3aed;text-decoration:none;font-size:.9rem;">Ch 6: Modules &rarr;</a>
+</div>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/feedback.js"></script>
+<script src="../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

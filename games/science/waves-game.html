@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wave Types</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:16px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.wave-canvas{width:100%;max-width:650px;height:200px;border:2px solid #334155;border-radius:12px;background:#0f172a}
+.question-card{background:#1e293b;border-radius:16px;padding:24px;max-width:650px;width:100%;text-align:center;border:2px solid #334155}
+.q-text{font-size:1.1rem;margin:16px 0;line-height:1.5}
+.drop-zone{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.drop-slot{width:140px;height:80px;border:2px dashed #475569;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:.85rem;transition:all .2s}
+.drop-slot.highlight{border-color:#38bdf8;background:rgba(56,189,248,0.1)}
+.drop-slot.correct{border-color:#22c55e;border-style:solid;background:rgba(34,197,94,0.1)}
+.drop-slot.wrong{border-color:#ef4444;border-style:solid;background:rgba(239,68,68,0.1);animation:shake .3s}
+.wave-type-btn{background:#1e293b;border:2px solid #475569;padding:12px 20px;border-radius:10px;cursor:grab;font-size:.9rem;color:#e2e8f0;transition:all .2s;user-select:none}
+.wave-type-btn:hover{border-color:#38bdf8}
+.wave-type-btn.selected{border-color:#facc15;background:#1e3a5f}
+.wave-type-btn.used{opacity:.3;pointer-events:none}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.secondary{background:#475569;color:#e2e8f0}
+.feedback{margin-top:12px;padding:12px;border-radius:8px;font-size:1rem;min-height:2em}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🌊 Wave Types</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/8</span>
+</div>
+<canvas class="wave-canvas" id="wc"></canvas>
+<div class="question-card">
+<div class="q-text" id="qtext"></div>
+<div class="drop-zone" id="dropzone"></div>
+<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:12px 0" id="wave-types"></div>
+<div class="feedback" id="feedback"></div>
+</div>
+<div style="display:flex;gap:12px">
+<button class="btn secondary" onclick="skip()">Skip ⏭️</button>
+</div>
+</div>
+<script>
+const wc=document.getElementById('wc'),wctx=wc.getContext('2d');
+let score=0,level=1,qNum=0,answered=false,selectedType=null;
+wc.width=650;wc.height=200;
+
+const waveTypes=[
+  {id:'transverse',label:'Transverse 🌊',emoji:'↕️',color:'#38bdf8'},
+  {id:'longitudinal',label:'Longitudinal 🔊',emoji:'↔️',color:'#f59e0b'},
+  {id:'surface',label:'Surface 🌊',emoji:'〰️',color:'#22c55e'},
+  {id:'electromagnetic',label:'EM Wave 💡',emoji:'⚡',color:'#a855f7'},
+];
+
+const questions=[
+  {desc:'Light from the sun travels through space as this wave type.',ans:'electromagnetic',hint:'Doesn\'t need a medium'},
+  {desc:'A slinky moving side to side creates this type of wave.',ans:'transverse',hint:'Displacement perpendicular to direction'},
+  {desc:'Sound waves in air compress and rarefy in the direction of travel.',ans:'longitudinal',hint:'Compression waves'},
+  {desc:'Waves on the surface of water combine up-down and back-forth motion.',ans:'surface',hint:'Combines both types'},
+  {desc:'X-rays are a form of this type of wave.',ans:'electromagnetic',hint:'Part of the EM spectrum'},
+  {desc:'A vibrating guitar string moves perpendicular to the string length.',ans:'transverse',hint:'Side-to-side motion'},
+  {desc:'Seismic P-waves compress rock in the direction they travel.',ans:'longitudinal',hint:'Primary earthquake waves'},
+  {desc:'Radio waves carry signals through empty space.',ans:'electromagnetic',hint:'No medium needed'},
+  {desc:'Ocean breakers roll in toward shore with circular water motion.',ans:'surface',hint:'Water surface waves'},
+  {desc:'Microwaves heat food using this type of electromagnetic wave.',ans:'electromagnetic',hint:'EM radiation'},
+  {desc:'A crowd doing "the wave" at a stadium moves perpendicular to the wave direction.',ans:'transverse',hint:'Up and down motion'},
+  {desc:'Sonic booms are pressure waves from supersonic aircraft.',ans:'longitudinal',hint:'Sound pressure wave'},
+];
+
+let shuffled=[...questions].sort(()=>Math.random()-0.5);
+let currentQ;
+
+function showQuestion(){
+  if(qNum>=8){showResults();return}
+  answered=false;selectedType=null;
+  currentQ=shuffled[qNum];
+  document.getElementById('qtext').textContent=currentQ.desc;
+  document.getElementById('qnum').textContent=qNum+1;
+  document.getElementById('feedback').textContent='';
+  document.getElementById('feedback').style.background='transparent';
+  const dz=document.getElementById('dropzone');
+  dz.innerHTML='<div class="drop-slot" id="main-drop"><span style="font-size:1.5rem">🎯</span><span>Drop wave type here</span></div>';
+  const wt=document.getElementById('wave-types');wt.innerHTML='';
+  waveTypes.forEach(w=>{
+    const b=document.createElement('button');
+    b.className='wave-type-btn';b.textContent=w.label;
+    b.onclick=()=>{wt.querySelectorAll('.wave-type-btn').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');selectedType=w.id};
+    wt.appendChild(b);
+  });
+  animateWave(currentQ.ans);
+}
+
+function animateWave(type){
+  let t=0;
+  function draw(){
+    wctx.clearRect(0,0,wc.width,wc.height);
+    wctx.fillStyle='#0f172a';wctx.fillRect(0,0,wc.width,wc.height);
+    const cy=100;
+    if(type==='transverse'){
+      drawTransverse(t,cy);
+    }else if(type==='longitudinal'){
+      drawLongitudinal(t,cy);
+    }else if(type==='surface'){
+      drawSurface(t,cy);
+    }else{
+      drawEM(t,cy);
+    }
+    // labels
+    wctx.fillStyle='#94a3b8';wctx.font='14px sans-serif';
+    wctx.fillText('Direction of propagation →',260,180);
+    t+=0.05;
+    if(!answered)requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+function drawTransverse(t,cy){
+  wctx.strokeStyle='#38bdf8';wctx.lineWidth=3;wctx.beginPath();
+  for(let x=0;x<wc.width;x++){
+    let y=cy+Math.sin(x*0.03+t)*40;
+    x===0?wctx.moveTo(x,y):wctx.lineTo(x,y);
+  }
+  wctx.stroke();
+  wctx.fillStyle='#38bdf8';wctx.font='bold 14px sans-serif';
+  wctx.fillText('↕️ Displacement ⊥ to propagation',10,30);
+}
+
+function drawLongitudinal(t,cy){
+  for(let i=0;i<30;i++){
+    let baseX=i*22+10;
+    let offset=Math.sin(baseX*0.05+t)*12;
+    let x=baseX+offset;
+    let density=1+Math.sin(baseX*0.05+t)*0.5;
+    wctx.fillStyle=`rgba(245,158,11,${0.3+density*0.3})`;
+    wctx.beginPath();wctx.arc(x,cy,8+density*4,0,Math.PI*2);wctx.fill();
+  }
+  wctx.fillStyle='#f59e0b';wctx.font='bold 14px sans-serif';
+  wctx.fillText('↔️ Compression & Rarefaction',10,30);
+}
+
+function drawSurface(t,cy){
+  wctx.strokeStyle='#22c55e';wctx.lineWidth=3;wctx.beginPath();
+  for(let x=0;x<wc.width;x++){
+    let y=cy+Math.sin(x*0.025+t)*35+Math.sin(x*0.04+t*1.3)*15;
+    x===0?wctx.moveTo(x,y):wctx.lineTo(x,y);
+  }
+  wctx.stroke();
+  wctx.strokeStyle='rgba(34,197,94,0.4)';wctx.lineWidth=2;wctx.beginPath();
+  for(let x=0;x<wc.width;x++){
+    let y=cy+20+Math.sin(x*0.03+t+1)*25;
+    x===0?wctx.moveTo(x,y):wctx.lineTo(x,y);
+  }
+  wctx.stroke();
+  wctx.fillStyle='#22c55e';wctx.font='bold 14px sans-serif';
+  wctx.fillText('〰️ Combined motion at surface',10,30);
+}
+
+function drawEM(t,cy){
+  wctx.strokeStyle='#a855f7';wctx.lineWidth=2.5;wctx.beginPath();
+  for(let x=0;x<wc.width;x++){
+    let y=cy+Math.sin(x*0.04+t)*35;
+    x===0?wctx.moveTo(x,y):wctx.lineTo(x,y);
+  }
+  wctx.stroke();
+  wctx.strokeStyle='#f59e0b';wctx.lineWidth=2;wctx.beginPath();
+  for(let x=0;x<wc.width;x++){
+    let y=cy+Math.cos(x*0.04+t)*30;
+    x===0?wctx.moveTo(x,y):wctx.lineTo(x,y);
+  }
+  wctx.stroke();
+  wctx.fillStyle='#a855f7';wctx.font='bold 14px sans-serif';
+  wctx.fillText('⚡ Electric ⊥ Magnetic ⊥ propagation',10,30);
+}
+
+function dropWave(){
+  if(!selectedType||answered)return;
+  answered=true;
+  const drop=document.getElementById('main-drop');
+  if(selectedType===currentQ.ans){
+    drop.classList.add('correct');
+    let pts=10+level*5;score+=pts;
+    document.getElementById('feedback').innerHTML='✅ Correct! '+currentQ.hint+' <b>+'+pts+' pts</b>';
+    document.getElementById('feedback').style.background='rgba(34,197,94,0.15)';
+  }else{
+    drop.classList.add('wrong');
+    document.getElementById('feedback').innerHTML='❌ Wrong! It was <b>'+currentQ.ans+'</b>. '+currentQ.hint;
+    document.getElementById('feedback').style.background='rgba(239,68,68,0.15)';
+  }
+  document.getElementById('score').textContent=score;
+  document.getElementById('next-btn').style.display='inline-block';
+}
+
+function skip(){qNum++;showQuestion();}
+
+function showResults(){
+  document.getElementById('qtext').textContent='🏆 Level '+level+' Complete! Score: '+score;
+  document.getElementById('dropzone').innerHTML='';
+  document.getElementById('wave-types').innerHTML=`
+    <button class="btn" onclick="nextLevel()">Next Level ⬆️</button>
+    <button class="btn secondary" onclick="restart()">↺ Restart</button>`;
+}
+
+function nextLevel(){level++;qNum=0;shuffled=[...questions].sort(()=>Math.random()-0.5);document.getElementById('level').textContent=level;showQuestion();}
+function restart(){score=0;level=1;qNum=0;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;shuffled=[...questions].sort(()=>Math.random()-0.5);showQuestion();}
+
+// click handler for drop
+document.getElementById('dropzone').addEventListener('click',e=>{
+  if(e.target.closest('.drop-slot'))dropWave();
+});
+
+// Add next button
+const nb=document.createElement('button');nb.className='btn';nb.id='next-btn';nb.textContent='Next ➡️';nb.style.display='none';nb.onclick=()=>{qNum++;showQuestion()};
+document.querySelector('.game-wrap').appendChild(nb);
+
+showQuestion();
+</script>
+</body>
+</html>

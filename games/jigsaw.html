@@ -1,0 +1,305 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jigsaw Puzzle</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+  body { background: #0f172a; }
+  .puzzle-piece {
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    border: 2px solid transparent;
+  }
+  .puzzle-piece:hover { transform: scale(1.03); }
+  .puzzle-piece.selected {
+    border-color: #facc15;
+    box-shadow: 0 0 12px rgba(250,204,21,0.6);
+    transform: scale(1.05);
+  }
+  .puzzle-piece.correct { border-color: #22c55e; }
+  .gradient-1 { background: linear-gradient(135deg, #667eea, #764ba2); }
+  .gradient-2 { background: linear-gradient(135deg, #f093fb, #f5576c); }
+  .gradient-3 { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+  .gradient-4 { background: linear-gradient(135deg, #43e97b, #38f9d7); }
+  .gradient-5 { background: linear-gradient(135deg, #fa709a, #fee140); }
+  .gradient-6 { background: linear-gradient(135deg, #a18cd1, #fbc2eb); }
+  .gradient-7 { background: linear-gradient(135deg, #fccb90, #d57eeb); }
+  .gradient-8 { background: linear-gradient(135deg, #e0c3fc, #8ec5fc); }
+  .gradient-9 { background: linear-gradient(135deg, #f5576c, #ff6a88); }
+  .gradient-10 { background: linear-gradient(135deg, #667eea, #00f2fe); }
+  .gradient-11 { background: linear-gradient(135deg, #43e97b, #fa709a); }
+  .gradient-12 { background: linear-gradient(135deg, #fccb90, #667eea); }
+  .gradient-13 { background: linear-gradient(135deg, #a18cd1, #00f2fe); }
+  .gradient-14 { background: linear-gradient(135deg, #fbc2eb, #38f9d7); }
+  .gradient-15 { background: linear-gradient(135deg, #d57eeb, #fee140); }
+  .gradient-16 { background: linear-gradient(135deg, #8ec5fc, #f5576c); }
+</style>
+</head>
+<body class="min-h-screen text-white">
+<div class="max-w-3xl mx-auto p-4">
+  <a href="index.html" class="inline-block mb-4 text-yellow-400 hover:text-yellow-300 transition">&larr; Back to Games</a>
+  <h1 class="text-3xl font-bold mb-2 text-center">Jigsaw Puzzle</h1>
+  <div class="flex justify-center gap-4 mb-4 text-sm">
+    <span class="bg-gray-800 px-3 py-1 rounded">Moves: <span id="moves">0</span></span>
+    <span class="bg-gray-800 px-3 py-1 rounded">Time: <span id="timer">00:00</span></span>
+    <select id="gridSize" class="bg-gray-800 px-2 py-1 rounded text-white border border-gray-600">
+      <option value="3">3×3</option>
+      <option value="4">4×4</option>
+    </select>
+  </div>
+  <div class="flex justify-center gap-3 mb-4">
+    <button id="previewBtn" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded font-semibold transition">Preview</button>
+    <button id="restartBtn" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded font-semibold transition">Restart</button>
+  </div>
+  <div id="puzzleContainer" class="mx-auto" style="width:fit-content;"></div>
+  <div id="previewOverlay" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
+    <div class="relative">
+      <div id="previewImage" class="rounded-lg shadow-2xl"></div>
+      <p class="text-center mt-3 text-gray-300">Release to hide</p>
+    </div>
+  </div>
+  <div id="winModal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-800 rounded-xl p-8 text-center shadow-2xl">
+      <h2 class="text-2xl font-bold text-yellow-400 mb-3">Puzzle Complete!</h2>
+      <p class="mb-1">Moves: <span id="finalMoves" class="font-bold"></span></p>
+      <p class="mb-4">Time: <span id="finalTime" class="font-bold"></span></p>
+      <button id="playAgainBtn" class="bg-green-600 hover:bg-green-500 px-6 py-2 rounded font-semibold transition">Play Again</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const gradients = [
+    'linear-gradient(135deg, #667eea, #764ba2)',
+    'linear-gradient(135deg, #f093fb, #f5576c)',
+    'linear-gradient(135deg, #4facfe, #00f2fe)',
+    'linear-gradient(135deg, #43e97b, #38f9d7)',
+    'linear-gradient(135deg, #fa709a, #fee140)',
+    'linear-gradient(135deg, #a18cd1, #fbc2eb)',
+    'linear-gradient(135deg, #fccb90, #d57eeb)',
+    'linear-gradient(135deg, #e0c3fc, #8ec5fc)',
+    'linear-gradient(135deg, #f5576c, #ff6a88)',
+    'linear-gradient(135deg, #667eea, #00f2fe)',
+    'linear-gradient(135deg, #43e97b, #fa709a)',
+    'linear-gradient(135deg, #fccb90, #667eea)',
+    'linear-gradient(135deg, #a18cd1, #00f2fe)',
+    'linear-gradient(135deg, #fbc2eb, #38f9d7)',
+    'linear-gradient(135deg, #d57eeb, #fee140)',
+    'linear-gradient(135deg, #8ec5fc, #f5576c)'
+  ];
+
+  let grid, pieces, selected, moveCount, timerInterval, seconds, n, gameWon;
+
+  const container = document.getElementById('puzzleContainer');
+  const previewOverlay = document.getElementById('previewOverlay');
+  const previewImage = document.getElementById('previewImage');
+  const winModal = document.getElementById('winModal');
+
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function isSolvable(arr, size) {
+    let inversions = 0;
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        if (arr[i] > arr[j]) inversions++;
+      }
+    }
+    if (size % 2 === 1) return inversions % 2 === 0;
+    const emptyRow = Math.floor(arr.indexOf(size * size) / size);
+    return (inversions + emptyRow) % 2 === 1;
+  }
+
+  function init() {
+    n = parseInt(document.getElementById('gridSize').value);
+    const total = n * n;
+    grid = [];
+    for (let i = 0; i < total; i++) grid.push(i);
+    do { shuffle(grid); } while (!isSolvable(grid, n) || grid.join(',') === Array.from({length:total},(_,i)=>i).join(','));
+    selected = null;
+    moveCount = 0;
+    seconds = 0;
+    gameWon = false;
+    document.getElementById('moves').textContent = '0';
+    document.getElementById('timer').textContent = '00:00';
+    winModal.classList.add('hidden');
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+      if (gameWon) return;
+      seconds++;
+      const m = String(Math.floor(seconds/60)).padStart(2,'0');
+      const s = String(seconds%60).padStart(2,'0');
+      document.getElementById('timer').textContent = m+':'+s;
+    }, 1000);
+    render();
+  }
+
+  function render() {
+    const size = Math.min(360, window.innerWidth - 40);
+    const cellSize = Math.floor(size / n);
+    container.innerHTML = '';
+    container.style.display = 'grid';
+    container.style.gridTemplateColumns = `repeat(${n}, ${cellSize}px)`;
+    container.style.gap = '2px';
+
+    const fullSize = cellSize * n;
+    previewImage.style.width = fullSize + 'px';
+    previewImage.style.height = fullSize + 'px';
+    previewImage.style.background = gradients.slice(0, n*n).reduce((acc, g, i) => {
+      const row = Math.floor(i / n);
+      const col = i % n;
+      return acc + `, ${g} ${col/n*100}% ${(col+1)/n*100}%, ${g} ${col/n*100}% ${(col+1)/n*100}%`;
+    }, '').substring(2);
+    previewImage.style.background = buildPreviewGradient();
+
+    for (let i = 0; i < n*n; i++) {
+      const pieceVal = grid[i];
+      const correctIdx = pieceVal;
+      const piece = document.createElement('div');
+      piece.className = 'puzzle-piece rounded';
+      if (pieceVal === n*n - 1) {
+        piece.style.background = 'transparent';
+        piece.style.border = '2px dashed #475569';
+      } else {
+        piece.style.background = gradients[pieceVal];
+      }
+      piece.style.width = cellSize + 'px';
+      piece.style.height = cellSize + 'px';
+      piece.style.display = 'flex';
+      piece.style.alignItems = 'center';
+      piece.style.justifyContent = 'center';
+      piece.style.fontSize = Math.max(12, cellSize / 4) + 'px';
+      piece.style.fontWeight = 'bold';
+      piece.textContent = pieceVal + 1;
+      piece.dataset.index = i;
+      if (correctIdx === pieceVal) piece.classList.add('correct');
+      if (selected === i) piece.classList.add('selected');
+
+      piece.addEventListener('click', () => handleClick(i));
+      container.appendChild(piece);
+    }
+  }
+
+  function buildPreviewGradient() {
+    const n = parseInt(document.getElementById('gridSize').value);
+    let gradParts = [];
+    for (let i = 0; i < n*n; i++) {
+      const col = i % n;
+      const row = Math.floor(i / n);
+      gradParts.push(`${gradients[i]} ${(col/n)*100}% ${((col+1)/n)*100}%`);
+    }
+    const rows = [];
+    for (let r = 0; r < n; r++) {
+      const rowParts = [];
+      for (let c = 0; c < n; c++) {
+        rowParts.push(`${gradients[r*n+c]}`);
+      }
+      rows.push(rowParts.join(', '));
+    }
+    let canvas = document.createElement('canvas');
+    canvas.width = 360; canvas.height = 360;
+    let ctx = canvas.getContext('2d');
+    for (let i = 0; i < n*n; i++) {
+      const col = i % n;
+      const row = Math.floor(i / n);
+      const cw = canvas.width / n;
+      const ch = canvas.height / n;
+      const grd = ctx.createLinearGradient(col*cw, row*ch, (col+1)*cw, (row+1)*ch);
+      grd.addColorStop(0, getColor(gradients[i], 0));
+      grd.addColorStop(1, getColor(gradients[i], 1));
+      ctx.fillStyle = grd;
+      ctx.fillRect(col*cw, row*ch, cw+1, ch+1);
+    }
+    return canvas.toDataURL();
+  }
+
+  function getColor(grad, idx) {
+    const m = grad.match(/#[0-9a-f]{6}/gi);
+    return m ? m[idx] : '#000';
+  }
+
+  function handleClick(idx) {
+    if (gameWon) return;
+    if (grid[idx] === n*n-1) return;
+    if (selected === null) {
+      selected = idx;
+      render();
+    } else if (selected === idx) {
+      selected = null;
+      render();
+    } else {
+      [grid[selected], grid[idx]] = [grid[idx], grid[selected]];
+      selected = null;
+      moveCount++;
+      document.getElementById('moves').textContent = moveCount;
+      render();
+      checkWin();
+    }
+  }
+
+  function checkWin() {
+    for (let i = 0; i < grid.length; i++) {
+      if (grid[i] !== i) return;
+    }
+    gameWon = true;
+    clearInterval(timerInterval);
+    document.getElementById('finalMoves').textContent = moveCount;
+    document.getElementById('finalTime').textContent = document.getElementById('timer').textContent;
+    winModal.classList.remove('hidden');
+  }
+
+  document.getElementById('restartBtn').addEventListener('click', init);
+  document.getElementById('playAgainBtn').addEventListener('click', init);
+  document.getElementById('gridSize').addEventListener('change', init);
+
+  let previewHeld = false;
+  document.getElementById('previewBtn').addEventListener('mousedown', () => {
+    previewHeld = true;
+    previewOverlay.classList.remove('hidden');
+  });
+  document.getElementById('previewBtn').addEventListener('mouseup', () => {
+    previewHeld = false;
+    previewOverlay.classList.add('hidden');
+  });
+  document.getElementById('previewBtn').addEventListener('mouseleave', () => {
+    if (previewHeld) {
+      previewHeld = false;
+      previewOverlay.classList.add('hidden');
+    }
+  });
+  document.getElementById('previewBtn').addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    previewOverlay.classList.remove('hidden');
+  });
+  document.getElementById('previewBtn').addEventListener('touchend', () => {
+    previewOverlay.classList.add('hidden');
+  });
+
+  init();
+})();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

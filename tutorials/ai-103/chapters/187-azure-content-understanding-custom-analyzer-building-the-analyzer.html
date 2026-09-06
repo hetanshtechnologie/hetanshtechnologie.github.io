@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>187. Azure Content Understanding - Custom Analyzer - Building the analyzer - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 187</span>
+<h1>Azure Content Understanding - Custom Analyzer - Building the analyzer</h1>
+<p>With the invoice samples stored, you can now build the custom analyzer that extracts structured data from them. Azure Content Understanding lets you define a <strong>custom analyzer</strong> as a JSON schema of fields, configures OCR and layout options, and then runs that analyzer over documents through the portal or the REST API. This chapter walks through defining the invoice fields, registering the analyzer, and testing it against the stored samples.</p>
+
+<h2>The Parts of a Custom Analyzer</h2>
+<p>An analyzer definition has three parts that together describe what to look for and how to look:</p>
+<ul>
+<li><strong>Content type:</strong> what kind of input the analyzer expects — a document, an image, or an audio/video stream.</li>
+<li><strong>Configuration:</strong> processing options such as enabling OCR, choosing a language, and capturing layout.</li>
+<li><strong>Fields:</strong> the named pieces of information to extract, each with a type and a natural-language description.</li>
+</ul>
+
+<h2>Defining the Invoice Fields</h2>
+<p>For the CloudXeus invoice flow, the fields should capture what an accounts team actually needs. A solid starting set:</p>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td>vendor</td><td>string</td><td>Company issuing the invoice</td></tr>
+<tr><td>invoice_number</td><td>string</td><td>Unique invoice identifier</td></tr>
+<tr><td>issue_date</td><td>date</td><td>Date the invoice was issued</td></tr>
+<tr><td>due_date</td><td>date</td><td>Payment due date</td></tr>
+<tr><td>tax_amount</td><td>number</td><td>Tax charged on the invoice</td></tr>
+<tr><td>total_amount</td><td>number</td><td>Grand total including tax</td></tr>
+</table>
+
+<div class="tip">
+<p>Write the field descriptions as precisely as you can. The extraction model reads those descriptions to decide what counts as a match, and vague descriptions are the most common source of wrong extractions.</p>
+</div>
+
+<h2>Creating the Analyzer in the Portal</h2>
+<p>In the Content Understanding portal (or the Foundry project view for the resource):</p>
+<ol>
+<li>Open <strong>Analyzer templates</strong> and create a new analyzer named <code>invoice-analyzer</code>.</li>
+<li>Set the content type to <strong>document</strong>.</li>
+<li>Enable OCR and layout, and set the language to English.</li>
+<li>Add each field from the table above with its type and description.</li>
+<li>Save the analyzer, then run it against one of the stored invoices to confirm it returns sensible values.</li>
+</ol>
+
+<h2>Creating the Analyzer via the REST API</h2>
+<p>The same definition is portable as JSON, which is what you will ship in your automation. Save this as <code>analyzer.json</code>:</p>
+
+<pre><code>{
+  "name": "invoice-analyzer",
+  "contentType": "document",
+  "description": "Extracts key fields from invoices",
+  "config": {
+    "ocr": true,
+    "language": "en",
+    "layout": true
+  },
+  "fields": {
+    "vendor": { "type": "string", "method": "extract", "description": "Company issuing the invoice" },
+    "invoice_number": { "type": "string", "method": "extract", "description": "Unique invoice identifier" },
+    "issue_date": { "type": "date", "method": "extract", "description": "Date the invoice was issued" },
+    "due_date": { "type": "date", "method": "extract", "description": "Payment due date" },
+    "tax_amount": { "type": "number", "method": "extract", "description": "Tax charged on the invoice" },
+    "total_amount": { "type": "number", "method": "extract", "description": "Grand total including tax" }
+  }
+}</code></pre>
+
+<p>Register it on your Content Understanding resource with a <code>PUT</code> request. In PowerShell:</p>
+
+<pre><code>$body = Get-Content -Raw analyzer.json
+$headers = @{ "Content-Type" = "application/json"; "Ocp-Apim-Subscription-Key" = $env:CONTENT_UNDERSTANDING_KEY }
+Invoke-RestMethod -Method Put `
+  -Uri "$env:CONTENT_UNDERSTANDING_ENDPOINT/models/invoice-analyzer?api-version=2024-12-01-preview" `
+  -Headers $headers -Body $body</code></pre>
+
+<div class="exercise">
+<h3>Exercise 1: Register and test the analyzer</h3>
+<ol>
+<li>Set the environment variables <code>CONTENT_UNDERSTANDING_ENDPOINT</code> and <code>CONTENT_UNDERSTANDING_KEY</code> to your resource's values.</li>
+<li>Save <code>analyzer.json</code> with the fields from the table above.</li>
+<li>Register the analyzer with the <code>PUT</code> call shown.</li>
+<li>Confirm the response contains the analyzer id and a status of <code>READY</code>.</li>
+</ol>
+</div>
+
+<h2>Analyzing a Stored Invoice</h2>
+<p>With the analyzer registered, submit one of the stored samples and inspect the JSON result:</p>
+
+<pre><code>POST https://YOUR_ENDPOINT/models/invoice-analyzer:analyze?api-version=2024-12-01-preview</code></pre>
+
+<p>with the invoice file as the request body and the subscription key header set. The response nests the extracted data under the first document's <code>fields</code> object. Each field carries its value and a confidence score, for example:</p>
+
+<pre><code>"invoice_number": {
+  "valueString": "INV-1042",
+  "confidence": 0.98
+},
+"total_amount": {
+  "valueNumber": 1249.75,
+  "confidence": 0.95
+}</code></pre>
+
+<h2>Reviewing Extraction Quality</h2>
+<p>Run the analyzer over the whole stored set and look for patterns, not single failures:</p>
+<ul>
+<li><strong>Low confidence fields:</strong> describe the field more precisely or fix the source scan.</li>
+<li><strong>Consistent misreads:</strong> if totals are wrong only for scanned invoices, the problem is OCR, not the field definition.</li>
+<li><strong>Missing fields:</strong> if a vendor never prints a due date, accept that the field is legitimately absent — do not stretch descriptions to force a value.</li>
+</ul>
+
+<div class="warn">
+<p>Beware of a misleading pass: if the samples you test with are the same ones you inspected while designing the analyzer, you are testing your own assumptions. Reserve a handful of invoices you have never opened for a final validation run.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You defined an invoice analyzer with typed fields and precise descriptions, registered it through the portal and the REST API, ran it over stored invoices, and learned to review extraction quality by confidence and error pattern. The analyzer is now the extraction engine behind the CloudXeus invoice flow. The next chapters look at the sibling service in this space — Azure Document Intelligence — and how the two compare.</p>
+<nav>
+<a href="186-azure-content-understanding-custom-analyzer-invoice-storage.html">&larr; Previous: Azure Content Understanding - Custom Analyzer - Invoice storage</a><a href="188-what-is-azure-document-intelligence.html">Next: What is Azure Document Intelligence &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 27: Anomaly Detection | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 27</span>
+    <h1>Anomaly Detection</h1>
+
+    <p>Sometimes the most valuable pattern in your data is the one that appears once. Fraud, equipment failure, network intrusion, and manufacturing defects are all rare events buried inside otherwise normal records. Anomaly detection is the discipline of finding those rare events automatically. This chapter compares three very different strategies: Isolation Forest, DBSCAN, and Local Outlier Factor.</p>
+
+    <h2>Anomaly Detection with Isolation Forest</h2>
+    <h3>In-Depth Intuition</h3>
+    <p>Most outlier methods describe the normal region and flag points that violate it. Isolation Forest flips the idea: it does not try to profile the normal data at all. Instead it asks how easy each point is to isolate from the rest. An anomaly is, by definition, a point that is easy to separate — there are so few similar points around it that a few random cuts trap it on its own almost immediately.</p>
+    <p>The algorithm builds many random decision trees. In each tree it repeatedly picks a random feature, picks a random threshold on that feature, and cuts the data along it until every point sits in its own leaf. Normal points live in dense regions, so cutting them away takes many splits and they end up in deep leaves. Anomalies sit in sparse regions, so a single unlucky cut often strands them, and they end up in shallow leaves. The depth at which a point is isolated becomes its anomaly score.</p>
+    <h3>How Splits Isolate Anomalies</h3>
+    <ul>
+        <li>A normal point is surrounded by neighbours, so random cuts peel points off one layer at a time — it takes a long path to leave it alone.</li>
+        <li>An anomaly is far from everything, so the first or second random split usually separates it into a leaf by itself.</li>
+        <li>Shallow average path length across all trees &#8594; anomalous. Deep average path length &#8594; normal.</li>
+    </ul>
+    <p>The final score is normalized from these path lengths; lower scores mean more anomalous. In scikit-learn, <code>IsolationForest</code> returns <code>1</code> for normal points and <code>-1</code> for anomalies, and also exposes a raw <code>score_samples</code> you can threshold yourself. Isolation Forest scales to huge datasets because it never computes distances between pairs of points.</p>
+
+    <h2>DBSCAN Clustering for Anomaly Detection</h2>
+    <p>Recall from the previous chapter that DBSCAN labels points as core, border, or noise. The noise label is a free anomaly detector: points that live in low-density regions have no core point within <code>eps</code> and get labeled -1.</p>
+    <pre><code>from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import StandardScaler
+
+X_std = StandardScaler().fit_transform(X)
+
+db = DBSCAN(eps=0.5, min_samples=5)
+labels = db.fit_predict(X_std)
+anomalies = X[labels == -1]   # rows labeled as noise</code></pre>
+    <p>Two settings shape the outcome:</p>
+    <ul>
+        <li><code>eps</code> is the radius that defines "near". Too small and every sparse point becomes noise; too large and true anomalies get absorbed into a cluster.</li>
+        <li><code>min_samples</code> is the minimum neighbourhood size that counts as dense. Raise it to be stricter about what counts as normal.</li>
+    </ul>
+    <p>The strength of DBSCAN here is that it needs no assumption about the shape of the data — if your normal data forms a crescent, DBSCAN models the crescent and still flags points far from it.</p>
+    <div class="note">
+        <strong>Practical tip:</strong> DBSCAN's anomaly set changes dramatically with <code>eps</code>. Instead of guessing, plot a 2D projection of the data and try a few values, watching how the number of noise points changes. A sudden jump in noise between two <code>eps</code> values usually means you have passed the density of your real clusters.
+    </div>
+
+    <h2>Local Outlier Factor for Anomaly Detection</h2>
+    <p>Local Outlier Factor (LOF) is a density-based method that compares each point's density with the density of its nearest neighbours. The core idea is that anomalies live in regions that are sparse relative to their surroundings.</p>
+    <ol>
+        <li>Find the k nearest neighbours of each point.</li>
+        <li>Compute each point's <strong>reachability distance</strong> to its neighbours (a modified distance that smooths out ties inside dense clusters).</li>
+        <li>Define the <strong>local reachability density</strong>: the inverse of the average reachability distance to the neighbours.</li>
+        <li>Compute the <strong>LOF score</strong>: the average ratio of the neighbours' density to the point's own density.</li>
+    </ol>
+    <p>A point whose density is close to its neighbours' has an LOF score near 1 and is normal. A point that is far sparser than its neighbours has a score well above 1 and is an outlier.</p>
+    <pre><code>from sklearn.neighbors import LocalOutlierFactor
+
+lof = LocalOutlierFactor(n_neighbors=20, contamination="auto")
+outlier_mask = lof.fit_predict(X)   # -1 marks anomalies
+print(lof.negative_outlier_factor_)  # raw LOF scores (negative)</code></pre>
+    <p>LOF's great advantage is that it is truly <strong>local</strong>: a cluster at density 100 and a cluster at density 5 are both "normal" internally, and points outside both are flagged. Global methods would misread the sparser-but-valid cluster as anomalous.</p>
+
+    <h2>Comparing the Three Approaches</h2>
+    <ul>
+        <li><strong>Speed and scale:</strong> Isolation Forest is the fastest for large, wide datasets. DBSCAN is fast for clustering-like work but needs the <code>eps</code> tuned. LOF is nearest-neighbour based, so it slows down as rows grow and struggles in very high dimensions.</li>
+        <li><strong>Assumptions:</strong> Isolation Forest assumes anomalies are few and easily cut off; DBSCAN assumes anomalies are points outside dense regions; LOF assumes anomalies are points whose neighbourhood is locally sparse.</li>
+        <li><strong>Shapes:</strong> DBSCAN and LOF respect arbitrary cluster shapes; Isolation Forest is geometry-agnostic and works well even when features are not numeric-friendly after scaling.</li>
+        <li><strong>Parameter sensitivity:</strong> Isolation Forest mostly needs <code>contamination</code> (the expected fraction of anomalies). DBSCAN hinges on <code>eps</code>. LOF hinges on <code>n_neighbors</code>.</li>
+        <li><strong>Interpretability:</strong> DBSCAN is easy to explain ("point with no neighbours around it"); LOF is intuitive ("sparser than its neighbours"); Isolation Forest is the least visual but the most robust default.</li>
+    </ul>
+    <div class="info">
+        <strong>Choosing:</strong> when in doubt on tabular data, run Isolation Forest first — it needs the least tuning and tolerates high dimensions. Use DBSCAN when you also want the clusters themselves or when your data has strong spatial structure. Use LOF when you have many points and your anomalies are subtle local deviations, not global extremes.
+    </div>
+
+    <h2>A Practice Exercise</h2>
+    <div class="exercise">
+        <strong>Practice:</strong> load the scikit-learn <code>make_blobs</code> dataset with 3 well-separated clusters and 300 points, then inject 20 synthetic anomalies by shifting 20 rows far away from all cluster centers. Run <code>IsolationForest</code>, <code>DBSCAN</code>, and <code>LocalOutlierFactor</code> on the same data (standardize first). For each method, count how many of the 20 injected anomalies it flags, how many normal points it wrongly flags, and report both numbers side by side. Then repeat once with only 5 injected anomalies and note which method degrades most — the winner tells you which approach to trust when anomalies are extremely rare.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="26-unsupervised.html">Prev: Unsupervised Learning &amp; Dimensionality</a>
+        <a href="28-docker-git.html">Next: Docker &amp; Git Essentials</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

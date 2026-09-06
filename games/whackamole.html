@@ -1,0 +1,158 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whack-a-Mole</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+<style>
+.hole { width: 90px; height: 70px; background: #8B4513; border-radius: 50%; position: relative; overflow: hidden; cursor: pointer; border: 4px solid #5C2D0E; }
+.mole { position: absolute; bottom: -60px; left: 50%; transform: translateX(-50%); font-size: 48px; transition: bottom 0.15s ease-out; cursor: pointer; user-select: none; }
+.mole.show { bottom: 0; }
+.mole.whacked { bottom: 0; opacity: 0; transform: translateX(-50%) scale(1.4); }
+@keyframes pop { 0%{transform:translateX(-50%) scale(0)} 50%{transform:translateX(-50%) scale(1.2)} 100%{transform:translateX(-50%) scale(1)} }
+.mole.show { animation: pop 0.15s ease-out; }
+.combo-flash { animation: comboFlash 0.4s ease-out; }
+@keyframes comboFlash { 0%{color:#fbbf24;transform:scale(1.3)} 100%{color:inherit;transform:scale(1)} }
+</style>
+</head>
+<body class="bg-gray-900 min-h-screen flex flex-col items-center">
+<a href="index.html" class="absolute top-4 left-4 text-yellow-400 hover:text-yellow-300 font-semibold text-lg">&larr; Back to Games</a>
+<h1 class="text-3xl font-bold text-yellow-400 mt-6 mb-2">Whack-a-Mole</h1>
+<div class="flex gap-6 mb-4 text-white text-lg">
+  <div>Score: <span id="score" class="font-bold text-yellow-300">0</span></div>
+  <div>Time: <span id="timer" class="font-bold text-green-400">30</span>s</div>
+  <div>Combo: <span id="combo" class="font-bold text-pink-400">x1</span></div>
+</div>
+<div id="board" class="grid grid-cols-3 gap-4 p-4 bg-green-800 rounded-2xl shadow-2xl border-4 border-green-600 mb-4">
+</div>
+<div id="message" class="text-white text-xl mb-4 h-8"></div>
+<button id="startBtn" class="px-8 py-3 bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-bold rounded-full text-xl shadow-lg transition">Start Game</button>
+<script>
+const board = document.getElementById('board');
+const scoreEl = document.getElementById('score');
+const timerEl = document.getElementById('timer');
+const comboEl = document.getElementById('combo');
+const messageEl = document.getElementById('message');
+const startBtn = document.getElementById('startBtn');
+
+let score = 0, combo = 0, maxCombo = 0;
+let timeLeft = 30, gameInterval, moleTimers = [];
+let gameActive = false;
+
+for (let i = 0; i < 9; i++) {
+  const hole = document.createElement('div');
+  hole.className = 'hole';
+  hole.innerHTML = '<div class="mole" data-index="' + i + '">&#x1F439;</div>';
+  board.appendChild(hole);
+}
+
+const moles = document.querySelectorAll('.mole');
+moles.forEach(m => {
+  m.addEventListener('click', (e) => {
+    e.stopPropagation();
+    whackMole(m);
+  });
+  m.parentElement.addEventListener('click', () => {
+    miss();
+  });
+});
+
+function whackMole(mole) {
+  if (!gameActive || mole.classList.contains('show') === false || mole.classList.contains('whacked')) return;
+  combo++;
+  if (combo > maxCombo) maxCombo = combo;
+  let points = combo >= 5 ? 3 : combo >= 3 ? 2 : 1;
+  score += points;
+  scoreEl.textContent = score;
+  comboEl.textContent = 'x' + combo;
+  mole.classList.remove('show');
+  mole.classList.add('whacked');
+  if (combo >= 3) {
+    messageEl.textContent = 'Combo x' + combo + '! +' + points;
+    messageEl.classList.add('combo-flash');
+    setTimeout(() => messageEl.classList.remove('combo-flash'), 400);
+  } else {
+    messageEl.textContent = '+' + points;
+  }
+  setTimeout(() => {
+    mole.classList.remove('whacked');
+    mole.style.bottom = '';
+  }, 300);
+}
+
+function miss() {
+  if (!gameActive) return;
+  combo = 0;
+  comboEl.textContent = 'x1';
+  messageEl.textContent = 'Miss!';
+}
+
+function showRandomMole() {
+  if (!gameActive) return;
+  const available = Array.from(moles).filter(m => !m.classList.contains('show') && !m.classList.contains('whacked'));
+  if (available.length === 0) return;
+  const mole = available[Math.floor(Math.random() * available.length)];
+  const duration = Math.max(600, 1400 - (30 - timeLeft) * 20);
+  mole.classList.add('show');
+  const t = setTimeout(() => {
+    if (mole.classList.contains('show')) {
+      mole.classList.remove('show');
+      combo = 0;
+      comboEl.textContent = 'x1';
+    }
+  }, duration);
+  moleTimers.push(t);
+}
+
+function startGame() {
+  score = 0; combo = 0; maxCombo = 0; timeLeft = 30;
+  scoreEl.textContent = '0';
+  timerEl.textContent = '30';
+  comboEl.textContent = 'x1';
+  messageEl.textContent = '';
+  gameActive = true;
+  startBtn.textContent = 'Restart';
+  moles.forEach(m => { m.classList.remove('show', 'whacked'); });
+  moleTimers.forEach(t => clearTimeout(t));
+  moleTimers = [];
+  showRandomMole();
+  gameInterval = setInterval(() => {
+    showRandomMole();
+  }, 900);
+  const timerInterval = setInterval(() => {
+    timeLeft--;
+    timerEl.textContent = timeLeft;
+    if (timeLeft <= 0) {
+      clearInterval(timerInterval);
+      clearInterval(gameInterval);
+      moleTimers.forEach(t => clearTimeout(t));
+      moleTimers = [];
+      gameActive = false;
+      moles.forEach(m => m.classList.remove('show'));
+      messageEl.innerHTML = 'Game Over! Score: <b>' + score + '</b> | Max Combo: x' + maxCombo;
+    }
+  }, 1000);
+  moleTimers.push(timerInterval);
+}
+
+startBtn.addEventListener('click', startGame);
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

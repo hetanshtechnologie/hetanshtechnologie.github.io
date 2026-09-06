@@ -1,0 +1,154 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>169. Lab - Azure AI Search - Creating the index - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 169</span>
+<h1>Lab - Azure AI Search - Creating the index</h1>
+<p>Your search service now knows where documents live, but it still has no idea what to do with them. In this lab you define the <strong>index</strong> — the schema that describes every document field and how each one can be searched. This is the contract the indexer will fill in the next lab, so getting the field attributes right now saves you from rebuilding everything later.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>The <strong>search service name</strong> and <strong>admin key</strong> from the data-source lab.</li>
+<li>The <strong>data source</strong> <code>docs-datasource</code> created in the previous lab.</li>
+<li>The Azure CLI signed in, with the <code>azure-search</code> extension installed, and your <code>$rg</code>, <code>$searchName</code>, and <code>$adminKey</code> variables still set.</li>
+</ul>
+
+<h2>Step 1 - Design the Schema</h2>
+<p>Before writing any JSON, decide what a single document should look like in the index. Each blob becomes one search document, and each field in the index maps to content from that blob. A minimal RAG-ready schema needs at least four things:</p>
+<table>
+<tr><th>Field</th><th>Type</th><th>Purpose</th></tr>
+<tr><td><code>id</code></td><td>Edm.String</td><td>The document key. Every index requires exactly one key field.</td></tr>
+<tr><td><code>title</code></td><td>Edm.String</td><td>A readable name, used in results and citations.</td></tr>
+<tr><td><code>content</code></td><td>Edm.String</td><td>The actual text of the document that search will match against.</td></tr>
+<tr><td><code>metadata_storage_path</code></td><td>Edm.String</td><td>The source blob's URI, useful for filters and provenance.</td></tr>
+</table>
+<p>Field attributes decide behavior. The most important ones were introduced in the theory chapter: <code>searchable</code> allows text matching, <code>filterable</code> allows filter expressions, <code>retrievable</code> controls whether the field is returned, and <code>sortable</code> / <code>facetable</code> enable ordering and faceting.</p>
+
+<h2>Step 2 - Write the Index Definition</h2>
+<p>Save the following as <code>index.json</code>. It defines a key, searchable title and content, a filterable source path, and a vector field that a later enrichment lab will populate with embeddings:</p>
+<pre><code>{
+  "name": "docs-index",
+  "fields": [
+    {
+      "name": "id",
+      "type": "Edm.String",
+      "key": true,
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true
+    },
+    {
+      "name": "title",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true
+    },
+    {
+      "name": "content",
+      "type": "Edm.String",
+      "searchable": true,
+      "retrievable": true
+    },
+    {
+      "name": "metadata_storage_path",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true
+    },
+    {
+      "name": "embedding",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "retrievable": false,
+      "dimensions": 1536,
+      "vectorSearchConfiguration": "docs-vector-profile"
+    }
+  ],
+  "vectorSearch": {
+    "algorithmConfigurations": [
+      {
+        "name": "docs-hnsw",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "metric": "cosine",
+          "m": 16,
+          "efConstruction": 400,
+          "efSearch": 500
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "name": "docs-vector-profile",
+        "algorithm": "docs-hnsw"
+      }
+    ]
+  }
+}
+</code></pre>
+
+<div class="note">
+<p>The vector field declares that a collection of 1536 floating-point numbers will be stored per document — the dimensionality of the embedding model used in this course. Query-time configuration syntax for vector search changes across API versions; the shape above matches the 2023-11-01 REST API and the <code>az search index</code> commands below. If your index later rejects the field, confirm the API version in your requests.</p>
+</div>
+
+<h2>Step 3 - Create the Index</h2>
+<p>Create the index by sending the JSON file to the service. With the Azure CLI extension, use the <code>--index-json</code> option to pass the whole definition in one command:</p>
+<pre><code>az search index create `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-index `
+  --index-json (Get-Content -Raw index.json)
+</code></pre>
+<p>A successful call echoes the index definition back, including the assigned <code>@odata.etag</code>. The index now exists on the service, ready to hold documents but still empty.</p>
+
+<div class="tip">
+<p>You can also create the index through the REST API directly, which is useful when you want to script from any language:</p>
+<pre><code>az rest --method put `
+  --uri "https://$searchName.search.windows.net/indexes/docs-index?api-version=2023-11-01" `
+  --headers "api-key=$adminKey" `
+  --body (Get-Content -Raw index.json)
+</code></pre>
+</div>
+
+<h2>Step 4 - Verify the Index</h2>
+<p>List the indexes on the service to confirm <code>docs-index</code> is registered:</p>
+<pre><code>az search index list `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey -o table
+</code></pre>
+<p>You should see a single row for <code>docs-index</code>. Its document count is zero — populating it is the job of the indexer in the next lab.</p>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>Index name cannot be changed</code></td><td>The name field does not match <code>--name</code></td><td>Keep both values identical and rerun.</td></tr>
+<tr><td><code>Invalid field</code> on <code>embedding</code></td><td>Vector config missing or wrong API version</td><td>Ensure <code>vectorSearch</code> is present and the version matches the field syntax.</td></tr>
+<tr><td><code>Key field not found</code></td><td>No field marked <code>key: true</code></td><td>Mark exactly one field as the key.</td></tr>
+<tr><td><code>503</code> at creation</td><td>Service scaling or quota limit</td><td>Wait a minute and retry; check the service's replication count.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You designed a search schema, wrote it as an index definition with field attributes and a vector-search configuration, created the index on your service, and verified it with a listing command. The index is the empty container your documents will flow into. In the next lab you create the indexer that pulls content from the blob data source and writes it into <code>docs-index</code>.</p>
+<nav>
+<a href="168-lab-azure-ai-search-data-sources.html">&larr; Previous: Lab - Azure AI Search - Data sources</a><a href="170-lab-azure-ai-search-creating-the-indexer.html">Next: Lab - Azure AI Search - Creating the indexer &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

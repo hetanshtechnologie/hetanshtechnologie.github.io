@@ -1,0 +1,478 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bot Framework SDK: Dialogs and Cards - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 21</span>
+<h1>Bot Framework SDK: Dialogs and Cards</h1>
+
+<h2>Bot Framework SDK Overview</h2>
+<p>The Microsoft Bot Framework SDK is a comprehensive framework for building conversational AI applications — bots — that interact with users across multiple channels including Microsoft Teams, Slack, Facebook Messenger, Web Chat, custom applications, and many others. The SDK provides abstractions for managing conversations, handling natural language understanding, maintaining state, and orchestrating multi-turn interactions through dialogs. On the AI-102 exam, the Bot Framework SDK is the primary technology tested under the "Implement conversational AI" domain, which accounts for 15-20% of the exam.</p>
+<p>A bot built with the SDK runs as a web application, typically hosted on Azure App Service. The bot communicates with its users through a channel — each channel (Teams, Web Chat, etc.) has its own transport protocol, but the Bot Framework abstracts this through the <strong>adapter</strong>. The adapter handles authentication, serialization, and communication with the Bot Framework Service, which is the intermediary between your bot and the channels. Your bot code implements a handler that receives <strong>activities</strong> (messages, conversation updates, events) and replies with outgoing activities.</p>
+
+<h2>Core Concepts: Activities, Turns, Adapter, Middleware</h2>
+<p><strong>Activities</strong> are the fundamental unit of communication in the Bot Framework. Every interaction — a user sending a message, a user joining a conversation, a bot sending a reply — is represented as an activity object. The <code>Activity</code> type has a <code>type</code> field that determines the kind of activity: <code>message</code> for regular text messages, <code>conversationUpdate</code> when participants join or leave, <code>event</code> for custom events, <code>invoke</code> for special interactions like Adaptive Card actions, and <code>typing</code> to indicate that the user or bot is typing. The <code>Activity</code> also carries <code>text</code> (the message body), <code>from</code> (the sender), <code>recipient</code>, <code>conversation</code> (the conversation ID and type), <code>channelId</code> (which channel the activity came from), and <code>attachments</code> for cards, images, and files.</p>
+<p>A <strong>turn</strong> is a single cycle of user activity and bot response. When a user sends a message, the Bot Framework Service forwards it to your bot as an incoming activity. Your bot processes it, generates one or more outgoing activities, and sends them back. That complete cycle is one turn. The turn context object (<code>TurnContext</code>) is available throughout the turn and provides methods to send activities, access the user's state, and interact with the adapter. The <strong>adapter</strong> connects your bot to the Bot Framework Service — it deserializes incoming requests into activities, processes them through middleware, and calls your bot's logic. The <strong>middleware</strong> pipeline sits between the adapter and your bot's handler, allowing you to inspect, modify, or block activities before they reach your bot. Common uses of middleware include logging, authentication, translation, and state management initialization.</p>
+
+<pre><code>// C# - Bot Framework SDK EchoBot (minimal example)
+using Microsoft.Bot.Builder;
+using Microsoft.Bot.Schema;
+
+public class EchoBot : ActivityHandler
+{
+    protected override async Task OnMessageActivityAsync(
+        ITurnContext&lt;IMessageActivity&gt; turnContext,
+        CancellationToken cancellationToken)
+    {
+        await turnContext.SendActivityAsync(
+            MessageFactory.Text($"Echo: {turnContext.Activity.Text}"),
+            cancellationToken);
+    }
+
+    protected override async Task OnMembersAddedAsync(
+        IList&lt;ChannelAccount&gt; membersAdded,
+        ITurnContext&lt;IConversationUpdateActivity&gt; turnContext,
+        CancellationToken cancellationToken)
+    {
+        var welcomeText = "Hello and welcome! Type something to see me echo it back.";
+        foreach (var member in membersAdded)
+        {
+            if (member.Id != turnContext.Activity.Recipient.Id)
+            {
+                await turnContext.SendActivityAsync(
+                    MessageFactory.Text(welcomeText), cancellationToken);
+            }
+        }
+    }
+}</pre></code>
+
+<pre><code># Python - Bot Framework SDK EchoBot
+from botbuilder.core import ActivityHandler, TurnContext, MessageFactory
+from botbuilder.schema import ChannelAccount
+
+class EchoBot(ActivityHandler):
+    async def on_message_activity(self, turn_context: TurnContext):
+        await turn_context.send_activity(
+            MessageFactory.text(f"Echo: {turn_context.activity.text}")
+        )
+
+    async def on_members_added(
+        self,
+        members_added: list[ChannelAccount],
+        turn_context: TurnContext
+    ):
+        for member in members_added:
+            if member.id != turn_context.activity.recipient.id:
+                await turn_context.send_activity(
+                    MessageFactory.text("Hello and welcome!")
+                )</pre></code>
+
+<h2>WelcomeBot: Greeting Users on Conversation Start</h2>
+<p>The WelcomeBot pattern greets users when they first join a conversation. This is important for providing a good first-time user experience. The pattern relies on the <code>conversationUpdate</code> activity — when a user (or the bot itself) joins a conversation, the Bot Framework Service sends a <code>conversationUpdate</code> activity with the <code>membersAdded</code> list. Your bot checks whether any of the newly added members are not the bot itself, and if so, sends a welcome message. In the C# SDK, this is handled by overriding <code>OnMembersAddedAsync</code>; in Python, by overriding <code>on_members_added</code>.</p>
+<p>For production bots, your welcome message should do more than just say hello. It should present a brief introduction to the bot's capabilities, suggest some example commands or actions the user can take, and optionally include a card with quick-start buttons. You should also handle the case where the bot is added to an existing conversation with many members — the welcome message might be sent to everyone, which could be intrusive. A common pattern is to use a flag in user state to detect whether the user has already seen the welcome message, and only show it on their first interaction.</p>
+
+<div class="exam-tip">
+<h3>Exam Tip: Activity Types and Handling</h3>
+<p>Know the four most common activity types and when they fire. <code>message</code> is the primary activity for user-to-bot and bot-to-user text communication. <code>conversationUpdate</code> fires when participants join or leave — use it for welcome messages. <code>event</code> is used for custom events from the bot to the application or channel-specific events like Teams invoke activities. <code>typing</code> indicates typing status — bots can send typing indicators to show they are processing. The exam may present a scenario asking which activity type to use for a specific interaction — for example, sending a typing indicator uses the <code>typing</code> activity, not <code>message</code>. You should also understand that the <code>OnMembersAddedAsync</code> handler only works for specific channels that send conversationUpdate activities. In Microsoft Teams, for example, the bot does not receive a conversationUpdate when a personal chat starts — you must send a proactive message or wait for the first user message.</p>
+</div>
+
+<h2>Dialogs: Waterfall Dialogs, Component Dialogs, Dialog Sets</h2>
+<p>Dialogs are the Bot Framework's mechanism for managing multi-turn conversations. A <strong>waterfall dialog</strong> is a sequence of steps that execute in order. Each step prompts the user for input, waits for a response, and passes the collected data to the next step. Waterfall dialogs are ideal for guided workflows like booking a ticket, filling out a form, or collecting order details. Each step is an async function that receives a <code>WaterfallStepContext</code> with access to the accumulated values, the user's response, and methods to prompt for input or end the dialog.</p>
+<p><strong>Component dialogs</strong> encapsulate a set of related dialogs into a reusable container. If your bot needs to handle multiple workflows (e.g., booking a flight, canceling a reservation, checking status), each workflow can be a component dialog. Component dialogs prevent naming conflicts — the dialogs inside a component dialog are scoped to that component. The root dialog set is typically stored in a <code>DialogSet</code> that is created from the conversation state. The <code>DialogSet</code> is initialized once per conversation and persists dialog state between turns.</p>
+
+<pre><code>// C# - Waterfall dialog with user prompts
+using Microsoft.Bot.Builder;
+using Microsoft.Bot.Builder.Dialogs;
+using Microsoft.Bot.Builder.Dialogs.Prompts;
+
+public class BookingDialog : ComponentDialog
+{
+    public BookingDialog()
+        : base(nameof(BookingDialog))
+    {
+        AddDialog(new WaterfallDialog(nameof(WaterfallDialog), new WaterfallStep[]
+        {
+            DestinationStepAsync,
+            DateStepAsync,
+            ConfirmStepAsync,
+            FinalStepAsync
+        }));
+        AddDialog(new TextPrompt(nameof(TextPrompt)));
+        AddDialog(new ConfirmPrompt(nameof(ConfirmPrompt)));
+
+        InitialDialogId = nameof(WaterfallDialog);
+    }
+
+    private async Task&lt;DialogTurnResult&gt; DestinationStepAsync(
+        WaterfallStepContext stepContext,
+        CancellationToken cancellationToken)
+    {
+        return await stepContext.PromptAsync(
+            nameof(TextPrompt),
+            new PromptOptions
+            {
+                Prompt = MessageFactory.Text("What is your destination?")
+            },
+            cancellationToken);
+    }
+
+    private async Task&lt;DialogTurnResult&gt; DateStepAsync(
+        WaterfallStepContext stepContext,
+        CancellationToken cancellationToken)
+    {
+        stepContext.Values["destination"] = (string)stepContext.Result;
+        return await stepContext.PromptAsync(
+            nameof(TextPrompt),
+            new PromptOptions
+            {
+                Prompt = MessageFactory.Text(
+                    "What date would you like to travel?")
+            },
+            cancellationToken);
+    }
+
+    private async Task&lt;DialogTurnResult&gt; ConfirmStepAsync(
+        WaterfallStepContext stepContext,
+        CancellationToken cancellationToken)
+    {
+        stepContext.Values["date"] = (string)stepContext.Result;
+        return await stepContext.PromptAsync(
+            nameof(ConfirmPrompt),
+            new PromptOptions
+            {
+                Prompt = MessageFactory.Text(
+                    $"Book a trip to {stepContext.Values["destination"]} "
+                    + $"on {stepContext.Values["date"]}? (yes/no)")
+            },
+            cancellationToken);
+    }
+
+    private async Task&lt;DialogTurnResult&gt; FinalStepAsync(
+        WaterfallStepContext stepContext,
+        CancellationToken cancellationToken)
+    {
+        if ((bool)stepContext.Result)
+        {
+            await stepContext.Context.SendActivityAsync(
+                MessageFactory.Text(
+                    "Your trip is booked! Confirmation will be sent."),
+                cancellationToken);
+        }
+        else
+        {
+            await stepContext.Context.SendActivityAsync(
+                MessageFactory.Text("Booking cancelled."),
+                cancellationToken);
+        }
+        return await stepContext.EndDialogAsync(cancellationToken);
+    }
+}</pre></code>
+
+<pre><code># Python - Waterfall dialog
+from botbuilder.dialogs import (
+    ComponentDialog, WaterfallDialog, WaterfallStepContext,
+    DialogTurnResult
+)
+from botbuilder.dialogs.prompts import TextPrompt, ConfirmPrompt, PromptOptions
+
+class BookingDialog(ComponentDialog):
+    def __init__(self, dialog_id: str = None):
+        super().__init__(dialog_id or BookingDialog.__name__)
+
+        self.add_dialog(TextPrompt(TextPrompt.__name__))
+        self.add_dialog(ConfirmPrompt(ConfirmPrompt.__name__))
+        self.add_dialog(WaterfallDialog(
+            WaterfallDialog.__name__,
+            [
+                self.destination_step,
+                self.date_step,
+                self.confirm_step,
+                self.final_step
+            ]
+        ))
+
+        self.initial_dialog_id = WaterfallDialog.__name__
+
+    async def destination_step(
+        self, step_context: WaterfallStepContext
+    ) -> DialogTurnResult:
+        return await step_context.prompt(
+            TextPrompt.__name__,
+            PromptOptions(prompt=MessageFactory.text("What is your destination?"))
+        )
+
+    async def date_step(
+        self, step_context: WaterfallStepContext
+    ) -> DialogTurnResult:
+        step_context.values["destination"] = step_context.result
+        return await step_context.prompt(
+            TextPrompt.__name__,
+            PromptOptions(prompt=MessageFactory.text("What date would you like to travel?"))
+        )
+
+    async def confirm_step(
+        self, step_context: WaterfallStepContext
+    ) -> DialogTurnResult:
+        step_context.values["date"] = step_context.result
+        return await step_context.prompt(
+            ConfirmPrompt.__name__,
+            PromptOptions(prompt=MessageFactory.text(
+                f"Book a trip to {step_context.values['destination']} "
+                f"on {step_context.values['date']}? (yes/no)"
+            ))
+        )
+
+    async def final_step(
+        self, step_context: WaterfallStepContext
+    ) -> DialogTurnResult:
+        if step_context.result:
+            await step_context.context.send_activity(
+                MessageFactory.text("Your trip is booked!")
+            )
+        else:
+            await step_context.context.send_activity(
+                MessageFactory.text("Booking cancelled.")
+            )
+        return await step_context.end_dialog()</pre></code>
+
+<h2>Adaptive Cards: Rich Interactive Card Layouts</h2>
+<p>Adaptive Cards are platform-agnostic UI components that render as rich, interactive cards across channels. Instead of sending plain text, your bot sends a JSON payload describing the card's structure — headers, text blocks, images, input fields, buttons, and fact sets. The channel renders the card using native UI elements. This means the same card JSON renders as a native card in Teams, a rich card in Web Chat, and a simplified layout in SMS channels that cannot render cards. Adaptive Cards are defined in JSON using the Adaptive Card schema (version 1.5 or 1.6).</p>
+<p>A card typically includes a <code>body</code> array with text blocks, image sets, fact sets, and containers, plus an <code>actions</code> array with buttons. Buttons can trigger <code>Action.OpenUrl</code> (open a URL), <code>Action.Submit</code> (send data back to the bot), <code>Action.ShowCard</code> (expand a sub-card inline), or <code>Action.Execute</code> (the newer universal action model). The Bot Framework SDK provides the <code>AdaptiveCard</code> class in the <code>Microsoft.Bot.Schema</code> namespace for C# and equivalent classes in Python through the <code>adaptivecards</code> package. For common card types like hero cards, thumbnail cards, and receipt cards, the SDK also provides the simplified <code>HeroCard</code>, <code>ThumbnailCard</code>, and related types.</p>
+
+<pre><code>// C# - Adaptive Card with hero card and fact sets
+using Microsoft.Bot.Builder;
+using Microsoft.Bot.Schema;
+
+public Activity GetOrderStatusCard(string orderId, string status)
+{
+    return MessageFactory.Attachment(new List&lt;Attachment&gt;
+    {
+        new HeroCard
+        {
+            Title = "Order Status",
+            Subtitle = $"Order #{orderId}",
+            Text = $"Your order is currently: **{status}**",
+            Images = new List&lt;CardImage&gt;
+            {
+                new CardImage("https://example.com/package-icon.png")
+            },
+            Buttons = new List&lt;CardAction&gt;
+            {
+                new CardAction(ActionTypes.ImBack, "Track Shipping",
+                               value: $"Track {orderId}"),
+                new CardAction(ActionTypes.ImBack, "Cancel Order",
+                               value: $"Cancel {orderId}"),
+                new CardAction(ActionTypes.OpenUrl, "View Details",
+                               url: $"https://example.com/orders/{orderId}")
+            }
+        }.ToAttachment()
+    });
+}
+
+// Adaptive Card via JSON (more flexible)
+public Activity GetProductCard()
+{
+    var cardJson = @"{
+        ""type"": ""AdaptiveCard"",
+        ""$schema"": ""http://adaptivecards.io/schemas/adaptive-card.json"",
+        ""version"": ""1.5"",
+        ""body"": [
+            {
+                ""type"": ""TextBlock"",
+                ""text"": ""Azure AI Services"",
+                ""weight"": ""bolder"",
+                ""size"": ""extraLarge""
+            },
+            {
+                ""type"": ""FactSet"",
+                ""facts"": [
+                    { ""title"": ""Category"", ""value"": ""Artificial Intelligence"" },
+                    { ""title"": ""Pricing"", ""value"": ""Pay-as-you-go"" },
+                    { ""title"": ""SLA"", ""value"": ""99.9%"", ""target"": null }
+                ]
+            },
+            {
+                ""type"": ""Input.Text"",
+                ""id"": ""userQuestion"",
+                ""placeholder"": ""Ask a question about Azure AI...""
+            }
+        ],
+        ""actions"": [
+            {
+                ""type"": ""Action.Submit"",
+                ""title"": ""Ask"",
+                ""data"": { ""action"": ""askQuestion"" }
+            }
+        ]
+    }";
+
+    return MessageFactory.Attachment(new Attachment
+    {
+        ContentType = "application/vnd.microsoft.card.adaptive",
+        Content = JsonConvert.DeserializeObject(cardJson)
+    });
+}</pre></code>
+
+<h2>Integrating AI Services with Bots</h2>
+<p>A bot that only echoes messages is not very useful. Real bots integrate AI services to understand user intent, detect entities, answer questions, analyze sentiment, translate languages, and perform vision tasks. The Bot Framework SDK makes it straightforward to call any Azure AI service from within your bot's turn handler or dialog steps. The integration typically follows one of two patterns: <strong>middleware integration</strong> where an AI service runs as part of the middleware pipeline (e.g., language detection middleware that sets the locale based on detected language), or <strong>explicit integration</strong> where your dialog steps call AI services directly.</p>
+<p>For <strong>Language Understanding</strong>, you integrate the Conversational Language Understanding (CLU) client in your bot. The bot sends the user's message to CLU, receives back an intent (what the user wants to do) and entities (specific details like dates, locations, or product names), and then routes to the appropriate dialog. For <strong>Question Answering</strong>, you call the Custom Question Answering service with the user's question and return the top answer. For <strong>Speech</strong>, bots on voice-enabled channels process audio using the Speech SDK for transcription and synthesis. For <strong>Content Safety</strong>, you can integrate moderation middleware that blocks harmful messages before they reach the bot's logic.</p>
+
+<pre><code># Python - Integrating CLU and Question Answering in a bot
+from botbuilder.core import ActivityHandler, TurnContext, MessageFactory
+from azure.ai.language.conversations import ConversationAnalysisClient
+from azure.ai.language.questionanswering import QuestionAnsweringClient
+from azure.core.credentials import AzureKeyCredential
+import os
+
+class SupportBot(ActivityHandler):
+    def __init__(self):
+        self.clu_endpoint = os.environ["CLU_ENDPOINT"]
+        self.clu_key = os.environ["CLU_KEY"]
+        self.clu_project = os.environ["CLU_PROJECT"]
+        self.clu_deployment = os.environ["CLU_DEPLOYMENT"]
+
+        self.qa_endpoint = os.environ["QA_ENDPOINT"]
+        self.qa_key = os.environ["QA_KEY"]
+        self.qa_project = os.environ["QA_PROJECT"]
+
+    async def on_message_activity(self, turn_context: TurnContext):
+        user_text = turn_context.activity.text
+
+        # Step 1: Call CLU to detect intent
+        clu_client = ConversationAnalysisClient(
+            self.clu_endpoint,
+            AzureKeyCredential(self.clu_key)
+        )
+        clu_response = clu_client.analyze_conversation(
+            task={
+                "kind": "Conversation",
+                "analysisInput": {
+                    "conversationItem": {
+                        "id": "1",
+                        "text": user_text
+                    }
+                },
+                "parameters": {
+                    "projectName": self.clu_project,
+                    "deploymentName": self.clu_deployment
+                }
+            }
+        )
+
+        top_intent = clu_response["result"]["prediction"]["topIntent"]
+
+        # Step 2: Route based on intent
+        if top_intent == "FAQ":
+            # Use Question Answering
+            qa_client = QuestionAnsweringClient(
+                self.qa_endpoint,
+                AzureKeyCredential(self.qa_key)
+            )
+            qa_response = qa_client.get_answers(
+                question=user_text,
+                project_name=self.qa_project,
+                deployment_name="production"
+            )
+            answer = qa_response.answers[0].answer if qa_response.answers else \
+                     "I could not find an answer to your question."
+            await turn_context.send_activity(
+                MessageFactory.text(answer))
+
+        elif top_intent == "OpenTicket":
+            await turn_context.send_activity(
+                MessageFactory.text(
+                    "I'm opening a support ticket. Let me ask a few questions."))
+            # Start dialog to collect ticket details
+
+        else:
+            await turn_context.send_activity(
+                MessageFactory.text(
+                    "I'm not sure how to help with that. "
+                    "Try asking a question or open a ticket."))</pre></code>
+
+<h2>Tracking Events with Application Insights Telemetry</h2>
+<p>Application Insights provides telemetry for your bot — you can track how many users interact with your bot, which intents are triggered most often, where users drop off in multi-turn dialogs, and how often errors occur. The Bot Framework SDK supports integration with Application Insights through the <code>TelemetryLoggerMiddleware</code> class. This middleware automatically logs incoming and outgoing activities, dialog events, and performance metrics. You can extend it to log custom events, such as which LUIS intent was triggered or which QnA Answer was returned.</p>
+<p>To enable telemetry, you add the <code>TelemetryLoggerMiddleware</code> to your bot's middleware pipeline during adapter initialization. You also configure the IBM (Instrumentation Key) or connection string for your Application Insights resource. For dialogs, you enable telemetry by setting <code>DialogSet.TelemetryClient</code> or passing a <code>TelemetryClient</code> to the <code>ComponentDialog</code> constructor. Waterfall dialogs automatically log events for each step — you can see how long users spend in each step, where they abandon the dialog, and which prompts are most confusing.</p>
+
+<pre><code>// C# - Adding Application Insights telemetry to a bot
+using Microsoft.ApplicationInsights;
+using Microsoft.ApplicationInsights.Extensibility;
+using Microsoft.Bot.Builder;
+using Microsoft.Bot.Builder.Integration.ApplicationInsights.Core;
+
+// In Startup.cs or Program.cs
+public void ConfigureServices(IServiceCollection services)
+{
+    // Create the telemetry client
+    var telemetryConfig = TelemetryConfiguration
+        .CreateDefault();
+    telemetryConfig.ConnectionString =
+        Environment.GetEnvironmentVariable("APPINSIGHTS_CONNECTION_STRING");
+    var telemetryClient = new TelemetryClient(telemetryConfig);
+
+    // Add telemetry middleware
+    services.AddSingleton&lt;IMiddleware&gt;(
+        new TelemetryLoggerMiddleware(telemetryClient, logPersonalInformation: true));
+
+    // Log custom events in dialogs
+    services.AddSingleton(telemetryClient);
+}
+
+// Log custom events from a dialog step
+private async Task&lt;DialogTurnResult&gt; BookingStepAsync(
+    WaterfallStepContext stepContext,
+    CancellationToken cancellationToken)
+{
+    var telemetryClient = stepContext.Context.TurnState
+        .Get&lt;TelemetryClient&gt;();
+
+    telemetryClient.TrackEvent("BookingStarted", new Dictionary&lt;string, string&gt;
+    {
+        { "Destination", stepContext.Values["destination"]?.ToString() },
+        { "Channel", stepContext.Context.Activity.ChannelId }
+    });
+
+    // ... rest of the step
+}</pre></code>
+
+<h2>Exercise: Build a Support Bot That Answers FAQs from QnA Maker</h2>
+<p>Build a support bot that answers common questions using the Custom Question Answering service and opens support tickets for unresolved issues.</p>
+<ol>
+<li>Create a Custom Question Answering project in Azure AI Language. Add at least 10 FAQ pairs about Azure AI services (e.g., "What is Azure AI Vision?", "How do I create a Language resource?"). Deploy the project.</li>
+<li>Create a new Bot Framework SDK project (C# or Python) using the EchoBot template from the Bot Framework SDK templates.</li>
+<li>Add the Question Answering client SDK to your project. Install the NuGet or pip package for <code>azure.ai.language.questionanswering</code>.</li>
+<li>Modify the <code>OnMessageActivityAsync</code> handler to call the Question Answering service with the user's message. Send the top answer back to the user.</li>
+<li>Add a <code>TextPrompt</code>-based waterfall dialog that collects three pieces of information: issue description, severity (High/Medium/Low), and contact email. This dialog should start when the user types "open ticket" or when the QA confidence score is below a threshold.</li>
+<li>Add an Adaptive Card that displays the ticket confirmation with fields for ticket ID, description, severity, and status.</li>
+<li>Register the <code>TelemetryLoggerMiddleware</code> and log each Question Answering call as a custom event with the question, confidence score, and response latency.</li>
+<li>Test the bot locally using the Bot Framework Emulator. Verify that FAQ questions return answers and that "open ticket" starts the waterfall dialog.</li>
+<li>Deploy the bot to Azure App Service and test via the Web Chat channel in the Azure portal.</li>
+</ol>
+
+<div class="exam-tip">
+<h3>Exam Tip: Dialog Design Patterns, Activity Types, Channel Integration</h3>
+<p>The AI-102 exam tests several key bot concepts. <strong>Dialog design patterns:</strong> Waterfall dialogs are for linear, step-by-step interactions. Component dialogs wrap related dialogs into reusable units. Adaptive dialogs (from Bot Framework Composer) are event-driven and handle interruptions better than waterfall dialogs. Use <strong>prompts</strong> (TextPrompt, NumberPrompt, ConfirmPrompt, ChoicePrompt) to collect typed input from users — they handle validation and re-prompting automatically. For <strong>activity types</strong>, remember that <code>message</code> is for all text-based communication, <code>conversationUpdate</code> signals membership changes (use for welcome messages), <code>event</code> carries custom event data, and <code>invoke</code> handles card actions and Teams-specific interactions. For <strong>channel integration</strong>, understand that not all channels support all features — Adaptive Cards degrade gracefully in text-only channels, Teams supports special invoke activities (Task/Fetch, SignIn/VerifyState), and Direct Line is the REST API protocol for custom client applications. The exam may ask you to choose the right channel for a given scenario: Direct Line for custom mobile apps, Web Chat for embedded website widgets, Teams for enterprise collaboration bots.</p>
+</div>
+
+<h2>Summary</h2>
+<p>The Bot Framework SDK provides the foundation for building conversational AI applications on Azure. Activities are the communication units exchanged between users and bots through the adapter. Turns represent a single request-response cycle. Middleware enables cross-cutting concerns like logging, authentication, and state management. Dialogs orchestrate multi-turn conversations — waterfall dialogs for linear workflows, component dialogs for modularity, and dialog sets for state persistence. Adaptive Cards deliver rich, interactive UI across channels using platform-agnostic JSON. Integrating AI services like CLU, Question Answering, and Speech transforms a basic echo bot into an intelligent assistant. Application Insights telemetry tracks user behavior, dialog performance, and errors. These concepts form the core of conversational AI on Azure and are heavily tested on the AI-102 exam. The next chapter covers Bot Framework Composer, which provides a visual alternative to SDK-based bot development.</p>
+
+<nav>
+<a href="../index.html">&larr; Back to Index</a>
+<a href="22-bot-framework-composer.html">Next: Bot Framework Composer and Publishing &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

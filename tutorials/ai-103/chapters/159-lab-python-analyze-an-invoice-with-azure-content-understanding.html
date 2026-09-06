@@ -1,0 +1,190 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>159. Lab - Python - Analyze an Invoice with Azure Content Understanding - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 159</span>
+<h1>Lab - Python - Analyze an Invoice with Azure Content Understanding</h1>
+<p>In this lab you move from the portal to Python. You will define an invoice analyzer through the Content Understanding REST API, submit an invoice document for analysis, and work with the returned JSON. When you finish you will have a reusable script that extracts invoice data — vendor, invoice number, due date, and totals — from any document you point it at.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>Python 3.9 or newer with <code>pip</code>, as configured earlier in the course.</li>
+<li>The <strong>Content Understanding</strong> resource you created in the previous lab.</li>
+<li>Its <strong>endpoint URL</strong> and <strong>API key</strong>, copied from <em>Keys and Endpoint</em> in the Azure portal.</li>
+<li>An invoice to test with. A PDF or image of a one-page invoice works best.</li>
+<li>The <code>requests</code> library, installed with <code>pip install requests</code>.</li>
+</ul>
+
+<div class="warn">
+<p>Store the endpoint and key in environment variables, not in the script. Never commit credentials to a repository or share them in screenshots.</p>
+</div>
+
+<h2>Step 1 - Set Environment Variables</h2>
+<p>Open a terminal in VS Code and set the connection values. Replace the placeholders with your own:</p>
+<pre><code>$env:CONTENT_UNDERSTANDING_ENDPOINT = "https://YOUR_RESOURCE.cognitiveservices.azure.com/"
+$env:CONTENT_UNDERSTANDING_KEY = "YOUR_KEY"
+</code></pre>
+
+<div class="note">
+<p>On macOS or Linux the equivalent commands are <code>export CONTENT_UNDERSTANDING_ENDPOINT="..."</code> and <code>export CONTENT_UNDERSTANDING_KEY="..."</code>.</p>
+</div>
+
+<h2>Step 2 - Create the Analyzer Definition</h2>
+<p>The analyzer is defined as JSON. Save the following as <code>analyzer.json</code>. It describes a document analyzer that performs OCR, captures layout, and extracts five invoice fields:</p>
+<pre><code>{
+  "name": "invoice-analyzer",
+  "contentType": "document",
+  "description": "Extracts key fields from one-page invoices",
+  "config": {
+    "ocr": true,
+    "language": "en",
+    "layout": true
+  },
+  "fields": {
+    "vendor": { "type": "string", "method": "extract", "description": "Company issuing the invoice" },
+    "invoice_number": { "type": "string", "method": "extract", "description": "Unique invoice identifier" },
+    "issue_date": { "type": "date", "method": "extract", "description": "Date the invoice was issued" },
+    "due_date": { "type": "date", "method": "extract", "description": "Payment due date" },
+    "total_amount": { "type": "number", "method": "extract", "description": "Grand total including tax" }
+  }
+}
+</code></pre>
+
+<div class="tip">
+<p>Write clear <code>description</code> text for every field. The description tells the extraction model what to look for, and the more specific it is, the more reliable the extraction tends to be.</p>
+</div>
+
+<h2>Step 3 - Register the Analyzer</h2>
+<p>Use the REST API to create the analyzer on your resource. In a terminal run:</p>
+<pre><code>$body = Get-Content -Raw analyzer.json
+$headers = @{ "Content-Type" = "application/json"; "Ocp-Apim-Subscription-Key" = $env:CONTENT_UNDERSTANDING_KEY }
+Invoke-RestMethod -Method Put `
+  -Uri "$env:CONTENT_UNDERSTANDING_ENDPOINT/models/invoice-analyzer?api-version=2024-12-01-preview" `
+  -Headers $headers -Body $body
+</code></pre>
+<p>A successful call returns the analyzer definition with an <code>id</code> and status <code>READY</code>. In this course's exercises you will do the equivalent work in Python, so let's build the full script now.</p>
+
+<h2>Step 4 - Write the Python Analyzer Script</h2>
+<div class="exercise">
+<h3>4.1 - Create the project folder</h3>
+<p>Create a folder named <code>ai103-lab159</code> and add a file called <code>analyze_invoice.py</code>.</p>
+
+<h3>4.2 - Paste the script</h3>
+<p>Paste the code below. It registers the analyzer if it does not exist, then sends an invoice for analysis and prints the extracted fields.</p>
+<pre><code>import json
+import os
+import requests
+
+ENDPOINT = os.environ["CONTENT_UNDERSTANDING_ENDPOINT"]
+KEY = os.environ["CONTENT_UNDERSTANDING_KEY"]
+API_VERSION = "2024-12-01-preview"
+MODEL_NAME = "invoice-analyzer"
+
+ANALYZER_DEFINITION = {
+    "contentType": "document",
+    "description": "Extracts key fields from one-page invoices",
+    "config": {"ocr": True, "language": "en", "layout": True},
+    "fields": {
+        "vendor": {"type": "string", "method": "extract",
+                   "description": "Company issuing the invoice"},
+        "invoice_number": {"type": "string", "method": "extract",
+                           "description": "Unique invoice identifier"},
+        "issue_date": {"type": "date", "method": "extract",
+                       "description": "Date the invoice was issued"},
+        "due_date": {"type": "date", "method": "extract",
+                     "description": "Payment due date"},
+        "total_amount": {"type": "number", "method": "extract",
+                         "description": "Grand total including tax"},
+    },
+}
+
+
+def ensure_analyzer():
+    url = f"{ENDPOINT}/models/{MODEL_NAME}?api-version={API_VERSION}"
+    response = requests.put(url, headers={
+        "Content-Type": "application/json",
+        "Ocp-Apim-Subscription-Key": KEY,
+    }, json=ANALYZER_DEFINITION)
+    response.raise_for_status()
+    print(f"Analyzer ready: {response.json().get('id')}")
+
+
+def analyze_document(file_path):
+    url = f"{ENDPOINT}/models/{MODEL_NAME}:analyze?api-version={API_VERSION}"
+    with open(file_path, "rb") as fh:
+        response = requests.post(url, headers={
+            "Ocp-Apim-Subscription-Key": KEY,
+        }, files={"file": fh})
+    response.raise_for_status()
+    return response.json()
+
+
+if __name__ == "__main__":
+    ensure_analyzer()
+    result = analyze_document("invoice.pdf")
+    document = result["content"]["documents"][0]
+    print(json.dumps(document["fields"], indent=2))
+</code></pre>
+
+<h3>4.3 - Run the script</h3>
+<p>Place your invoice file in the folder as <code>invoice.pdf</code> (or update the filename) and run:</p>
+<pre><code>python analyze_invoice.py
+</code></pre>
+</div>
+
+<h2>Understanding the Response</h2>
+<p>The analysis response mirrors the portal output. The part you will use most is the <code>fields</code> object inside the first document:</p>
+<pre><code>{
+  "invoice_number": {
+    "valueString": "INV-1042",
+    "confidence": 0.98,
+    "regions": [{ "pageNumber": 1, "polygon": [10, 20, 60, 20, 60, 40, 10, 40] }]
+  },
+  "total_amount": {
+    "valueNumber": 1249.75,
+    "confidence": 0.95,
+    "regions": [{ "pageNumber": 1, "polygon": [...] }]
+  }
+}
+</code></pre>
+<ul>
+<li><code>valueString</code>, <code>valueNumber</code>, or <code>valueDate</code> — the extracted value, whose shape depends on the field type.</li>
+<li><code>confidence</code> — how confident the model is about the extraction.</li>
+<li><code>regions</code> — the page and polygon where each value was found.</li>
+</ul>
+
+<div class="tip">
+<p>Add a quick guard to your pipeline: when a field's <code>confidence</code> is below a threshold such as <code>0.8</code>, send that document to a review queue instead of trusting the value.</p>
+</div>
+
+<h2>Error Handling Quick Reference</h2>
+<table>
+<tr><th>Error</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>401</code></td><td>Wrong or missing key</td><td>Re-check the environment variable and the resource key.</td></tr>
+<tr><td><code>404</code> on analyze</td><td>The analyzer name does not match</td><td>Use the exact <code>MODEL_NAME</code> you registered.</td></tr>
+<tr><td><code>415</code> unsupported media</td><td>Unsupported file format</td><td>Submit PDF, PNG, or JPG.</td></tr>
+<tr><td><code>400</code> invalid request</td><td>Malformed analyzer JSON or bad field type</td><td>Validate <code>analyzer.json</code> against the documented schema.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You registered an invoice analyzer through the REST API, submitted a document from Python, and read typed field values with confidence scores from the response. This is the same call pattern you will reuse for image analyzers in the coming labs, and the structured output you produced is exactly the input your future RAG index and agents will consume.</p>
+<nav>
+<a href="158-review-of-document-analysis-with-azure-content-understanding.html">&larr; Previous: Review of document analysis with Azure Content Understanding</a><a href="160-visual-understanding-with-image-analyzers.html">Next: Visual Understanding with Image Analyzers &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

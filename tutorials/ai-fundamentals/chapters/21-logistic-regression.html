@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 21: Logistic Regression | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 21</span>
+    <h1>Logistic Regression</h1>
+
+    <p>Despite its name, logistic regression is a classifier. It answers the question Chapter 20 left open: how do we output a probability for a category? The answer is to wrap linear regression in a squashing function so predictions stay between 0 and 1. This chapter builds the intuition, the metrics that judge classifiers, and the machinery to tune and deploy them.</p>
+
+    <h2>Logistic Regression In-Depth Math Intuition</h2>
+
+    <h3>The Sigmoid Function</h3>
+    <p>Start with the linear score <code>z = w·x + b</code>. It can range from negative to positive infinity, which is useless as a probability. The sigmoid (or logistic) function folds that entire line into the interval (0, 1):</p>
+    <p><code>sigmoid(z) = 1 / (1 + exp(-z))</code></p>
+    <ul>
+        <li>When <code>z</code> is large and positive, <code>exp(-z)</code> approaches 0 and the output approaches 1.</li>
+        <li>When <code>z</code> is large and negative, the denominator blows up and the output approaches 0.</li>
+        <li>When <code>z = 0</code>, the output is exactly 0.5 — the point of maximum uncertainty.</li>
+    </ul>
+    <p>The output <code>p = sigmoid(z)</code> is interpreted as the probability that the example belongs to the positive class.</p>
+
+    <h3>Log-Odds</h3>
+    <p>The name "logistic" comes from the <em>log-odds</em>. Rearranging the sigmoid:</p>
+    <p><code>z = log( p / (1 - p) )</code></p>
+    <p>The quantity <code>p / (1 - p)</code> is the <em>odds</em> — if <code>p = 0.75</code>, the odds are 3 to 1. The model is literally learning a linear function of the features that predicts the natural log of the odds. That is why the coefficients read like regression coefficients: increasing a feature by one unit multiplies the odds by <code>exp(wj)</code>. An odds ratio above 1 pushes the prediction toward class 1; below 1 pushes it toward class 0.</p>
+
+    <h3>The Decision Boundary</h3>
+    <p>To make a hard prediction, pick a threshold, normally 0.5: predict class 1 when <code>p &gt;= 0.5</code>, class 0 otherwise. Because <code>p = 0.5</code> corresponds to <code>z = 0</code>, the decision boundary in feature space is the hyperplane <code>w·x + b = 0</code> — exactly the geometry from Chapter 18. Points far on one side get near-certain probabilities; points near the boundary get near-0.5.</p>
+    <pre><code>import numpy as np
+
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
+
+w, b = np.array([1.0, 2.0]), -3.0
+p = sigmoid(np.dot([2.0, 1.0], w) + b)
+print(p)  # probability of positive class</code></pre>
+
+    <h2>Performance Metrics for Classification</h2>
+    <p>Accuracy alone can lie. When 95% of emails are ham, a model that always predicts ham is 95% "accurate" yet completely useless. That is why we count the four cells of a confusion matrix.</p>
+
+    <h3>The Confusion Matrix</h3>
+    <ul>
+        <li><strong>True Positive (TP):</strong> predicted positive, actually positive.</li>
+        <li><strong>True Negative (TN):</strong> predicted negative, actually negative.</li>
+        <li><strong>False Positive (FP):</strong> predicted positive, actually negative (a false alarm).</li>
+        <li><strong>False Negative (FN):</strong> predicted negative, actually positive (a miss).</li>
+    </ul>
+    <p>Everything else derives from these four counts.</p>
+
+    <h3>Accuracy, Precision, Recall, F1</h3>
+    <p><code>accuracy = (TP + TN) / total</code> — fraction correct overall. Good for balanced problems.</p>
+    <p><code>precision = TP / (TP + FP)</code> — of everything we flagged positive, how much was right? High precision means few false alarms.</p>
+    <p><code>recall = TP / (TP + FN)</code> — of all true positives, how many did we catch? High recall means few misses.</p>
+    <p><code>F1 = 2 * precision * recall / (precision + recall)</code> — the harmonic mean, a single number balancing the two.</p>
+    <p>Choose your metric by the cost of mistakes: fraud detection favors high recall (catch the fraud), legal spam filters favor high precision (never block a real email), and F1 gives a balanced score when both matter.</p>
+    <pre><code>from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+
+print(confusion_matrix(y_true, y_pred))
+print(precision_score(y_true, y_pred), recall_score(y_true, y_pred), f1_score(y_true, y_pred))</code></pre>
+
+    <h2>Logistic Regression One-vs-Rest (OVR)</h2>
+    <p>Logistic regression is natively binary. For <code>C</code> classes, the one-vs-rest strategy trains <code>C</code> binary models, each distinguishing "class k" against "everything else," then picks the class whose model is most confident. Scikit-learn wraps this automatically via <code>multi_class="ovr"</code> (the newer default for softmax-style is multinomial, but OVR remains the classic, well-understood option). OVR is simple, parallelizable, and a solid default for multiclass problems.</p>
+
+    <h2>Logistic Regression Implementation</h2>
+    <pre><code>from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.datasets import load_breast_cancer
+
+data = load_breast_cancer()
+X_train, X_test, y_train, y_test = train_test_split(
+    data.data, data.target, test_size=0.2, random_state=42)
+
+clf = LogisticRegression(max_iter=2000)
+clf.fit(X_train, y_train)
+print(clf.score(X_test, y_test))</code></pre>
+    <p>Note <code>max_iter</code>: logistic regression is trained by gradient descent, so you must let it converge. If you see a convergence warning, raise the iteration cap or scale the features.</p>
+
+    <h2>GridSearchCV Hyperparameter Search</h2>
+    <p>The most important tuning dials are the regularization strength <code>C</code> (inverse of alpha — smaller C means stronger regularization) and the penalty type. GridSearchCV tries every combination in a grid and reports the best cross-validated score:</p>
+    <pre><code>from sklearn.model_selection import GridSearchCV
+
+param_grid = {"C": [0.01, 0.1, 1.0, 10.0]}
+gs = GridSearchCV(LogisticRegression(max_iter=2000),
+                  param_grid, cv=5, scoring="f1")
+gs.fit(X_train, y_train)
+print(gs.best_params_, gs.best_score_)</code></pre>
+    <p>Grid search is thorough but explodes combinatorially as you add dimensions to the grid.</p>
+
+    <h2>RandomizedSearchCV</h2>
+    <p>When the search space grows, randomized search is more efficient. It samples a fixed number of parameter combinations from a distribution rather than exhausting a grid, giving most of the benefit of grid search at a fraction of the cost:</p>
+    <pre><code>from sklearn.model_selection import RandomizedSearchCV
+from scipy.stats import loguniform
+
+param_dist = {"C": loguniform(0.001, 100)}
+rs = RandomizedSearchCV(LogisticRegression(max_iter=2000),
+                        param_dist, n_iter=50, cv=5, random_state=42)
+rs.fit(X_train, y_train)
+print(rs.best_params_)</code></pre>
+    <p>Use randomized search when you have many hyperparameters or a large dataset; use grid search when the grid is small enough to enumerate.</p>
+
+    <h2>Logistic Regression on Imbalanced Datasets</h2>
+    <p>When one class dominates (99% legit transactions vs 1% fraud), a model can achieve 99% accuracy by predicting the majority class always. Countermeasures, in order of preference:</p>
+    <ul>
+        <li>Evaluate with precision/recall/F1 or ROC-AUC instead of accuracy.</li>
+        <li>Tell the algorithm the classes are not equal: pass <code>class_weight="balanced"</code> to up-weight the minority class.</li>
+        <li>Adjust the decision threshold downward (say, predict fraud when <code>p &gt;= 0.3</code>) to catch more minority cases.</li>
+        <li>Resample: oversample the minority with SMOTE or undersample the majority, then retrain.</li>
+    </ul>
+    <div class="note">
+        <strong>Threshold choice is a business decision, not a math one.</strong> Lowering the threshold raises recall and lowers precision. Where to land depends on whether a missed fraud or a blocked customer hurts more.
+    </div>
+
+    <h2>ROC Curves and AUC</h2>
+    <p>A Receiver Operating Characteristic (ROC) curve shows the trade-off between the true positive rate and the false positive rate as the decision threshold slides from 0 to 1. A perfect classifier produces an ROC curve that hugs the top-left corner; a random guess produces a diagonal line. The Area Under the Curve (AUC) summarizes the whole curve as a single number:</p>
+    <ul>
+        <li>AUC = 1.0 — perfect separation.</li>
+        <li>AUC = 0.5 — no better than a coin flip.</li>
+        <li>AUC = 0.8+ — strong discrimination for most real problems.</li>
+    </ul>
+    <pre><code>from sklearn.metrics import roc_curve, roc_auc_score
+
+prob = clf.predict_proba(X_test)[:, 1]
+fpr, tpr, _ = roc_curve(y_test, prob)
+print("AUC:", roc_auc_score(y_test, prob))</code></pre>
+    <p>AUC is threshold-independent, making it ideal for comparing models before you commit to a production threshold.</p>
+
+    <div class="info">
+        <strong>Why "regression"?</strong> Logistically speaking, the model is still learning a linear equation — it just maps the output through the sigmoid and interprets it as a probability. The name honors the lineage, not the problem type.
+    </div>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> On the breast cancer dataset, train a logistic regression and record accuracy, precision, recall, and F1 for thresholds 0.3, 0.5, and 0.7. Then plot the ROC curve and print the AUC. In a few sentences, explain why accuracy and AUC can tell different stories about the same model.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="20-regularized-regression.html">Prev: Polynomial &amp; Regularized Regression</a>
+        <a href="22-svm.html">Next: Support Vector Machines</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

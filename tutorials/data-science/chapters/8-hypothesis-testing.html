@@ -1,0 +1,118 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>8. Hypothesis Testing &amp; A/B Testing - Data Science Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>8. Hypothesis Testing &amp; A/B Testing</h1>
+<p class="tag">Chapter 8</p>
+
+<h2>From Question to Hypothesis</h2>
+<p>A hypothesis test answers: <em>"Is the difference I see in my sample real, or could it be chance?"</em> The machinery:</p>
+<ul>
+<li><strong>Null hypothesis (H₀):</strong> no effect — e.g., "the new checkout converts at the same rate as the old one."</li>
+<li><strong>Alternative hypothesis (H₁):</strong> there is an effect — "the new checkout converts at a different rate."</li>
+<li><strong>Test statistic:</strong> a number computed from the data whose distribution under H₀ is known.</li>
+<li><strong>p-value:</strong> the probability of seeing a statistic at least as extreme as yours, <em>if H₀ were true</em>.</li>
+</ul>
+<p>If the p-value is small (below your threshold, usually 0.05), you <strong>reject H₀</strong> — the data are unlikely under "no effect," so you act as if there is an effect.</p>
+
+<div class="warn">
+<strong>p-value myths:</strong> the p-value is <em>not</em> the probability that H₀ is true, and it is <em>not</em> the probability that you made a mistake. It is purely conditional on H₀. "Statistically significant" says nothing about practical importance — a tiny effect can be "significant" with a large sample.
+</div>
+
+<h2>Type I and Type II Errors</h2>
+<table>
+<tr><th></th><th>H₀ is true</th><th>H₀ is false</th></tr>
+<tr><td>You reject H₀</td><td>Type I error (false positive)</td><td>Correct decision</td></tr>
+<tr><td>You fail to reject</td><td>Correct decision</td><td>Type II error (false negative)</td></tr>
+</table>
+<ul>
+<li><strong>α</strong> = probability of Type I error (significance level, commonly 0.05).</li>
+<li><strong>β</strong> = probability of Type II error; <strong>power = 1 − β</strong>.</li>
+</ul>
+
+<h2>A t-test in Python</h2>
+<pre><code>from scipy import stats
+import numpy as np
+
+# Two independent samples
+new = np.random.normal(loc=3.2, scale=1.1, size=200)
+old = np.random.normal(loc=3.0, scale=1.1, size=200)
+
+t_stat, p_value = stats.ttest_ind(new, old, equal_var=False)
+print(f"t = {t_stat:.3f}, p = {p_value:.4f}")
+# p &lt; 0.05 -> reject H0: the means differ
+</code></pre>
+
+<h2>Which Test When</h2>
+<table>
+<tr><th>Question</th><th>Test</th></tr>
+<tr><td>Mean of one group vs a value</td><td>One-sample t-test</td></tr>
+<tr><td>Means of two independent groups</td><td>Independent t-test</td></tr>
+<tr><td>Paired observations (before/after)</td><td>Paired t-test</td></tr>
+<tr><td>Two means, non-normal data</td><td>Mann-Whitney U</td></tr>
+<tr><td>Three+ group means</td><td>ANOVA (then post-hoc)</td></tr>
+<tr><td>Association of two categoricals</td><td>Chi-square test of independence</td></tr>
+<tr><td>Correlation significance</td><td>Pearson/Spearman + its p-value</td></tr>
+</table>
+
+<h2>A/B Testing in Practice</h2>
+<p>An A/B test is just a hypothesis test run on a real system: randomly split users into a <strong>control</strong> (old version) and <strong>treatment</strong> (new version), measure a key metric, and compare.</p>
+<p>Design checklist:</p>
+<ol>
+<li><strong>Choose one primary metric</strong> (e.g., conversion rate). Pre-decide it before the test.</li>
+<li><strong>Randomize at the user level</strong> (not the session level — sessions are not independent).</li>
+<li><strong>Run a power analysis</strong> to size the experiment before starting.</li>
+<li><strong>Run to completion.</strong> Never stop early because results "look done" — early stopping inflates false positives.</li>
+<li><strong>Watch for peeking</strong> and repeated testing — every look uses up your error budget.</li>
+<li><strong>Check for interference</strong> between groups and novelty effects.</li>
+</ol>
+
+<pre><code># Power analysis to size an A/B test (conversion-rate example)
+from statsmodels.stats.power import TTestIndPower
+
+# Baseline 10% -> treatment 12%, alpha 0.05, power 0.8
+effect = abs(0.12 - 0.10) / np.sqrt(0.10 * 0.90)
+n = TTestIndPower().solve_power(effect_size=effect,
+                                alpha=0.05, power=0.8)
+print(f"per group ~{int(n)} users")
+</code></pre>
+
+<div class="note">
+<strong>Bootstrap as a robust alternative:</strong> when you doubt normality assumptions, you can bootstrap the difference of means and read the confidence interval directly — no formulas required:
+<pre><code>rng = np.random.default_rng(42)
+diffs = []
+for _ in range(2000):
+    s1 = rng.choice(new, size=len(new), replace=True)
+    s2 = rng.choice(old, size=len(old), replace=True)
+    diffs.append(s1.mean() - s2.mean())
+lo, hi = np.percentile(diffs, [2.5, 97.5])
+print(f"95% bootstrap CI of difference: ({lo:.3f}, {hi:.3f})")
+</code></pre>
+If the interval excludes zero, the difference is real.
+</div>
+
+<h2>Multiple Comparisons</h2>
+<p>If you test 20 hypotheses at α = 0.05, you expect about 1 false positive by chance. Corrections control this:</p>
+<ul>
+<li><strong>Bonferroni:</strong> divide α by the number of tests (simple, conservative).</li>
+<li><strong>Benjamini-Hochberg (FDR):</strong> controls the expected fraction of false discoveries — standard in modern practice.</li>
+</ul>
+
+<div class="exercise">
+<strong>Practice Task:</strong> In your EDA notebook you generated hypotheses. Now run the appropriate test for each: compare two groups with a t-test (or Mann-Whitney), check a categorical association with chi-square, and compute a bootstrap CI for the difference. State for each: the hypothesis, the p-value, whether you reject H₀, and a plain-language conclusion.
+</div>
+
+<nav>
+  <span></span>
+  <a href="../index.html">Back to Index</a>
+  <a href="9-sql-for-data-science.html">Next: SQL for Data Science &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

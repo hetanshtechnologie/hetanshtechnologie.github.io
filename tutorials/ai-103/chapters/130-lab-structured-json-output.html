@@ -1,0 +1,161 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>130. Lab - Structured JSON Output - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 130</span>
+<h1>Lab - Structured JSON Output</h1>
+<p>In the previous lab the model answered with free-form text that varied from run to run. In this lab you will force the same analysis into strict JSON using the chat API's JSON mode, then parse the result into Python objects. When you finish, entity and topic extraction will return a predictable schema that your application code can consume without string parsing.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>The <code>naive_prompt.py</code> file and environment from the previous lab.</li>
+<li>The <code>json</code> module (part of the standard library) and <code>openai</code> installed.</li>
+</ul>
+
+<h2>Step 1: Turn On JSON Mode</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Request valid JSON</h3>
+<p>Create <code>json_output.py</code>:</p>
+<pre><code>import json
+import os
+
+from dotenv import load_dotenv
+from openai import AzureOpenAI
+
+load_dotenv()
+
+client = AzureOpenAI(
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_key=os.getenv("AZURE_OPENAI_KEY"),
+    api_version="2024-06-01",
+)
+
+DEPLOYMENT = "YOUR_DEPLOYMENT_NAME"
+
+document = (
+    "Acme Robotics shipped its new inspection drone to Frankfurt on "
+    "March 12. CEO Dana Whitfield announced the launch at the plant "
+    "near Berlin, with a retail price of 2,400 euros."
+)
+
+response = client.chat.completions.create(
+    model=DEPLOYMENT,
+    response_format={"type": "json_object"},
+    messages=[
+        {
+            "role": "system",
+            "content": (
+                "You are a text analysis assistant. Always respond with "
+                "valid JSON, no prose around it."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Extract the entities from this text. Return a JSON object "
+                "with an 'entities' key holding a list of objects with "
+                "'name' and 'type' fields.\n\n" + document
+            ),
+        },
+    ],
+)
+
+content = response.choices[0].message.content
+print(content)
+data = json.loads(content)
+print(type(data))
+print(data["entities"])</code></pre>
+<ol>
+<li>Run the script. The printed message should be a JSON object with an <code>entities</code> list.</li>
+<li>The final lines call <code>json.loads</code> and confirm the result is a real Python <code>dict</code> — proof your code can walk it like any other data.</li>
+</ol>
+</div>
+
+<div class="warn">
+<p>JSON mode guarantees syntactically valid JSON, but it does not guarantee your schema. The model decides the exact key names and structure, so the instruction that specifies the schema is just as important as the JSON mode flag. If you need a hard contract, describe the schema in detail in the prompt.</p>
+</div>
+
+<h2>Step 2: Add Topics to the Same Object</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Combine entities and topics in one response</h3>
+<p>Extend the script with a second analysis pass that returns both entities and topics in a single object:</p>
+<pre><code>response2 = client.chat.completions.create(
+    model=DEPLOYMENT,
+    response_format={"type": "json_object"},
+    messages=[
+        {
+            "role": "system",
+            "content": (
+                "You analyze product reviews. Respond only in JSON."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Analyze this review and return a JSON object with two "
+                "keys: 'entities' (list of {name, type}) and 'topics' "
+                "(list of short strings).\n\n"
+                "The camera arrived late and the autofocus hunts in low "
+                "light, but Acme support replaced the lens unit quickly."
+            ),
+        },
+    ],
+)
+
+data2 = json.loads(response2.choices[0].message.content)
+print(json.dumps(data2, indent=2))</code></pre>
+<ol>
+<li>Run the script and inspect the pretty-printed JSON.</li>
+<li>Check that both keys exist and that <code>entities</code> holds objects while <code>topics</code> holds plain strings.</li>
+<li>Add a malformed instruction — for example, ask for the schema with inconsistent field names in the system and user messages — and see how the model reconciles or ignores the conflict. This demonstrates why the schema instruction must live in one authoritative place.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>Combining entities and topics in a single call saves tokens and latency versus two separate calls. The pattern generalizes: any analysis you can describe can be bundled into one JSON response.</p>
+</div>
+
+<h2>Step 3: Write a Small Schema Validator</h2>
+<p>A parseable format is only half the battle — the fields must actually be present. A tiny validator turns schema drift into a clear error instead of a silent <code>KeyError</code>:</p>
+<pre><code>def require(data: dict, key: str, kind: type) -&gt; list:
+    value = data.get(key)
+    if not isinstance(value, list) or not all(isinstance(i, kind) for i in value):
+        raise ValueError(f"Field '{key}' must be a list of {kind.__name__}.")
+    return value
+
+entities = require(data2, "entities", dict)
+topics = require(data2, "topics", str)
+print(f"Parsed {len(entities)} entities and {len(topics)} topics.")</code></pre>
+<ol>
+<li>Append the validator to <code>json_output.py</code> and run it.</li>
+<li>Temporarily change one key name in the prompt (for example, <code>topic</code> instead of <code>topics</code>) and rerun. The validator should raise a descriptive error instead of crashing with an obscure <code>KeyError</code>.</li>
+</ol>
+
+<div class="tip">
+<p>In production, prefer a library such as Pydantic for validation. The hand-rolled validator above is intentionally small so you can see the principle: treat model output as untrusted data and check it before use.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You switched a chat model into JSON mode, asked it to return entities and topics under a fixed schema, parsed the output with <code>json.loads</code>, and validated the structure before use. Structured output turns a chat model from a text generator into a reliable data-transformation component. In the next lab you will apply the same prompting approach to sentiment and tone.</p>
+<nav>
+<a href="129-lab-naive-prompting-for-entities-and-topics.html">&larr; Previous: Lab - Naive Prompting for Entities and Topics</a><a href="131-lab-detecting-sentiment-and-tone.html">Next: Lab - Detecting Sentiment and Tone &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

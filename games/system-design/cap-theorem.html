@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CAP Theorem Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:900px;margin:24px auto;padding:0 16px}
+.cap-triangle{width:300px;height:260px;margin:20px auto;position:relative}
+.cap-vertex{position:absolute;width:70px;height:70px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;border:3px solid;transition:all .3s;text-align:center}
+.cap-vertex.c{top:0;left:50%;transform:translateX(-50%);border-color:#4ade80;color:#4ade80}
+.cap-vertex.a{bottom:0;left:0;border-color:#38bdf8;color:#38bdf8}
+.cap-vertex.p{bottom:0;right:0;border-color:#a78bfa;color:#a78bfa}
+.cap-vertex.chosen{box-shadow:0 0 20px;transform:translateX(-50%) scale(1.1)}
+.cap-vertex.a.chosen,.cap-vertex.p.chosen{transform:scale(1.1)}
+.cap-edge{position:absolute;height:2px;transform-origin:left center}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px;line-height:1.5}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:12px 24px;color:#e2e8f0;cursor:pointer;font-size:14px;font-weight:600;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.choice-btn.cp{border-color:#a78bfa;background:rgba(167,139,250,.1)}
+.choice-btn.ap{border-color:#38bdf8;background:rgba(56,189,248,.1)}
+.choice-btn.ca{border-color:#4ade80;background:rgba(74,222,128,.1)}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.comparison{display:flex;gap:16px;justify-content:center;margin:12px 0;flex-wrap:wrap}
+.comp-card{background:#334155;border-radius:8px;padding:10px 16px;font-size:12px;text-align:center;border:2px solid transparent}
+.comp-card.selected{border-color:#38bdf8}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>CAP Theorem Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/15</div>
+<div class="hud-item"><span id="picks">0</span>Correct</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="cap-triangle">
+<div class="cap-vertex c" id="v-c">Consistency</div>
+<div class="cap-vertex a" id="v-a">Availability</div>
+<div class="cap-vertex p" id="v-p">Partition Tolerance</div>
+</div>
+<div class="scenario-card">
+<h3 id="scenario-title">Choose Your System</h3>
+<p id="scenario-desc"></p>
+</div>
+<div class="comparison" id="comparison"></div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>CAP Master!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=15,correct=0,answered=false;
+const scenarios=[
+{desc:"Online banking system where every transaction must be consistent. Network partitions may occur.",correct:"CP",reason:"Banking requires strong consistency. Better to reject requests than show wrong balances.",examples:["HBase","MongoDB (strong mode)","Google Spanner"]},
+{desc:"Social media feed where showing stale data is acceptable but downtime is not.",correct:"AP",reason:"Social media prioritizes availability. Showing slightly old posts is better than errors.",examples:["Cassandra","DynamoDB","CouchDB"]},
+{desc:"DNS system where availability is critical. Updates may propagate slowly.",correct:"AP",reason:"DNS must always resolve. Stale records are better than failed lookups.",examples:["DNS","Cassandra","Riak"]},
+{desc:"Stock trading system where price must be accurate. Reject if unsure.",correct:"CP",reason:"Financial data must be consistent. Wrong prices could cost millions.",examples:["MongoDB","etcd","ZooKeeper"]},
+{desc:"Chat application where messages should always be delivered.",correct:"AP",reason:"Users need to chat even during partitions. Messages sync later.",examples:["WhatsApp","Slack","Discord"]},
+{desc:"Inventory management for airline seats. No double-booking allowed.",correct:"CP",reason:"Overbooking is unacceptable. Reject booking if consistency can't be guaranteed.",examples:["Spanner","CockroachDB"]},
+{desc:"Content delivery network. Show cached content even if origin is down.",correct:"AP",reason:"CDN should always serve cached content. Freshness comes later.",examples:["CloudFront","Akamai"]},
+{desc:"Healthcare records system. Data must be 100% accurate.",correct:"CP",reason:"Patient data errors are life-threatening. Consistency is non-negotiable.",examples:["PostgreSQL","Oracle"]},
+{desc:"IoT sensor network. Millions of devices reporting. Can't lose data.",correct:"AP",reason:"Sensor data is time-series. Availability for writes is critical.",examples:["InfluxDB","TimescaleDB"]},
+{desc:"E-commerce product catalog. Show products even if inventory count is stale.",correct:"AP",reason:"Better to show products with approximate stock than show nothing.",examples:["Elasticsearch","Cassandra"]},
+{desc:"Distributed lock service. Lock must be exclusive.",correct:"CP",reason:"Lock service must be consistent. Two clients can't hold the same lock.",examples:["etcd","ZooKeeper"]},
+{desc:"User session store. Sessions should always be available.",correct:"AP",reason:"Users shouldn't see errors if their session cache is stale.",examples:["Redis Cluster","Memcached"]},
+{desc:"Payment processing. Must not lose or duplicate transactions.",correct:"CP",reason:"Financial integrity requires consistency. Duplicate payments are unacceptable.",examples:["PostgreSQL","Spanner"]},
+{desc:"Analytics dashboard. Show approximate real-time data.",correct:"AP",reason:"Analytics can tolerate eventual consistency for availability.",examples:["ClickHouse","Druid"]},
+{desc:"Configuration service for microservices. All instances need same config.",correct:"CP",reason:"Inconsistent config across services could cause cascading failures.",examples:["etcd","Consul","ZooKeeper"]}
+];
+function init(){score=0;round=0;correct=0;startRound();}
+function highlightCAP(type){
+document.querySelectorAll('.cap-vertex').forEach(v=>v.classList.remove('chosen'));
+if(type==='CP'){document.getElementById('v-c').classList.add('chosen');document.getElementById('v-p').classList.add('chosen');}
+else if(type==='AP'){document.getElementById('v-a').classList.add('chosen');document.getElementById('v-p').classList.add('chosen');}
+else{document.getElementById('v-c').classList.add('chosen');document.getElementById('v-a').classList.add('chosen');}
+}
+function startRound(){
+answered=false;
+const s=scenarios[round%scenarios.length];
+document.getElementById('scenario-title').textContent=`Scenario ${round+1}`;
+document.getElementById('scenario-desc').textContent=s.desc;
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+document.querySelectorAll('.cap-vertex').forEach(v=>v.classList.remove('chosen'));
+document.getElementById('choices').innerHTML=['CP (Consistency + Partition Tolerance)','AP (Availability + Partition Tolerance)','CA (Consistency + Availability)'].map(c=>{
+const type=c.substring(0,2);
+return`<button class="choice-btn ${type.toLowerCase()}" onclick="answer('${type}','${s.correct}','${s.reason.replace(/'/g,"\\'")}','${s.examples.join(',')}')">${c}</button>`;
+}).join('');
+}
+function answer(chosen,correct,reason,examples){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect){score+=10;correct++;}
+else{score=Math.max(0,score-3);}
+highlightCAP(chosen);
+document.querySelectorAll('.choice-btn').forEach(b=>{
+const btnType=b.textContent.substring(0,2);
+if(btnType===correct)b.classList.add('correct');
+else if(btnType===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=`${reason}\nExamples: ${examples}`;
+document.getElementById('score').textContent=score;
+document.getElementById('picks').textContent=correct;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;document.getElementById('picks').textContent=0;
+}
+init();
+</script>
+</body>
+</html>

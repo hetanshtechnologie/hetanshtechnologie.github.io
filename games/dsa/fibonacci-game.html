@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fibonacci Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:900px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.3rem}
+.fib-display{display:flex;gap:16px;justify-content:center;margin-bottom:20px;flex-wrap:wrap}
+.fib-box{background:#1e293b;border-radius:12px;padding:16px 24px;text-align:center;min-width:120px;border:2px solid #334155}
+.fib-box h3{color:#94a3b8;font-size:.8rem;margin-bottom:6px}
+.fib-box .val{color:#38bdf8;font-size:1.5rem;font-weight:700}
+.tree-area{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px;min-height:250px;overflow:auto}
+.call-tree{display:flex;flex-direction:column;align-items:center;gap:4px}
+.call-node{padding:6px 14px;border-radius:8px;border:2px solid #475569;font-weight:600;font-size:.85rem;transition:all .3s}
+.call-node.active{border-color:#facc15;background:#422006;color:#facc15}
+.call-node.computed{border-color:#22c55e;background:#14532d;color:#4ade80}
+.call-node.duplicate{border-color:#ef4444;background:#7f1d1d;color:#fca5a5}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.choice-btn{display:block;width:100%;padding:12px 20px;margin-bottom:8px;background:#334155;color:#e2e8f0;border:2px solid #475569;border-radius:8px;font-size:1rem;cursor:pointer;text-align:left;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.choice-btn.correct{border-color:#22c55e;background:#14532d}
+.choice-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:12px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.comp-box{background:#1e293b;border-radius:12px;padding:16px}
+.comp-box h3{color:#94a3b8;margin-bottom:8px;font-size:.9rem}
+.comp-val{font-size:1.2rem;font-weight:700}
+.comp-recursive{color:#ef4444}
+.comp-iterative{color:#22c55e}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&#8592; Home</a><h1>Fibonacci Game</h1></div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Round: <span class="score-val" id="round">1</span></span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="fib-display">
+    <div class="fib-box"><h3>n</h3><div class="val" id="nVal">-</div></div>
+    <div class="fib-box"><h3>fib(n)</h3><div class="val" id="fibVal">-</div></div>
+    <div class="fib-box"><h3>Recursive Calls</h3><div class="val" id="recCalls">-</div></div>
+    <div class="fib-box"><h3>Iterative Steps</h3><div class="val" id="iterSteps">-</div></div>
+  </div>
+  <div class="comparison">
+    <div class="comp-box"><h3>Recursive</h3><div class="comp-val comp-recursive" id="recBigO">-</div></div>
+    <div class="comp-box"><h3>Iterative</h3><div class="comp-val comp-iterative" id="iterBigO">-</div></div>
+  </div>
+  <div class="tree-area" id="treeArea"></div>
+  <div class="instructions"><h2>How to Play</h2><p>fib(0)=0, fib(1)=1, fib(n)=fib(n-1)+fib(n-2). Predict the value, count recursive calls, or compare approaches!</p></div>
+  <div id="messageArea"></div>
+  <div id="choicesArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startRound()">Start Round</button>
+    <button class="btn btn-secondary" id="resetBtn" onclick="resetAll()" style="display:none">New Round</button>
+  </div>
+</div>
+<script>
+let n=0,fibVal=0,recCallCount=0,score=0,round=1,streak=0,phase='value';
+
+function fib(n){if(n<=1)return n;return fib(n-1)+fib(n-2)}
+function fibIter(n){if(n<=1)return n;let a=0,b=1;for(let i=2;i<=n;i++){[a,b]=[b,a+b]}return b}
+function countRecCalls(n){if(n<=1)return 1;return 1+countRecCalls(n-1)+countRecCalls(n-2)}
+
+function renderCallTree(){
+  const el=document.getElementById('treeArea');
+  const calls=fib(n);
+  el.innerHTML=`<div class="call-tree"><div class="call-node active">fib(${n})</div><div style="color:#475569">\u2193 \u2193</div><div style="display:flex;gap:40px"><div class="call-node">fib(${n-1})</div><div class="call-node">fib(${n-2})</div></div></div>`;
+}
+
+function updateScore(ok){if(ok){score+=10+streak*5;streak++}else{streak=0}document.getElementById('score').textContent=score;document.getElementById('streak').textContent=streak}
+
+function startRound(){
+  n=Math.floor(Math.random()*8)+2;
+  fibVal=fib(n);recCallCount=countRecCalls(n);
+  phase='value';
+  document.getElementById('nVal').textContent=n;
+  document.getElementById('fibVal').textContent='?';
+  document.getElementById('recCalls').textContent='?';
+  document.getElementById('iterSteps').textContent=n-1;
+  document.getElementById('recBigO').textContent='O(2^n)';
+  document.getElementById('iterBigO').textContent='O(n)';
+  renderCallTree();
+  showQ();
+  document.getElementById('startBtn').style.display='none';
+  document.getElementById('resetBtn').style.display='';
+  document.getElementById('round').textContent=round;
+  document.getElementById('messageArea').innerHTML='';
+}
+
+function showQ(){
+  let choices=[];
+  if(phase==='value'){
+    const wrong1=fibVal+Math.floor(Math.random()*5)+1;
+    const wrong2=fibVal-Math.floor(Math.random()*3);
+    choices=[
+      {text:`fib(${n}) = ${fibVal}`,correct:true},
+      {text:`fib(${n}) = ${wrong1}`,correct:false},
+      {text:`fib(${n}) = ${Math.max(0,wrong2)}`,correct:false}
+    ];
+  }else if(phase==='calls'){
+    choices=[
+      {text:`Recursive calls: ${recCallCount}`,correct:true},
+      {text:`Recursive calls: ${n*2}`,correct:false},
+      {text:`Recursive calls: ${n+2}`,correct:false},
+      {text:`Recursive calls: ${recCallCount-2}`,correct:false}
+    ];
+  }else{
+    choices=[
+      {text:`Recursive: O(2^n), Iterative: O(n)`,correct:true},
+      {text:`Recursive: O(n), Iterative: O(n)`,correct:false},
+      {text:`Recursive: O(n^2), Iterative: O(n)`,correct:false},
+      {text:`Both are O(n)`,correct:false}
+    ];
+  }
+  choices.sort(()=>Math.random()-.5);
+  let prompt='';
+  if(phase==='value')prompt=`What is fib(${n})?`;
+  else if(phase==='calls')prompt=`How many recursive calls to compute fib(${n})?`;
+  else prompt='What are the time complexities?';
+  let html=`<p style="margin-bottom:8px;color:#94a3b8">${prompt}</p>`;
+  choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answer(${c.correct},this)">${c.text}</button>`});
+  document.getElementById('choicesArea').innerHTML=html;
+}
+
+function answer(ok,el){
+  document.querySelectorAll('.choice-btn').forEach(b=>b.disabled=true);
+  el.classList.add(ok?'correct':'wrong');
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Correct! +'+(10+streak*5)+' points':'Wrong!'}</div>`;
+  updateScore(ok);
+  setTimeout(()=>{
+    if(phase==='value'){
+      document.getElementById('fibVal').textContent=fibVal;
+      phase='calls';
+    }else if(phase==='calls'){
+      document.getElementById('recCalls').textContent=recCallCount;
+      phase='complexity';
+    }else{
+      round++;document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Next Round';
+      document.getElementById('resetBtn').style.display='none';
+      document.getElementById('choicesArea').innerHTML='';return;
+    }
+    showQ();
+  },700);
+}
+
+function resetAll(){
+  document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Start Round';
+  document.getElementById('resetBtn').style.display='none';
+  document.getElementById('choicesArea').innerHTML='';document.getElementById('messageArea').innerHTML='';
+  document.getElementById('treeArea').innerHTML='';
+  ['nVal','fibVal','recCalls','iterSteps','recBigO','iterBigO'].forEach(id=>document.getElementById(id).textContent='-');
+}
+</script>
+</body>
+</html>

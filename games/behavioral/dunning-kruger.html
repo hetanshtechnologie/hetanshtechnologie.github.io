@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dunning-Kruger Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;border-bottom:1px solid #334155}
+.topbar a{color:#60a5fa;text-decoration:none;font-size:14px}
+.topbar h1{margin-left:16px;font-size:18px;color:#e2e8f0}
+.container{max-width:760px;margin:0 auto;padding:24px}
+.stats{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.stat{background:#1e293b;padding:12px 20px;border-radius:10px;flex:1;min-width:100px;text-align:center}
+.stat .label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px}
+.stat .value{font-size:24px;font-weight:700;color:#60a5fa;margin-top:4px}
+.card{background:#1e293b;border-radius:12px;padding:28px;margin-bottom:20px;border:1px solid #334155}
+.card h2{font-size:16px;color:#94a3b8;margin-bottom:8px;font-weight:500}
+.scenario{font-size:17px;line-height:1.7;margin-bottom:20px;color:#e2e8f0}
+.options{display:flex;flex-direction:column;gap:10px}
+.option{background:#0f172a;border:2px solid #334155;border-radius:10px;padding:14px 18px;cursor:pointer;transition:all .2s;font-size:15px;text-align:left;color:#e2e8f0}
+.option:hover{border-color:#60a5fa;background:#1a2744}
+.option.correct{border-color:#22c55e;background:#052e16;color:#86efac}
+.option.wrong{border-color:#ef4444;background:#450a0a;color:#fca5a5}
+.option.disabled{pointer-events:none}
+.explanation{margin-top:16px;padding:16px;background:#0f172a;border-radius:8px;border-left:4px solid #60a5fa;font-size:14px;line-height:1.6;color:#cbd5e1;display:none}
+.explanation.show{display:block}
+.btn{background:#3b82f6;color:#fff;border:none;padding:12px 28px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;transition:background .2s}
+.btn:hover{background:#2563eb}
+.btn-row{margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.game-over{text-align:center;padding:40px 20px}
+.game-over h2{font-size:28px;margin-bottom:12px;color:#60a5fa}
+.game-over p{font-size:16px;color:#94a3b8;margin-bottom:24px}
+.progress-bar{width:100%;height:6px;background:#334155;border-radius:3px;margin-bottom:24px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:3px;transition:width .3s}
+.hidden{display:none}
+.dk-curve{text-align:center;padding:20px;margin:16px 0;background:#0f172a;border-radius:12px;border:1px solid #334155}
+.dk-chart{display:flex;align-items:flex-end;justify-content:center;gap:4px;height:120px;padding:8px 0}
+.dk-bar{width:36px;border-radius:4px 4px 0 0;transition:height .3s}
+.dk-labels{display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;margin-top:8px}
+.dk-title{font-size:12px;color:#60a5fa;margin-top:12px;font-weight:600}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&larr; Back to Games</a><h1>Dunning-Kruger Effect</h1></div>
+<div class="container">
+<div class="stats">
+<div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
+<div class="stat"><div class="label">Level</div><div class="value" id="level">1</div></div>
+<div class="stat"><div class="label">Streak</div><div class="value" id="streak">0</div></div>
+<div class="stat"><div class="label">Question</div><div class="value" id="qnum">1/10</div></div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+<div id="game-area"></div>
+</div>
+<script>
+const qs=[
+{q:"<div class='dk-curve'><div class='dk-chart'><div class='dk-bar' style='height:100%;background:#ef4444'></div><div class='dk-bar' style='height:20%;background:#f59e0b'></div><div class='dk-bar' style='height:10%;background:#3b82f6'></div><div class='dk-bar' style='height:40%;background:#22c55e'></div><div class='dk-bar' style='height:70%;background:#22c55e'></div></div><div class='dk-labels'><span>Novice</span><span>Beginner</span><span>Intermediate</span><span>Advanced</span><span>Expert</span></div><div class='dk-title'>Dunning-Kruger Confidence Curve</div></div>The Dunning-Kruger effect describes:",options:["Smart people are always confident","People with low ability overestimate competence; experts underestimate theirs","Intelligence is normally distributed","Confidence correlates linearly with skill"],answer:1,explanation:"Dunning-Kruger (1999): Low-skill individuals lack the metacognitive ability to recognize their incompetence, leading to overconfidence. High-skill individuals underestimate their relative ability."},
+{q:"After reading 3 articles about climate change, a person claims to know more than climate scientists. This is:",options:["Informed opinion","Peak of Mount Stupid — early knowledge creates maximum overconfidence","Scientific literacy","Healthy skepticism"],answer:1,explanation:"'Peak of Mount Stupid': A little knowledge creates maximum confidence. The person doesn't know enough to recognize what they don't know. More knowledge would actually decrease confidence."},
+{q:"An experienced engineer downplays their expertise, saying 'I still have so much to learn.' This is:",options:["False modesty","Valley of Despair / Impostor Syndrome — experts underestimate their competence","Lack of confidence","Honest assessment"],answer:1,explanation:"Expert Underestimation: As competence grows, awareness of complexity grows faster. Experts know how much they don't know, leading to more modest self-assessments."},
+{q:"A student who scored 20% on a test estimates they scored 70%. The actual top scorer estimates 60%. This classic finding demonstrates:",options:["Grading error","Dunning-Kruger — low performers dramatically overestimate, high performers underestimate","Student laziness","Teacher bias"],answer:1,explanation:"The original Dunning-Kruger study: Bottom performers estimated themselves at 62nd percentile (actual: 12th). Top performers estimated 75th (actual: 86th). The gap is dramatic."},
+{q:"A新手 programmer thinks they can build Facebook in a weekend. An experienced developer says it would take years. Who shows Dunning-Kruger?",options:["The experienced developer","The beginner — overestimating ability due to lack of awareness","Neither","Both equally"],answer:1,explanation:"The beginner's overconfidence stems from not knowing the complexity of what they're attempting. They lack the knowledge to even comprehend the task's difficulty."},
+{q:"To combat Dunning-Kruger in your own thinking, the best strategy is:",options:["Be more confident","Seek honest feedback, compare yourself with experts, and practice metacognition","Avoid learning new things","Trust your first impression"],answer:1,explanation:"Metacognition: Thinking about your own thinking. Seeking feedback, comparing with experts, and deliberately testing your abilities counteract the overconfidence of low competence."},
+{q:"Why do experts sometimes struggle to teach beginners?",options:["Experts are arrogant","Expert blind spot — experts can't remember what it's like to not know something","Beginners are lazy","Teaching is hard"],answer:1,explanation:"Expert Blind Spot: Experts have automated so much knowledge that they can't reconstruct the learning path. They skip steps they consider 'obvious' that are actually confusing for beginners."},
+{q:"A person who watched a few YouTube videos about economics debates an economics professor and believes they're equally knowledgeable. This is:",options:["Good debate","Dunning-Kruger — shallow knowledge creates false sense of equal expertise","The professor is wrong","YouTube is educational"],answer:1,explanation:"Illusory Expertise: Consuming content about a topic doesn't create expertise. The person doesn't know enough to evaluate the depth of their knowledge vs the professor's."},
+{q:"Research shows that the top 10% of performers tend to:",options:["Boast about their skills","Underestimate their abilities relative to others","Be the most confident","Ignore feedback"],answer:1,explanation:"High performers consistently underestimate their relative ability. They assume what's easy for them must be easy for everyone, not realizing their skills are exceptional."},
+{q:"A new manager who's been in the role for 2 months makes sweeping changes, confident they know better than 20-year veterans. This is:",options:["Bold leadership","Dunning-Kruger — insufficient experience to recognize the value of existing systems","Innovation","Management skill"],answer:1,explanation:"Novice Manager Overconfidence: Without enough experience to understand why things are done a certain way, new managers often make changes that reveal their lack of contextual knowledge."},
+{q:"The Dunning-Kruger effect is named after psychologists who found that improving skills in one area:",options:["Makes people more humble automatically","Doesn't automatically improve self-assessment in other areas","Increases confidence in everything","Has no effect on confidence"],answer:1,explanation:"Key finding: Skills don't transfer metacognitive ability. Being good at one thing doesn't make you better at evaluating your abilities in other things."},
+{q:"Why is Dunning-Kruger particularly dangerous in the age of Google?",options:["Google is unreliable","Access to information creates illusion of expertise — reading ≠ understanding","Google is biased","Search engines are bad"],answer:1,explanation:"Information vs Knowledge: Google provides information, but expertise requires deep understanding, practice, and context. Easy access to facts creates an illusion of equivalent knowledge."},
+{q:"A chef of 30 years says 'I'm still learning new techniques every day.' This reflects:",options:["Lack of skill","Growth Mindset combined with expert awareness of complexity","Uncertainty","Teaching humility"],answer:1,explanation:"Expert Growth Mindset: True expertise involves recognizing the vastness of a field and one's relative position within it. Lifelong learning reflects awareness, not inadequacy."},
+{q:"When someone confidently claims 'I could do that job easily' about a field they have no experience in, the most likely explanation is:",options:["They're a natural talent","Dunning-Kruger — they don't know enough to understand the difficulty","They have hidden skills","The job is actually easy"],answer:1,explanation:"Unconscious Incompetence: Without experience, the person can't assess the complexity. What looks simple from outside requires deep knowledge to execute well."},
+{q:"Research shows that training in critical thinking skills:",options:["Increases overconfidence","Helps people recognize the limits of their own knowledge","Makes people more humble without increasing skill","Has no effect on self-assessment"],answer:1,explanation:"Metacognitive Training: Critical thinking and self-assessment training help people calibrate their confidence more accurately. Knowing how to evaluate your own knowledge reduces Dunning-Kruger."},
+{q:"A student who earned an A on one math test starts tutoring others, giving incorrect explanations. This is:",options:["Good peer teaching","Dunning-Kruger — one success creates false universal confidence","Helpful behavior","Mathematical ability"],answer:1,explanation:"One Success Overgeneralization: A single achievement doesn't create expertise. The student lacks the deep understanding needed to teach accurately, but their confidence outpaces their competence."},
+{q:"The Dunning-Kruger effect suggests that humility in experts comes from:",options:["Low self-esteem","Knowing enough to realize how much they don't know","Cultural conditioning","False modesty"],answer:1,explanation:"Knowledge-aware Humility: True expertise reveals the vastness of what remains unknown. This isn't false modesty — it's an accurate assessment of one's position in a complex field."},
+{q:"If you suspect you might be at the 'Peak of Mount Stupid,' what's the best first step?",options:["Double down on your confidence","Deliberately test your knowledge against experts or standardized assessments","Ignore the feeling","Teach others to validate yourself"],answer:1,explanation:"Reality Testing: Comparing your self-assessment against objective measures (expert feedback, tests, peer comparison) is the most reliable way to calibrate confidence."},
+{q:"Research on the Dunning-Kruger effect has been replicated across:",options:["Only academic settings","Cultures, languages, domains (logic, humor, math, chess), and demographics worldwide","Only Western cultures","Only in laboratory conditions"],answer:1,explanation:"Universal Effect: Dunning-Kruger has been replicated across cultures, languages, and domains. It's a fundamental feature of human metacognition, not a cultural artifact."},
+{q:"The ultimate lesson of Dunning-Kruger is:",options:["Always be humble","Know what you know and what you don't — accurate self-assessment is a skill to develop","Never be confident","Expertise is impossible"],answer:1,explanation:"Accurate Self-Assessment: The goal isn't permanent doubt — it's calibrated confidence. Knowing your strengths AND weaknesses enables better decisions, learning, and collaboration."}
+];
+let state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:[]};
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function getQ(){return shuffle([...qs]).slice(0,10)}
+function updateStats(){document.getElementById('score').textContent=state.score;document.getElementById('level').textContent=state.level;document.getElementById('streak').textContent=state.streak;document.getElementById('qnum').textContent=`${state.q+1}/${state.questions.length}`;document.getElementById('progress').style.width=`${((state.q)/state.questions.length)*100}%`}
+function renderQ(){if(state.q>=state.questions.length){renderOver();return}const q=state.questions[state.q];state.answered=false;document.getElementById('game-area').innerHTML=`<div class="card"><h2>Dunning-Kruger Effect</h2><div class="scenario">${q.q}</div><div class="options" id="options"></div><div class="explanation" id="explanation"></div><div class="btn-row"><button class="btn hidden" id="nextBtn" onclick="nextQ()">Next →</button></div></div>`;const opts=document.getElementById('options');q.options.forEach((o,i)=>{const b=document.createElement('button');b.className='option';b.textContent=o;b.onclick=()=>pick(i,b);opts.appendChild(b)});updateStats()}
+function pick(i,btn){if(state.answered)return;state.answered=true;const q=state.questions[state.q];document.querySelectorAll('.option').forEach(b=>b.classList.add('disabled'));if(i===q.answer){btn.classList.add('correct');state.score+=10+state.streak*5;state.streak++;if(state.streak>state.maxStreak)state.maxStreak=state.streak;if(state.streak>=3)state.level=Math.floor(state.streak/3)+1}else{btn.classList.add('wrong');document.querySelectorAll('.option')[q.answer].classList.add('correct');state.streak=0}document.getElementById('explanation').textContent=q.explanation;document.getElementById('explanation').classList.add('show');document.getElementById('nextBtn').classList.remove('hidden');updateStats()}
+function nextQ(){state.q++;renderQ()}
+function renderOver(){const g=state.maxStreak>=8?'Metacognition Master!':state.maxStreak>=5?'Self-Aware Learner':state.maxStreak>=3?'Growing Awareness':'Keep Learning';document.getElementById('game-area').innerHTML=`<div class="card game-over"><h2>Dunning-Kruger Complete!</h2><p>Score: <strong>${state.score}</strong> | Max Streak: <strong>${state.maxStreak}</strong></p><p style="font-size:20px;color:#60a5fa;margin-bottom:24px">${g}</p><div class="btn-row"><button class="btn" onclick="resetGame()">Play Again</button></div></div>`;document.getElementById('progress').style.width='100%'}
+function resetGame(){state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:getQ()};renderQ()}
+state.questions=getQ();renderQ();
+</script>
+</body>
+</html>

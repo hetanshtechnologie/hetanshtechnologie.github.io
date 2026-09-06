@@ -1,0 +1,168 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>132. Lab - Translating Text - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 132</span>
+<h1>Lab - Translating Text</h1>
+<p>Translation is the transformation task in the text-analysis family. Because chat models are trained on multilingual text, translating between languages is often as simple as asking. In this lab you will translate text with prompts, control register and audience, and then consider when a prompt-based approach is the right choice versus a dedicated translation service.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>The environment and client setup from the earlier text-analysis labs.</li>
+<li>A deployed chat model with a known deployment name.</li>
+</ul>
+
+<h2>Step 1: Translate with a Plain Prompt</h2>
+
+<div class="exercise">
+<h3>Exercise 1: One text, one target language</h3>
+<p>Create <code>translate_chat.py</code>:</p>
+<pre><code>import os
+
+from dotenv import load_dotenv
+from openai import AzureOpenAI
+
+load_dotenv()
+
+client = AzureOpenAI(
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_key=os.getenv("AZURE_OPENAI_KEY"),
+    api_version="2024-06-01",
+)
+
+DEPLOYMENT = "YOUR_DEPLOYMENT_NAME"
+
+source = (
+    "The inspection drone uses a stereo camera to map pipe surfaces "
+    "and flags corrosion zones before they become critical."
+)
+
+
+def translate(text: str, language: str) -&gt; str:
+    response = client.chat.completions.create(
+        model=DEPLOYMENT,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a professional translator. Translate the user's "
+                    "text into the requested language. Preserve the meaning "
+                    "and technical terms; return only the translation."
+                ),
+            },
+            {"role": "user", "content": f"Target language: {language}\n\n{text}"},
+        ],
+    )
+    return response.choices[0].message.content
+
+
+print(translate(source, "Spanish"))
+print(translate(source, "German"))
+print(translate(source, "Japanese"))</code></pre>
+<ol>
+<li>Run the script and review the three translations. Technical terms such as "stereo camera" and "corrosion zones" should stay accurate across languages.</li>
+<li>Translate the output of one language into another, for example Spanish back to English, and compare the round trip with the original. Small wording differences are normal; a changed fact means the prompt needs tightening.</li>
+</ol>
+</div>
+
+<h2>Step 2: Control Register and Audience</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Translate for an audience</h3>
+<p>Add a register parameter to the translation function:</p>
+<pre><code>def translate_for(text: str, language: str, style: str) -&gt; str:
+    response = client.chat.completions.create(
+        model=DEPLOYMENT,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a professional translator. Translate the text "
+                    "into the target language. Match the requested register "
+                    "exactly. Return only the translation."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Target language: {language}\n"
+                    f"Register: {style}\n\n{text}"
+                ),
+            },
+        ],
+    )
+    return response.choices[0].message.content
+
+
+support_note = (
+    "Your order was delayed because the warehouse lost the package. "
+    "We are shipping a replacement today."
+)
+print(translate_for(support_note, "French", "warm, apologetic customer-service tone"))
+print(translate_for(support_note, "French", "brief, neutral official notice"))</code></pre>
+<ol>
+<li>Run the script and compare the two French versions. They should translate the same facts but with very different word choices and structure.</li>
+<li>Try a technical document with the style "simple language for a general audience" and then "formal engineering report". Note how sentence length and vocabulary shift.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>This audience control is the prompting approach's signature advantage: a general-purpose model can adapt a translation to a register, audience, or brand voice. A pure translation service returns one faithful version and leaves the rest to you.</p>
+</div>
+
+<h2>Step 3: Batch-Translate a Short Document</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Translate several paragraphs</h3>
+<p>Loop over a list of paragraphs to translate a small document:</p>
+<pre><code>document = [
+    "The sensor array reports every 30 seconds.",
+    "Alerts are grouped by severity on the dashboard.",
+    "Operators can acknowledge alarms with one click.",
+]
+
+for para in document:
+    print(translate(para, "Italian"))</code></pre>
+<ol>
+<li>Run the script. Each paragraph should be translated independently and printed in order.</li>
+<li>Change the system prompt to "Translate the whole document and return it as one continuous text" and pass all paragraphs joined by a newline instead. Compare the result with the per-paragraph loop.</li>
+<li>Notice any terminology drift: in a real multi-paragraph translation, a phrase translated one way in paragraph one may come back differently in paragraph two unless you ask the model to keep terminology consistent.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>For high-volume production translation, compare the cost-per-character of a chat model against Azure Translator. The translator lab later in this section shows the dedicated service, which is typically faster and cheaper for bulk work but does not offer register control.</p>
+</div>
+
+<h2>Step 4: Detect Issues in the Output</h2>
+<p>Machine translation occasionally drops or adds meaning. Two cheap checks catch most problems:</p>
+<ul>
+<li><strong>Round trip:</strong> translate the output back to the original language and compare with the source. Any fact that changed in the round trip is a translation error or a prompt problem.</li>
+<li><strong>Terms list:</strong> ask the model to keep a small glossary of key terms fixed, then spot-check that the glossary terms appear in every translation.</li>
+</ul>
+
+<pre><code>glossary = "stereo camera = camera stereo; corrosion zones = zonas de corrosión"
+print(translate_for(source, "Spanish", f"use this glossary: {glossary}"))</code></pre>
+
+<h2>Summary</h2>
+<p>You translated text with a plain prompt, controlled register and audience, batch-processed a short document, and applied round-trip and glossary checks to catch errors. Prompt-based translation is flexible and context-aware; later in this section you will meet Azure Translator as the dedicated, high-throughput alternative.</p>
+<nav>
+<a href="131-lab-detecting-sentiment-and-tone.html">&larr; Previous: Lab - Detecting Sentiment and Tone</a><a href="133-azure-ai-language.html">Next: Azure AI Language &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>35. Lab - Invoking our agent - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 35</span>
+<h1>Lab - Invoking our agent</h1>
+<p>Your agent now exists and is registered in the Foundry project. In this lab you will invoke it the way a production application would: open a conversation, send a message, wait for the run to finish, and read the agent's answer. By the end you will have a small client script you can reuse any time you need to talk to your agent from Python.</p>
+
+<h2>Objectives</h2>
+<ul>
+<li>Connect to your Foundry project and load the agent you registered.</li>
+<li>Create a thread and send a user message.</li>
+<li>Poll the run until it completes and retrieve the agent's replies.</li>
+</ul>
+
+<h2>Step 1: Load the existing agent</h2>
+<p>Create a new script in the same project folder. Instead of creating an agent from scratch, look up the one you registered so the script works no matter how many times it has been run.</p>
+
+<div class="exercise">
+<h3>Set up <code>invoke_agent.py</code></h3>
+<pre><code>import os
+import time
+from dotenv import load_dotenv
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+
+load_dotenv()
+
+project_client = AIProjectClient.from_connection_string(
+    credential=DefaultAzureCredential(),
+    conn_str=os.getenv("PROJECT_CONNECTION_STRING"),
+)
+
+agent = next(
+    a for a in project_client.agents.list_agents().data
+    if a.name == "trip-planner"
+)
+print(f"Using agent: {agent.id}")
+</code></pre>
+</div>
+
+<div class="note">
+<p>The agent's ID is stable across calls, but it differs from project to project. Looking it up by name keeps your scripts portable, at the cost of assuming the name is unique — which is exactly what the previous chapter's idempotent registration guarantees.</p>
+</div>
+
+<h2>Step 2: Start a conversation</h2>
+<p>Agent conversations happen in threads. Create a thread, then post the first user message into it. A single thread can hold many messages, and the agent uses the whole thread as context for each run.</p>
+
+<div class="exercise">
+<h3>Create the thread and send a message</h3>
+<pre><code>thread = project_client.agents.create_thread()
+print(f"Thread created: {thread.id}")
+
+message = project_client.agents.create_message(
+    thread_id=thread.id,
+    role="user",
+    content="Plan a 3-day trip to Paris for two people.",
+)
+print(f"Message posted: {message.id}")
+</code></pre>
+</div>
+
+<h2>Step 3: Run the agent and wait</h2>
+<p>Sending a message does not generate an answer by itself. You must create a run — the execution unit that feeds the thread to the model — and poll it until it reaches a finished state. The same run object later tells you whether any tools were called and whether the run completed cleanly.</p>
+
+<div class="exercise">
+<h3>Create the run and poll for completion</h3>
+<pre><code>run = project_client.agents.create_run(
+    thread_id=thread.id,
+    agent_id=agent.id,
+)
+
+while run.status in ("queued", "in_progress", "requires_action"):
+    run = project_client.agents.get_run(
+        thread_id=thread.id, run_id=run.id
+    )
+    time.sleep(1)
+
+print(f"Run finished with status: {run.status}")
+</code></pre>
+</div>
+
+<div class="tip">
+<p>The <code>requires_action</code> status is important: it means the model has requested a tool call and is waiting for your application to execute it and return the result. In this lab the agent has no tools, so the run should pass through the other statuses and complete on its own.</p>
+</div>
+
+<h2>Step 4: Read the agent's answer</h2>
+<p>After the run completes, the thread contains the assistant's messages. Retrieve them and print the text content of the latest reply.</p>
+
+<div class="exercise">
+<h3>Retrieve and display the response</h3>
+<pre><code>messages = project_client.agents.list_messages(thread_id=thread.id)
+
+for item in reversed(messages.data):
+    if item.role == "assistant" and item.content:
+        for part in item.content:
+            if hasattr(part, "text"):
+                print(part.text.value)
+</code></pre>
+</div>
+
+<p>Run the script and confirm you see a full itinerary reply. Then experiment:</p>
+<ul>
+<li>Post a second message into the same thread and run the agent again to see it remember the first exchange.</li>
+<li>Ask a clarifying question you know the instructions force, such as a trip with no budget, and confirm the agent asks before answering.</li>
+</ul>
+
+<div class="warn">
+<p>Each run consumes tokens and generates trace data in your project. During testing, keep runs short and remember to clean up demo threads you do not need, so your project stays tidy and your bill stays predictable.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You invoked your registered agent from code using the standard pattern: load the agent, create a thread, post a message, run, poll, and read. This client loop is the same one you will build on when the agent gains tools — at that point the run will occasionally pause at <code>requires_action</code> and hand control back to your application to execute a function.</p>
+<nav>
+<a href="34-let-s-try-to-register-our-agent-again.html">&larr; Previous: Let's try to register our agent again</a><a href="36-our-first-ai-agent-review.html">Next: Our First AI Agent - Review &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

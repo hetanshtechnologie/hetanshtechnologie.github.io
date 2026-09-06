@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Migrations - .NET Core Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 12</span>
+    <h1>Migrations</h1>
+    <p>Moving from the classic .NET Framework to .NET Core (modern .NET) requires careful planning. This chapter covers migration strategies, tooling, breaking changes, and best practices for large codebases.</p>
+
+    <h2>Upgrading from .NET Framework</h2>
+    <p>Modern .NET (5, 6, 7, 8+) is the successor to both .NET Core and .NET Framework. The recommended path is:</p>
+    <ol>
+      <li>Run the <strong>.NET Portability Analyzer</strong> to assess compatibility.</li>
+      <li>Convert <code>packages.config</code> to <code>PackageReference</code>.</li>
+      <li>Retarget the project to a compatible <code>.NET Standard</code> version (2.0 is widely compatible).</li>
+      <li>Upgrade to the latest .NET SDK and recompile.</li>
+    </ol>
+
+    <h2>project.json to csproj Conversion</h2>
+    <p>Early .NET Core used <code>project.json</code>; the SDK later returned to the <code>.csproj</code> format. If you still have <code>project.json</code>:</p>
+    <pre><code>dotnet migrate                     # Automated migration tool
+# Or manually create a .csproj:
+&lt;Project Sdk="Microsoft.NET.Sdk"&gt;
+  &lt;PropertyGroup&gt;
+    &lt;TargetFramework&gt;net8.0&lt;/TargetFramework&gt;
+  &lt;/PropertyGroup&gt;
+&lt;/Project&gt;</code></pre>
+
+    <div class="note">The <code>dotnet migrate</code> command was deprecated after .NET Core 3.0. For newer projects, create a new SDK-style project and port your code manually.</div>
+
+    <h2>API Compatibility Analyzer</h2>
+    <p>The <strong>API Compatibility Analyzer</strong> (<code>Microsoft.DotNet.ApiCompat</code>) helps identify APIs that are not available on your target platform. It runs as an MSBuild task:</p>
+    <pre><code>&lt;PackageReference Include="Microsoft.DotNet.ApiCompat" Version="8.0.0" /&gt;</code></pre>
+    <p>Run <code>dotnet build</code> and review any compatibility warnings.</p>
+
+    <h2>Breaking Changes</h2>
+    <p>Several technologies from .NET Framework are not available in modern .NET:</p>
+    <ul>
+      <li><strong>System.Drawing:</strong> Limited to Windows. Use <code>SkiaSharp</code> or <code>ImageSharp</code> for cross-platform image processing.</li>
+      <li><strong>AppDomain:</strong> Code isolation via AppDomains is replaced by <code>AssemblyLoadContext</code>.</li>
+      <li><strong>Remoting:</strong> .NET Remoting is removed. Use gRPC, SignalR, or message queues instead.</li>
+      <li><strong>BinaryFormatter:</strong> Unsafe and removed. Use <code>System.Text.Json</code> or <code>Protobuf</code>.</li>
+      <li><strong>Enterprise Services (COM+):</strong> Not supported. Use dependency injection instead.</li>
+    </ul>
+
+    <img src="../images/dotnetcore-build-process.svg" alt=".NET Core migration path">
+
+    <h2>Porting Analyzer Tool</h2>
+    <p>The <code>dotnet-apiport</code> tool (now integrated into Visual Studio) scans your assemblies and generates a detailed report of API usage and compatibility.</p>
+    <pre><code>dotnet tool install -g dotnet-apiport
+dotnet apiport analyze -f MyApp.exe -t net8.0 -o report.html</code></pre>
+
+    <h2>.NET Standard Compatibility</h2>
+    <p>.NET Standard 2.0 is the bridge between .NET Framework and modern .NET. Libraries targeting .NET Standard 2.0 can be consumed by both ecosystems.</p>
+
+    <table border="1" cellpadding="6" style="border-collapse:collapse;margin:12px 0;">
+      <tr style="background:#ede7f6;"><th>.NET Standard</th><th>Supported by</th></tr>
+      <tr><td>2.0</td><td>.NET Framework 4.6.1+, .NET Core 2.0+, Unity 2018.1+</td></tr>
+      <tr><td>2.1</td><td>.NET Core 3.0+, .NET 5+ (not supported by .NET Framework)</td></tr>
+    </table>
+
+    <div class="info">If you need to support .NET Framework consumers, target <code>netstandard2.0</code>. For new libraries, target <code>net8.0</code> (or later) to access the latest APIs.</div>
+
+    <h2>Tips for Large Codebases</h2>
+    <ul>
+      <li>Migrate incrementally — convert one project at a time using a strangler fig pattern.</li>
+      <li>Use <code>#if NET</code> preprocessor directives to maintain dual-target builds during transition.</li>
+      <li>Lock your NuGet dependency versions and test each upgrade step.</li>
+      <li>Automate the build after each project migration to catch regressions early.</li>
+    </ul>
+
+    <h2>Dual-Targeting Strategy</h2>
+    <p>You can target both .NET Framework and modern .NET during migration:</p>
+    <pre><code>&lt;TargetFrameworks&gt;net472;net8.0&lt;/TargetFrameworks&gt;</code></pre>
+    <p>Use <code>#if NET472</code> and <code>#if NET8_0</code> in source code to isolate platform-specific code.</p>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Take a small .NET Framework console app (targeting 4.7.2) that uses <code>System.Drawing</code> to resize images and <code>AppDomain</code> for plugin loading. Port it to .NET 8, replacing <code>System.Drawing</code> with <code>SkiaSharp</code> and <code>AppDomain</code> with <code>AssemblyLoadContext</code>. Run the portability analyzer before and after.
+    </div>
+
+    <nav>
+      <a href="11-build.html">&larr; Previous: Build &amp; Deployment</a>
+      <a href="../index.html">Back to Index</a>
+      <a href="13-advanced.html">Next: Advanced Topics &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

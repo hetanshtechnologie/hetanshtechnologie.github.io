@@ -1,0 +1,994 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 8: Terraform CI/CD — Terraform eBook</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+
+<h1>Chapter 8: Terraform CI/CD</h1>
+
+<div class="toc">
+<h2>Table of Contents</h2>
+<ol>
+<li><a href="#why-cicd">Why CI/CD for Terraform</a></li>
+<li><a href="#plan-apply">Plan/Apply Separation</a></li>
+<li><a href="#github-actions">GitHub Actions</a></li>
+<li><a href="#azure-devops">Azure DevOps</a></li>
+<li><a href="#gitlab-ci">GitLab CI</a></li>
+<li><a href="#atlantis">Atlantis</a></li>
+<li><a href="#security-scanning">Security Scanning</a></li>
+<li><a href="#policy-as-code">Policy as Code</a></li>
+<li><a href="#drift-detection">Drift Detection</a></li>
+<li><a href="#summary">Summary &amp; Checklist</a></li>
+</ol>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="why-cicd">1. Why CI/CD for Terraform</h2>
+
+<p>Running <code>terraform apply</code> from your laptop works for experiments. The moment infrastructure supports production workloads — databases serving traffic, DNS records pointed at your clusters, TLS certificates encrypting customer data — manual, developer-machine-driven workflows become a serious liability. CI/CD pipelines for Terraform address five core problems:</p>
+
+<table>
+<thead>
+<tr><th>Problem</th><th>Without CI/CD</th><th>With CI/CD</th></tr>
+</thead>
+<tbody>
+<tr><td>Consistency</td><td>Each developer uses a different Terraform version, different env vars, different OS.</td><td>Locked tool versions and a reproducible runner environment.</td></tr>
+<tr><td>Auditability</td><td>"Who applied this?" — nobody knows. Maybe it was a late-night Slack request.</td><td>Every apply is tied to a PR, a commit SHA, and an identity.</td></tr>
+<tr><td>Review gates</td><td>One person pushes production changes with no second set of eyes.</td><td>PRs require approvals; plan output is visible before merge.</td></tr>
+<tr><td>Security</td><td>Credentials stored in <code>~/.aws/credentials</code> or env vars on dev laptops.</td><td>Short-lived tokens via OIDC federation; no long-lived secrets in repos.</td></tr>
+<tr><td>Speed &amp; collaboration</td><td>Terraform locks block the whole team; one person at a time.</td><td>Remote state + locking + pipeline concurrency controls.</td></tr>
+</tbody>
+</table>
+
+<div class="tip">
+<strong>Key principle:</strong> The pipeline, not a human, is the entity that touches production infrastructure. Humans propose changes; the pipeline applies them.
+</div>
+
+<h3>The general flow</h3>
+<div class="diagram">
+<pre>
+ Developer                CI/CD Pipeline              Cloud Provider
+ ─────────                ──────────────              ──────────────
+ git push / PR
+    │
+    ├──── Trigger ──────────►  terraform fmt -check
+    │                          terraform validate
+    │                          terraform init
+    │                          terraform plan -out=tfplan
+    │                          security scan
+    │                          policy check
+    │
+    │                     ◄─── Post plan output to PR
+    │
+    │  Code review + approval
+    │
+    ├── Merge to main ────►  terraform apply tfplan
+    │                          (apply the EXACT plan)
+    │
+    │                     ◄─── State updated, resources created
+    │
+    ├── Scheduled cron ───►  terraform plan (drift check)
+    │                          alert if unexpected changes
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="plan-apply">2. Plan/Apply Separation</h2>
+
+<p>This is the single most important concept in Terraform CI/CD. Without it, every other piece of the pipeline is theatre.</p>
+
+<h3>Why separate plan and apply?</h3>
+<p>If you run <code>terraform apply -auto-approve</code> in a pipeline, the plan and apply happen atomically. There is no opportunity for a human to review what <em>will</em> happen before it <em>does</em> happen. This is dangerous because:</p>
+<ul>
+<li>Terraform's HCL is declarative but sometimes non-obvious — a <code>for_each</code> over a data source could delete resources you did not expect.</li>
+<li>A provider bug or upstream API change could cause Terraform to propose destructive actions.</li>
+<li>Malicious or accidental changes to code could destroy production databases.</li>
+</ul>
+
+<h3>The <code>-out</code> flag</h3>
+<p>The <code>-out</code> flag serializes the plan to a binary file. That file contains the exact actions Terraform will take. When you later run <code>terraform apply tfplan</code>, Terraform executes <em>only</em> those serialized actions — it does not re-plan. If anything in the configuration or state has changed since the plan was created, Terraform rejects the file.</p>
+
+<pre><code># Step 1: Create a saved plan
+terraform plan -out=tfplan
+
+# Step 2: Apply the EXACT saved plan
+terraform apply tfplan</code></pre>
+
+<div class="warning">
+<strong>Never</strong> run <code>terraform apply -auto-approve</code> in a CI pipeline that handles production infrastructure. Always save the plan, present it for review, and then apply the exact plan file.
+</div>
+
+<h3>What happens if state changed between plan and apply?</h3>
+<pre><code>$ terraform apply tfplan
+Error: Saved plan is stale
+
+The given plan file was created by a different Terraform core
+version or the state has changed since it was created. The plan
+file cannot be applied.</code></pre>
+
+<p>This safety net ensures the apply matches the reviewed plan exactly.</p>
+
+<h3>Plan output format options</h3>
+<table>
+<thead>
+<tr><th>Format</th><th>Flag</th><th>Use case</th></tr>
+</thead>
+<tbody>
+<tr><td>Human-readable (default)</td><td>stdout</td><td>PR comments, terminal output</td></tr>
+<tr><td>Binary plan file</td><td><code>-out=tfplan</code></td><td>Exact replay during apply</td></tr>
+<tr><td>JSON plan</td><td><code>-json</code></td><td>Machine parsing, policy checks, custom tooling</td></tr>
+</tbody>
+</table>
+
+<div class="exercise">
+<strong>Exercise:</strong> Run <code>terraform plan -out=tfplan</code>, then run <code>terraform show -json tfplan</code> to see the JSON representation. Try modifying a resource in your config, then running <code>terraform apply tfplan</code> — notice Terraform refuses the stale plan.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="github-actions">3. GitHub Actions</h2>
+
+<p>GitHub Actions is the most common CI/CD platform for open-source and private Terraform repositories. Below is a complete, production-ready workflow.</p>
+
+<h3>Complete Workflow</h3>
+<pre><code># .github/workflows/terraform.yml
+name: Terraform
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read
+  pull-requests: write
+
+env:
+  ARM_USE_OIDC: "true"
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  TF_VERSION: "1.9.8"
+
+jobs:
+  terraform:
+    name: Terraform ${{ github.event_name }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: infra/
+
+      - name: Terraform Init
+        run: terraform init -backend-config="resource_group_name=${{ secrets.STATE_RG }}" -backend-config="storage_account_name=${{ secrets.STATE_SA }}"
+        working-directory: infra/
+
+      - name: Terraform Validate
+        run: terraform validate -no-color
+        working-directory: infra/
+
+      # --- PR path: plan only ---
+      - name: Terraform Plan
+        if: github.event_name == 'pull_request'
+        id: plan
+        run: |
+          terraform plan -no-color -out=tfplan 2>&amp;1 | tee plan.txt
+          echo "plan_exit_code=$?" &gt;&gt; "$GITHUB_OUTPUT"
+        working-directory: infra/
+        continue-on-error: true
+
+      - name: Comment Plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infra/plan.txt', 'utf8');
+            const truncated = plan.length &gt; 60000
+              ? plan.substring(0, 60000) + '\n\n... (truncated)'
+              : plan;
+            const body = `### Terraform Plan
+            \`\`\`\n${truncated}\n\`\`\`
+            *Triggered by @${context.actor} on \`${context.sha.substring(0, 7)}\`*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+      - name: Fail if Plan Failed
+        if: github.event_name == 'pull_request' &amp;&amp; steps.plan.outputs.plan_exit_code != '0'
+        run: exit 1
+
+      # --- Push to main: apply ---
+      - name: Terraform Apply
+        if: github.event_name == 'push'
+        run: terraform apply -auto-approve -input=false tfplan
+        working-directory: infra/</code></pre>
+
+<h3>OIDC Authentication to Azure</h3>
+<p>The workflow above uses OpenID Connect (OIDC) federation instead of long-lived service principal secrets. Setup steps:</p>
+
+<ol>
+<li>Create an Azure AD App Registration and Service Principal.</li>
+<li>Add a federated credential in Azure: subject = <code>repo:OWNER/REPO:ref:refs/heads/main</code>.</li>
+<li>Grant the Service Principal the necessary roles on your subscription (e.g., <code>Contributor</code>).</li>
+<li>Store <code>AZURE_TENANT_ID</code>, <code>AZURE_SUBSCRIPTION_ID</code>, and <code>AZURE_CLIENT_ID</code> as GitHub Actions secrets.</li>
+</ol>
+
+<pre><code># Create the federated credential via Azure CLI
+az ad app federated-credential create \
+  --name "github-terraform-main" \
+  --id "&lt;app-registration-id&gt;" \
+  --parameters '{
+    "name": "github-terraform-main",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:myorg/myrepo:ref:refs/heads/main",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'</code></pre>
+
+<div class="tip">
+<strong>Why OIDC?</strong> OIDC tokens are short-lived (typically 10 minutes), scoped to the repository and branch, and require no secrets to be stored in GitHub. This is significantly more secure than storing a <code>ARM_CLIENT_SECRET</code> in your repository secrets.
+</div>
+
+<h3>Reusable Terraform Module Workflow</h3>
+<p>For repositories with multiple Terraform directories, use a matrix strategy:</p>
+<pre><code>jobs:
+  terraform:
+    strategy:
+      matrix:
+        directory: [infra/networking, infra/compute, infra/database]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform init
+        working-directory: ${{ matrix.directory }}
+      - run: terraform plan -out=tfplan
+        working-directory: ${{ matrix.directory }}</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="azure-devops">4. Azure DevOps</h2>
+
+<p>Azure DevOps Pipelines is a natural fit for teams already invested in the Microsoft ecosystem. It supports YAML pipelines, approval gates, and service connections with managed identities.</p>
+
+<h3>Complete Azure DevOps Pipeline</h3>
+<pre><code># azure-pipelines.yml
+trigger:
+  branches:
+    include:
+      - main
+      - 'feature/*'
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  - name: terraformVersion
+    value: '1.9.8'
+  - name: tfWorkingDirectory
+    value: 'infra'
+  - name: serviceConnection
+    value: 'azure-terraform-sc'  # Service connection name
+
+stages:
+  # ── STAGE 1: Validate ──────────────────────────────────
+  - stage: Validate
+    displayName: 'Validate Terraform'
+    jobs:
+      - job: validate
+        displayName: 'Fmt, Init, Validate'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: $(terraformVersion)
+
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: $(tfWorkingDirectory)
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: 'tfstate-rg'
+              backendAzureRmStorageAccountName: 'tfstatestore'
+              backendAzureRmContainerName: 'tfstate'
+              backendAzureRmKey: 'pipeline.tfstate'
+
+          - bash: |
+              terraform fmt -check -recursive
+            displayName: 'Terraform Format Check'
+            workingDirectory: $(tfWorkingDirectory)
+
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Validate'
+            inputs:
+              provider: 'azurerm'
+              command: 'validate'
+              workingDirectory: $(tfWorkingDirectory)
+              environmentServiceNameAzureRM: $(serviceConnection)
+
+  # ── STAGE 2: Plan ──────────────────────────────────────
+  - stage: Plan
+    displayName: 'Terraform Plan'
+    dependsOn: Validate
+    jobs:
+      - job: plan
+        displayName: 'Generate Plan'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: $(terraformVersion)
+
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Init'
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: $(tfWorkingDirectory)
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: 'tfstate-rg'
+              backendAzureRmStorageAccountName: 'tfstatestore'
+              backendAzureRmContainerName: 'tfstate'
+              backendAzureRmKey: 'pipeline.tfstate'
+
+          - task: TerraformTaskV4@4
+            displayName: 'Terraform Plan'
+            inputs:
+              provider: 'azurerm'
+              command: 'plan'
+              workingDirectory: $(tfWorkingDirectory)
+              environmentServiceNameAzureRM: $(serviceConnection)
+              commandOptions: '-out=tfplan'
+
+          - publish: $(tfWorkingDirectory)/tfplan
+            artifact: 'tfplan'
+            displayName: 'Publish Plan Artifact'
+
+  # ── STAGE 3: Apply ─────────────────────────────────────
+  - stage: Apply
+    displayName: 'Terraform Apply'
+    dependsOn: Plan
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: apply
+        displayName: 'Apply Plan'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'production'   # ← Has approval gates configured
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: TerraformInstaller@1
+                  displayName: 'Install Terraform'
+                  inputs:
+                    terraformVersion: $(terraformVersion)
+
+                - task: TerraformTaskV4@4
+                  displayName: 'Terraform Init'
+                  inputs:
+                    provider: 'azurerm'
+                    command: 'init'
+                    workingDirectory: $(tfWorkingDirectory)
+                    backendServiceArm: $(serviceConnection)
+                    backendAzureRmResourceGroupName: 'tfstate-rg'
+                    backendAzureRmStorageAccountName: 'tfstatestore'
+                    backendAzureRmContainerName: 'tfstate'
+                    backendAzureRmKey: 'pipeline.tfstate'
+
+                - download: current
+                  artifact: 'tfplan'
+
+                - task: TerraformTaskV4@4
+                  displayName: 'Terraform Apply'
+                  inputs:
+                    provider: 'azurerm'
+                    command: 'apply'
+                    workingDirectory: $(tfWorkingDirectory)
+                    environmentServiceNameAzureRM: $(serviceConnection)
+                    commandOptions: '-auto-approve $(Pipeline.Workspace)/tfplan/tfplan'</code></pre>
+
+<h3>Approval Gates</h3>
+<p>Azure DevOps environments let you configure approval checks before a deployment proceeds:</p>
+<ol>
+<li>Go to <strong>Pipelines → Environments → production → Approvals and checks</strong>.</li>
+<li>Add an <strong>Approvals</strong> check and select the approvers.</li>
+<li>Optionally add a <strong>Branch policy</strong> check to restrict which branches can deploy.</li>
+</ol>
+
+<div class="note">
+<strong>Note:</strong> The <code>deployment</code> job type is critical here. Regular <code>jobs</code> do not support Azure DevOps environments and their approval gates.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="gitlab-ci">5. GitLab CI</h2>
+
+<p>GitLab CI/CD is popular for teams hosting on GitLab. Terraform Cloud can be used as the backend, or you can use a standard remote backend like Azure Blob Storage.</p>
+
+<h3>Complete <code>.gitlab-ci.yml</code></h3>
+<pre><code># .gitlab-ci.yml
+stages:
+  - validate
+  - plan
+  - apply
+
+variables:
+  TF_ROOT: infra
+  TF_STATE_NAME: default
+  TF_VERSION: "1.9.8"
+
+# ── Template for Terraform commands ───────────────────────
+.terraform-base:
+  image:
+    name: hashicorp/terraform:${TF_VERSION}
+    entrypoint: [""]
+  before_script:
+    - cd ${TF_ROOT}
+    - terraform init
+      -backend-config="resource_group_name=${STATE_RG}"
+      -backend-config="storage_account_name=${STATE_SA}"
+
+# ── Stage 1: Validate ────────────────────────────────────
+fmt-check:
+  extends: .terraform-base
+  stage: validate
+  script:
+    - terraform fmt -check -recursive -diff
+  allow_failure: false
+
+validate:
+  extends: .terraform-base
+  stage: validate
+  script:
+    - terraform validate -no-color
+  allow_failure: false
+
+# ── Stage 2: Plan ────────────────────────────────────────
+plan:
+  extends: .terraform-base
+  stage: plan
+  script:
+    - terraform plan -out=tfplan -no-color
+    - terraform show -no-color -json tfplan &gt; tfplan.json
+  artifacts:
+    paths:
+      - ${TF_ROOT}/tfplan
+      - ${TF_ROOT}/tfplan.json
+    expire_in: 1 day
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ── Stage 3: Apply ───────────────────────────────────────
+apply:
+  extends: .terraform-base
+  stage: apply
+  script:
+    - terraform apply -auto-approve -input=false tfplan
+  dependencies:
+    - plan
+  artifacts:
+    paths:
+      - ${TF_ROOT}/tfplan
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual    # ← Requires manual trigger in GitLab UI
+  environment:
+    name: production</code></pre>
+
+<h3>GitLab-Specific Features</h3>
+<table>
+<thead>
+<tr><th>Feature</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>when: manual</code></td><td>Requires a human to click "Play" in the GitLab UI before apply runs.</td></tr>
+<tr><td><code>environment</code></td><td>Tracks deployments per environment; shows history in the Operations dashboard.</td></tr>
+<tr><td>Artifacts</td><td>The <code>tfplan</code> file is passed between stages via GitLab's artifact mechanism.</td></tr>
+<tr><td>Merge Request Pipelines</td><td>Plans run automatically on MRs; apply only runs on the default branch.</td></tr>
+<tr><td>Protected branches</td><td>Combine with branch protection rules to require approval before merging.</td></tr>
+</tbody>
+</table>
+
+<div class="tip">
+<strong>Tip:</strong> For a more integrated experience, consider GitLab's built-in Terraform state management. Set the <code>TF_STATE_NAME</code> variable and use the <a href="https://docs.gitlab.com/ee/user/infrastructure/iac/terraform_state.html">GitLab-managed Terraform state</a> backend.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="atlantis">6. Atlantis</h2>
+
+<p><a href="https://www.runatlantis.io/">Atlantis</a> is a Terraform-specific pull request automation tool. Unlike GitHub Actions or GitLab CI, Atlantis runs as a self-hosted server that listens for webhook events and comments on PRs with plan/apply output. It is popular in organizations that want a centralised, auditable Terraform workflow without writing custom CI/CD YAML.</p>
+
+<h3>How Atlantis Works</h3>
+<div class="diagram">
+<pre>
+ Developer                 Atlantis Server              Cloud Provider
+ ─────────                 ───────────────              ──────────────
+ git push / PR
+    │
+    ├──── Webhook ──────────►  Detects terraform files
+    │                          Runs: terraform plan
+    │                          Comments plan on PR
+    │
+    │                     ◄─── "Plan: +3 ~1 -0"
+    │
+    │  Reviewer comments
+    │  "atlantis apply"
+    │
+    ├── Webhook ───────────►  Runs: terraform apply
+    │                          Comments result on PR
+    │
+    │                     ◄─── "Apply: +3 ~1 -0 complete"
+</pre>
+</div>
+
+<h3>Repo-Level Configuration</h3>
+<pre><code># atlantis.yaml (in repo root)
+version: 3
+automerge: false
+parallel_plan: true
+parallel_apply: false
+
+projects:
+  - name: networking
+    dir: infra/networking
+    workspace: default
+    autoplan:
+      when_modified: ["*.tf", "*.tfvars", "modules/**/*.tf"]
+      enabled: true
+    apply_requirements: [approved, mergeable]
+    workflow: custom
+
+  - name: compute
+    dir: infra/compute
+    workspace: default
+    autoplan:
+      when_modified: ["*.tf", "*.tfvars"]
+      enabled: true
+    apply_requirements: [approved]
+
+workflows:
+  custom:
+    plan:
+      steps:
+        - init:
+            extra_args: ["-backend-config=backend.hcl"]
+        - run: terraform fmt -check
+        - plan:
+            extra_args: ["-out=$PLANFILE", "-var-file=terraform.tfvars"]
+    apply:
+      steps:
+        - apply:
+            extra_args: ["$PLANFILE"]</code></pre>
+
+<h3>Atlantis vs CI/CD Pipeline Comparison</h3>
+<table>
+<thead>
+<tr><th>Aspect</th><th>Atlantis</th><th>GitHub Actions / GitLab CI</th></tr>
+</thead>
+<tbody>
+<tr><td>Infrastructure</td><td>Self-hosted server (K8s, ECS, or VM)</td><td>Managed by GitHub / GitLab</td></tr>
+<tr><td>PR integration</td><td>Native — comments on PR automatically</td><td>Custom — you write comment logic</td></tr>
+<tr><td>Plan storage</td><td>Managed internally (S3, GCS, etc.)</td><td>Pipeline artifacts</td></tr>
+<tr><td>Multi-repo</td><td>Single server handles all repos</td><td>Each repo has its own workflow</td></tr>
+<tr><td>Locking</td><td>Built-in workspace locking per directory</td><td>Backend-level state locking</td></tr>
+<tr><td>Custom workflows</td><td><code>atlantis.yaml</code> per repo</td><td>YAML pipeline files</td></tr>
+<tr><td>Maintenance burden</td><td>Must maintain server, updates, permissions</td><td>Low — managed service</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<strong>Note:</strong> Atlantis requires SSH keys or personal access tokens to push plan output back to PRs. Ensure your server has appropriate network access to your Git provider.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="security-scanning">7. Security Scanning</h2>
+
+<p>Security scanning tools analyze Terraform configurations for misconfigurations, compliance violations, and known vulnerabilities <em>before</em> they reach production. Integrating these into CI/CD catches issues at the earliest possible point.</p>
+
+<h3>Tools Overview</h3>
+<table>
+<thead>
+<tr><th>Tool</th><th>Maintainer</th><th>Policy Language</th><th>Strengths</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>tfsec</strong></td><td>Aqua Security (now Checkmarx)</td><td>Rego-like rules</td><td>Fast, focused on cloud provider misconfigs, native GitHub SARIF output</td></tr>
+<tr><td><strong>checkov</strong></td><td>Bridgecrew</td><td>Python (custom checks)</td><td>Broad coverage (Terraform, CloudFormation, K8s), built-in policy library</td></tr>
+<tr><td><strong>terrascan</strong></td><td>Tenable</td><td>OPA/Rego</td><td>Deep policy enforcement, supports 18+ IaC frameworks, Kubernetes admission control</td></tr>
+</tbody>
+</table>
+
+<h3>GitHub Actions Integration</h3>
+<pre><code># Add these steps to your Terraform workflow
+
+- name: tfsec Security Scan
+  uses: aquasecurity/tfsec-action@v1.0.3
+  with:
+    working_directory: infra/
+    soft_fail: false  # Set to true to warn without failing
+    format: sarif      # Output format for GitHub code scanning
+
+- name: Upload tfsec SARIF
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: tfsec-results.sarif
+
+- name: Checkov Scan
+  uses: bridgecrewio/checkov-action@v12
+  with:
+    directory: infra/
+    framework: terraform
+    output_format: cli,sarif
+    output_file_path: checkov-results.sarif
+    soft_fail: false
+
+- name: Terrascan Scan
+  uses: tenable/terrascan-action@main
+  with:
+    iac_type: terraform
+    iac_dir: infra/
+    policy_type: all
+    sarif_output: terrascan-results.sarif
+    fail_on: high</code></pre>
+
+<h3>Sample Findings</h3>
+<pre><code># tfsec output example
+[WARNING] azure-storage/no-public-access: Storage account should not
+allow public blob access — infra/storage.tf:12
+  Detected: allow_blob_public_access = true
+
+[ERROR] azure-keyvault/no-soft-delete: Key Vault should have soft delete
+enabled — infra/keyvault.tf:3
+  Detected: soft_delete_enabled not set</code></pre>
+
+<div class="warning">
+<strong>Important:</strong> Do not <code>soft_fail: true</code> in production pipelines. Security findings should block the pipeline until resolved. Use <code>soft_fail: true</code> only in initial rollout while tuning the baseline.
+</div>
+
+<h3>Suppressing false positives</h3>
+<pre><code># Inline annotation (tfsec)
+resource "azurerm_storage_account" "logs" {
+  #tfsec:ignore:azure-storage/no-public-access  # Logs bucket intentionally public
+  allow_blob_public_access = true
+}
+
+# Config file (.tfsec.yml at repo root)
+---
+exclude:
+  - azure-keyvault/no-soft-delete    # Managed via Azure Policy
+  - azure-network/enable-nsg-flow-log # Planned for Q3</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="policy-as-code">8. Policy as Code</h2>
+
+<p>Security scanning catches misconfigurations. Policy as code goes further — it enforces organizational standards: naming conventions, tag requirements, allowed instance sizes, encryption mandates, and more. Policies are written in code, versioned alongside infrastructure, and enforced automatically.</p>
+
+<h3>OPA / Rego for Terraform</h3>
+<p>Open Policy Agent (OPA) with Rego is the de facto standard for Terraform policy enforcement. The <a href="https://github.com/open-policy-agent/conftest">conftest</a> tool evaluates Terraform plan JSON against Rego policies.</p>
+
+<h4>Example Rego Policy</h4>
+<pre><code># policy/enforce_tags.rego
+package terraform.enforce_tags
+
+required_tags := {"environment", "owner", "cost-center"}
+
+deny[msg] {
+    resource := input.planned_values.root_module.resources[_]
+    resource.type == "azurerm_resource_group"
+
+    tags := object.get(resource.values, "tags", {})
+    missing := required_tags - object.keys(tags)
+    count(missing) &gt; 0
+
+    msg := sprintf(
+        "Resource group '%s' is missing required tags: %v",
+        [resource.address, missing]
+    )
+}
+
+deny[msg] {
+    resource := input.planned_values.root_module.resources[_]
+    resource.type == "azurerm_linux_virtual_machine"
+
+    size := resource.values.vm_size
+    allowed := {"Standard_B2s", "Standard_B2ms", "Standard_D2s_v3"}
+    not allowed[size]
+
+    msg := sprintf(
+        "VM '%s' uses disallowed size '%s'. Allowed: %v",
+        [resource.address, size, allowed]
+    )
+}</code></pre>
+
+<h4>Running conftest in CI</h4>
+<pre><code># Generate plan JSON
+terraform plan -out=tfplan
+terraform show -json tfplan &gt; plan.json
+
+# Run policy checks
+conftest test plan.json --policy policy/
+
+# Output on failure:
+# FAIL - policy/enforce_tags.rego - terraform.enforce_tags
+#   Resource group 'rg-prod' is missing required tags: {"cost-center"}
+# FAIL - policy/enforce_tags.rego - terraform.enforce_tags
+#   VM 'vm-web-01' uses disallowed size 'Standard_G2'. Allowed: {...}</code></pre>
+
+<h3>Sentinel (HashiCorp Cloud Platform)</h3>
+<p>Sentinel is HashiCorp's built-in policy-as-code framework for Terraform Cloud / Enterprise. Policies are written in Sentinel (a Python-like language) and enforced at the policy set level.</p>
+
+<pre><code># sentinel/policy-set/sentinel.hcl
+schema_version = 1
+
+import "tfplan/v2"
+
+# Require all resources to have a "team" tag
+tag_check = rule {
+    all tfplan.resource_changes as _, rc {
+        rc.mode is "managed" implies
+        rc.change.after.tags contains "team"
+    }
+}
+
+# Enforce encryption on storage accounts
+storage_encrypted = rule {
+    all tfplan.resource_changes as _, rc {
+        rc.type is "azurerm_storage_account" implies
+        rc.change.after.enable_https_traffic_only is true
+    }
+}
+
+main = rule {
+    tag_check and storage_encrypted
+}</code></pre>
+
+<table>
+<thead>
+<tr><th>Feature</th><th>OPA / Rego + conftest</th><th>Sentinel</th></tr>
+</thead>
+<tbody>
+<tr><td>Runs where</td><td>Any CI/CD pipeline</td><td>Terraform Cloud / Enterprise only</td></tr>
+<tr><td>Language</td><td>Rego (declarative)</td><td>Sentinel (Python-like)</td></tr>
+<tr><td>Enforcement levels</td><td>Pass/fail in pipeline</td><td>advisory, soft-mandatory, hard-mandatory</td></tr>
+<tr><td>Testable</td><td>Yes (conftest --test)</td><td>Yes (sentinel test)</td></tr>
+<tr><td>Cost</td><td>Free / open source</td><td>Requires HCP or TFE license</td></tr>
+</tbody>
+</table>
+
+<div class="tip">
+<strong>Start simple:</strong> Begin with 3-5 critical policies (required tags, encryption, no public access) and expand over time. Overly aggressive policy enforcement on day one slows adoption.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="drift-detection">9. Drift Detection</h2>
+
+<p>Infrastructure drift occurs when the actual state of cloud resources diverges from what Terraform expects. Common causes:</p>
+<ul>
+<li>Manual changes made in the cloud console ("click-ops")</li>
+<li>Auto-scaling events that create resources Terraform does not manage</li>
+<li>Provider-side updates that modify resource attributes</li>
+<li>External tools (Azure Policy, AWS Config) that mutate resources</li>
+</ul>
+
+<h3>Scheduled Drift Detection Pipeline</h3>
+<pre><code># .github/workflows/drift-detection.yml
+name: Drift Detection
+
+on:
+  schedule:
+    - cron: '0 6 * * 1-5'  # Weekdays at 06:00 UTC
+  workflow_dispatch:         # Allow manual trigger
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+jobs:
+  detect-drift:
+    name: Check for Drift
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        directory: [infra/networking, infra/compute, infra/database]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ${{ matrix.directory }}
+
+      - name: Terraform Plan (drift check)
+        id: plan
+        run: |
+          terraform plan -detailed-exitcode -no-color &gt; plan-output.txt
+          echo "exit_code=$?" &gt;&gt; "$GITHUB_OUTPUT"
+        working-directory: ${{ matrix.directory }}
+        continue-on-error: true
+
+      - name: Create Issue on Drift
+        if: steps.plan.outputs.exit_code == '2'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync(
+              `${process.env.WORKING_DIR}/plan-output.txt`, 'utf8'
+            );
+            const truncated = plan.length &gt; 60000
+              ? plan.substring(0, 60000) + '\n...truncated'
+              : plan;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `⚠️ Drift detected in ${{ matrix.directory }}`,
+              body: `## Infrastructure Drift Detected\n\n` +
+                `**Directory:** \`${{ matrix.directory }}\`\n` +
+                `**Workflow run:** ${context.serverUrl}/${context.repo.owner}/` +
+                `${context.repo.repo}/actions/runs/${context.runId}\n\n` +
+                `### Plan Output\n\`\`\`\n${truncated}\n\`\`\`\n\n` +
+                `Review and remediate by applying the plan or reverting ` +
+                `the manual change.`,
+              labels: ['drift', 'infrastructure']
+            });
+
+      - name: Fail if Drift Found
+        if: steps.plan.outputs.exit_code == '2'
+        run: |
+          echo "::error::Drift detected! Review the plan output."
+          exit 1</code></pre>
+
+<h3>Understanding exit codes</h3>
+<table>
+<thead>
+<tr><th>Exit Code</th><th>Meaning</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>0</code></td><td>No changes</td><td>Everything matches — no action needed.</td></tr>
+<tr><td><code>1</code></td><td>Error</td><td>Plan failed (state lock, auth error, etc.). Investigate.</td></tr>
+<tr><td><code>2</code></td><td>Changes present</td><td>Drift detected — create an issue, alert the team.</td></tr>
+</tbody>
+</table>
+
+<h3>Drift detection strategies</h3>
+<div class="diagram">
+<pre>
+ Strategy                 Frequency        Best For
+ ─────────                ─────────        ────────
+ Scheduled pipeline       Daily/weekly     Small to mid-size estates
+ Terraform Cloud          Built-in         Teams already on HCP/TFE
+ Azure Policy + Change    Continuous       Enforcing compliance at
+   Tracking                               scale
+ Event-driven             On resource      Real-time alerting on
+                          change           critical resources
+</pre>
+</div>
+
+<div class="note">
+<strong>Note:</strong> Not all drift is bad. Some provider attributes are computed and will always show differences in <code>plan</code> output. Use <code>-refresh-only</code> flag (Terraform ≥ 1.15) to check drift without proposing changes, or use <code>ignore_changes</code> lifecycle blocks for attributes that legitimately change outside Terraform.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="summary">10. Summary &amp; Checklist</h2>
+
+<div class="diagram">
+<pre>
+ Terraform CI/CD Maturity Model
+
+ Level 0: Manual
+   terraform apply from laptop
+   ✗ No version control on runs
+   ✗ No review process
+
+ Level 1: Basic Pipeline
+   terraform fmt + validate + plan in CI
+   ✓ All changes go through PRs
+   ✗ Apply still manual or unreviewed
+
+ Level 2: Plan/Apply Separation
+   Saved plans reviewed before apply
+   ✓ OIDC auth, no long-lived secrets
+   ✓ Plan output visible on PRs
+
+ Level 3: Security &amp; Policy
+   tfsec / checkov / OPA in pipeline
+   ✓ Automated security gates
+   ✓ Policy as code enforced
+
+ Level 4: Full Governance
+   Drift detection, approval gates, audit trail
+   ✓ Compliance reporting
+   ✓ Continuous monitoring
+</pre>
+</div>
+
+<h3>Key Takeaways</h3>
+<ul>
+<li><strong>Always separate plan and apply</strong> — save the plan with <code>-out=tfplan</code>, review it, then apply the exact file.</li>
+<li><strong>Use OIDC federation</strong> instead of long-lived secrets for cloud provider authentication.</li>
+<li><strong>Pin Terraform versions</strong> — specify exact versions in your pipeline and <code>required_version</code> constraints.</li>
+<li><strong>Run <code>terraform fmt -check</code></strong> before validate to enforce consistent formatting.</li>
+<li><strong>Integrate security scanning</strong> (tfsec, checkov, terrascan) as mandatory pipeline steps — not optional.</li>
+<li><strong>Implement policy as code</strong> starting with 3-5 critical rules; expand over time.</li>
+<li><strong>Detect drift</strong> with scheduled pipeline runs; alert on divergence between expected and actual state.</li>
+<li><strong>Use approval gates</strong> — require manual approval before production applies, even on the main branch.</li>
+<li><strong>Version your state</strong> — store state in a remote backend with versioning enabled; never rely on local state.</li>
+<li><strong>Audit everything</strong> — every apply must be traceable to a PR, a commit, and an identity.</li>
+<li><strong>Test policies separately</strong> — use <code>conftest test</code> or <code>sentinel test</code> to validate policy logic before enforcing.</li>
+<li><strong>Start simple, iterate</strong> — begin with fmt/validate/plan; add security, policies, and drift detection as your team matures.</li>
+</ul>
+
+<h3>Pre-Commit Hook</h3>
+<p>Before code even reaches the pipeline, catch issues locally:</p>
+<pre><code># .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.96.2
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+      - id: terraform_tflint
+      - id: terraform_tfsec
+      - id: terraform_checkov
+        args:
+          - --args=--framework terraform
+
+  - repo: https://github.com/antonbabenko/pre-commit
+    rev: v1.96.2
+    hooks:
+      - id: terraform_validate</code></pre>
+
+<div class="exercise">
+<strong>Exercise:</strong> Take an existing Terraform repository and add a GitHub Actions workflow following the patterns in this chapter. Start with fmt + validate + plan on PRs. Once that is working, add security scanning and a scheduled drift detection workflow. If your team uses Azure DevOps or GitLab, adapt the pipeline templates from the relevant section above.
+</div>
+
+<div class="tip">
+<strong>Recommended reading:</strong>
+<ul>
+<li><a href="https://developer.hashicorp.com/terraform/cloud-docs/run">Terraform Cloud — Run Overview</a></li>
+<li><a href="https://www.runatlantis.io/docs/">Atlantis Documentation</a></li>
+<li><a href="https://www.openpolicyagent.org/docs/latest/">OPA Documentation</a></li>
+<li><a href="https://aquasecurity.github.io/tfsec/">tfsec Documentation</a></li>
+</ul>
+</div>
+
+<!-- Navigation -->
+<div style="display:flex;justify-content:space-between;margin-top:40px;padding-top:20px;border-top:1px solid #e2e8f0;">
+<a href="7-workspaces.html" style="color:#7c3aed;text-decoration:none;font-size:.95rem;">&larr; Ch 7: Workspaces</a>
+<a href="9-advanced.html" style="color:#7c3aed;text-decoration:none;font-size:.95rem;">Ch 9: Advanced &rarr;</a>
+</div>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/feedback.js"></script>
+<script src="../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

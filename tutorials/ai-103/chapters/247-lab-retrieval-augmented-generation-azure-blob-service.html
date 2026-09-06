@@ -1,0 +1,121 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>247. Lab - Retrieval Augmented Generation - Azure Blob service - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 247</span>
+<h1>Lab - Retrieval Augmented Generation - Azure Blob service</h1>
+<p>Every RAG pipeline starts with the same ingredient: a place to store the documents that will become the knowledge base. In this lab you will create an Azure Blob Storage account, upload a few sample documents, and confirm they are reachable — the storage foundation the following labs will connect to Azure AI Search.</p>
+
+<h2>Why Blob Storage</h2>
+<p>Azure Blob Storage is object storage for unstructured content. It is the natural home for the raw material of RAG — PDFs, Word files, text, and markdown — because it is cheap, scales without limits, and is a first-class data source for Azure AI Search indexers. Documents land in a <strong>container</strong> inside a <strong>storage account</strong>, and every file gets a URL you can reference later.</p>
+
+<h2>What You Will Need</h2>
+<ul>
+<li>An Azure subscription with an owner or contributor role.</li>
+<li>The Azure CLI (<code>az</code>) installed and signed in with <code>az login</code>.</li>
+<li>A resource group to keep this lab's resources together.</li>
+</ul>
+<pre><code>az login
+az account set --subscription "YOUR_SUBSCRIPTION_ID"
+</code></pre>
+
+<h2>Step 1: Create the Storage Account and Container</h2>
+<div class="exercise">
+<h3>Exercise 1: Provision storage with the CLI</h3>
+<p>Choose a resource group (create one if needed) and run these commands. Replace the placeholder names with values that are unique — storage account names must be globally unique:</p>
+<pre><code>az group create --name "ai103-rag-rg" --location "eastus"
+
+az storage account create \
+  --name "ai103ragstore" \
+  --resource-group "ai103-rag-rg" \
+  --location "eastus" \
+  --sku Standard_LRS \
+  --kind StorageV2
+
+az storage container create \
+  --account-name "ai103ragstore" \
+  --name "ragdocs" \
+  --auth-mode login
+</code></pre>
+<p>If the container creation reports that the account's resource group does not exist or you see a "missing resource group" error, verify the first two commands ran without errors and that your default subscription is the correct one.</p>
+</div>
+
+<div class="tip">
+<p>Using <code>--auth-mode login</code> creates the container with your Entra identity instead of a shared key. It is the recommended default for new storage resources and avoids handling account keys.</p>
+</div>
+
+<h2>Step 2: Upload Sample Documents</h2>
+<p>The knowledge base needs realistic content. Prepare two or three small text files, such as a fictional company policy and a product FAQ. For example, create <code>policy.txt</code> and <code>faq.md</code> in a local folder, then upload them:</p>
+<div class="exercise">
+<h3>Exercise 2: Upload documents to the container</h3>
+<pre><code>az storage blob upload \
+  --account-name "ai103ragstore" \
+  --container-name "ragdocs" \
+  --name "policy.txt" \
+  --file "policy.txt" \
+  --auth-mode login
+
+az storage blob upload \
+  --account-name "ai103ragstore" \
+  --container-name "ragdocs" \
+  --name "faq.md" \
+  --file "faq.md" \
+  --auth-mode login
+</code></pre>
+<p>List the blobs to confirm both files are in place:</p>
+<pre><code>az storage blob list \
+  --account-name "ai103ragstore" \
+  --container-name "ragdocs" \
+  --auth-mode login \
+  --output table
+</code></pre>
+<p>You should see two rows: <code>faq.md</code> and <code>policy.txt</code>, each with a size and a last-modified timestamp.</p>
+</div>
+
+<h2>Step 3: Capture the Connection Details</h2>
+<p>The next labs need to reach this storage from Azure AI Search. Two values matter: the storage account name (you have it) and a connection string or key that the search service can use. Record the connection string now:</p>
+<pre><code>az storage account show-connection-string \
+  --name "ai103ragstore" \
+  --resource-group "ai103-rag-rg" \
+  --query connectionString
+</code></pre>
+
+<div class="warn">
+<p>A connection string is a credential. Treat it like a password: never paste it into code that is committed to a repository, and revoke it if it leaks. For this course you can keep it in a local notes file; in production, use managed identity between the search service and storage instead of a shared key.</p>
+</div>
+
+<div class="note">
+<p>Managed identity is the production-grade alternative to connection strings. You grant the search service's system-assigned identity the <em>Storage Blob Data Reader</em> role on the storage account, and the indexer authenticates without any secret. It is a little more setup now and much safer later — but for these labs the connection string keeps the focus on RAG itself.</p>
+</div>
+
+<h2>Step 4: Verify the Files Are Publicly Addressable</h2>
+<p>Indexers connect to blobs through their HTTPS endpoints. Your files are private by default, which is exactly what you want. Reachability is handled by the credentials you supply to the indexer, not by making the container public. Confirm the container's access level is private:</p>
+<pre><code>az storage container show-permission \
+  --account-name "ai103ragstore" \
+  --name "ragdocs" \
+  --auth-mode login
+</code></pre>
+<p>The output should show <code>publicAccess: None</code>. That is the secure baseline you want before any indexing happens.</p>
+
+<h2>Summary</h2>
+<p>You created a storage account and a <code>ragdocs</code> container, uploaded two sample documents, captured the connection string the next labs will reuse, and verified the container is private. Your knowledge base now has a home. In the next lab you will create the Azure AI Search service that will index these documents and make them searchable.</p>
+<nav>
+<a href="246-retrieval-augmented-generation.html">&larr; Previous: Retrieval Augmented Generation</a><a href="248-lab-retrieval-augmented-generation-azure-search-service.html">Next: Lab - Retrieval Augmented Generation - Azure Search service &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

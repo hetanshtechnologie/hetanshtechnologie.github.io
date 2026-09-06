@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Muscle Quiz 💪</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.top-bar{width:100%;padding:12px 20px;background:#1e293b;display:flex;justify-content:space-between;align-items:center}
+.top-bar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.top-bar h1{font-size:18px}
+.game{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;max-width:500px;padding:20px}
+.hidden{display:none}
+.result-card{background:#1e293b;border-radius:16px;padding:30px;text-align:center}
+.result-card h2{color:#a78bfa}
+.result-card p{color:#94a3b8;margin:5px 0}
+.play-again{background:#a78bfa;color:#fff;border:none;padding:14px 40px;border-radius:12px;font-size:18px;font-weight:bold;cursor:pointer;margin-top:15px}
+.question-card{background:#1e293b;border-radius:16px;padding:24px;text-align:center;width:100%;margin:10px 0}
+.question-emoji{font-size:64px;margin:10px 0}
+.question-text{font-size:20px;font-weight:bold;margin:10px 0;color:#a78bfa}
+.options{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:15px 0;width:100%}
+.option{padding:14px;border-radius:12px;background:#0f172a;border:2px solid #334155;color:#e2e8f0;font-size:15px;font-weight:bold;cursor:pointer;transition:all .2s}
+.option:hover{border-color:#a78bfa;background:#1a1a3e}
+.option.correct{border-color:#22c55e;background:#166534;color:#22c55e}
+.option.wrong{border-color:#ef4444;background:#7f1d1d;color:#ef4444}
+.option:disabled{cursor:default}
+.feedback{font-size:18px;min-height:28px;margin:10px 0;font-weight:bold}
+.score-display{display:flex;gap:15px;margin:10px 0}
+.score-box{background:#1e293b;padding:10px 18px;border-radius:10px;text-align:center}
+.score-box .label{font-size:12px;color:#94a3b8}
+.score-box .value{font-size:22px;font-weight:bold;color:#a78bfa}
+.progress-bar{width:100%;height:12px;background:#1e293b;border-radius:6px;margin:10px 0;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#a78bfa,#c084fc);border-radius:6px;transition:width .3s}
+</style>
+</head>
+<body>
+<div class="top-bar"><a href="../index.html">← Back</a><h1>Muscle Quiz 💪</h1><span></span></div>
+<div class="game" id="startScreen">
+  <div style="font-size:80px;animation:bounce 1s infinite">💪</div>
+  <style>@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-15px)}}</style>
+  <h2 style="margin:15px 0">Muscle Quiz</h2>
+  <p style="color:#94a3b8;text-align:center">Which exercise targets which muscle?<br>Test your anatomy knowledge!</p>
+  <button class="play-again" onclick="startQuiz()">Start Quiz</button>
+</div>
+<div class="game hidden" id="gameScreen">
+  <div class="score-display">
+    <div class="score-box"><div class="label">SCORE</div><div class="value" id="scoreVal">0</div></div>
+    <div class="score-box"><div class="label">STREAK</div><div class="value" id="streakVal">0</div></div>
+    <div class="score-box"><div class="label">Q#</div><div class="value" id="qNum">1/10</div></div>
+  </div>
+  <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+  <div class="question-card">
+    <div class="question-emoji" id="qEmoji">🏋️</div>
+    <div class="question-text" id="qText">Which muscle does this exercise target?</div>
+    <div class="options" id="optionsGrid"></div>
+    <div class="feedback" id="feedback"></div>
+  </div>
+</div>
+<div class="game hidden" id="resultScreen">
+  <div class="result-card">
+    <div style="font-size:80px">🏆</div>
+    <h2>Quiz Complete!</h2>
+    <p>Correct: <span id="finalCorrect">0</span>/10</p>
+    <p>Best Streak: <span id="finalStreak">0</span></p>
+    <p>Score: <span id="finalScore">0</span></p>
+    <p id="finalMsg"></p>
+    <button class="play-again" onclick="resetGame()">Play Again</button>
+  </div>
+</div>
+<script>
+const questions=[
+  {emoji:'🏋️',exercise:'Bench Press',correct:'Chest (Pectorals)',options:['Chest (Pectorals)','Biceps','Quadriceps','Calves']},
+  {emoji:'🦵',exercise:'Squats',correct:'Quadriceps & Glutes',options:['Biceps','Quadriceps & Glutes','Shoulders','Abs']},
+  {emoji:'💪',exercise:'Bicep Curls',correct:'Biceps',options:['Triceps','Biceps','Forearms','Deltoids']},
+  {emoji:'🏋️',exercise:'Deadlift',correct:'Lower Back & Hamstrings',options:['Chest','Lower Back & Hamstrings','Calves','Triceps']},
+  {emoji:'🧘',exercise:'Plank',correct:'Core / Abs',options:['Legs','Core / Abs','Arms','Back']},
+  {emoji:'🏃',exercise:'Running',correct:'Cardiovascular / Legs',options:['Arms','Cardiovascular / Legs','Shoulders','Chest']},
+  {emoji:'🤸',exercise:'Pull-ups',correct:'Back & Biceps',options:['Chest','Triceps','Back & Biceps','Abs']},
+  {emoji:'🏋️',exercise:'Overhead Press',correct:'Shoulders (Deltoids)',options:['Legs','Shoulders (Deltoids)','Chest','Abs']},
+  {emoji:'🦵',exercise:'Lunges',correct:'Glutes & Quadriceps',options:['Arms','Glutes & Quadriceps','Chest','Shoulders']},
+  {emoji:'💪',exercise:'Tricep Dips',correct:'Triceps',options:['Biceps','Triceps','Chest','Back']}
+];
+let currentQ=0,score=0,streak=0,bestStreak=0,correctCount=0,answered=false;
+function startQuiz(){document.getElementById('startScreen').classList.add('hidden');document.getElementById('gameScreen').classList.remove('hidden');currentQ=0;score=0;streak=0;bestStreak=0;correctCount=0;showQuestion()}
+function showQuestion(){
+  if(currentQ>=questions.length){endGame();return}
+  answered=false;let q=questions[currentQ];
+  document.getElementById('qEmoji').textContent=q.emoji;
+  document.getElementById('qText').textContent='Which muscle does '+q.exercise+' primarily target?';
+  document.getElementById('feedback').textContent='';
+  document.getElementById('qNum').textContent=(currentQ+1)+'/'+questions.length;
+  document.getElementById('scoreVal').textContent=score;
+  document.getElementById('streakVal').textContent=streak;
+  document.getElementById('progressFill').style.width=(currentQ/questions.length*100)+'%';
+  let grid=document.getElementById('optionsGrid');grid.innerHTML='';
+  let shuffled=[...q.options].sort(()=>Math.random()-0.5);
+  shuffled.forEach(opt=>{
+    let btn=document.createElement('button');btn.className='option';btn.textContent=opt;
+    btn.onclick=()=>checkAnswer(opt,q.correct,btn);
+    grid.appendChild(btn);
+  });
+}
+function checkAnswer(answer,correct,btn){
+  if(answered)return;answered=true;
+  document.querySelectorAll('.option').forEach(b=>b.disabled=true);
+  if(answer===correct){
+    btn.classList.add('correct');streak++;correctCount++;score+=100+streak*25;
+    if(streak>bestStreak)bestStreak=streak;
+    document.getElementById('feedback').textContent='✅ Correct! +'+(100+(streak-1)*25);
+    document.getElementById('feedback').style.color='#22c55e';
+  }else{
+    btn.classList.add('wrong');streak=0;
+    document.querySelectorAll('.option').forEach(b=>{if(b.textContent===correct)b.classList.add('correct')});
+    document.getElementById('feedback').textContent='❌ Answer: '+correct;
+    document.getElementById('feedback').style.color='#ef4444';
+  }
+  document.getElementById('scoreVal').textContent=score;document.getElementById('streakVal').textContent=streak;
+  setTimeout(()=>{currentQ++;showQuestion()},1500);
+}
+function resetGame(){document.getElementById('resultScreen').classList.add('hidden');document.getElementById('startScreen').classList.remove('hidden')}
+function endGame(){document.getElementById('gameScreen').classList.add('hidden');document.getElementById('resultScreen').classList.remove('hidden');
+  document.getElementById('finalCorrect').textContent=correctCount;document.getElementById('finalStreak').textContent=bestStreak;document.getElementById('finalScore').textContent=score;
+  let pct=correctCount/questions.length*100;
+  document.getElementById('finalMsg').textContent=pct>=80?'🌟 Muscle master!':pct>=60?'💪 Good knowledge!':pct>=40?'📚 Keep studying!':'🔄 Try again!'}
+</script>
+</body></html>

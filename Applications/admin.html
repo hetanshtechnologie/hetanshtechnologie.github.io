@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ProjectPro Admin</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<script>if(location.hash==='#')history.replaceState(null,'',location.pathname+location.search)</script>
+<style>
+.admin-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:24px; }
+.admin-section { background:#fff; border-radius:12px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,0.08); margin-bottom:16px; }
+.admin-section h3 { font-size:15px; font-weight:600; margin-bottom:12px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--gray-100); }
+th { background:var(--gray-50); font-weight:600; color:var(--gray-500); font-size:12px; text-transform:uppercase; }
+tr:hover td { background:var(--gray-50); }
+.user-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+.role-admin { background:#f3e8ff; color:#6b21a8; }
+.role-user { background:#dbeafe; color:#1e40af; }
+.plan-free { background:#f1f5f9; color:#475569; }
+.plan-pro { background:#fef3c7; color:#92400e; }
+.plan-admin { background:#d1fae5; color:#065f46; }
+@media (max-width:768px) {
+  .admin-stats { grid-template-columns:repeat(2,1fr); }
+  table { font-size:12px; }
+  th, td { padding:6px 4px; }
+}
+</style>
+</head>
+<body>
+<div id="login-overlay">
+  <div id="login-box">
+    <h2>ProjectPro Admin</h2>
+    <p class="subtitle">Administrator Access Only</p>
+    <div id="login-error" style="color:var(--danger);font-size:13px;margin-bottom:8px;text-align:center;"></div>
+    <input type="email" id="admin-email" placeholder="Admin Email" autocomplete="email">
+    <input type="password" id="admin-password" placeholder="Password" autocomplete="current-password">
+    <button class="btn btn-primary btn-block" id="admin-login-btn">Sign In</button>
+  </div>
+</div>
+
+<div id="app" class="hidden" style="max-width:1200px;margin:0 auto;padding:24px;">
+  <div class="top-bar" style="margin-bottom:24px;">
+    <h1 style="margin:0;">⚙️ Admin Panel</h1>
+    <a href="index.html" class="btn btn-sm btn-secondary">&larr; Back to App</a>
+    <button class="btn btn-sm btn-danger" id="admin-logout">Logout</button>
+  </div>
+
+  <div class="admin-stats">
+    <div class="stat-card"><div class="stat-label">Total Users</div><div class="stat-value" id="stat-users">-</div></div>
+    <div class="stat-card"><div class="stat-label">Total Projects</div><div class="stat-value" id="stat-projects">-</div></div>
+    <div class="stat-card"><div class="stat-label">Total Tasks</div><div class="stat-value" id="stat-tasks">-</div></div>
+    <div class="stat-card"><div class="stat-label">Admins</div><div class="stat-value" id="stat-admins">-</div></div>
+  </div>
+
+  <!-- Users Section -->
+  <div class="admin-section">
+    <h3>All Users</h3>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Email</th><th>Role</th><th>Joined</th><th>Projects</th><th>Actions</th></tr></thead>
+        <tbody id="users-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Projects Section -->
+  <div class="admin-section">
+    <h3>All Projects</h3>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Title</th><th>Owner</th><th>Status</th><th>Priority</th><th>Budget</th><th>Tasks</th><th>Created</th></tr></thead>
+        <tbody id="projects-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://vgipghqejzbcoighktij.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnaXBnaHFlanpiY29pZ2hrdGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MjQ2MjIsImV4cCI6MjA5NTMwMDYyMn0.KoDwAZarGWOLwKXOwycA8wuIiIrksvZy7dyaO0-ehUo';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let adminUser = null;
+
+function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function formatDate(d) {
+  if (!d) return '-';
+  return new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+}
+
+function showToast(msg, type) {
+  const t=document.createElement('div'); t.className='toast '+(type||'success');
+  t.textContent=msg; document.body.appendChild(t);
+  setTimeout(()=>t.remove(),3000);
+}
+
+async function checkAdmin() {
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return;
+  adminUser = user;
+  const { data: role } = await sb.from('pm_roles').select('role').eq('user_id', user.id).maybeSingle();
+  if (role?.role !== 'admin') {
+    document.getElementById('login-error').textContent = 'Unauthorized - Admin access required';
+    return;
+  }
+  document.getElementById('login-overlay').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  loadAdminData();
+}
+
+async function adminLogin() {
+  const email = document.getElementById('admin-email').value;
+  const password = document.getElementById('admin-password').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { errEl.textContent = error.message; return; }
+  adminUser = data.user;
+  const { data: role } = await sb.from('pm_roles').select('role').eq('user_id', data.user.id).maybeSingle();
+  if (role?.role !== 'admin') {
+    errEl.textContent = 'Unauthorized - Admin access required';
+    await sb.auth.signOut();
+    return;
+  }
+  document.getElementById('login-overlay').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  loadAdminData();
+}
+
+async function loadAdminData() {
+  try {
+    const { data: roles, error: rolesErr } = await sb.from('pm_roles').select('*');
+    if (rolesErr) {
+      if (rolesErr.message?.includes('does not exist')) {
+        showToast('Run supabase/schema.sql in your Supabase SQL Editor first', 'error');
+        return;
+      }
+      throw rolesErr;
+    }
+
+    const { data: projects, error: projErr } = await sb.from('pm_projects').select('*').order('created_at', { ascending: false });
+    if (projErr) throw projErr;
+
+    const { data: tasks, error: taskErr } = await sb.from('pm_tasks').select('id', { count: 'exact', head: true });
+
+    // Get user emails from auth - we need to use a function for this
+    const token = (await sb.auth.getSession()).data?.session?.access_token;
+    let usersMap = {};
+
+    // Try fetching users via edge function
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/pm-admin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.users) {
+          usersMap = Object.fromEntries(d.users.map(u => [u.id, u]));
+        }
+      }
+    } catch (e) { /* edge function may not exist */ }
+
+    // Fallback: populate from roles table
+    const allUsers = roles || [];
+    for (const r of allUsers) {
+      if (!usersMap[r.user_id]) {
+        usersMap[r.user_id] = { id: r.user_id, email: r.user_id, created_at: r.created_at };
+      }
+    }
+
+    // Stats
+    document.getElementById('stat-users').textContent = allUsers.length;
+    document.getElementById('stat-projects').textContent = projects ? projects.length : 0;
+    document.getElementById('stat-tasks').textContent = tasks?.length || 0;
+    document.getElementById('stat-admins').textContent = allUsers.filter(r => r.role === 'admin').length;
+
+    // Users table
+    const usersTbody = document.getElementById('users-table-body');
+    usersTbody.innerHTML = allUsers.map(r => `
+      <tr>
+        <td><strong>${escHtml(usersMap[r.user_id]?.email || r.user_id.substring(0,8)+'...')}</strong></td>
+        <td><span class="user-badge role-${r.role}">${r.role}</span></td>
+        <td>${formatDate(r.created_at)}</td>
+        <td>${(projects||[]).filter(p => p.user_id === r.user_id).length}</td>
+        <td>
+          <button class="btn btn-xs ${r.role === 'admin' ? 'btn-secondary' : 'btn-primary'}"
+            onclick="toggleRole('${r.user_id}', '${r.role === 'admin' ? 'user' : 'admin'}')">
+            ${r.role === 'admin' ? 'Demote' : 'Promote'}
+          </button>
+        </td>
+      </tr>
+    `).join('');
+
+    // Projects table
+    const projTbody = document.getElementById('projects-table-body');
+    projTbody.innerHTML = (projects||[]).map(p => `
+      <tr>
+        <td><strong>${escHtml(p.title)}</strong></td>
+        <td>${escHtml(usersMap[p.user_id]?.email || 'Unknown')}</td>
+        <td><span class="project-status status-${p.status}" style="font-size:11px;">${p.status.replace('_',' ')}</span></td>
+        <td>${p.priority}</td>
+        <td>₹${(parseFloat(p.budget)||0).toLocaleString()}</td>
+        <td>${(tasks||[]).filter(t => t.project_id === p.id).length}</td>
+        <td>${formatDate(p.created_at)}</td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    showToast('Error loading admin data: ' + e.message, 'error');
+  }
+}
+
+async function toggleRole(userId, newRole) {
+  if (!confirm(`Change role to ${newRole}?`)) return;
+  const { error } = await sb.from('pm_roles').update({ role: newRole }).eq('user_id', userId);
+  if (error) { showToast(error.message, 'error'); return; }
+  showToast('Role updated');
+  loadAdminData();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('admin-login-btn').addEventListener('click', adminLogin);
+  document.getElementById('admin-password').addEventListener('keydown', e => { if (e.key === 'Enter') adminLogin(); });
+  document.getElementById('admin-logout').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
+  checkAdmin();
+});
+</script>
+<script src="../js/analytics-tracker.js" defer></script>
+</body>
+</html>

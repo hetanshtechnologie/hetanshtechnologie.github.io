@@ -1,0 +1,170 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>140. Lab - Translating Text with Azure Translator - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 140</span>
+<h1>Lab - Translating Text with Azure Translator</h1>
+<p>Azure Translator is the dedicated translation service in the Azure AI family. Where the chat-model lab translated by prompting, Translator is a purpose-built REST API tuned on massive amounts of parallel text — fast, cheap at scale, and supporting dozens of languages. In this lab you will translate text with HTTP requests, handle multi-language and multi-target calls, and compare the service with the prompt-based approach you built earlier.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>An Azure Translator resource with its key and region. You can create it in the portal, or create a single-service resource named <code>Translator</code> in your resource group.</li>
+<li>Python with the <code>httpx</code> (or <code>requests</code>) library installed:</li>
+</ul>
+<pre><code>pip install httpx python-dotenv</code></pre>
+
+<h2>Step 1: Make Your First Translation Call</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Translate one sentence with a REST call</h3>
+<p>Create <code>translator.py</code>:</p>
+<pre><code>import os
+
+import httpx
+from dotenv import load_dotenv
+
+load_dotenv()
+
+KEY = os.getenv("AZURE_TRANSLATOR_KEY")
+REGION = os.getenv("AZURE_TRANSLATOR_REGION")
+ENDPOINT = os.getenv(
+    "AZURE_TRANSLATOR_ENDPOINT",
+    "https://api.cognitive.microsofttranslator.com",
+)
+
+
+def translate(text: str, to: list[str]) -&gt; list[dict]:
+    url = f"{ENDPOINT}/translate?api-version=3.0" + "".join(
+        f"&to={lang}" for lang in to
+    )
+    headers = {
+        "Ocp-Apim-Subscription-Key": KEY,
+        "Ocp-Apim-Subscription-Region": REGION,
+        "Content-Type": "application/json",
+    }
+    response = httpx.post(url, headers=headers, json=[{"text": text}])
+    response.raise_for_status()
+    return response.json()
+
+
+result = translate(
+    "The inspection drone maps pipe surfaces before corrosion becomes critical.",
+    ["de", "fr", "ja"],
+)
+for entry in result[0]["translations"]:
+    print(f"{entry['to']}: {entry['text']}")</code></pre>
+<ol>
+<li>Run the script. You should see German, French, and Japanese translations, one per target language.</li>
+<li>Note the structure of the response: a list of entries (one per input text), each holding a <code>translations</code> list keyed by the <code>to</code> code.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>Three key details make Translator calls work: the resource key in the <code>Ocp-Apim-Subscription-Key</code> header, the resource <em>region</em> in the <code>Ocp-Apim-Subscription-Region</code> header (required for the multi-service regional pricing and for access in your region), and the request body as a JSON array of <code>{"text": ...}</code> objects.</p>
+</div>
+
+<h2>Step 2: Translate a Batch of Texts</h2>
+
+<div class="exercise">
+<h3>Exercise 2: One call, several inputs</h3>
+<p>Send multiple source strings in a single request:</p>
+<pre><code>batch_texts = [
+    "The sensor array reports every 30 seconds.",
+    "Alerts are grouped by severity on the dashboard.",
+    "Operators can acknowledge alarms with one click.",
+]
+
+batch_url = f"{ENDPOINT}/translate?api-version=3.0&amp;to=es"
+headers = {
+    "Ocp-Apim-Subscription-Key": KEY,
+    "Ocp-Apim-Subscription-Region": REGION,
+    "Content-Type": "application/json",
+}
+response = httpx.post(
+    batch_url,
+    headers=headers,
+    json=[{"text": t} for t in batch_texts],
+)
+response.raise_for_status()
+for i, entry in enumerate(response.json(), start=1):
+    print(f"{i}: {entry['translations'][0]['text']}")</code></pre>
+<ol>
+<li>Run the script. The service returns one entry per input, in the same order — no interleaving, no prompt parsing.</li>
+<li>Batching also cuts request overhead: one HTTP round trip replaces three.</li>
+</ol>
+</div>
+
+<h2>Step 3: Detect the Source Language Automatically</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Let Translator guess the source</h3>
+<p>Omit the <code>from</code> parameter and ask for a detected-language response:</p>
+<pre><code>auto_url = (
+    f"{ENDPOINT}/translate?api-version=3.0&amp;to=en"
+    "&amp;includeSentenceLength=false"
+)
+mixed = ["Bonjour, comment allez-vous ?", "Guten Morgen", "おはようございます"]
+response = httpx.post(
+    auto_url,
+    headers=headers,
+    json=[{"text": t} for t in mixed],
+)
+response.raise_for_status()
+for entry in response.json():
+    detected = entry.get("detectedLanguage", {})
+    print(f"{detected.get('language', '?')} -&gt; {entry['translations'][0]['text']}")</code></pre>
+<ol>
+<li>Run the script. Each input is auto-detected (French, German, Japanese) and translated to English.</li>
+<li>Ask for the confidence score by adding <code>includeAlignment</code> or by sending a very short, ambiguous string — a single word like "love" — and observe the detected-language confidence vary.</li>
+</ol>
+</div>
+
+<h2>Step 4: Compare with the Chat-Model Translation</h2>
+<p>Translate the same sentence three ways — with the chat model from the translation-prompting lab, with Translator in one target language, and with Translator in several targets — and compare them on the axes that matter in production:</p>
+<table>
+<tr><th>Aspect</th><th>Chat-model prompting</th><th>Azure Translator</th></tr>
+<tr><td>Register and audience</td><td>Controllable via prompt</td><td>Not offered; one faithful version</td></tr>
+<tr><td>Billing</td><td>Per token (input + output)</td><td>Per character translated</td></tr>
+<tr><td>Response shape</td><td>Prose you must parse or constrain</td><td>Fixed JSON with one entry per input</td></tr>
+<tr><td>Multiple targets</td><td>One target per prompt (or repeat)</td><td>Many <code>to</code> parameters in one call</td></tr>
+<tr><td>Best for</td><td>Adaptive, styled, low-volume work</td><td>Bulk, multi-language, high-volume work</td></tr>
+</table>
+
+<div class="tip">
+<p>A common production pattern is a hybrid: Translator handles the bulk throughput at low cost, while a chat model is reserved for the small subset of content that needs an audience-specific or branded translation.</p>
+</div>
+
+<h2>Step 5: Handle Errors</h2>
+<ul>
+<li><strong>401 Unauthorized:</strong> the key header is missing or wrong.</li>
+<li><strong>403 or 400 with quota messages:</strong> the resource is out of quota or the region header is missing — a very common first-time mistake.</li>
+<li><strong>400 on language codes:</strong> the <code>to</code> value is not a valid language code; validate codes against the supported-language endpoint before batch runs.</li>
+</ul>
+<pre><code># List supported languages (no key required)
+lang_url = f"{ENDPOINT}/languages?api-version=3.0&amp;scope=translation"
+lang_response = httpx.get(lang_url)
+lang_response.raise_for_status()
+print(list(lang_response.json()["translation"].keys())[:10], "...")</code></pre>
+
+<h2>Summary</h2>
+<p>You translated text with the Azure Translator REST API, sent batches and multiple target languages in single calls, used automatic source-language detection, and compared the service with prompt-based translation on cost, shape, and flexibility. Translator is the high-volume complement to the chat model's adaptive translation — and a fine close to this text-analysis section.</p>
+<nav>
+<a href="139-lab-listing-tools-on-the-azure-language-mcp-server.html">&larr; Previous: Lab - Listing Tools on the Azure Language MCP Server</a><a href="141-speech-and-voice-arc.html">Next: Speech and Voice Arc &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

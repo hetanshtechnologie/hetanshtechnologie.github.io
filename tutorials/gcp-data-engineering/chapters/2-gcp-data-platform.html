@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>2. Google Cloud Data Platform - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>2. Google Cloud Data Platform</h1>
+<p class="tag">Chapter 2</p>
+
+<h2>Google Cloud in One Picture</h2>
+<p>Google Cloud offers a broad portfolio of data services. Understanding how they fit together is the first step in architecting pipelines. The major data-related services:</p>
+<table>
+<tr><th>Category</th><th>Services</th><th>Role</th></tr>
+<tr><td>Object storage</td><td>Cloud Storage (GCS)</td><td>Cheap, durable storage for files and raw data; the lake layer</td></tr>
+<tr><td>Analytics warehouse</td><td>BigQuery</td><td>Serverless SQL data warehouse and analytics engine</td></tr>
+<tr><td>Distributed processing</td><td>Dataproc, Dataflow</td><td>Managed Spark/Hadoop (Dataproc) and Beam pipelines (Dataflow)</td></tr>
+<tr><td>Streaming</td><td>Pub/Sub, Dataflow</td><td>Event ingestion (Pub/Sub) and stream processing</td></tr>
+<tr><td>Databases</td><td>Cloud SQL, Spanner, Bigtable, Firestore, Memorystore</td><td>Operational data stores (relational, NoSQL)</td></tr>
+<tr><td>Orchestration</td><td>Cloud Composer</td><td>Managed Apache Airflow</td></tr>
+<tr><td>Migration</td><td>Storage Transfer Service, BigQuery Data Transfer Service</td><td>Move data into GCP</td></tr>
+<tr><td>Governance</td><td>Dataplex, Data Catalog, Data Loss Prevention</td><td>Metadata, lineage, data quality, protection</td></tr>
+<tr><td>BI &amp; ML</td><td>Looker, Looker Studio, BigQuery ML, Vertex AI</td><td>Consume and model data</td></tr>
+</table>
+
+<h2>Core Platform Concepts</h2>
+<p>Before building pipelines, you must understand GCP's organizational model:</p>
+<ul>
+<li><strong>Organization:</strong> the root of your GCP hierarchy (your company).</li>
+<li><strong>Projects:</strong> the fundamental unit of isolation and billing. Resources (buckets, datasets, clusters) live inside projects. Every API call is scoped to a project.</li>
+<li><strong>Folders:</strong> organize projects hierarchically (e.g., by business unit, environment).</li>
+<li><strong>Regions and zones:</strong> resources are created in a specific location. Data residency and latency depend on this choice.</li>
+<li><strong>IAM (Identity and Access Management):</strong> who (principal) can do what (role) on which resource. Principles include least privilege and separation of duties.</li>
+</ul>
+
+<pre><code># Setting project and region in gcloud
+gcloud config set project my-data-project
+gcloud config set compute/region us-central1
+gcloud config set compute/zone us-central1-a</code></pre>
+
+<h2>Service Accounts and Application Default Credentials</h2>
+<p>Pipelines rarely authenticate as a human. They use <strong>service accounts</strong> — machine identities with IAM roles. Best practices:</p>
+<ul>
+<li>One service account per workload/pipeline, with least-privilege roles.</li>
+<li>Prefer short-lived credentials; rotate keys; use workload identity federation where possible.</li>
+<li>Never store keys in code or DAGs; use the metadata server (on GCE/GKE), Workload Identity (on GKE), or a secret manager for keys.</li>
+</ul>
+
+<pre><code># Using Application Default Credentials in Python
+from google.auth import default
+
+credentials, project = default()
+print("Using project:", project)</code></pre>
+
+<h2>Data Residency and Regions</h2>
+<p>Choosing regions matters for:</p>
+<ul>
+<li><strong>Compliance:</strong> some data must stay in a country/region (GDPR, industry rules).</li>
+<li><strong>Performance:</strong> keep compute near storage near consumers.</li>
+<li><strong>Availability:</strong> multi-region storage options replicate across regions.</li>
+<li><strong>Cost:</strong> data egress (leaving GCP or crossing regions) is billable — keep data movement inside a region when possible.</li>
+</ul>
+
+<p>BigQuery has <strong>regional</strong> and <strong>multi-regional</strong> locations (e.g., <code>us</code>, <code>eu</code>). Cloud Storage supports regional, dual-region, and multi-region classes.</p>
+
+<h2>Cost Model Essentials</h2>
+<p>GCP pricing is consumption-based. For data engineering the biggest cost drivers are:</p>
+<ul>
+<li><strong>BigQuery:</strong> you pay for analysis (queries) and storage. The flat-rate (slot) option is for heavy, predictable usage; on-demand pricing charges per amount of data scanned per query. Designing for fewer scanned bytes is a core optimization skill.</li>
+<li><strong>Dataproc:</strong> you pay for cluster VMs (per-vCPU/hour) plus a small Dataproc surcharge. Ephemeral clusters (create for the job, delete after) keep costs low.</li>
+<li><strong>Cloud Storage:</strong> per GB stored per month, by storage class (Standard, Nearline, Coldline, Archive). Data access has additional charges.</li>
+<li><strong>Cloud Composer:</strong> a monthly base cost plus worker/scheduler VMs and storage.</li>
+<li><strong>Network egress:</strong> data leaving GCP is the hidden cost — minimize unnecessary egress.</li>
+</ul>
+
+<div class="note">
+<strong>Cost mindset:</strong> In the cloud, you pay for what you use, so engineering decisions (schema design, partition granularity, query patterns, cluster sizing) directly move the bill. A "cost-aware" data engineer is more valuable than one who just writes working SQL.
+</div>
+
+<h2>Security and Networking for Data</h2>
+<ul>
+<li><strong>VPC:</strong> private networks for Dataproc clusters, Composer environments, and BigQuery (via private service connect).</li>
+<li><strong>Cloud KMS / CMEK:</strong> customer-managed encryption keys for buckets, datasets, and clusters.</li>
+<li><strong>Data Loss Prevention (DLP):</strong> detect and redact PII in transit.</li>
+<li><strong>VPC Service Controls:</strong> restrict data exfiltration — important for regulated data.</li>
+<li><strong>Logging and monitoring:</strong> Cloud Logging + Cloud Monitoring for pipeline telemetry; audit logs for governance.</li>
+</ul>
+
+<h2>A Reference Data Architecture on GCP</h2>
+<pre><code>Sources (SaaS, DBs, files, events)
+   │
+   ├─ batch files ──────────────► Cloud Storage (GCS) ──► BigQuery (load / external)
+   │
+   ├─ streaming events ─────────► Pub/Sub ──► Dataflow ──► BigQuery / Bigtable
+   │
+   └─ database changes ─────────► CDC tool ─► Pub/Sub ──► BigQuery
+
+Cloud Composer (Airflow) orchestrates all scheduled steps.
+dbt runs warehouse transformations; Looker/BI consume BigQuery.</code></pre>
+
+<p>This is the pattern most teams converge on: a lake in GCS, a warehouse in BigQuery, streaming through Pub/Sub + Dataflow, orchestration via Composer, and transformation via dbt or Spark.</p>
+
+<h2>IAM Roles That Data Engineers Use Most</h2>
+<table>
+<tr><th>Resource</th><th>Useful Roles</th></tr>
+<tr><td>BigQuery</td><td>BigQuery Admin, Data Editor, Data Viewer, Job User, Metadata Viewer</td></tr>
+<tr><td>Cloud Storage</td><td>Storage Admin, Object Admin, Object Viewer, Object Creator</td></tr>
+<tr><td>Dataproc</td><td>Dataproc Administrator, Worker, Editor</td></tr>
+<tr><td>Cloud Composer</td><td>Composer Administrator, Worker, Environment and Storage Object Viewer</td></tr>
+<tr><td>Project-level</td><td>roles/viewer, roles/editor (avoid for data with secrets)</td></tr>
+</table>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Using the GCP free tier (or documentation), create a project hierarchy on paper for a company with dev, staging, and prod environments across two business units. Assign IAM roles to three personas: a data engineer, an analyst, and a data scientist — least privilege for each. Then list which region you would choose and why, considering data residency for a company in Europe serving EU customers.
+</div>
+
+<nav>
+  <a href="1-introduction.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="3-bigquery-fundamentals.html">Next: BigQuery Fundamentals &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

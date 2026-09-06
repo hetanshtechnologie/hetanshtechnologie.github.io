@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CQRS Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:1000px;margin:24px auto;padding:0 16px}
+.cqrs-diagram{display:flex;gap:16px;justify-content:center;margin:20px 0;flex-wrap:wrap}
+.cqrs-side{background:#1e293b;border:2px solid;border-radius:12px;padding:16px;flex:1;min-width:280px;max-width:400px}
+.cqrs-side.write{border-color:#f87171}
+.cqrs-side.read{border-color:#4ade80}
+.cqrs-side h3{font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.cqrs-side h3::before{content:'';width:10px;height:10px;border-radius:50%;display:inline-block}
+.write h3::before{background:#f87171}
+.read h3::before{background:#4ade80}
+.model-box{background:#334155;border-radius:8px;padding:10px;font-size:12px;margin-bottom:8px;border-left:3px solid}
+.model-box.write-model{border-color:#f87171}
+.model-box.read-model{border-color:#4ade80}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.sync-indicator{display:flex;align-items:center;justify-content:center;gap:8px;margin:12px 0;font-size:12px;color:#94a3b8}
+.sync-dot{width:8px;height:8px;border-radius:50%;background:#4ade80;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>CQRS Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/12</div>
+<div class="hud-item"><span id="syncs">0</span>Synced</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="cqrs-diagram">
+<div class="cqrs-side write">
+<h3>Write Model (Commands)</h3>
+<div id="write-models"></div>
+</div>
+<div class="cqrs-side read">
+<h3>Read Model (Queries)</h3>
+<div id="read-models"></div>
+</div>
+</div>
+<div class="sync-indicator"><div class="sync-dot"></div>Event Store Syncing</div>
+<div class="scenario-card">
+<h3 id="scenario-title">CQRS Decision</h3>
+<p id="scenario-desc"></p>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>CQRS Expert!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=12,syncs=0,answered=false;
+const scenarios=[
+{desc:"User updates profile. Which model handles the write?",writeModel:"User Aggregate",readModel:"User Projection",correct:"Write to User Aggregate, then project to read model",reason:"Commands go to write model. Event projects to read model."},
+{desc:"Dashboard needs 30-day analytics. Which model queries?",writeModel:"Analytics Aggregate",readModel:"Analytics Dashboard View",correct:"Query the denormalized read model",reason:"Read models are optimized for queries with denormalized data."},
+{desc:"Place order with complex validation. Which model?",writeModel:"Order Aggregate",readModel:"Order Summary View",correct:"Write model validates business rules",reason:"Write model enforces invariants. Read model just displays."},
+{desc:"Product search with filters. Which model?",writeModel:"Product Aggregate",readModel:"Product Search Index",correct:"Query the search-optimized read model",reason:"Read model can be a separate search index for fast queries."},
+{desc:"User's order history needs pagination. Which model?",writeModel:"Order Aggregate",readModel:"User Order History View",correct:"Read model provides paginated view",reason:"Read models can be pre-computed for specific query patterns."},
+{desc:"Concurrent edits to same order. Handling?",writeModel:"Order Aggregate (optimistic locking)",readModel:"Order View",correct:"Write model handles conflicts via aggregate",reason:"Write model uses optimistic concurrency control."},
+{desc:"Generate monthly financial report. Which model?",writeModel:"Financial Aggregate",readModel:"Report View (materialized)",correct:"Materialize report in read model",reason:"Expensive queries should pre-compute results in read model."},
+{desc:"Real-time inventory count. Which model?",writeModel:"Inventory Aggregate",readModel:"Inventory Count View",correct:"Read model maintains real-time count via events",reason:"Read model subscribes to events for real-time updates."},
+{desc:"Command fails validation. What happens to read model?",writeModel:"Validation rejects command",readModel:"Read model unchanged",correct:"No event published, read model stays consistent",reason:"Failed commands don't produce events. Read model untouched."},
+{desc:"Read model is 5 seconds behind write model. Acceptable?",writeModel:"Writes complete",readModel:"Reads slightly stale",correct:"Yes — eventual consistency is normal for CQRS",reason:"CQRS accepts eventual consistency between write and read models."},
+{desc:"Need to query across multiple aggregates. Which model?",writeModel:"Multiple aggregates",readModel:"Cross-aggregate projection",correct:"Create a read model projection across aggregates",reason:"Read models can join data from multiple write aggregates."},
+{desc:"Audit trail required. Which model provides it?",writeModel:"Event Store",readModel:"Audit Log View",correct:"Event store is the audit trail",reason:"Event sourcing naturally provides complete audit trails."}
+];
+const writeModels=[
+{Name:"User Aggregate",Fields:["id","name","email","status"]},
+{Name:"Order Aggregate",Fields:["id","items","total","status"]},
+{Name:"Product Aggregate",Fields:["id","name","price","stock"]},
+{Name:"Payment Aggregate",Fields:["id","amount","method","status"]}
+];
+const readModels=[
+{Name:"User Profile View",Fields:["name","email","avatar","lastLogin"]},
+{Name:"Order History View",Fields:["orderId","date","total","status"]},
+{Name:"Product Search View",Fields:["name","price","rating","category"]},
+{Name:"Analytics Dashboard",Fields:["totalUsers","totalOrders","revenue"]}
+];
+function init(){score=0;round=0;syncs=0;startRound();}
+function renderModels(){
+document.getElementById('write-models').innerHTML=writeModels.map(m=>`<div class="model-box write-model"><div style="font-weight:600;margin-bottom:4px">${m.Name}</div><div style="color:#94a3b8;font-size:11px">${m.Fields.join(' · ')}</div></div>`).join('');
+document.getElementById('read-models').innerHTML=readModels.map(m=>`<div class="model-box read-model"><div style="font-weight:600;margin-bottom:4px">${m.Name}</div><div style="color:#94a3b8;font-size:11px">${m.Fields.join(' · ')}</div></div>`).join('');
+}
+function startRound(){
+answered=false;
+const s=scenarios[round%scenarios.length];
+document.getElementById('scenario-title').textContent=`Scenario ${round+1}`;
+document.getElementById('scenario-desc').textContent=s.desc;
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+document.getElementById('choices').innerHTML=[
+'Write Model handles it',
+'Read Model handles it',
+'Both models coordinate',
+'Event Store handles it'
+].map(c=>`<button class="choice-btn" onclick="answer('${c}','${s.correct}','${s.reason}')">${c}</button>`).join('');
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect){score+=10;syncs++;}
+else{score=Math.max(0,score-3);}
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+document.getElementById('syncs').textContent=syncs;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;document.getElementById('syncs').textContent=0;
+}
+renderModels();startRound();
+</script>
+</body>
+</html>

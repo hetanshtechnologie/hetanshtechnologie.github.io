@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Updates &amp; Enhancements - PWA Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 14</span>
+    <h1>Updates &amp; Enhancements</h1>
+
+    <h2>Service Worker Update Lifecycle</h2>
+    <p>When you deploy a new Service Worker, it goes through a specific lifecycle:</p>
+    <ol>
+      <li>Browser detects the new SW file (byte-different)</li>
+      <li>New SW installs in the background</li>
+      <li>New SW enters "waiting" state until all pages using the old SW are closed</li>
+      <li>New SW activates and takes control</li>
+    </ol>
+
+    <pre><code>// Detect Service Worker updates
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(registration => {
+    // Check for updates every minute
+    setInterval(() => {
+      registration.update();
+    }, 60 * 1000);
+
+    // Listen for new SW
+    registration.addEventListener('updatefound', () => {
+      const newWorker = registration.installing;
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'installed') {
+          if (navigator.serviceWorker.controller) {
+            // New version available!
+            showUpdateNotification();
+          }
+        }
+      });
+    });
+  });
+}</code></pre>
+
+    <h2>Update Strategies</h2>
+
+    <h3>1. Immediate Update (Skip Waiting)</h3>
+    <pre><code>// sw.js
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
+// page.js - Force update when user clicks "Update"
+function applyUpdate() {
+  if (window.newWorker) {
+    window.newWorker.postMessage({ type: 'SKIP_WAITING' });
+  }
+}
+
+// sw.js
+self.addEventListener('message', (event) => {
+  if (event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});</code></pre>
+
+    <h3>2. Gentle Update (Notify + Defer)</h3>
+    <pre><code>// Show a notification bar
+function showUpdateNotification() {
+  const banner = document.createElement('div');
+  banner.className = 'update-banner';
+  banner.innerHTML = `
+    A new version is available.
+    &lt;button onclick="applyUpdate()"&gt;Update&lt;/button&gt;
+    &lt;button onclick="dismissUpdate()"&gt;Later&lt;/button&gt;
+  `;
+  document.body.prepend(banner);
+}
+
+// Listen for controller change (after update)
+let refreshing = false;
+navigator.serviceWorker.addEventListener('controllerchange', () => {
+  if (refreshing) return;
+  refreshing = true;
+  window.location.reload();
+});</code></pre>
+
+    <h2>Versioning</h2>
+    <pre><code>// sw.js - Use cache versioning
+const CACHE_VERSION = 'v2';
+const STATIC_CACHE = `static-${CACHE_VERSION}`;
+const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`;
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then(keys => {
+      return Promise.all(
+        keys.map(key => {
+          if (key !== STATIC_CACHE && key !== DYNAMIC_CACHE) {
+            return caches.delete(key);
+          }
+        })
+      );
+    })
+  );
+});</code></pre>
+
+    <h2>Progressive Enhancement</h2>
+    <p>Progressive enhancement means your PWA should work as a basic website even without JavaScript, then enhance when more capabilities are available.</p>
+
+    <pre><code>// Check feature availability
+const features = {
+  serviceWorker: 'serviceWorker' in navigator,
+  cache: 'caches' in window,
+  indexedDB: 'indexedDB' in window,
+  notifications: 'Notification' in window,
+  pushManager: 'PushManager' in window,
+  sync: 'SyncManager' in window,
+  bluetooth: 'bluetooth' in navigator,
+  usb: 'usb' in navigator,
+  nfc: 'nfc' in navigator
+};
+
+// Progressively enhance based on available features
+if (features.serviceWorker) {
+  // Register SW for offline support
+}
+if (features.notifications) {
+  // Enable push notifications
+}
+if (features.sync) {
+  // Enable background sync
+}</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Implement a versioned cache strategy for a PWA. When a new version is deployed, show a "New version available" toast notification. When the user clicks "Update", activate the new Service Worker and refresh the page.
+    </div>
+
+    <nav>
+      <a href="13-install-prompt.html">&larr; Previous: Install Prompt</a>
+      <a href="../">Back to Index</a>
+      <a href="15-enhancements.html">Next: Progressive Enhancements &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

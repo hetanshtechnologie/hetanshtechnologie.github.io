@@ -1,0 +1,323 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azure AI Vision: Image Analysis - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 4</span>
+<h1>Azure AI Vision: Image Analysis</h1>
+
+<h2>Overview of Azure AI Vision</h2>
+<p>Azure AI Vision is a cloud-based service that extracts information from images. It provides prebuilt models for a wide range of visual recognition tasks, eliminating the need to train custom models for common scenarios. The service accepts image input as a URL or raw binary data and returns structured JSON containing the analysis results. You can use it to tag images with objects and concepts, generate human-readable captions, detect specific objects and their bounding boxes, identify brands and landmarks, read printed and handwritten text, generate smart cropped thumbnails, and moderate adult or racy content.</p>
+<p>The service is part of the Azure AI Services portfolio and is available through a dedicated Computer Vision resource or through the multi-service Cognitive Services resource. The REST API supports version 3.2 (stable) and version 4.0 (preview), with the 4.0 version introducing the unified Image Analysis API that combines multiple capabilities into a single call.</p>
+<p>On the AI-102 exam, Computer Vision questions appear in the "Implement image and video processing" domain. You should understand which visual features are available, how to interpret the API responses, and when to use the newer Image Analysis 4.0 API versus the legacy 3.2 endpoints.</p>
+
+<h2>Image Analysis Features</h2>
+<p>The Image Analysis API provides several categories of visual features that you request through the <code>visualFeatures</code> parameter. Each feature returns a specific section in the response JSON.</p>
+
+<table>
+<tr><th>Feature</th><th>Description</th><th>API Parameter</th></tr>
+<tr><td>Tags</td><td>Content tags based on objects, actions, and scenes</td><td><code>Tags</code></td></tr>
+<tr><td>Caption</td><td>A human-readable sentence describing the image</td><td><code>Caption</code></td></tr>
+<tr><td>Dense Captions</td><td>Captions for individual regions of the image</td><td><code>DenseCaptions</code></td></tr>
+<tr><td>Objects</td><td>Detected objects with bounding boxes</td><td><code>Objects</code></td></tr>
+<tr><td>Brands</td><td>Detected brand logos with bounding boxes</td><td><code>Brands</code></td></tr>
+<tr><td>Celebrities</td><td>Identified celebrities (legacy domain-specific model)</td><td><code>Celebrities</code></td></tr>
+<tr><td>Landmarks</td><td>Identified landmarks (legacy domain-specific model)</td><td><code>Landmarks</code></td></tr>
+<tr><td>Adult</td><td>Adult, racy, and gory content classification</td><td><code>Adult</code></td></tr>
+<tr><td>Categories</td><td>Image categorization using a taxonomy of 86 categories</td><td><code>Categories</code></td></tr>
+<tr><td>Color</td><td>Dominant colors, accent color, and color scheme analysis</td><td><code>Color</code></td></tr>
+<tr><td>Image Type</td><td>Indicates if the image is clip art or line drawing</td><td><code>ImageType</code></td></tr>
+<tr><td>Faces</td><td>Detects faces with age and gender (limited)</td><td><code>Faces</code></td></tr>
+</table>
+
+<p>In the 4.0 Image Analysis API, these features are grouped and invoked through a unified endpoint. The newer API also adds support for people detection and background removal, though these may have additional pricing.</p>
+
+<h3>Understanding API Responses</h3>
+<p>The Image Analysis API returns a structured JSON response. The following example shows the key parts of a response when requesting Tags and Caption features:</p>
+
+<pre><code>{
+  "captionResult": {
+    "text": "A group of people standing on a beach at sunset",
+    "confidence": 0.92
+  },
+  "tagsResult": {
+    "values": [
+      { "name": "beach", "confidence": 0.99 },
+      { "name": "sunset", "confidence": 0.98 },
+      { "name": "people", "confidence": 0.95 },
+      { "name": "ocean", "confidence": 0.93 },
+      { "name": "sand", "confidence": 0.90 },
+      { "name": "standing", "confidence": 0.87 },
+      { "name": "group", "confidence": 0.82 },
+      { "name": "outdoor", "confidence": 0.80 }
+    ]
+  },
+  "metadata": {
+    "width": 1920,
+    "height": 1080,
+    "format": "Jpeg"
+  },
+  "modelVersion": "2024-02-01"
+}</code></pre>
+
+<p>Each tag includes a <code>name</code> and <code>confidence</code> score between 0 and 1. Higher confidence indicates the model is more certain that the tag applies to the image. The caption provides a natural language description. The dense captions feature extends this by providing region-specific captions, each with a bounding box and confidence score.</p>
+
+<div class="note">
+<p>The celebrity and landmark detection features are considered legacy domain-specific models. They were included in earlier API versions but are not being actively enhanced. For new projects, use the general tags feature and map specific names yourself, or consider using Custom Vision for domain-specific recognition tasks.</p>
+</div>
+
+<h2>Optical Character Recognition (OCR)</h2>
+<p>Azure AI Vision provides two OCR approaches: the legacy OCR API and the newer Read API. The Read API is the recommended approach for extracting text from images. It supports both printed and handwritten text, handles multiple languages, and processes images with varying orientations and angles.</p>
+<p>The Read API uses an asynchronous operation pattern. You submit an image for analysis, receive an operation location URL, and poll that URL until the analysis completes. This is necessary because OCR for complex documents can take several seconds. The synchronous approach is available only for the legacy OCR API, which has limited capabilities compared to Read.</p>
+<p>The async workflow involves three steps. First, call the <code>POST /vision/v3.2/read/analyze</code> endpoint with the image URL or binary data. The response includes an <code>Operation-Location</code> header containing the result URL. Second, poll the result URL using GET requests at one-second intervals. Third, when the response status changes to "succeeded," parse the JSON response to extract the recognized text, lines, and words.</p>
+
+<pre><code># Python - OCR extraction with Read API
+import os
+import time
+from azure.ai.vision import ImageAnalysisClient
+from azure.core.credentials import AzureKeyCredential
+
+endpoint = os.environ["VISION_ENDPOINT"]
+key = os.environ["VISION_KEY"]
+
+client = ImageAnalysisClient(
+    endpoint=endpoint,
+    credential=AzureKeyCredential(key)
+)
+
+# Read from a local image file
+with open("receipt.jpg", "rb") as f:
+    image_data = f.read()
+
+# Start the async OCR operation
+poller = client.begin_read(image_data)
+result = poller.result()
+
+# Process the results
+if result.blocks:
+    for block in result.blocks:
+        for line in block.lines:
+            print(f"Line: '{line.text}'")
+            for word in line.words:
+                print(f"  Word: '{word.text}' (confidence: {word.confidence:.2f})")</code></pre>
+
+<pre><code>// C# - OCR extraction with Read API
+using Azure;
+using Azure.AI.Vision;
+using Azure.AI.Vision.ImageAnalysis;
+
+var endpoint = Environment.GetEnvironmentVariable("VISION_ENDPOINT");
+var key = Environment.GetEnvironmentVariable("VISION_KEY");
+
+var client = new ImageAnalysisClient(
+    new Uri(endpoint),
+    new AzureKeyCredential(key));
+
+using var imageStream = File.OpenRead("receipt.jpg");
+var result = client.Read(imageStream);
+
+foreach (var block in result.Value.Blocks)
+{
+    foreach (var line in block.Lines)
+    {
+        Console.WriteLine($"Line: '{line.Text}'");
+        foreach (var word in line.Words)
+        {
+            Console.WriteLine($"  Word: '{word.Text}' (confidence: {word.Confidence:F2})");
+        }
+    }
+}</code></pre>
+
+<div class="exam-tip">
+<h3>Exam Tip: OCR vs. Document Intelligence</h3>
+<p>The AI-102 exam tests your ability to distinguish between Azure AI Vision's Read API and Azure AI Document Intelligence (formerly Form Recognizer). Use the Read API when you need to extract text from general images, such as signs, menus, or photographs containing text. Use Document Intelligence when you need to extract structured information from forms, invoices, receipts, or identity documents, because it can interpret field relationships and table structures. When the scenario involves form fields or key-value pairs, Document Intelligence is the correct choice.</p>
+</div>
+
+<h2>Generating Thumbnails with Smart Cropping</h2>
+<p>The smart cropping feature generates thumbnails that preserve the region of interest in an image. Instead of simple resizing that might cut out the subject, the Vision service analyzes the image to identify the most important region and crops around it. You specify the desired output dimensions (width and height), and the service returns a cropped image centered on the region of interest.</p>
+<p>The API accepts a <code>smartCropping</code> parameter set to <code>true</code> to enable intelligent cropping. Without this flag, the service performs standard center cropping. Smart cropping is particularly useful for generating thumbnail previews in galleries, profile pictures, and responsive layouts where the subject must remain visible regardless of the aspect ratio.</p>
+
+<pre><code># Python - smart thumbnail generation
+import os
+from azure.ai.vision import ImageAnalysisClient
+from azure.core.credentials import AzureKeyCredential
+
+endpoint = os.environ["VISION_ENDPOINT"]
+key = os.environ["VISION_KEY"]
+
+client = ImageAnalysisClient(
+    endpoint=endpoint,
+    credential=AzureKeyCredential(key)
+)
+
+with open("photo.jpg", "rb") as f:
+    image_data = f.read()
+
+# Generate a 200x200 smart-cropped thumbnail
+result = client.generate_thumbnail(
+    image_data=image_data,
+    width=200,
+    height=200,
+    smart_cropping=True
+)
+
+with open("thumbnail.jpg", "wb") as f:
+    f.write(result.thumbnail_data)
+
+print("Thumbnail saved as thumbnail.jpg")</code></pre>
+
+<h2>Moderating Adult and Racy Content</h2>
+<p>Adult content moderation classifies images into three categories: adult content (explicit sexual content), racy content (sexually suggestive content), and gory content (violent or gruesome imagery). The API returns an <code>isAdultContent</code>, <code>isRacyContent</code>, and <code>isGoryContent</code> boolean flag, along with confidence scores that indicate the model's certainty.</p>
+<p>This feature is useful for user-generated content platforms, social media applications, image libraries, and any system where users upload images. You can combine the Vision moderation results with Azure AI Content Safety for text-based moderation to create a comprehensive content safety pipeline.</p>
+<p>For child safety compliance and to meet Microsoft's responsible AI requirements, applications that process images should always include adult content moderation. The moderation scores are not perfect and should be treated as a guide rather than an absolute classification. You may need to tune thresholds based on your specific content policies.</p>
+
+<h2>Pricing and Quota Management</h2>
+<p>The Computer Vision service offers two pricing tiers. The Free F0 tier provides 5,000 transactions per month with a rate limit of 20 transactions per minute. The Standard S0 tier charges per 1,000 transactions, with pricing varying by feature. The rate limits for S0 are substantially higher — typically 100 transactions per minute, adjustable by requesting a quota increase through Azure support.</p>
+
+<table>
+<tr><th>Operation</th><th>F0 Limit</th><th>S0 Limit</th><th>S0 Price (per 1K)</th></tr>
+<tr><td>Analyze Image (all features)</td><td>20/min, 5K/mo</td><td>100/min</td><td>~$1.50</td></tr>
+<tr><td>OCR Read</td><td>20/min, 5K/mo</td><td>100/min</td><td>~$1.50</td></tr>
+<tr><td>Generate Thumbnail</td><td>20/min, 5K/mo</td><td>100/min</td><td>~$0.80</td></tr>
+<tr><td>Detect Objects</td><td>20/min, 5K/mo</td><td>100/min</td><td>~$1.50</td></tr>
+</table>
+
+<p>Monitor your quota usage through the Metrics blade in the Azure portal. Create a metric alert for the "Total Calls" metric with a threshold at 80% of your quota to receive early warnings. For S0 tiers, the rate limit can be increased through a support ticket, but Microsoft reserves the right to deny requests that would negatively impact service stability.</p>
+
+<h2>Object Detection</h2>
+<p>Object detection identifies specific objects in an image and returns bounding box coordinates for each detection. The service recognizes a wide range of object categories including vehicles, animals, furniture, electronics, food, and household items. Each detection includes the object name, confidence score, and a bounding box specified as x, y, width, and height coordinates relative to the image dimensions.</p>
+<p>Unlike image tagging, which answers "what is in this image," object detection answers "where is each object in this image." The bounding box coordinates let you draw rectangles around detected objects, enabling applications like inventory management, retail analytics, and automated quality inspection.</p>
+<p>Prebuilt object detection is best for common objects. For domain-specific objects such as industrial parts, medical instruments, or specialized equipment, use Custom Vision object detection (covered in Chapter 5) to train a model with your own labeled images.</p>
+
+<h2>Putting It All Together: A Console Application</h2>
+<p>The following complete Python console application demonstrates image analysis with multiple features, OCR extraction, and thumbnail generation in a single workflow:</p>
+
+<pre><code>import os
+import sys
+import json
+from azure.ai.vision import ImageAnalysisClient
+from azure.ai.vision.models import VisualFeatures
+from azure.core.credentials import AzureKeyCredential
+
+def analyze_image(client, image_path):
+    with open(image_path, "rb") as f:
+        data = f.read()
+    
+    features = [
+        VisualFeatures.CAPTION,
+        VisualFeatures.TAGS,
+        VisualFeatures.OBJECTS,
+        VisualFeatures.ADULT
+    ]
+    
+    result = client.analyze(
+        image_data=data,
+        visual_features=features
+    )
+    return result
+
+def print_analysis(result):
+    if result.caption:
+        print(f"\nCaption: {result.caption.text}")
+        print(f"Confidence: {result.caption.confidence:.2%}")
+    
+    if result.tags:
+        print(f"\nTags ({len(result.tags)}):")
+        for tag in result.tags:
+            print(f"  {tag.name}: {tag.confidence:.2%}")
+    
+    if result.objects:
+        print(f"\nObjects ({len(result.objects)}):")
+        for obj in result.objects:
+            box = obj.bounding_box
+            print(f"  {obj.object_property} at ({box.x}, {box.y}), {box.w}x{box.h}")
+    
+    if result.adult:
+        print(f"\nAdult Content: {result.adult.is_adult_content}")
+        print(f"Racy Content: {result.adult.is_racy_content}")
+        print(f"Gore Content: {result.adult.is_gory_content}")
+
+if __name__ == "__main__":
+    endpoint = os.environ.get("VISION_ENDPOINT")
+    key = os.environ.get("VISION_KEY")
+    
+    if not endpoint or not key:
+        print("Error: Set VISION_ENDPOINT and VISION_KEY environment variables.")
+        sys.exit(1)
+    
+    if len(sys.argv) < 2:
+        print("Usage: python analyze.py &lt;image_path&gt;")
+        sys.exit(1)
+    
+    client = ImageAnalysisClient(
+        endpoint=endpoint,
+        credential=AzureKeyCredential(key)
+    )
+    
+    image_path = sys.argv[1]
+    if not os.path.exists(image_path):
+        print(f"Error: File '{image_path}' not found.")
+        sys.exit(1)
+    
+    result = analyze_image(client, image_path)
+    print_analysis(result)</code></pre>
+
+<div class="exercise">
+<h3>Exercise: Build an Image Analysis Console Application</h3>
+<p>Create a new Python file named <code>image_analyzer.py</code> that performs the following tasks using the Azure AI Vision SDK:</p>
+<ol>
+<li>Accept an image URL from the command line.</li>
+<li>Analyze the image requesting Caption, Tags, and Objects visual features.</li>
+<li>Print the caption with its confidence score.</li>
+<li>List every tag with a confidence above 0.80, sorted by confidence descending.</li>
+<li>For each detected object, draw a red rectangle on a copy of the image using Pillow (install with <code>pip install Pillow</code>) and save the result as <code>output.jpg</code>.</li>
+<li>Handle HTTP 429 rate limit errors by implementing a retry with a 3-second delay.</li>
+</ol>
+<p>Run your script against at least three different images: a landscape photo, a photo with multiple people, and a photo containing text. Observe how the caption changes based on the image content and note any tags that seem incorrect or surprising.</p>
+</div>
+
+<h2>Best Practices for Image Analysis</h2>
+<p>To get the best results from Azure AI Vision, follow these guidelines. Provide high-quality images with good lighting and clear subjects. The minimum image size is 50x50 pixels and the maximum is 20,480x20,480 pixels. For OCR, use images where text is at least 10 pixels tall and has good contrast against the background. Images larger than 4 MB take longer to process and may cause timeout errors; consider resizing large images before sending them.</p>
+<p>When you need to analyze many images, consider batching. The SDK does not provide a built-in batch API, but you can implement your own batching with parallel requests subject to the rate limit. Use the asynchronous Read API for OCR to avoid blocking your application thread during long-running operations. Cache analysis results when the same images are analyzed multiple times to reduce cost and latency.</p>
+
+<div class="warn">
+<p>The prebuilt Vision models have limited knowledge of specialized domains. They will not recognize proprietary product SKUs, industry-specific equipment, or niche categories. For these requirements, train a Custom Vision model. Also note that the Face detection within the Vision API (under the Faces feature) is limited compared to the dedicated Face API and should not be used for identity verification scenarios.</p>
+</div>
+
+<h2>Comparing Vision API Versions</h2>
+<p>At the time of writing, Azure AI Vision has two active API versions. Version 3.2 is the stable, long-supported version that most production applications use. Version 4.0 introduces the combined Image Analysis API with a simpler interface and new features like dense captions and background removal.</p>
+
+<table>
+<tr><th>Capability</th><th>API 3.2</th><th>API 4.0</th></tr>
+<tr><td>Image analysis</td><td>Separate endpoints per feature</td><td>Unified endpoint</td></tr>
+<tr><td>OCR</td><td>Read API (async)</td><td>Read API (async)</td></tr>
+<tr><td>Dense captions</td><td>Not available</td><td>Supported</td></tr>
+<tr><td>Background removal</td><td>Not available</td><td>Supported (preview)</td></tr>
+<tr><td>People detection</td><td>Not available</td><td>Supported</td></tr>
+<tr><td>SDK support</td><td>Azure.AI.Vision 1.x</td><td>Azure.AI.Vision 2.x (preview)</td></tr>
+</table>
+
+<p>For the exam, version 3.2 is the current tested version. However, Microsoft updates exam content as services evolve, so check the exam study guide for the specific API version covered at your testing time. The concepts are the same across versions; only the endpoint URLs and response structures differ.</p>
+
+<h2>Summary</h2>
+<p>Azure AI Vision provides powerful prebuilt image analysis capabilities including tagging, caption generation, object detection, OCR, thumbnail generation, and content moderation. The Read API handles printed and handwritten text extraction using an asynchronous pattern. Smart cropping produces thumbnails that preserve the image's region of interest. Pricing tiers range from free (F0) with limited throughput to standard (S0) with higher limits and per-transaction billing. Understanding the API response structure and the difference between prebuilt Vision and custom Vision is essential for the exam. In the next chapter, you will learn how to train custom classification and object detection models using Custom Vision.</p>
+
+<nav>
+<a href="3-security-monitoring.html">&larr; Previous: Security, Monitoring, and Governance</a>
+<a href="5-custom-vision.html">Next: Custom Vision: Classification and Detection &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

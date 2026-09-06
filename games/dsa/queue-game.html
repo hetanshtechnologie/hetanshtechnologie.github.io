@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Queue Operations Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:850px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.3rem}
+.queue-area{background:#1e293b;border-radius:12px;padding:24px;margin-bottom:20px}
+.queue-label{color:#94a3b8;font-weight:600;margin-bottom:12px}
+.queue-visual{display:flex;gap:8px;align-items:center;min-height:60px;flex-wrap:wrap}
+.queue-arrow{color:#475569;font-size:1.5rem}
+.queue-item{width:56px;height:56px;display:flex;align-items:center;justify-content:center;background:#334155;border:2px solid #475569;border-radius:10px;font-weight:700;font-size:1rem;transition:all .4s;flex-shrink:0}
+.queue-item.front{border-color:#facc15;background:#422006}
+.queue-item.rear{border-color:#22c55e;background:#14532d}
+.queue-item.dequeuing{border-color:#ef4444;background:#7f1d1d;animation:dequeAnim .4s}
+.queue-item.enqueuing{border-color:#38bdf8;background:#1e3a5f;animation:enqueAnim .4s}
+@keyframes dequeAnim{0%{transform:translateX(0);opacity:1}100%{transform:translateX(-30px);opacity:0}}
+@keyframes enqueAnim{0%{transform:translateX(30px);opacity:0}100%{transform:translateX(0);opacity:1}}
+.op-history{background:#1e293b;border-radius:12px;padding:16px;margin-bottom:20px}
+.op-history h3{color:#94a3b8;margin-bottom:8px;font-size:.9rem}
+.op-list{display:flex;gap:8px;flex-wrap:wrap}
+.op-tag{padding:4px 10px;border-radius:6px;font-size:.8rem;font-weight:600}
+.op-tag.enqueue{background:#14532d;color:#4ade80}
+.op-tag.dequeue{background:#7f1d1d;color:#fca5a5}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.choice-btn{display:block;width:100%;padding:12px 20px;margin-bottom:8px;background:#334155;color:#e2e8f0;border:2px solid #475569;border-radius:8px;font-size:1rem;cursor:pointer;text-align:left;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.choice-btn.correct{border-color:#22c55e;background:#14532d}
+.choice-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:12px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&#8592; Home</a><h1>Queue Operations Game</h1></div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Round: <span class="score-val" id="round">1</span></span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="queue-area">
+    <div class="queue-label">Queue (front &#8594; rear)</div>
+    <div class="queue-visual" id="queueVisual"></div>
+  </div>
+  <div class="op-history"><h3>Operations:</h3><div class="op-list" id="opList"></div></div>
+  <div class="instructions"><h2>How to Play</h2><p>Queue is FIFO (First In, First Out). Given operations, predict the queue state, front element, or dequeue result!</p></div>
+  <div id="messageArea"></div>
+  <div id="choicesArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startRound()">Start Round</button>
+    <button class="btn btn-secondary" id="resetBtn" onclick="resetAll()" style="display:none">New Round</button>
+  </div>
+</div>
+<script>
+let queue=[],ops=[],opIdx=0,score=0,round=1,streak=0;
+
+function renderQueue(){
+  const el=document.getElementById('queueVisual');el.innerHTML='';
+  queue.forEach((v,i)=>{
+    if(i===0){const a=document.createElement('span');a.className='queue-arrow';a.textContent='Front &#8594;';el.appendChild(a)}
+    const d=document.createElement('div');d.className='queue-item';
+    if(i===0)d.classList.add('front');
+    if(i===queue.length-1)d.classList.add('rear');
+    d.textContent=v;el.appendChild(d);
+    if(i===queue.length-1){const a=document.createElement('span');a.className='queue-arrow';a.textContent='&#8594; Rear';el.appendChild(a)}
+  });
+  if(queue.length===0)el.innerHTML='<span style="color:#64748b">Empty queue</span>';
+}
+
+function renderOps(){
+  const el=document.getElementById('opList');el.innerHTML='';
+  ops.slice(0,opIdx).forEach(o=>{
+    const tag=document.createElement('span');tag.className='op-tag '+o.type;
+    tag.textContent=o.type==='enqueue'?`enqueue(${o.val})`:'dequeue()';
+    el.appendChild(tag);
+  });
+}
+
+function updateScore(ok){if(ok){score+=10+streak*5;streak++}else{streak=0}document.getElementById('score').textContent=score;document.getElementById('streak').textContent=streak}
+
+function genOps(){
+  ops=[];let q=[];const count=4+Math.floor(Math.random()*3);
+  for(let i=0;i<count;i++){
+    const r=Math.random();
+    if(q.length===0||r<0.6){
+      const v=Math.floor(Math.random()*90)+10;
+      ops.push({type:'enqueue',val:v});q.push(v);
+    }else{
+      ops.push({type:'dequeue',val:q.shift()});
+    }
+  }
+}
+
+function startRound(){
+  queue=[];opIdx=0;genOps();renderQueue();renderOps();showQ();
+  document.getElementById('startBtn').style.display='none';
+  document.getElementById('resetBtn').style.display='';
+  document.getElementById('round').textContent=round;
+  document.getElementById('messageArea').innerHTML='';
+}
+
+function showQ(){
+  if(opIdx>=ops.length){
+    document.getElementById('messageArea').innerHTML='<div class="message correct">All operations complete!</div>';
+    document.getElementById('choicesArea').innerHTML='';
+    round++;document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Next Round';
+    document.getElementById('resetBtn').style.display='none';return;
+  }
+  const op=ops[opIdx];let choices=[];
+  if(op.type==='enqueue'){
+    const after=[...queue,op.val];
+    choices=[
+      {text:`After enqueue(${op.val}): Queue = [${after}]`,correct:true},
+      {text:`After enqueue(${op.val}): Queue = [${op.val},...${queue}]`,correct:false},
+      {text:`After enqueue(${op.val}): Queue = [${queue}] (unchanged)`,correct:false}
+    ];
+  }else{
+    const dq=queue[0];const after=queue.slice(1);
+    choices=[
+      {text:`Dequeue returns ${dq}, queue becomes [${after}]`,correct:true},
+      {text:`Dequeue returns ${queue[queue.length-1]}, queue becomes [${after}]`,correct:false},
+      {text:`Dequeue returns ${dq}, queue stays [${queue}]`,correct:false}
+    ];
+  }
+  choices.sort(()=>Math.random()-.5);
+  let html=`<p style="margin-bottom:8px;color:#94a3b8">Op ${opIdx+1}/${ops.length}. Queue: [${queue}]</p>`;
+  choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answer(${c.correct},this)">${c.text}</button>`});
+  document.getElementById('choicesArea').innerHTML=html;
+}
+
+function answer(ok,el){
+  document.querySelectorAll('.choice-btn').forEach(b=>b.disabled=true);
+  el.classList.add(ok?'correct':'wrong');
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Correct! +'+(10+streak*5)+' points':'Wrong!'}</div>`;
+  updateScore(ok);
+  setTimeout(()=>{
+    const op=ops[opIdx];
+    if(op.type==='enqueue')queue.push(op.val);else queue.shift();
+    opIdx++;renderQueue();renderOps();showQ();
+  },700);
+}
+
+function resetAll(){
+  document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Start Round';
+  document.getElementById('resetBtn').style.display='none';
+  document.getElementById('choicesArea').innerHTML='';document.getElementById('messageArea').innerHTML='';
+  document.getElementById('queueVisual').innerHTML='';document.getElementById('opList').innerHTML='';
+}
+</script>
+</body>
+</html>

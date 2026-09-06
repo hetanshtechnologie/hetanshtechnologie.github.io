@@ -1,0 +1,341 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sudoku</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+<style>
+body { margin: 0; background: #1e293b; font-family: 'Segoe UI', sans-serif; }
+.sudoku-cell {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 600; cursor: pointer;
+  border: 1px solid #475569; user-select: none;
+  transition: background 0.1s;
+}
+.sudoku-cell.given { color: #e2e8f0; background: #334155; }
+.sudoku-cell.user { color: #60a5fa; background: #1e293b; }
+.sudoku-cell.selected { background: #1e3a5f !important; }
+.sudoku-cell.highlight { background: #253349; }
+.sudoku-cell.error { color: #ef4444 !important; background: #451a1a !important; }
+.sudoku-cell.same-num { background: #1e4040 !important; }
+.border-thick-right { border-right: 2px solid #94a3b8; }
+.border-thick-bottom { border-bottom: 2px solid #94a3b8; }
+.numpad-btn {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 700; cursor: pointer;
+  border-radius: 6px; border: 2px solid #475569;
+  background: #334155; color: #e2e8f0;
+  transition: all 0.1s;
+}
+.numpad-btn:hover { background: #475569; border-color: #60a5fa; }
+.numpad-btn.active { background: #2563eb; border-color: #60a5fa; }
+</style>
+</head>
+<body class="min-h-screen flex flex-col items-center pt-4">
+<a href="index.html" class="absolute top-4 left-4 text-blue-400 hover:text-blue-300 text-sm font-semibold">&larr; Back to Games</a>
+<h1 class="text-2xl font-bold text-white mb-2">SUDOKU</h1>
+<div class="flex gap-3 mb-3">
+  <button class="diff-btn px-4 py-1 rounded-lg text-sm font-semibold bg-green-600 text-white" data-diff="easy">Easy</button>
+  <button class="diff-btn px-4 py-1 rounded-lg text-sm font-semibold bg-gray-700 text-gray-300" data-diff="medium">Medium</button>
+  <button class="diff-btn px-4 py-1 rounded-lg text-sm font-semibold bg-gray-700 text-gray-300" data-diff="hard">Hard</button>
+</div>
+<div class="flex gap-6 mb-3 items-center">
+  <div class="text-center">
+    <div class="text-xs text-gray-400 uppercase">Time</div>
+    <div id="timer" class="text-xl font-bold text-yellow-400 font-mono">0:00</div>
+  </div>
+  <button id="solveBtn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-5 rounded-lg text-sm transition">Check</button>
+  <button id="resetBtn" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-5 rounded-lg text-sm transition">New</button>
+</div>
+<div id="board" class="inline-grid bg-gray-700 p-[2px] rounded-lg mb-3"></div>
+<div id="numpad" class="flex gap-2 mb-2"></div>
+<div id="msg" class="text-green-400 font-bold h-6 text-center"></div>
+<script>
+const SIZE = 9;
+let puzzle, solution, userBoard, given, selectedR, selectedC, difficulty;
+let timerVal, timerInterval, gameOver;
+
+const givens = { easy: 42, medium: 32, hard: 25 };
+
+function generateSudoku() {
+  let board = Array.from({length: 9}, () => Array(9).fill(0));
+  function isValid(board, r, c, num) {
+    for (let i = 0; i < 9; i++) {
+      if (board[r][i] === num) return false;
+      if (board[i][c] === num) return false;
+    }
+    let br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+    for (let i = br; i < br + 3; i++)
+      for (let j = bc; j < bc + 3; j++)
+        if (board[i][j] === num) return false;
+    return true;
+  }
+  function solve(board) {
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if (board[r][c] === 0) {
+          let nums = shuffle([1,2,3,4,5,6,7,8,9]);
+          for (let n of nums) {
+            if (isValid(board, r, c, n)) {
+              board[r][c] = n;
+              if (solve(board)) return true;
+              board[r][c] = 0;
+            }
+          }
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      let j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  solve(board);
+  return board;
+}
+
+function createPuzzle(sol, removeCount) {
+  let p = sol.map(r => [...r]);
+  let positions = [];
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 9; c++)
+      positions.push([r, c]);
+  let shuffled = positions.sort(() => Math.random() - 0.5);
+  for (let i = 0; i < removeCount && i < shuffled.length; i++) {
+    p[shuffled[i][0]][shuffled[i][1]] = 0;
+  }
+  return p;
+}
+
+function init() {
+  document.getElementById('msg').textContent = '';
+  gameOver = false;
+  selectedR = -1;
+  selectedC = -1;
+  timerVal = 0;
+  clearInterval(timerInterval);
+  timerInterval = null;
+  document.getElementById('timer').textContent = '0:00';
+  solution = generateSudoku();
+  let removeCount = 81 - givens[difficulty];
+  puzzle = createPuzzle(solution, removeCount);
+  given = puzzle.map(r => r.map(v => v !== 0));
+  userBoard = puzzle.map(r => [...r]);
+  renderBoard();
+  renderNumpad();
+}
+
+function startTimer() {
+  if (timerInterval) return;
+  timerInterval = setInterval(() => {
+    timerVal++;
+    let m = Math.floor(timerVal / 60);
+    let s = timerVal % 60;
+    document.getElementById('timer').textContent = m + ':' + (s < 10 ? '0' : '') + s;
+  }, 1000);
+}
+
+function formatTime(secs) {
+  let m = Math.floor(secs / 60);
+  let s = secs % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function findErrors() {
+  let errors = Array.from({length: 9}, () => Array(9).fill(false));
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      if (given[r][c] || userBoard[r][c] === 0) continue;
+      let num = userBoard[r][c];
+      for (let i = 0; i < 9; i++) {
+        if (i !== c && userBoard[r][i] === num) { errors[r][c] = true; errors[r][i] = true; }
+        if (i !== r && userBoard[i][c] === num) { errors[r][c] = true; errors[i][c] = true; }
+      }
+      let br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+      for (let i = br; i < br + 3; i++)
+        for (let j = bc; j < bc + 3; j++)
+          if ((i !== r || j !== c) && userBoard[i][j] === num) { errors[r][c] = true; errors[i][j] = true; }
+    }
+  }
+  return errors;
+}
+
+function checkSolved() {
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 9; c++)
+      if (userBoard[r][c] !== solution[r][c]) return false;
+  return true;
+}
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.style.gridTemplateColumns = 'repeat(9, 44px)';
+  board.innerHTML = '';
+  let errors = findErrors();
+  let selectedNum = (selectedR >= 0 && selectedC >= 0) ? userBoard[selectedR][selectedC] : 0;
+
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'sudoku-cell';
+      if (c % 3 === 2 && c < 8) cell.classList.add('border-thick-right');
+      if (r % 3 === 2 && r < 8) cell.classList.add('border-thick-bottom');
+
+      if (given[r][c]) {
+        cell.classList.add('given');
+        cell.textContent = userBoard[r][c];
+      } else {
+        cell.classList.add('user');
+        if (userBoard[r][c] !== 0) cell.textContent = userBoard[r][c];
+      }
+
+      if (errors[r][c]) cell.classList.add('error');
+
+      let isHighlighted = false;
+      if (selectedR >= 0 && selectedC >= 0) {
+        if (r === selectedR || c === selectedC) isHighlighted = true;
+        let sbr = Math.floor(selectedR / 3) * 3, sbc = Math.floor(selectedC / 3) * 3;
+        if (r >= sbr && r < sbr + 3 && c >= sbc && c < sbc + 3) isHighlighted = true;
+        if (r === selectedR && c === selectedC) { cell.classList.add('selected'); isHighlighted = false; }
+        else if (selectedNum !== 0 && userBoard[r][c] === selectedNum) { cell.classList.add('same-num'); isHighlighted = false; }
+        else if (isHighlighted) cell.classList.add('highlight');
+      }
+
+      cell.addEventListener('click', () => {
+        if (gameOver) return;
+        selectedR = r;
+        selectedC = c;
+        renderBoard();
+      });
+      board.appendChild(cell);
+    }
+  }
+}
+
+function renderNumpad() {
+  const pad = document.getElementById('numpad');
+  pad.innerHTML = '';
+  for (let n = 1; n <= 9; n++) {
+    const btn = document.createElement('div');
+    btn.className = 'numpad-btn';
+    btn.textContent = n;
+    if (selectedR >= 0 && selectedC >= 0 && userBoard[selectedR][selectedC] === n)
+      btn.classList.add('active');
+    btn.addEventListener('click', () => {
+      if (gameOver || selectedR < 0 || selectedC < 0 || given[selectedR][selectedC]) return;
+      startTimer();
+      userBoard[selectedR][selectedC] = n;
+      renderBoard();
+      renderNumpad();
+      if (checkSolved()) {
+        gameOver = true;
+        clearInterval(timerInterval);
+        document.getElementById('msg').textContent = 'Solved in ' + formatTime(timerVal) + '!';
+        document.getElementById('msg').className = 'text-green-400 font-bold h-6 text-center';
+      }
+    });
+    pad.appendChild(btn);
+  }
+  const clearBtn = document.createElement('div');
+  clearBtn.className = 'numpad-btn';
+  clearBtn.textContent = '\u2715';
+  clearBtn.style.color = '#ef4444';
+  clearBtn.addEventListener('click', () => {
+    if (gameOver || selectedR < 0 || selectedC < 0 || given[selectedR][selectedC]) return;
+    userBoard[selectedR][selectedC] = 0;
+    renderBoard();
+    renderNumpad();
+  });
+  pad.appendChild(clearBtn);
+}
+
+document.addEventListener('keydown', e => {
+  if (gameOver || selectedR < 0) return;
+  let num = parseInt(e.key);
+  if (num >= 1 && num <= 9 && !given[selectedR][selectedC]) {
+    startTimer();
+    userBoard[selectedR][selectedC] = num;
+    renderBoard();
+    renderNumpad();
+    if (checkSolved()) {
+      gameOver = true;
+      clearInterval(timerInterval);
+      document.getElementById('msg').textContent = 'Solved in ' + formatTime(timerVal) + '!';
+      document.getElementById('msg').className = 'text-green-400 font-bold h-6 text-center';
+    }
+  }
+  if (e.key === 'Backspace' || e.key === 'Delete') {
+    if (!given[selectedR][selectedC]) {
+      userBoard[selectedR][selectedC] = 0;
+      renderBoard();
+      renderNumpad();
+    }
+  }
+  if (e.key === 'ArrowUp' && selectedR > 0) { selectedR--; renderBoard(); }
+  if (e.key === 'ArrowDown' && selectedR < 8) { selectedR++; renderBoard(); }
+  if (e.key === 'ArrowLeft' && selectedC > 0) { selectedC--; renderBoard(); }
+  if (e.key === 'ArrowRight' && selectedC < 8) { selectedC++; renderBoard(); }
+});
+
+document.querySelectorAll('.diff-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    difficulty = btn.dataset.diff;
+    document.querySelectorAll('.diff-btn').forEach(b => {
+      b.className = 'diff-btn px-4 py-1 rounded-lg text-sm font-semibold bg-gray-700 text-gray-300';
+    });
+    btn.className = 'diff-btn px-4 py-1 rounded-lg text-sm font-semibold bg-green-600 text-white';
+    init();
+  });
+});
+
+document.getElementById('resetBtn').addEventListener('click', init);
+
+document.getElementById('solveBtn').addEventListener('click', () => {
+  if (gameOver) return;
+  let errors = findErrors();
+  let hasErrors = errors.some(r => r.some(v => v));
+  if (hasErrors) {
+    document.getElementById('msg').textContent = 'Errors found! Fix them first.';
+    document.getElementById('msg').className = 'text-red-400 font-bold h-6 text-center';
+    renderBoard();
+  } else {
+    for (let r = 0; r < 9; r++)
+      for (let c = 0; c < 9; c++)
+        userBoard[r][c] = solution[r][c];
+    gameOver = true;
+    clearInterval(timerInterval);
+    document.getElementById('msg').textContent = 'Puzzle solved! Time: ' + formatTime(timerVal);
+    document.getElementById('msg').className = 'text-blue-400 font-bold h-6 text-center';
+    renderBoard();
+  }
+});
+
+difficulty = 'easy';
+init();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>E-Way Bills — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}td{padding:6px 10px;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">E-Way Bills</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-7xl mx-auto p-6">
+    <div id="kpi" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6"></div>
+
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white active" data-tab="list" onclick="switchTab('list')">All E-Way Bills</button>
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700" data-tab="pending" onclick="switchTab('pending')">Pending Generation</button>
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700" data-tab="partb" onclick="switchTab('partb')">Part-B (Vehicle)</button>
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700" data-tab="generate" onclick="switchTab('generate')">Generate New</button>
+    </div>
+
+    <div id="content" class="bg-white rounded-xl shadow-sm border p-6">
+      <div id="loading" class="text-center text-gray-500 py-8">Loading...</div>
+      <div id="tab-content" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- Part-B Modal -->
+  <div id="partb-modal" class="fixed inset-0 bg-black bg-opacity-40 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
+      <h3 class="text-lg font-bold mb-4">Update Part-B (Vehicle Details)</h3>
+      <div class="space-y-3">
+        <input type="text" id="partb-vehicle" placeholder="Vehicle No (e.g. MH-01-AB-1234)" class="w-full border rounded px-3 py-2 text-sm" required>
+        <input type="text" id="partb-transporter" placeholder="Transporter Name" class="w-full border rounded px-3 py-2 text-sm">
+        <input type="text" id="partb-trans-id" placeholder="Transporter ID" class="w-full border rounded px-3 py-2 text-sm">
+        <input type="text" id="partb-doc-no" placeholder="Transport Doc No (LR No)" class="w-full border rounded px-3 py-2 text-sm">
+        <input type="date" id="partb-doc-date" class="w-full border rounded px-3 py-2 text-sm">
+        <input type="number" id="partb-distance" placeholder="Distance (km)" class="w-full border rounded px-3 py-2 text-sm">
+        <p class="text-xs text-gray-500">Part-B is required before goods movement. Enter vehicle details to generate Part-B of the e-way bill.</p>
+      </div>
+      <div class="flex gap-3 mt-4">
+        <button onclick="savePartB()" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700">Save Part-B</button>
+        <button onclick="closePartBModal()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm font-semibold">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generate Single Modal -->
+  <div id="gen-modal" class="fixed inset-0 bg-black bg-opacity-40 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 max-w-2xl w-full mx-4 shadow-xl max-h-screen overflow-y-auto">
+      <h3 class="text-lg font-bold mb-4">Generate E-Way Bill</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="col-span-2"><label class="text-sm font-semibold">Select Invoice</label>
+          <select id="gen-invoice" class="w-full border rounded px-3 py-2 text-sm" onchange="onInvoiceSelect()">
+            <option value="">— Select Invoice —</option>
+          </select>
+        </div>
+        <div><label class="text-sm font-semibold">From GSTIN</label><input type="text" id="gen-from-gstin" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="text-sm font-semibold">From Pincode</label><input type="text" id="gen-from-pincode" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="text-sm font-semibold">To GSTIN</label><input type="text" id="gen-to-gstin" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="text-sm font-semibold">To Pincode</label><input type="text" id="gen-to-pincode" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="text-sm font-semibold">Doc Type</label>
+          <select id="gen-doc-type" class="w-full border rounded px-3 py-2 text-sm"><option value="INV">Invoice</option><option value="BOS">Bill of Supply</option><option value="CHL">Challan</option><option value="OTH">Others</option></select>
+        </div>
+        <div><label class="text-sm font-semibold">Total Value</label><input type="number" id="gen-total" step="0.01" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="text-sm font-semibold">HSN Code</label><input type="text" id="gen-hsn" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="text-sm font-semibold">Transporter ID</label><input type="text" id="gen-trans-id" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="text-sm font-semibold">Transporter Doc No</label><input type="text" id="gen-trans-doc" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="text-sm font-semibold">Distance (km)</label><input type="number" id="gen-distance" class="w-full border rounded px-3 py-2 text-sm"></div>
+      </div>
+      <div class="flex gap-3 mt-4">
+        <button onclick="generateEwayBill()" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700">Generate</button>
+        <button onclick="closeGenModal()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm font-semibold">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId, activeTab = 'list', org, ewayBills = [], invoices = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const user = await requireLogin(); if(!user) return;
+      orgId = await getOrgId(); if(!orgId) return;
+      const { data: o } = await erp.from('organizations').select('*').eq('id', orgId).single();
+      org = o;
+      loadTab();
+    });
+
+    function switchTab(t) {
+      activeTab = t;
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('bg-blue-600','text-white','active');
+        b.classList.add('bg-gray-200','text-gray-700');
+        if(b.dataset.tab === t) { b.classList.add('bg-blue-600','text-white','active'); b.classList.remove('bg-gray-200','text-gray-700'); }
+      });
+      loadTab();
+    }
+
+    async function loadTab() {
+      if(activeTab === 'list') loadList();
+      else if(activeTab === 'pending') loadPending();
+      else if(activeTab === 'partb') loadPartB();
+      else if(activeTab === 'generate') loadGenerateForm();
+    }
+
+    async function loadList() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('tab-content').classList.add('hidden');
+      const { data: eway } = await erp.from('eway_bills').select('*, invoices!left(invoice_no)').eq('org_id', orgId).order('created_at', { ascending: false });
+      ewayBills = eway || [];
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('tab-content').classList.remove('hidden');
+
+      const active = ewayBills.filter(e => e.status === 'active').length;
+      const expired = ewayBills.filter(e => e.status === 'expired').length;
+      const cancelled = ewayBills.filter(e => e.status === 'cancelled').length;
+
+      document.getElementById('kpi').innerHTML = `
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Total</div><div class="text-lg font-bold">${ewayBills.length}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Active</div><div class="text-lg font-bold text-green-600">${active}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Expired</div><div class="text-lg font-bold text-gray-600">${expired}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Cancelled</div><div class="text-lg font-bold text-red-600">${cancelled}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Part-B Done</div><div class="text-lg font-bold text-blue-600">${ewayBills.filter(e => e.part_b_generated).length}</div></div>`;
+
+      let rows = ewayBills.map(e => {
+        const inv = e.invoices || {};
+        return `<tr class="border-b text-xs">
+          <td class="font-mono font-bold">${e.ewb_no || '<span class="text-gray-300">-</span>'}</td>
+          <td>${formatDate(e.ewb_date)}</td>
+          <td><a href="invoice-view.html?id=${e.invoice_id}" class="text-blue-600 hover:underline">${escapeHtml(e.invoice_no)}</a></td>
+          <td>${e.doc_type}</td>
+          <td class="text-right">${formatCurrency(e.total_value)}</td>
+          <td>${e.vehicle_no||'<span class="text-gray-400">-</span>'}</td>
+          <td>${e.to_name ? escapeHtml(e.to_name.substring(0,20)) : '-'}</td>
+          <td><span class="px-2 py-0.5 rounded font-medium text-xs ${e.status==='active'?'bg-green-100 text-green-700':e.status==='expired'?'bg-gray-100 text-gray-600':'bg-red-100 text-red-700'}">${e.status}</span></td>
+          <td>${e.part_b_generated ? '<span class="text-green-600 font-medium">&#10003;</span>' : '<span class="text-yellow-600">&#9711;</span>'}</td>
+          <td class="flex gap-1">
+            ${e.status==='active' ? `<button onclick="openPartB(${e.id})" class="text-blue-500 hover:underline">Vehicle</button><button onclick="cancelEway(${e.id})" class="text-red-500 hover:underline">Cancel</button>` : ''}
+            <button onclick="printEway(${e.id})" class="text-gray-500 hover:underline">Print</button>
+          </td>
+        </tr>`;
+      }).join('');
+
+      document.getElementById('tab-content').innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-lg font-bold">All E-Way Bills</h2>
+          <button onclick="switchTab('generate')" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700">+ Generate New</button>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full whitespace-nowrap">
+          <thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">EWB No</th><th class="text-left p-2 font-semibold">Date</th><th class="text-left p-2 font-semibold">Invoice</th><th class="text-left p-2 font-semibold">Type</th><th class="text-right p-2 font-semibold">Value</th><th class="text-left p-2 font-semibold">Vehicle</th><th class="text-left p-2 font-semibold">Consignee</th><th class="text-left p-2 font-semibold">Status</th><th class="text-left p-2 font-semibold">Part-B</th><th class="text-left p-2 font-semibold">Actions</th></tr></thead>
+          <tbody>${rows||'<tr><td colspan="10" class="text-center text-gray-400 py-6">No e-way bills yet</td></tr>'}</tbody></table></div>`;
+    }
+
+    async function loadPending() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('tab-content').classList.add('hidden');
+      const { data: invs } = await erp.from('invoices')
+        .select('*, parties!inner(id,name,gstin,pincode,state_code,address), eway_bills!left(id,ewb_no)')
+        .eq('org_id', orgId)
+        .in('doc_type', ['invoice','challan'])
+        .not('status', 'in', '("draft","cancelled")')
+        .gte('total', 50000)
+        .order('invoice_date', { ascending: false });
+
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('tab-content').classList.remove('hidden');
+
+      // Filter to those without e-way bills
+      const pending = (invs||[]).filter(inv => !inv.eway_bills || !inv.eway_bills.length);
+
+      let rows = pending.map(inv => {
+        const p = inv.parties || {};
+        const addr = p.address || {};
+        const stateCode = p.state_code || addr.state_code || '';
+        let selectedInv = invoices.find(x => x.id === inv.id);
+        return `<tr class="border-b text-sm">
+          <td>${formatDate(inv.invoice_date)}</td><td><a href="invoice-view.html?id=${inv.id}" class="text-blue-600 hover:underline">${escapeHtml(inv.invoice_no)}</a></td>
+          <td>${escapeHtml(p.name||'')}</td><td>${escapeHtml(p.gstin||'')}</td>
+          <td class="text-right">${formatCurrency(inv.total||0)}</td>
+          <td><button onclick="genFromPending(${inv.id})" class="bg-green-600 text-white px-2 py-1 rounded text-xs hover:bg-green-700">Generate EWB</button></td>
+        </tr>`;
+      }).join('');
+
+      document.getElementById('tab-content').innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-lg font-bold">Invoices Pending E-Way Bill (&gt;₹50,000)</h2>
+          <button onclick="bulkGenerate()" class="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700" ${pending.length===0?'disabled':''}>Bulk Generate All</button>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">Date</th><th class="text-left p-2 font-semibold">Invoice</th><th class="text-left p-2 font-semibold">Party</th><th class="text-left p-2 font-semibold">GSTIN</th><th class="text-right p-2 font-semibold">Amount</th><th class="text-left p-2 font-semibold"></th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="6" class="text-center text-gray-400 py-6">All invoices have e-way bills generated</td></tr>'}</tbody></table></div>`;
+    }
+
+    async function loadPartB() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('tab-content').classList.add('hidden');
+      const { data: eway } = await erp.from('eway_bills').select('*, invoices!left(invoice_no)').eq('org_id', orgId).eq('status','active').order('created_at', { ascending: false });
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('tab-content').classList.remove('hidden');
+
+      const withoutPartB = (eway||[]).filter(e => !e.part_b_generated);
+      const withPartB = (eway||[]).filter(e => e.part_b_generated);
+
+      document.getElementById('tab-content').innerHTML = `
+        <div class="mb-6">
+          <h2 class="text-lg font-bold mb-2">Active E-Way Bills Without Part-B (${withoutPartB.length})</h2>
+          ${withoutPartB.length ? `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">EWB No</th><th class="text-left p-2 font-semibold">Invoice</th><th class="text-right p-2 font-semibold">Value</th><th class="text-left p-2 font-semibold"></th></tr></thead><tbody>${
+            withoutPartB.map(e => `<tr class="border-b"><td class="font-mono">${e.ewb_no}</td><td>${escapeHtml(e.invoice_no)}</td><td class="text-right">${formatCurrency(e.total_value)}</td><td><button onclick="openPartB(${e.id})" class="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700">Add Vehicle</button></td></tr>`).join('')
+          }</tbody></table>` : '<p class="text-gray-400 text-sm py-4">All active e-way bills have Part-B generated.</p>'}
+        </div>
+        <div>
+          <h2 class="text-lg font-bold mb-2">With Part-B (${withPartB.length})</h2>
+          ${withPartB.length ? `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">EWB No</th><th class="text-left p-2 font-semibold">Invoice</th><th class="text-left p-2 font-semibold">Vehicle</th><th class="text-left p-2 font-semibold">Transporter</th><th class="text-left p-2 font-semibold">Distance</th></tr></thead><tbody>${
+            withPartB.map(e => `<tr class="border-b"><td class="font-mono">${e.ewb_no}</td><td>${escapeHtml(e.invoice_no)}</td><td>${escapeHtml(e.vehicle_no||'')}</td><td>${escapeHtml(e.transporter_name||'')}</td><td>${e.distance_km||''} km</td></tr>`).join('')
+          }</tbody></table>` : ''}
+        </div>`;
+    }
+
+    async function loadGenerateForm() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('tab-content').classList.add('hidden');
+      const { data: invs } = await erp.from('invoices').select('id,invoice_no,invoice_date,total,parties!inner(name,gstin)').eq('org_id', orgId).in('doc_type',['invoice','challan']).not('status','in','("draft","cancelled")').order('invoice_date', { ascending: false });
+      invoices = invs || [];
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('tab-content').classList.remove('hidden');
+
+      const sel = document.getElementById('gen-invoice');
+      sel.innerHTML = '<option value="">— Select Invoice —</option>' + invoices.map(inv => `<option value="${inv.id}" data-gstin="${escapeHtml(inv.parties?.gstin||'')}">${escapeHtml(inv.invoice_no)} - ${escapeHtml(inv.parties?.name||'')} - ${formatCurrency(inv.total)}</option>`).join('');
+
+      if(org) {
+        document.getElementById('gen-from-gstin').value = org.gstin || '';
+        document.getElementById('gen-from-pincode').value = org.pincode || '';
+        document.getElementById('gen-hsn').value = '';
+        document.getElementById('gen-distance').value = 0;
+      }
+      document.getElementById('gen-total').value = '';
+      document.getElementById('gen-to-gstin').value = '';
+      document.getElementById('gen-to-pincode').value = '';
+
+      document.getElementById('tab-content').innerHTML = document.getElementById('gen-modal').outerHTML.replace('hidden','').replace('z-50','');
+      document.getElementById('gen-modal').innerHTML = '';
+      initGenForm();
+    }
+
+    function initGenForm() {
+      const modal = document.getElementById('tab-content').querySelector('#gen-modal');
+      if(modal) {
+        modal.classList.remove('fixed','inset-0','z-50');
+        modal.classList.add('relative');
+        modal.querySelector('button[onclick="closeGenModal()"]').onclick = () => loadList();
+        modal.querySelector('h3').textContent = 'Generate E-Way Bill';
+        modal.querySelector('button[onclick="generateEwayBill()"]').onclick = generateEwayBill;
+      }
+    }
+
+    function onInvoiceSelect() {
+      const id = parseInt(document.getElementById('gen-invoice').value);
+      const inv = invoices.find(i => i.id === id);
+      if(inv) {
+        document.getElementById('gen-total').value = inv.total;
+        document.getElementById('gen-to-gstin').value = inv.parties?.gstin || '';
+        const addr = inv.parties?.address || {};
+        document.getElementById('gen-to-pincode').value = addr.pincode || inv.parties?.pincode || '';
+      }
+    }
+
+    async function generateEwayBill() {
+      const invId = parseInt(document.getElementById('gen-invoice').value);
+      if(!invId) return alert('Select an invoice');
+      const inv = invoices.find(i => i.id === invId);
+      if(!inv) return alert('Invoice not found');
+
+      const ewbNo = 'EWB' + Date.now().toString().slice(-12);
+      const data = {
+        org_id: orgId, ewb_no: ewbNo, ewb_date: new Date().toISOString().split('T')[0],
+        invoice_id: invId, invoice_no: inv.invoice_no, invoice_date: inv.invoice_date,
+        doc_type: document.getElementById('gen-doc-type').value,
+        from_gstin: document.getElementById('gen-from-gstin').value,
+        from_pincode: document.getElementById('gen-from-pincode').value,
+        to_gstin: document.getElementById('gen-to-gstin').value,
+        to_pincode: document.getElementById('gen-to-pincode').value,
+        to_name: inv.parties?.name || '',
+        total_value: parseFloat(document.getElementById('gen-total').value)||0,
+        hsn_code: document.getElementById('gen-hsn').value,
+        transporter_id: document.getElementById('gen-trans-id').value,
+        transporter_doc_no: document.getElementById('gen-trans-doc').value,
+        distance_km: parseInt(document.getElementById('gen-distance').value)||0,
+        status: 'active'
+      };
+      const { error } = await erp.from('eway_bills').insert(data);
+      if(error) return alert('Error: '+error.message);
+      await erp.from('invoices').update({ eway_bill_no: ewbNo }).eq('id', invId);
+      alert('E-Way Bill generated: ' + ewbNo);
+      loadList();
+    }
+
+    function genFromPending(id) {
+      switchTab('generate');
+      setTimeout(() => {
+        document.getElementById('gen-invoice').value = id;
+        onInvoiceSelect();
+      }, 300);
+    }
+
+    async function bulkGenerate() {
+      if(!confirm('Generate e-way bills for all pending invoices?')) return;
+      const { data: invs } = await erp.from('invoices').select('*, parties!inner(name,gstin)').eq('org_id', orgId).in('doc_type',['invoice','challan']).not('status','in','("draft","cancelled")').gte('total',50000);
+      let count = 0;
+      for(const inv of (invs||[])) {
+        const { data: existing } = await erp.from('eway_bills').select('id').eq('invoice_id', inv.id);
+        if(existing && existing.length) continue;
+        const ewbNo = 'EWB' + Date.now().toString().slice(-12) + count;
+        const addr = inv.parties?.address || {};
+        await erp.from('eway_bills').insert({
+          org_id: orgId, ewb_no: ewbNo, ewb_date: new Date().toISOString().split('T')[0],
+          invoice_id: inv.id, invoice_no: inv.invoice_no, invoice_date: inv.invoice_date,
+          from_gstin: org?.gstin||'', from_pincode: org?.pincode||'',
+          to_gstin: inv.parties?.gstin||'', to_pincode: addr.pincode||'',
+          to_name: inv.parties?.name||'', total_value: inv.total||0, status: 'active'
+        });
+        await erp.from('invoices').update({ eway_bill_no: ewbNo }).eq('id', inv.id);
+        count++;
+      }
+      alert(`Generated ${count} e-way bills`);
+      loadPending();
+    }
+
+    let currentEwayId = null;
+    function openPartB(id) {
+      currentEwayId = id;
+      const e = ewayBills.find(x => x.id === id);
+      if(e) {
+        document.getElementById('partb-vehicle').value = e.vehicle_no||'';
+        document.getElementById('partb-transporter').value = e.transporter_name||'';
+        document.getElementById('partb-trans-id').value = e.transporter_id||'';
+        document.getElementById('partb-doc-no').value = e.transporter_doc_no||'';
+        document.getElementById('partb-doc-date').value = e.transporter_doc_date||'';
+        document.getElementById('partb-distance').value = e.distance_km||'';
+      }
+      document.getElementById('partb-modal').style.display = 'flex';
+    }
+    function closePartBModal() { document.getElementById('partb-modal').style.display = 'none'; currentEwayId = null; }
+
+    async function savePartB() {
+      if(!currentEwayId) return;
+      const data = {
+        vehicle_no: document.getElementById('partb-vehicle').value,
+        transporter_name: document.getElementById('partb-transporter').value,
+        transporter_id: document.getElementById('partb-trans-id').value,
+        transporter_doc_no: document.getElementById('partb-doc-no').value,
+        transporter_doc_date: document.getElementById('partb-doc-date').value || null,
+        distance_km: parseInt(document.getElementById('partb-distance').value)||0,
+        part_b_generated: true
+      };
+      if(!data.vehicle_no) return alert('Vehicle No is required');
+      const { error } = await erp.from('eway_bills').update(data).eq('id', currentEwayId);
+      if(error) return alert('Error: '+error.message);
+      closePartBModal();
+      loadList();
+    }
+
+    async function cancelEway(id) {
+      if(!confirm('Cancel this e-way bill?')) return;
+      const { error } = await erp.from('eway_bills').update({ status: 'cancelled' }).eq('id', id);
+      if(error) return alert('Error: '+error.message);
+      loadList();
+    }
+
+    function printEway(id) {
+      const e = ewayBills.find(x => x.id === id);
+      if(!e) return;
+      const w = window.open('', '_blank');
+      w.document.write(`
+        <html><head><title>E-Way Bill ${e.ewb_no}</title>
+        <style>body{font-family:Arial;padding:40px;max-width:700px;margin:auto}table{width:100%;border-collapse:collapse;margin:10px 0}td,th{border:1px solid #ddd;padding:8px;text-align:left}h2{color:#1a56db}.qr{text-align:center;margin:20px 0}</style>
+            <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head><body>
+        <h2>E-Way Bill</h2>
+        <table><tr><th>EWB No</th><td>${e.ewb_no}</td><th>Date</th><td>${formatDate(e.ewb_date)}</td></tr>
+        <tr><th>Invoice</th><td>${escapeHtml(e.invoice_no)}</td><th>Doc Type</th><td>${e.doc_type}</td></tr>
+        <tr><th>From GSTIN</th><td>${e.from_gstin}</td><th>To GSTIN</th><td>${e.to_gstin||'-'}</td></tr>
+        <tr><th>Total Value</th><td>${formatCurrency(e.total_value)}</td><th>HSN</th><td>${e.hsn_code||'-'}</td></tr>
+        <tr><th>Vehicle</th><td>${e.vehicle_no||'-'}</td><th>Distance</th><td>${e.distance_km||'-'} km</td></tr>
+        <tr><th>Status</th><td>${e.status}</td><th>Part-B</th><td>${e.part_b_generated?'Yes':'No'}</td></tr>
+        </table>
+        <p style="font-size:10px;color:gray;text-align:center;margin-top:40px">Generated by All-in-One ERP | ${new Date().toLocaleString()}</p>
+        <script>window.print();<\/script><script src="../../js/analytics-tracker.js" defer></script>
+</body></html>`);
+      w.document.close();
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

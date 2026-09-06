@@ -1,0 +1,106 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>164. Lab - Content Understanding with Agents - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 164</span>
+<h1>Lab - Content Understanding with Agents</h1>
+<p>In this lab you will connect your Content Understanding analyzer to an agent so the agent can read documents on its own. You will create an agent in Microsoft Foundry, register your document analyzer as a tool it can call, and then test the full loop: upload a document, have the agent extract the fields, and get an answer that is grounded in what it read.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>A Microsoft Foundry project with an agent-capable model deployed (any chat model you deployed earlier works).</li>
+<li>Your <strong>Content Understanding</strong> resource and a published analyzer — the <code>invoice-analyzer</code> from the earlier lab is ideal.</li>
+<li>A test document (the same invoice you used in the Python lab).</li>
+<li>The Azure CLI (<code>az</code>) installed and signed in, plus the role assignments required to connect the services.</li>
+</ul>
+
+<h2>Step 1 - Give the Agent Access to Content Understanding</h2>
+<p>Before the agent can call the analyzer, its identity must be allowed to use the Content Understanding resource. In the Azure portal, open the Content Understanding resource and add a role assignment:</p>
+<ol>
+<li>Select <strong>Access control (IAM) &gt; Add role assignment</strong>.</li>
+<li>Choose the <strong>Cognitive Services User</strong> role.</li>
+<li>Assign it to the service principal that represents your Foundry agent (in many setups this is the project's managed identity).</li>
+<li>Save the assignment and wait a minute for it to propagate.</li>
+</ol>
+
+<div class="warn">
+<p>If you skip this step, the agent will be able to see the tool but every call will fail with an authorization error. When in doubt, check the resource's activity log or the agent's trace output for the failing call.</p>
+</div>
+
+<h2>Step 2 - Add the Analyzer as a Tool</h2>
+<p>In the Foundry portal, open the agent editor and go to the tools section. Choose to add a new tool and select the option that connects to Content Understanding. Complete the setup:</p>
+<ol>
+<li>Pick the Content Understanding resource and project.</li>
+<li>Select the published analyzer you want to expose (for example <code>invoice-analyzer</code>).</li>
+<li>Give the tool a clear name and description, such as:</li>
+</ol>
+<pre><code>Name: extract_invoice_fields
+Description: Extracts vendor, invoice number, dates, and total from an
+invoice PDF or image. Use this when the user shares an invoice and asks
+questions about its contents.
+</code></pre>
+<p>Save the tool and confirm it appears in the agent's tool list.</p>
+
+<div class="tip">
+<p>The tool description is instruction to the model, not documentation for humans. Be specific about when to call it and what it returns — the agent decides whether to invoke the tool based on this text.</p>
+</div>
+
+<h2>Step 3 - Test the Tool in the Chat</h2>
+<p>Open the agent's chat interface and run this full loop:</p>
+<ol>
+<li>Type <em>"I received an invoice. Can you tell me the total and the due date?"</em></li>
+<li>Attach your invoice file to the message.</li>
+<li>Send the message and watch the agent work.</li>
+<li>Look for the tool call in the trace: the agent should invoke <code>extract_invoice_fields</code>, receive the JSON, and then answer using the values in it.</li>
+</ol>
+
+<div class="note">
+<p>The exact attachment mechanism depends on your Foundry setup — some agent experiences accept file uploads directly, while others expect the document to be stored and referenced by URL. If upload is not available, store the file in a container and describe where the agent can find it.</p>
+</div>
+
+<h2>Step 4 - Inspect the Tool Trace</h2>
+<p>Open the trace or run details for your conversation. You should see a sequence like this:</p>
+<pre><code>[user]  I received an invoice. Can you tell me the total and the due date?
+[agent] Calling tool extract_invoice_fields(file=invoice.pdf)
+[tool]  {"vendor": "ACME Supplies Ltd.", "invoice_number": "INV-1042",
+         "issue_date": "2026-07-01", "due_date": "2026-07-31",
+         "total_amount": 1249.75}
+[agent] The invoice from ACME Supplies Ltd. totals $1,249.75 and is due
+        on July 31, 2026.
+</code></pre>
+<p>Notice that the agent did not invent the numbers — it answered from the tool output. This is grounded behavior: the model used the analyzer's structured result instead of guessing.</p>
+
+<h2>Step 5 - Probe the Failure Path</h2>
+<p>Test what happens when extraction cannot work. Attach a file the analyzer cannot read (for example, a binary file renamed to <code>.pdf</code>) and ask the same question. A well-configured agent should say it could not extract the fields rather than fabricate an answer. If your agent instead makes up numbers, add a line to its system prompt: <em>"When a tool fails or returns low confidence, say so and ask for a better file."</em></p>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td>Tool exists but calls fail</td><td>Missing role assignment on Content Understanding</td><td>Grant the agent's identity the Cognitive Services User role.</td></tr>
+<tr><td>Agent never calls the tool</td><td>Tool description is vague</td><td>Rewrite the description with a clear trigger condition and output summary.</td></tr>
+<tr><td>Agent answers without using the tool</td><td>Low grounding in the system prompt</td><td>Instruct the agent to extract document contents via the tool before answering.</td></tr>
+<tr><td>Analyzer not listed when adding the tool</td><td>Analyzer not published, or wrong project</td><td>Publish the analyzer and confirm the resource is attached to the project.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You granted your agent access to Content Understanding, registered your invoice analyzer as a callable tool, and watched the agent extract and reason over a real document. The tool trace demonstrated grounded, non-hallucinated answers — the model used the analyzer's structured output. This pattern generalizes to any analyzer: give the agent a tool, describe it well, and let the model decide when to use it. Next, you will shift focus to the retrieval side of your applications with Azure AI Search.</p>
+<nav>
+<a href="163-content-understanding-with-agents.html">&larr; Previous: Content Understanding with Agents</a><a href="165-introduction-to-azure-ai-search-for-rag.html">Next: Introduction to Azure AI Search for RAG &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

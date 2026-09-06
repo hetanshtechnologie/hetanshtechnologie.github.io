@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Design Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:900px;margin:24px auto;padding:0 16px}
+.req-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0}
+.req-card h3{color:#f8fafc;margin-bottom:8px;font-size:16px}
+.req-card p{color:#94a3b8;font-size:13px;line-height:1.6}
+.endpoint-builder{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0}
+.endpoint-builder h3{margin-bottom:16px;font-size:14px}
+.endpoint-row{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.method-select{background:#334155;border:2px solid #475569;border-radius:8px;padding:10px;color:#e2e8f0;font-size:13px;font-weight:700;cursor:pointer;min-width:100px}
+.method-select option{background:#1e293b}
+.path-input{flex:1;background:#334155;border:2px solid #475569;border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:13px;font-family:monospace;min-width:200px}
+.path-input:focus{outline:none;border-color:#38bdf8}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.choice-btn.selected{border-color:#38bdf8;background:rgba(56,189,248,.1)}
+.api-preview{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:14px;margin:12px 0;font-family:monospace;font-size:12px;white-space:pre-wrap;color:#94a3b8;max-height:200px;overflow-y:auto}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.status-codes{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.status-tag{background:#334155;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;border:2px solid transparent;transition:all .2s}
+.status-tag:hover{border-color:#38bdf8}
+.status-tag.selected{border-color:#38bdf8;background:rgba(56,189,248,.1)}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>API Design Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/12</div>
+<div class="hud-item"><span id="streak">0</span>Streak</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="req-card" id="req-card">
+<h3 id="req-title"></h3>
+<p id="req-desc"></p>
+</div>
+<div class="endpoint-builder">
+<h3>Design the Endpoint</h3>
+<div class="endpoint-row">
+<select class="method-select" id="method-select">
+<option value="GET">GET</option>
+<option value="POST">POST</option>
+<option value="PUT">PUT</option>
+<option value="PATCH">PATCH</option>
+<option value="DELETE">DELETE</option>
+</select>
+<input class="path-input" id="path-input" placeholder="/api/v1/resource" />
+</div>
+<div id="extra-choices"></div>
+</div>
+<div class="api-preview" id="api-preview"></div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>API Architect!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=12,streak=0,answered=false;
+const scenarios=[
+{title:"User Registration",desc:"Allow new users to create accounts with email and password. Returns user object.",method:"POST",path:"/api/v1/users",status:201,validation:["Email format","Password min 8 chars"],bestPath:"/api/v1/users",bestMethod:"POST"},
+{title:"Get User Profile",desc:"Retrieve a specific user's profile by their ID.",method:"GET",path:"/api/v1/users/:id",status:200,validation:["User ID required"],bestPath:"/api/v1/users/:id",bestMethod:"GET"},
+{title:"Update User Settings",desc:"Partially update user preferences (theme, notifications).",method:"PATCH",path:"/api/v1/users/:id/settings",status:200,validation:["At least one field"],bestPath:"/api/v1/users/:id/settings",bestMethod:"PATCH"},
+{title:"Delete Account",desc:"Permanently remove user and all associated data.",method:"DELETE",path:"/api/v1/users/:id",status:204,validation:["Confirmation token"],bestPath:"/api/v1/users/:id",bestMethod:"DELETE"},
+{title:"List Products",desc:"Get paginated list of products with filtering by category and price range.",method:"GET",path:"/api/v1/products",status:200,validation:["Page, limit, category optional"],bestPath:"/api/v1/products",bestMethod:"GET"},
+{title:"Create Order",desc:"Place a new order with items array. Returns order with total.",method:"POST",path:"/api/v1/orders",status:201,validation:["Items array non-empty","Shipping address"],bestPath:"/api/v1/orders",bestMethod:"POST"},
+{title:"Search Products",desc:"Full-text search across product names and descriptions.",method:"GET",path:"/api/v1/products/search",status:200,validation:["Query parameter q required"],bestPath:"/api/v1/products/search",bestMethod:"GET"},
+{title:"Upload Avatar",desc:"Upload user profile image (multipart/form-data).",method:"POST",path:"/api/v1/users/:id/avatar",status:201,validation:["Image file required, max 5MB"],bestPath:"/api/v1/users/:id/avatar",bestMethod:"POST"},
+{title:"Get Order Status",desc:"Check current status and tracking info for an order.",method:"GET",path:"/api/v1/orders/:id/status",status:200,validation:["Order ID"],bestPath:"/api/v1/orders/:id/status",bestMethod:"GET"},
+{title:"Cancel Order",desc:"Cancel a pending order (not shipped yet).",method:"POST",path:"/api/v1/orders/:id/cancel",status:200,validation:["Reason field"],bestPath:"/api/v1/orders/:id/cancel",bestMethod:"POST"},
+{title:"List Notifications",desc:"Get user's notifications, mark as read option.",method:"GET",path:"/api/v1/notifications",status:200,validation:["Pagination, unread filter"],bestPath:"/api/v1/notifications",bestMethod:"GET"},
+{title:"Bulk Update Products",desc:"Update prices for multiple products at once.",method:"PATCH",path:"/api/v1/products/bulk",status:200,validation:["Array of {id, price}"],bestPath:"/api/v1/products/bulk",bestMethod:"PATCH"}
+];
+function init(){score=0;round=0;streak=0;startRound();}
+function startRound(){
+answered=false;
+const s=scenarios[round%scenarios.length];
+document.getElementById('req-title').textContent=s.title;
+document.getElementById('req-desc').textContent=s.desc;
+document.getElementById('method-select').value='GET';
+document.getElementById('path-input').value='';
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+const extra=document.getElementById('extra-choices');
+extra.innerHTML=`<div style="margin-top:12px"><p style="font-size:12px;color:#94a3b8;margin-bottom:8px">Expected Status Code:</p><div class="status-codes" id="status-codes">${[200,201,204,400,401,404,500].map(c=>`<div class="status-tag" onclick="selectStatus(this,${c})">${c}</div>`).join('')}</div></div>`;
+let selectedStatus=null;
+window.selectStatus=function(el,code){
+document.querySelectorAll('.status-tag').forEach(t=>t.classList.remove('selected'));
+el.classList.add('selected');selectedStatus=code;
+};
+window._selectedStatus=()=>selectedStatus;
+// Preview update
+const updatePreview=()=>{
+const m=document.getElementById('method-select').value;
+const p=document.getElementById('path-input').value||'/api/v1/...';
+document.getElementById('api-preview').textContent=`${m} ${p}\n\nRequest Body: {\n  // ...\n}\n\nResponse: {\n  "status": ${s.status},\n  "data": { ... }\n}`;
+};
+document.getElementById('method-select').onchange=updatePreview;
+document.getElementById('path-input').oninput=updatePreview;
+updatePreview();
+// Show choice buttons for strategy
+const methods=['GET','POST','PUT','PATCH','DELETE'];
+document.getElementById('choices').innerHTML=`<button class="choice-btn" onclick="submitAnswer()">Submit Design</button>`;
+}
+function submitAnswer(){
+if(answered)return;answered=true;
+const s=scenarios[round%scenarios.length];
+const method=document.getElementById('method-select').value;
+const path=document.getElementById('path-input').value;
+const status=window._selectedStatus();
+const methodCorrect=method===s.bestMethod;
+const pathCorrect=path===s.bestPath||path===s.bestPath.replace(':id','{id}')||path===s.bestPath.replace(':id',':userId');
+const statusCorrect=status===s.status;
+const totalCorrect=methodCorrect&&pathCorrect;
+let pts=0;
+if(methodCorrect)pts+=5;
+if(pathCorrect)pts+=5;
+if(statusCorrect)pts+=3;
+if(pts>=10){score+=pts;streak++;}else{score+=pts;streak=0;}
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(totalCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=totalCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=totalCorrect?'✓ Correct!':'✗ Needs Improvement';
+let fbText=`Best: ${s.bestMethod} ${s.bestPath} → ${s.status}`;
+if(!methodCorrect)fbText+=`\nMethod should be ${s.bestMethod}`;
+if(!pathCorrect)fbText+=`\nPath should be ${s.bestPath}`;
+document.getElementById('fb-text').textContent=fbText;
+document.getElementById('score').textContent=score;
+document.getElementById('streak').textContent=streak;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;document.getElementById('streak').textContent=0;
+}
+init();
+</script>
+</body>
+</html>

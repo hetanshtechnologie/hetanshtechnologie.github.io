@@ -1,0 +1,222 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>112. Lab - Talking to our custom MCP server - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 112</span>
+<h1>Lab - Talking to our custom MCP server</h1>
+<p>Your custom MCP server exists and runs. In this final lab of the section you will connect to it, call its tools, and wire it into a LangChain agent — closing the loop you opened several chapters ago. You will connect over both stdio and HTTP, so you see both transports working with your own tools.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>The <code>my_mcp_server.py</code> file and environment from the previous lab.</li>
+<li><code>mcp</code>, <code>langchain</code>, and <code>langchain-openai</code> installed.</li>
+<li>Your Foundry chat deployment details in a <code>.env</code> file for the agent step.</li>
+<li>The server either running locally on <code>localhost:8080</code> (SSE) or deployed to Container Apps.</li>
+</ul>
+
+<div class="warn">
+<p>If you are testing against the HTTP transport, make sure the server process is still running in its other terminal. If it crashed, restart it before continuing — the client cannot start it for you.</p>
+</div>
+
+<h2>Step 1: Call the Server over stdio</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Connect and invoke a tool on a local process</h3>
+<p>Create <code>stdio_client.py</code>:</p>
+
+<pre><code>import asyncio
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+
+async def main():
+    server_params = StdioServerParameters(
+        command="python",
+        args=["my_mcp_server.py"],
+    )
+
+    read, write = await stdio_client(server_params)
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+
+        tools = await session.list_tools()
+        print("Tools on the server:", [t.name for t in tools.tools])
+
+        result = await session.call_tool("lookup_contact", {"name": "Sam"})
+        print("lookup_contact:", result.content[0].text)
+
+        result = await session.call_tool("evaluate_expression", {"expression": "(2 + 3) * 4"})
+        print("evaluate_expression:", result.content[0].text)
+
+
+asyncio.run(main())</code></pre>
+
+<p>Run it from the same folder as your server:</p>
+
+<pre><code>python stdio_client.py</code></pre>
+
+<p>The client launches your server as a subprocess, discovers both tools, calls them, and prints the results. You just exercised the full MCP protocol against code you wrote.</p>
+</div>
+
+<div class="note">
+<p>Notice the client and server are <em>separate processes</em> speaking the same protocol. That separation is the whole point of MCP — your server can be replaced, moved, or upgraded without the client changing a line.</p>
+</div>
+
+<h2>Step 2: Call the Server over HTTP</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Reach the same tools over SSE</h3>
+<p>Create <code>sse_client.py</code> — the exact pattern you used with the Azure server, but pointed at your own endpoint:</p>
+
+<pre><code>import asyncio
+
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+SERVER_URL = "http://localhost:8080/sse"
+
+
+async def main():
+    read, write = await sse_client(SERVER_URL)
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        result = await session.call_tool("lookup_contact", {"name": "Mira"})
+        print("lookup_contact:", result.content[0].text)
+
+        result = await session.call_tool("evaluate_expression", {"expression": "7 * 6"})
+        print("evaluate_expression:", result.content[0].text)
+
+
+asyncio.run(main())</code></pre>
+
+<p>Run it:</p>
+
+<pre><code>python sse_client.py</code></pre>
+
+<p>The same tools, same protocol — only the transport changed. If your server is deployed to Container Apps, substitute the container's URL plus <code>/sse</code>.</p>
+</div>
+
+<div class="tip">
+<p>Comparing the two clients is instructive: the only differences are the connection setup. Everything after <code>ClientSession</code> — initialize, list tools, call tools — is identical. That transport independence is a direct benefit of the protocol's design.</p>
+</div>
+
+<h2>Step 3: Wrap the Tools for an Agent</h2>
+<p>Now bridge your server into a LangChain agent, exactly as you did for the Azure server. The wrapper turns each MCP tool into a callable the model can invoke:</p>
+
+<pre><code>from langchain_core.tools import StructuredTool
+
+
+def make_langchain_tool(session: ClientSession, mcp_tool):
+    async def _run(**kwargs):
+        result = await session.call_tool(mcp_tool.name, kwargs)
+        return "\n".join(
+            block.text for block in result.content if block.type == "text"
+        )
+
+    return StructuredTool(
+        name=mcp_tool.name,
+        description=mcp_tool.description,
+        coroutine=_run,
+    )</code></pre>
+
+<h2>Step 4: Run the Agent</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Ask the model questions that need your server</h3>
+<p>Create <code>agent_with_my_server.py</code>:</p>
+
+<pre><code>import asyncio
+import os
+
+from dotenv import load_dotenv
+from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import AzureChatOpenAI
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+load_dotenv()
+
+SERVER_URL = "http://localhost:8080/sse"
+
+
+async def run():
+    read, write = await sse_client(SERVER_URL)
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        langchain_tools = [make_langchain_tool(session, t) for t in tools.tools]
+
+        model = AzureChatOpenAI(
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
+            temperature=0,
+        )
+
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "Use your tools when they help. You can look up contacts and evaluate arithmetic."),
+            ("human", "{input}"),
+            ("placeholder", "{agent_scratchpad}"),
+        ])
+
+        agent = create_tool_calling_agent(model.bind_tools(langchain_tools), langchain_tools, prompt)
+        executor = AgentExecutor(agent=agent, tools=langchain_tools)
+
+        for question in [
+            "What is the email address for HetanshTechnologie?",
+            "Compute the result of (8 + 2) * 3.",
+            "What is 5 * 5?",
+        ]:
+            result = await executor.ainvoke({"input": question})
+            print(f"\nQ: {question}\nA: {result['output']}")
+
+
+asyncio.run(run())</code></pre>
+
+<p>Run it:</p>
+
+<pre><code>python agent_with_my_server.py</code></pre>
+
+<ol>
+<li>The contact question should route through <code>lookup_contact</code> and return the email address from your in-memory directory.</li>
+<li>The expression question should route through <code>evaluate_expression</code> and return 30.</li>
+<li>The plain arithmetic question should be answered directly — the model recognizes no tool is needed.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>Watch the sequence closely: the model emits a tool call, the agent executes it through your MCP server, the result comes back, and the model composes the final answer. Your own server now occupies the exact role the Azure server played two labs ago — proof that the whole pattern is transport- and implementation-agnostic.</p>
+</div>
+
+<h2>Step 5: Deploy the Same Agent Against the Hosted Server</h2>
+<p>If you containerized and deployed your server in the previous lab, point <code>SERVER_URL</code> at the deployed FQDN and rerun the agent. Add an access key header if you configured one. Nothing else changes — the agent works identically against the local and hosted servers. This is the payoff of the architecture: the code you wrote for a local process scales to a cloud deployment without redesign.</p>
+
+<div class="warn">
+<p>When you are done, stop the local server and delete any container app you deployed. Both the running process and the cloud service consume resources — the former on your machine, the latter against your Azure subscription.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You connected a client to your own MCP server over stdio and SSE, called its tools, wrapped them for LangChain, and ran an agent that used them on demand. You also verified the identical code works against a hosted deployment. You have now completed the full MCP arc: understand the protocol, call a hosted Azure server, build your own server, and drive it from an agent. The next section provides the code and resources download to accompany everything you built.</p>
+<nav>
+<a href="111-lab-building-our-own-mcp-server.html">&larr; Previous: Lab - Building our own MCP Server</a><a href="113-code-and-resources-download-for-this-section.html">Next: Code and resources download for this section &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

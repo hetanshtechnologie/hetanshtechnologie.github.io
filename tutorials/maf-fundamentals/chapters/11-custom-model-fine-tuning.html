@@ -1,0 +1,147 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Custom Model Fine-tuning — MAF Fundamentals</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <h1>11. Custom Model Fine-tuning</h1>
+
+    <h2>Why Fine-tune?</h2>
+    <p>Base LLMs are general-purpose. Fine-tuning adapts a model to your domain — your terminology, tone, data formats, and business logic. This leads to higher accuracy, fewer hallucinations, and more consistent outputs for domain-specific tasks.</p>
+
+    <h2>When to Fine-tune vs. Prompt Engineer</h2>
+    <table>
+      <tr><th>Approach</th><th>When to Use</th><th>Effort</th></tr>
+      <tr><td>Prompt Engineering</td><td>Simple tasks, few examples, rapid iteration</td><td>Low</td></tr>
+      <tr><td>RAG (Retrieval Augmented)</td><td>Dynamic knowledge, large corpora</td><td>Medium</td></tr>
+      <tr><td>Fine-tuning</td><td>Consistent style/schema, specialized domain, cost reduction</td><td>High (dataset prep)</td></tr>
+      <tr><td>Pre-training</td><td>New language or knowledge from scratch</td><td>Very high</td></tr>
+    </table>
+
+    <h2>Fine-tuning Methods</h2>
+    <ul>
+      <li><strong>Full Fine-tuning</strong> — updates all model weights. Most expressive, most expensive.</li>
+      <li><strong>LoRA (Low-Rank Adaptation)</strong> — injects small trainable matrices. Fast, cheap, composable.</li>
+      <li><strong>QLoRA</strong> — quantized LoRA for fine-tuning on consumer GPUs.</li>
+      <li><strong>DPO (Direct Preference Optimization)</strong> — aligns model to human preferences without RLHF.</li>
+    </ul>
+
+    <h2>Dataset Preparation</h2>
+    <p>Fine-tuning data typically follows a chat format. For instruction tuning, use this structure:</p>
+    <pre><code>[
+  {
+    "messages": [
+      { "role": "system", "content": "You are a medical coding assistant." },
+      { "role": "user", "content": "Diagnosis: Type 2 diabetes, initial encounter" },
+      { "role": "assistant", "content": "E11.9" }
+    ]
+  },
+  {
+    "messages": [
+      { "role": "system", "content": "You are a medical coding assistant." },
+      { "role": "user", "content": "Diagnosis: Essential hypertension" },
+      { "role": "assistant", "content": "I10" }
+    ]
+  }
+]</code></pre>
+
+    <h3>Data Quality Checklist</h3>
+    <ul>
+      <li>Minimum 500-1000 high-quality examples</li>
+      <li>Ensure label consistency — have 2+ annotators per sample</li>
+      <li>Balance classes to avoid bias</li>
+      <li>Include edge cases and refusal examples</li>
+      <li>Split into train/validation/test (80/10/10)</li>
+    </ul>
+
+    <h2>Fine-tuning with Azure AI Foundry</h2>
+    <p>Azure AI Foundry provides a managed fine-tuning service for models like GPT-4o, Phi-3, and Llama families:</p>
+    <pre><code># Azure CLI — start a fine-tuning job
+az ml job create --file fine-tuning-job.yml
+
+# fine-tuning-job.yml
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+type: command
+code: .
+command: >-
+  python finetune.py
+  --model gpt-4o
+  --training-file azureml://datasets/train.jsonl
+  --validation-file azureml://datasets/val.jsonl
+environment: azureml:openai-finetune-env:latest
+compute: azureml:gpu-cluster
+resources:
+  instance_count: 1
+  instance_type: Standard_ND40rs_v2</code></pre>
+
+    <h2>Evaluating a Fine-tuned Model</h2>
+    <p>After fine-tuning, evaluate using:</p>
+    <ul>
+      <li><strong>Hold-out test set</strong> — accuracy, F1, exact match on unseen examples</li>
+      <li><strong>Side-by-side evaluation</strong> — compare base vs. fine-tuned on representative prompts</li>
+      <li><strong>Cost & latency</strong> — fine-tuned models can use smaller base models, reducing inference cost</li>
+    </ul>
+
+    <h2>Deploying a Fine-tuned Model</h2>
+    <p>Once validated, deploy the fine-tuned model as a serverless endpoint or managed compute:</p>
+    <pre><code>from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint="https://your-endpoint.openai.azure.com/",
+    api_version="2024-08-01-preview",
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o-finetuned",  # your fine-tuned deployment name
+    messages=[{"role": "user", "content": "Classify this support ticket: ..."}]
+)</code></pre>
+
+    <h2>Using Fine-tuned Models with MAF Agents</h2>
+    <p>In MAF, you can configure an agent to use any model by specifying the deployment in the model config:</p>
+    <pre><code>const agent = new Agent({
+  name: "MedicalCoder",
+  instructions: "Classify diagnoses into ICD-10 codes.",
+  model: {
+    provider: "azure-openai",
+    deployment: "gpt-4o-finetuned",
+    endpoint: process.env.AZURE_OPENAI_ENDPOINT
+  }
+});</code></pre>
+
+    <div class="info">
+      <strong>💡 Key Insight:</strong> Fine-tuning doesn't replace RAG — they complement each other. Use fine-tuning for behavior/style and RAG for factual knowledge.
+    </div>
+
+    <div class="exercise">
+      <strong>✏️ Exercise:</strong> Create a small dataset of 20 examples for a "tone converter" that rewrites technical jargon into plain English. Use the chat format shown above and note how you would split train/validation/test sets.
+    </div>
+
+    <nav>
+      <a href="10-copilot-extensions.html">&larr; Previous</a>
+      <a href="../index.html">Back to Index</a>
+      <a href="12-agent-to-agent-communication.html">Next: Agent-to-Agent Communication &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

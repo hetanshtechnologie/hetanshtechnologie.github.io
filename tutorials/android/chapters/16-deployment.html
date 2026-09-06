@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deployment - Android Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 16</span>
+    <h1>Deployment</h1>
+
+    <h2>Preparing for Release</h2>
+    <ul>
+      <li>Remove all debug logs and <code>android:debuggable</code> from manifest</li>
+      <li>Update <code>versionCode</code> and <code>versionName</code> in build.gradle.kts</li>
+      <li>Run ProGuard/R8 for code shrinking and obfuscation</li>
+      <li>Test the release build on a physical device</li>
+      <li>Prepare app store assets (icons, screenshots, description)</li>
+    </ul>
+
+    <h2>App Signing</h2>
+    <pre><code>// Generate a signing key
+// Android Studio: Build > Generate Signed Bundle / APK
+
+// Or via command line:
+keytool -genkey -v -keystore my-release-key.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -alias my-alias
+
+// app/build.gradle.kts
+android {
+    signingConfigs {
+        create("release") {
+            storeFile = file("my-release-key.jks")
+            storePassword = "password"
+            keyAlias = "my-alias"
+            keyPassword = "password"
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+}</code></pre>
+
+    <h2>App Bundles vs APK</h2>
+    <p>Google Play requires Android App Bundles (AAB) for new apps. App Bundles allow Google Play to generate optimized APKs for different device configurations.</p>
+
+    <pre><code># Generate App Bundle
+./gradlew bundleRelease
+
+# Located at: app/build/outputs/bundle/release/app-release.aab
+
+# Generate APK (alternative)
+./gradlew assembleRelease
+
+# Test the bundle using bundletool
+java -jar bundletool.jar build-apks \
+  --bundle=app-release.aab \
+  --output=app-release.apks \
+  --ks=my-release-key.jks \
+  --ks-pass=pass:password \
+  --ks-key-alias=my-alias
+
+# Install on device
+java -jar bundletool.jar install-apks --apks=app-release.apks</code></pre>
+
+    <h2>Google Play Console</h2>
+    <ul>
+      <li><strong>Create Developer Account:</strong> One-time $25 registration fee</li>
+      <li><strong>Dashboard:</strong> View app stats, crashes, ratings</li>
+      <li><strong>Release Management:</strong> Create internal/alpha/beta/production releases</li>
+      <li><strong>Store Listing:</strong> App description, screenshots, feature graphic</li>
+      <li><strong>Pricing &amp; Distribution:</strong> Set pricing, countries, devices</li>
+      <li><strong>In-app Products:</strong> Configure IAP items and subscriptions</li>
+    </ul>
+
+    <h2>Versioning Strategy</h2>
+    <pre><code>// app/build.gradle.kts
+android {
+    defaultConfig {
+        applicationId = "com.example.myapp"
+        minSdk = 24
+        targetSdk = 34
+
+        // Increment versionCode for each release
+        versionCode = 5
+        versionName = "2.1.0"
+    }
+}
+
+// Semantic versioning: MAJOR.MINOR.PATCH
+// - MAJOR: Breaking changes
+// - MINOR: New features (backward compatible)
+// - PATCH: Bug fixes
+
+// versionCode vs versionName
+// versionCode: Integer, must increment for each update
+// versionName: Human-readable version string</code></pre>
+
+    <h2>Crash Reporting</h2>
+    <pre><code>// Firebase Crashlytics
+// build.gradle.kts
+// implementation("com.google.firebase:firebase-crashlytics")
+
+// Initialize in Application class
+FirebaseCrashlytics.getInstance().apply {
+    setCrashlyticsCollectionEnabled(true)
+    log("App started")
+    setUserId("user_123")
+}
+
+// Log custom events
+FirebaseCrashlytics.getInstance().recordException(Exception("Payment failed"))
+
+// Firebase Performance Monitoring
+// implementation("com.google.firebase:firebase-perf")
+// Automatically monitors app startup, network, and screen rendering</code></pre>
+
+    <h2>CI/CD for Android</h2>
+    <pre><code># .github/workflows/android-ci.yml
+name: Android CI
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 17
+      - run: ./gradlew test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 17
+      - run: ./gradlew bundleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-bundle
+          path: app/build/outputs/bundle/release/app-release.aab</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Prepare an app for release on Google Play. Generate a signing key, configure the build.gradle.kts for release with ProGuard, create an Android App Bundle, and verify it works by testing via bundletool on a physical device or emulator.
+    </div>
+
+    <nav>
+      <a href="15-testing.html">&larr; Previous: Testing &amp; Debugging</a>
+      <a href="../">Back to Index</a>
+      <a href="17-practice.html">Next: Practice &amp; Resources &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

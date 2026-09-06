@@ -1,0 +1,337 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tangram Puzzle</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+  body { background: #0f172a; }
+  canvas { touch-action: none; }
+  .tool-btn {
+    transition: transform 0.15s, background 0.15s;
+  }
+  .tool-btn:hover { transform: scale(1.05); }
+  .tool-btn.active { outline: 2px solid #facc15; outline-offset: 2px; }
+</style>
+</head>
+<body class="min-h-screen text-white">
+<div class="max-w-3xl mx-auto p-4">
+  <a href="index.html" class="inline-block mb-4 text-yellow-400 hover:text-yellow-300 transition">&larr; Back to Games</a>
+  <h1 class="text-3xl font-bold mb-2 text-center">Tangram Puzzle</h1>
+  <div class="flex justify-center gap-4 mb-3 text-sm">
+    <span class="bg-gray-800 px-3 py-1 rounded">Time: <span id="timer">00:00</span></span>
+    <span class="bg-gray-800 px-3 py-1 rounded">Moves: <span id="moves">0</span></span>
+    <select id="targetSelect" class="bg-gray-800 px-2 py-1 rounded text-white border border-gray-600">
+      <option value="square">Square</option>
+      <option value="house">House</option>
+      <option value="arrow">Arrow</option>
+    </select>
+  </div>
+  <div class="flex justify-center gap-3 mb-4">
+    <button id="rotateBtn" class="tool-btn bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded font-semibold">Rotate 45°</button>
+    <button id="flipBtn" class="tool-btn bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded font-semibold">Flip</button>
+    <button id="resetBtn" class="tool-btn bg-green-600 hover:bg-green-500 px-4 py-2 rounded font-semibold">Restart</button>
+  </div>
+  <div id="info" class="text-center text-gray-400 mb-2 text-sm">Click a piece to select, drag to move. Use buttons to rotate/flip.</div>
+  <div class="flex justify-center">
+    <canvas id="canvas" width="700" height="500" class="rounded-lg border border-gray-700" style="max-width:100%;"></canvas>
+  </div>
+  <div id="winModal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-800 rounded-xl p-8 text-center shadow-2xl">
+      <h2 class="text-2xl font-bold text-yellow-400 mb-3">Puzzle Solved!</h2>
+      <p class="mb-1">Time: <span id="finalTime" class="font-bold"></span></p>
+      <p class="mb-4">Moves: <span id="finalMoves" class="font-bold"></span></p>
+      <button id="playAgainBtn" class="bg-green-600 hover:bg-green-500 px-6 py-2 rounded font-semibold">Play Again</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const W = 700, H = 500;
+
+  const COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899'];
+  const LABELS = ['A','B','C','D','E','F','G'];
+
+  const targets = {
+    square: { cx:525, cy:250, size:180, silhouette: [
+      {x:-180,y:-180},{x:180,y:-180},{x:180,y:180},{x:-180,y:180}
+    ]},
+    house: { cx:525, cy:250, size:180, silhouette: [
+      {x:-120,y:120},{x:120,y:120},{x:120,y:-40},{x:0,y:-180},{x:-120,y:-40}
+    ]},
+    arrow: { cx:525, cy:250, size:180, silhouette: [
+      {x:-60,y:140},{x:60,y:140},{x:60,y:0},{x:180,y:0},{x:0,y:-140},
+      {x:-180,y:0},{x:-60,y:0},{x:-60,y:140}
+    ]}
+  };
+
+  function makeTriangle(s) {
+    return [{x:0,y:0},{x:s,y:0},{x:0,y:s}];
+  }
+
+  function createPieces() {
+    const s = 50;
+    return [
+      { shape: [{x:0,y:0},{x:2*s,y:0},{x:0,y:2*s}], color:COLORS[0], label:LABELS[0], x:40, y:30, angle:0, flipped:false, target:{x:435,y:155}, placed:false },
+      { shape: [{x:0,y:0},{x:2*s,y:0},{x:0,y:2*s}], color:COLORS[1], label:LABELS[1], x:40, y:170, angle:0, flipped:false, target:{x:435,y:335}, placed:false },
+      { shape: [{x:0,y:0},{x:1.4*s,y:0},{x:0,y:1.4*s}], color:COLORS[2], label:LABELS[2], x:40, y:310, angle:0, flipped:false, target:{x:565,y:155}, placed:false },
+      { shape: [{x:0,y:0},{x:s*0.707,y:0},{x:s*0.707,y:s*0.707},{x:0,y:s*0.707}], color:COLORS[3], label:LABELS[3], x:150, y:30, angle:0, flipped:false, target:{x:565,y:290}, placed:false },
+      { shape: [{x:0,y:0},{x:s*0.707,y:0},{x:0,y:s*0.707}], color:COLORS[4], label:LABELS[4], x:150, y:140, angle:0, flipped:false, target:{x:435,y:335}, placed:false },
+      { shape: [{x:0,y:0},{x:s*0.707,y:0},{x:0,y:s*0.707}], color:COLORS[5], label:LABELS[5], x:150, y:230, angle:0, flipped:false, target:{x:565,y:290}, placed:false },
+      { shape: [{x:0,y:0},{x:2*s,y:0},{x:2.5*s,y:s},{x:0.5*s,y:s}], color:COLORS[6], label:LABELS[6], x:150, y:330, angle:0, flipped:false, target:{x:435,y:155}, placed:false }
+    ];
+  }
+
+  let pieces, selectedIdx, dragging, dragOffX, dragOffY, moveCount, timerInterval, seconds, gameWon;
+
+  function rotateShape(shape, angle, flipped) {
+    const rad = angle * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    return shape.map(p => {
+      let px = p.x, py = p.y;
+      if (flipped) px = -px;
+      return { x: px*cos - py*sin, y: px*sin + py*cos };
+    });
+  }
+
+  function getTranslated(shape, px, py) {
+    return shape.map(p => ({x: p.x + px, y: p.y + py}));
+  }
+
+  function pointInPoly(px, py, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x, yi = poly[i].y;
+      const xj = poly[j].x, yj = poly[j].y;
+      if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  function dist(a, b) {
+    return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    // draw target area label
+    ctx.fillStyle = '#64748b';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Target Area', 525, 30);
+
+    // draw target silhouette
+    const tgt = targets[document.getElementById('targetSelect').value];
+    ctx.save();
+    ctx.translate(tgt.cx, tgt.cy);
+    ctx.beginPath();
+    const sil = tgt.silhouette;
+    ctx.moveTo(sil[0].x, sil[0].y);
+    for (let i = 1; i < sil.length; i++) ctx.lineTo(sil[i].x, sil[i].y);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(71,85,105,0.3)';
+    ctx.fill();
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+
+    // draw pieces
+    for (let i = 0; i < pieces.length; i++) {
+      const p = pieces[i];
+      const rotated = rotateShape(p.shape, p.angle, p.flipped);
+      const translated = getTranslated(rotated, p.x, p.y);
+
+      ctx.beginPath();
+      ctx.moveTo(translated[0].x, translated[0].y);
+      for (let j = 1; j < translated.length; j++) ctx.lineTo(translated[j].x, translated[j].y);
+      ctx.closePath();
+      ctx.fillStyle = p.color;
+      ctx.fill();
+      ctx.strokeStyle = i === selectedIdx ? '#facc15' : '#1e293b';
+      ctx.lineWidth = i === selectedIdx ? 3 : 2;
+      ctx.stroke();
+
+      // label
+      const cx = translated.reduce((s, v) => s + v.x, 0) / translated.length;
+      const cy = translated.reduce((s, v) => s + v.y, 0) / translated.length;
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p.label, cx, cy);
+    }
+
+    // palette area
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(0, 0, 200, H);
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(200, 0);
+    ctx.lineTo(200, H);
+    ctx.stroke();
+    ctx.fillStyle = '#64748b';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Pieces', 100, 20);
+  }
+
+  function getMousePos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const scaleY = H / rect.height;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
+  }
+
+  function findPieceAt(mx, my) {
+    for (let i = pieces.length - 1; i >= 0; i--) {
+      const p = pieces[i];
+      const rotated = rotateShape(p.shape, p.angle, p.flipped);
+      const translated = getTranslated(rotated, p.x, p.y);
+      if (pointInPoly(mx, my, translated)) return i;
+    }
+    return -1;
+  }
+
+  function onDown(e) {
+    if (gameWon) return;
+    e.preventDefault();
+    const pos = getMousePos(e);
+    const idx = findPieceAt(pos.x, pos.y);
+    if (idx >= 0) {
+      selectedIdx = idx;
+      dragging = true;
+      dragOffX = pos.x - pieces[idx].x;
+      dragOffY = pos.y - pieces[idx].y;
+      draw();
+    }
+  }
+
+  function onMove(e) {
+    if (!dragging || gameWon) return;
+    e.preventDefault();
+    const pos = getMousePos(e);
+    pieces[selectedIdx].x = pos.x - dragOffX;
+    pieces[selectedIdx].y = pos.y - dragOffY;
+    draw();
+  }
+
+  function onUp(e) {
+    if (!dragging || gameWon) return;
+    dragging = false;
+    moveCount++;
+    document.getElementById('moves').textContent = moveCount;
+    snapPiece(selectedIdx);
+    checkWin();
+    draw();
+  }
+
+  function snapPiece(idx) {
+    const p = pieces[idx];
+    const tgt = targets[document.getElementById('targetSelect').value];
+    const targetDist = dist({x:p.x, y:p.y}, tgt);
+    if (targetDist < 50) {
+      p.x = tgt.cx;
+      p.y = tgt.cy;
+      p.placed = true;
+    } else {
+      p.placed = false;
+    }
+  }
+
+  function checkWin() {
+    if (pieces.every(p => p.placed)) {
+      gameWon = true;
+      clearInterval(timerInterval);
+      document.getElementById('finalTime').textContent = document.getElementById('timer').textContent;
+      document.getElementById('finalMoves').textContent = moveCount;
+      document.getElementById('winModal').classList.remove('hidden');
+    }
+  }
+
+  function rotateSelected() {
+    if (selectedIdx === null || gameWon) return;
+    pieces[selectedIdx].angle = (pieces[selectedIdx].angle + 45) % 360;
+    moveCount++;
+    document.getElementById('moves').textContent = moveCount;
+    snapPiece(selectedIdx);
+    checkWin();
+    draw();
+  }
+
+  function flipSelected() {
+    if (selectedIdx === null || gameWon) return;
+    pieces[selectedIdx].flipped = !pieces[selectedIdx].flipped;
+    moveCount++;
+    document.getElementById('moves').textContent = moveCount;
+    snapPiece(selectedIdx);
+    checkWin();
+    draw();
+  }
+
+  function init() {
+    pieces = createPieces();
+    selectedIdx = null;
+    dragging = false;
+    moveCount = 0;
+    seconds = 0;
+    gameWon = false;
+    document.getElementById('moves').textContent = '0';
+    document.getElementById('timer').textContent = '00:00';
+    document.getElementById('winModal').classList.add('hidden');
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+      if (gameWon) return;
+      seconds++;
+      const m = String(Math.floor(seconds/60)).padStart(2,'0');
+      const s = String(seconds%60).padStart(2,'0');
+      document.getElementById('timer').textContent = m+':'+s;
+    }, 1000);
+    draw();
+  }
+
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  canvas.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown);
+  canvas.addEventListener('touchmove', onMove);
+  canvas.addEventListener('touchend', onUp);
+  document.getElementById('rotateBtn').addEventListener('click', rotateSelected);
+  document.getElementById('flipBtn').addEventListener('click', flipSelected);
+  document.getElementById('resetBtn').addEventListener('click', init);
+  document.getElementById('playAgainBtn').addEventListener('click', init);
+  document.getElementById('targetSelect').addEventListener('change', init);
+
+  init();
+})();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

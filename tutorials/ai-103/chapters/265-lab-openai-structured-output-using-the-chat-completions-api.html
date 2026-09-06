@@ -1,0 +1,120 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>265. Lab - OpenAI - Structured Output - Using the Chat Completions API - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 265</span>
+<h1>Lab - OpenAI - Structured Output - Using the Chat Completions API</h1>
+<p>The Chat Completions API is the older sibling of the Responses API, but it is still widely used. It also supports structured outputs, configured through the <code>response_format</code> parameter. In this lab you will reproduce the order-issue extraction from the previous lab using Chat Completions, then compare the two approaches.</p>
+
+<h2>Setting Up Structured Output</h2>
+<p>With Chat Completions, the call uses a <code>messages</code> list instead of <code>instructions</code> and <code>input</code>, and the schema is passed through <code>response_format</code>.</p>
+<div class="exercise">
+<h3>Step 1 — Create the script</h3>
+<p>Create a file named <code>structured_chat.py</code>:</p>
+<pre><code>from openai import OpenAI
+
+client = OpenAI(api_key="YOUR_API_KEY")
+
+schema = {
+    "type": "object",
+    "properties": {
+        "customer": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "email": {"type": "string"}
+            },
+            "required": ["name", "email"],
+            "additionalProperties": False
+        },
+        "order_number": {"type": "string"},
+        "issue": {"type": "string"}
+    },
+    "required": ["customer", "order_number", "issue"],
+    "additionalProperties": False
+}
+
+email_text = """
+Hi, I am Meera. My email is meera@example.com. Order 99211
+was billed twice and I need a refund.
+"""
+
+response = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "Extract the requested details from the message."},
+        {"role": "user", "content": email_text},
+    ],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "order_issue",
+            "schema": schema,
+            "strict": True
+        }
+    },
+)
+
+print(response.choices[0].message.content)</code></pre>
+
+<h3>Step 2 — Run it</h3>
+<pre><code>python structured_chat.py</code></pre>
+<p>The response should again be clean JSON following your schema.</p>
+</div>
+
+<h2>Reading the Result</h2>
+<p>Chat Completions places the JSON in the assistant message's <code>content</code>. Parsing works the same way as before:</p>
+<pre><code>import json
+
+payload = json.loads(response.choices[0].message.content)
+print("Customer:", payload["customer"]["name"])
+print("Order:", payload["order_number"])</code></pre>
+
+<div class="tip">
+<p>Some environments (especially with tool calling) return the content inside <code>message.tool_calls[0].function.arguments</code> instead. If <code>message.content</code> is empty, check whether a tool call carried the JSON.</p>
+</div>
+
+<h2>Comparing the Two APIs</h2>
+<table>
+<tr><th>Aspect</th><th>Responses API</th><th>Chat Completions API</th></tr>
+<tr><td>Schema location</td><td><code>output[0].text.format</code></td><td><code>response_format.json_schema</code></td></tr>
+<tr><td>Message structure</td><td><code>instructions</code> + <code>input</code></td><td><code>messages</code> list</td></tr>
+<tr><td>Result accessor</td><td><code>output[0].content[0].text</code></td><td><code>choices[0].message.content</code></td></tr>
+<tr><td>Position in platform</td><td>Newer, unified</td><td>Older, widely deployed</td></tr>
+</table>
+<p>The schema itself and the strictness rules are nearly identical; only the transport differs.</p>
+
+<h2>Handling a Parsing Failure</h2>
+<p>Even with structured outputs, defensive code is cheap. Wrap the parse in a try/except so a malformed payload fails loudly instead of crashing mid-application:</p>
+<pre><code>try:
+    payload = json.loads(response.choices[0].message.content)
+except json.JSONDecodeError as exc:
+    print("Could not parse model output:", exc)
+    raise</code></pre>
+
+<div class="note">
+<p>Structured outputs constrain the format the model emits, but a transport or truncation problem can still produce unusable content. Keep the try/except, and log the raw content whenever parsing fails — the raw text is the first clue for debugging.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You applied structured output to the Chat Completions API with <code>response_format</code>, parsed the JSON from the assistant message, and compared the setup with the Responses API. You can now choose whichever API fits your existing code while keeping the same schema and guarantees.</p>
+<nav>
+<a href="264-lab-openai-structured-output-trying-to-use-the-responses-api.html">&larr; Previous: Lab - OpenAI - Structured Output - Trying to use the Responses API</a><a href="266-openai-concept-of-using-tools.html">Next: OpenAI - Concept of using Tools &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

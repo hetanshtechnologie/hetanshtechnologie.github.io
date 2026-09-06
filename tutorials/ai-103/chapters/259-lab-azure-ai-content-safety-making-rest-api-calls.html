@@ -1,0 +1,120 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>259. Lab - Azure AI Content Safety - Making REST API calls - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 259</span>
+<h1>Lab - Azure AI Content Safety - Making REST API calls</h1>
+<p>The Content Safety SDKs wrap a plain REST API. Understanding that API is valuable because it lets you call the service from any language, debug what the SDK sends, and integrate with tools that only speak HTTP. In this lab you will call the text analysis endpoint directly using the command line and a small Python request, reading the JSON responses yourself.</p>
+
+<h2>The Moderation Endpoint</h2>
+<p>Text moderation lives at a fixed path under your resource endpoint:</p>
+<pre><code>POST {ENDPOINT}/contentsafety/text:analyze?api-version=2024-02-15-preview</code></pre>
+<p>The request needs two headers:</p>
+<ul>
+<li><code>Ocp-Apim-Subscription-Key</code> — your resource key.</li>
+<li><code>Content-Type</code> — <code>application/json</code>.</li>
+</ul>
+<p>The body is JSON containing the text to analyze.</p>
+
+<h2>Calling from the Command Line</h2>
+<p>On Windows, PowerShell's <code>Invoke-RestMethod</code> makes the call straightforward:</p>
+<pre><code>$endpoint = "YOUR_ENDPOINT"
+$key = "YOUR_KEY"
+
+$body = @{
+    text = "Your sample text to moderate."
+} | ConvertTo-Json
+
+$uri = "$endpoint/contentsafety/text:analyze?api-version=2024-02-15-preview"
+
+$headers = @{
+    "Ocp-Apim-Subscription-Key" = $key
+    "Content-Type" = "application/json"
+}
+
+$response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body
+$response.categoriesAnalysis | ForEach-Object {
+    Write-Output "$($_.category): severity $($_.severity)"
+}</code></pre>
+<p>On Linux or macOS you can use curl instead:</p>
+<pre><code>curl -X POST "https://YOUR_ENDPOINT/contentsafety/text:analyze?api-version=2024-02-15-preview" \
+  -H "Ocp-Apim-Subscription-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Your sample text to moderate."}'</code></pre>
+
+<div class="warn">
+<p>PowerShell converts the double-quoted JSON to a hashtable and back, which is fine. Just do not add extra backslashes or quoting inside <code>text</code> — keep the string clean so the service receives valid JSON.</p>
+</div>
+
+<h2>Reading the JSON Response</h2>
+<p>Whichever tool you use, the response has the same shape:</p>
+<pre><code>{
+  "blocklistsMatch": [],
+  "categoriesAnalysis": [
+    { "category": "Hate", "severity": 0 },
+    { "category": "Sexual", "severity": 0 },
+    { "category": "Violence", "severity": 0 },
+    { "category": "SelfHarm", "severity": 0 }
+  ]
+}</code></pre>
+<ul>
+<li><code>categoriesAnalysis</code> — one object per category with its severity.</li>
+<li><code>blocklistsMatch</code> — terms from your blocklists that appeared, empty when nothing matched.</li>
+</ul>
+
+<h2>Calling from Python with Requests</h2>
+<p>The SDK is convenient, but sometimes you want a plain HTTP client. Python's <code>requests</code> library keeps the call explicit:</p>
+<pre><code>import requests
+
+endpoint = "YOUR_ENDPOINT"
+key = "YOUR_KEY"
+text = "Your sample text to moderate."
+
+url = f"{endpoint}/contentsafety/text:analyze?api-version=2024-02-15-preview"
+headers = {
+    "Ocp-Apim-Subscription-Key": key,
+    "Content-Type": "application/json",
+}
+payload = {"text": text}
+
+response = requests.post(url, headers=headers, json=payload)
+response.raise_for_status()
+
+for item in response.json()["categoriesAnalysis"]:
+    print(f"{item['category']}: severity {item['severity']}")</code></pre>
+<p>Install the library first if needed: <code>pip install requests</code>.</p>
+
+<div class="tip">
+<p>Watch the HTTP status code. A <code>200</code> means the analysis ran; a <code>401</code> means a bad key; a <code>429</code> means you hit a rate limit. Reading status codes before parsing the body saves you confusing debugging later.</p>
+</div>
+
+<h2>Verifying Error Handling</h2>
+<p>Confirm that errors surface clearly by deliberately sending a bad request:</p>
+<ol>
+<li>Use an incorrect key and observe the <code>401 Unauthorized</code> response.</li>
+<li>Send an empty <code>text</code> field and read the validation error in the response body.</li>
+</ol>
+<p>Understanding these failure modes helps you build robust retry logic in your own applications.</p>
+
+<h2>Summary</h2>
+<p>The Content Safety service is a straightforward HTTP API. You called the text analysis endpoint from PowerShell, curl, and Python's requests library, and you parsed the same JSON response each time. With this foundation you can integrate Content Safety into any stack, with or without the official SDK.</p>
+<nav>
+<a href="258-lab-python-azure-ai-content-safety-as-a-service-detect-harmful-text.html">&larr; Previous: Lab - Python - Azure AI Content Safety as a service - Detect Harmful text</a><a href="260-lab-openai-using-the-new-responses-api.html">Next: Lab - OpenAI - Using the New Responses API &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

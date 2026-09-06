@@ -1,0 +1,166 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>99. Lab - Getting started with LangChain - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 99</span>
+<h1>Lab - Getting started with LangChain</h1>
+<p>In this lab you will get LangChain installed and running against a model deployed in Microsoft Foundry. By the end you will have a repeatable Python environment, a working connection to your deployed chat model, and a first chain that turns a user request into a formatted response. This environment is the foundation for every LangChain lab that follows, so take the time to verify each step before moving on.</p>
+
+<h2>Prerequisites</h2>
+<p>Before you start, confirm you have the following:</p>
+<ul>
+<li>Python 3.10 or newer installed on your machine. Check with <code>python --version</code> on Windows or <code>python3 --version</code> on macOS and Linux.</li>
+<li><code>pip</code> available for installing packages.</li>
+<li>A model deployment in Microsoft Foundry, with its endpoint URL, deployment name, and API key at hand. If you deleted your deployment earlier, redeploy a chat model before continuing.</li>
+<li>A comfortable code editor — Visual Studio Code is a good choice for the rest of this course.</li>
+</ul>
+
+<div class="warn">
+<p>Keep your API key out of your code. Never paste a real key directly into a Python file that might be shared or committed to a repository. Use environment variables instead, as shown in this lab.</p>
+</div>
+
+<h2>Step 1: Create an Isolated Environment</h2>
+<p>An isolated virtual environment keeps the packages you install for LangChain separate from the rest of your system. This avoids version conflicts between projects and makes your setup reproducible. Create a project folder and a virtual environment inside it:</p>
+
+<pre><code>mkdir langchain-lab
+cd langchain-lab
+python -m venv .venv</code></pre>
+
+<p>Activate the environment so that <code>pip</code> and <code>python</code> refer to it:</p>
+<ul>
+<li><strong>Windows (PowerShell):</strong> <code>.venv\Scripts\Activate.ps1</code></li>
+<li><strong>macOS / Linux:</strong> <code>source .venv/bin/activate</code></li>
+</ul>
+
+<p>When the environment is active you will see its name in your prompt. Now install the packages you need:</p>
+
+<pre><code>pip install "langchain" "langchain-openai" "python-dotenv"</code></pre>
+
+<div class="tip">
+<p>The <code>langchain-openai</code> package provides integrations for both OpenAI and Azure OpenAI-compatible endpoints. It is the package that brings the <code>AzureChatOpenAI</code> class into your project.</p>
+</div>
+
+<h2>Step 2: Store Your Connection Details</h2>
+<p>Create a file named <code>.env</code> in the project folder and store your deployment details in it. The <code>python-dotenv</code> package will load these values into your environment when your code runs:</p>
+
+<pre><code>AZURE_OPENAI_ENDPOINT=https://YOUR_ENDPOINT
+AZURE_OPENAI_API_KEY=YOUR_KEY
+AZURE_OPENAI_DEPLOYMENT_NAME=ai103-chat-deploy
+AZURE_OPENAI_API_VERSION=2024-06-01</code></pre>
+
+<p>Replace <code>YOUR_ENDPOINT</code> and <code>YOUR_KEY</code> with the values from your Foundry deployment, and make sure <code>AZURE_OPENAI_DEPLOYMENT_NAME</code> exactly matches the deployment name you chose when you deployed the model.</p>
+
+<div class="warn">
+<p>If you share your code, never share the <code>.env</code> file. Add <code>.env</code> to a <code>.gitignore</code> file if you initialize a repository in this folder.</p>
+</div>
+
+<h2>Step 3: Make Your First Model Call</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Call your Foundry deployment through LangChain</h3>
+<p>Create a file named <code>first_call.py</code> with the following content:</p>
+
+<pre><code>import os
+
+from dotenv import load_dotenv
+from langchain_openai import AzureChatOpenAI
+
+load_dotenv()
+
+model = AzureChatOpenAI(
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+    api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+    deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
+    temperature=0.7,
+)
+
+response = model.invoke("Explain what a token is in one sentence.")
+print(response.content)</code></pre>
+
+<p>Run the script from the activated environment:</p>
+
+<pre><code>python first_call.py</code></pre>
+
+<ol>
+<li>If everything is configured correctly, the script prints a single-sentence answer about tokens.</li>
+<li>Run it again. The exact wording may differ because sampling introduces randomness.</li>
+<li>Temporarily set <code>temperature=0</code> and run it a few times. With greedy decoding the output becomes far more consistent.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>The <code>invoke</code> method is the core entry point in LangChain. It accepts input, runs the full pipeline, and returns the result. Every LangChain object you build — models, prompts, chains, and agents — supports <code>invoke</code>, which is what makes it so easy to combine them.</p>
+</div>
+
+<h2>Step 4: Build a Prompt-and-Response Chain</h2>
+<p>A single model call is rarely enough for a real application. You usually want a system instruction, a templated user prompt, and a clean string output. LangChain composes these pieces with the pipe operator. Create a file named <code>greeter.py</code>:</p>
+
+<pre><code>import os
+
+from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import AzureChatOpenAI
+
+load_dotenv()
+
+model = AzureChatOpenAI(
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+    api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+    deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
+    temperature=0.5,
+)
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a friendly course assistant for AI-103."),
+    ("human", "Greet the learner named {name} and tell them what today's topic is: {topic}."),
+])
+
+chain = prompt | model | StrOutputParser()
+
+result = chain.invoke({"name": "Sam", "topic": "LangChain"})
+print(result)</code></pre>
+
+<p>Run the script:</p>
+
+<pre><code>python greeter.py</code></pre>
+
+<p>This time the flow has three stages: the <code>ChatPromptTemplate</code> fills the placeholders from the input dictionary, the model generates an answer, and the <code>StrOutputParser</code> extracts just the text. The chain is nothing more than those three pieces connected with <code>|</code>.</p>
+
+<div class="tip">
+<p>Try changing the prompt to ask for the answer as JSON, then swap <code>StrOutputParser</code> for LangChain's JSON output parser. You will get a parsed Python dictionary back instead of text — a pattern you will use repeatedly in later chapters.</p>
+</div>
+
+<h2>Step 5: Inspect What Happens Under the Hood</h2>
+<p>LangChain objects expose rich metadata through attributes. A small change to the model call lets you see token usage and the raw response:</p>
+
+<pre><code>response = model.invoke("List three Azure AI services.")
+print(response.content)
+print("Token usage:", response.usage_metadata)</code></pre>
+
+<p>The <code>usage_metadata</code> dictionary shows prompt tokens, completion tokens, and total tokens for the request. Watching this number is a good habit because it maps directly to cost when your application scales.</p>
+
+<h2>Summary</h2>
+<p>You installed LangChain into an isolated Python environment, stored your Foundry deployment details in a <code>.env</code> file, made your first model call through <code>AzureChatOpenAI</code>, and composed your first prompt-and-response chain with the pipe operator. You also saw how to read token usage from the response. In the next chapter you will learn what an agent is and how LangChain builds one from models and tools.</p>
+<nav>
+<a href="98-langchain-agent-core-components.html">&larr; Previous: LangChain Agent Core Components</a><a href="100-building-a-langchain-agent.html">Next: Building a LangChain agent &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

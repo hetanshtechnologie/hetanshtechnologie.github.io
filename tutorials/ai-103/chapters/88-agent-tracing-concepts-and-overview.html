@@ -1,0 +1,88 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>88. Agent Tracing - Concepts and Overview - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 88</span>
+<h1>Agent Tracing - Concepts and Overview</h1>
+<p>An agent is a program that makes many small decisions in sequence — it calls a model, decides a tool is needed, runs the tool, feeds the result back, and repeats until it answers. When something goes wrong, a single log line cannot explain it; you need the whole story of that run. Tracing is how you capture that story. This chapter introduces the core concepts of tracing — traces, spans, and their attributes — and explains how they make agent behaviour inspectable, especially through Application Insights and OpenTelemetry-style instrumentation.</p>
+
+<h2>From Log Lines to Traces</h2>
+<p>A traditional log is a single event: <em>request received</em>, <em>error 500</em>, <em>tool finished</em>. For a linear service, stitching these events together in time is usually enough. An agent is different: it loops, it calls tools that take variable time, and it can spawn several parallel operations. You need to see the causal structure — which operation caused which, what each returned, and how long each took — not just a chronological list. That causal structure is a <strong>trace</strong>.</p>
+
+<div class="note">
+<p>A trace represents one end-to-end unit of work, such as a single user question processed by the agent. Everything the agent does to answer that one question belongs to the same trace, even if it involves multiple model calls and several tools.</p>
+</div>
+
+<h2>Spans: The Building Blocks of a Trace</h2>
+<p>A trace is made of <strong>spans</strong>. A span is a single operation inside the trace, with a start time, an end time, a name, and attributes describing what happened. Spans nest: one span can be the parent of several children. For a support agent, a typical trace might contain:</p>
+<ul>
+<li>A <strong>root span</strong> representing the whole user turn.</li>
+<li>Child spans for the first model call and for a retrieval tool.</li>
+<li>A nested span for the tool's internal processing, and another for the second model call that writes the final answer.</li>
+</ul>
+
+<table>
+<tr><th>Span</th><th>Parent</th><th>What it records</th></tr>
+<tr><td>user_turn</td><td>—</td><td>Whole request handled end to end</td></tr>
+<tr><td>model_call_1</td><td>user_turn</td><td>Prompt, model, tokens, latency</td></tr>
+<tr><td>retrieve_tool</td><td>user_turn</td><td>Tool name, arguments, result</td></tr>
+<tr><td>model_call_2</td><td>user_turn</td><td>Final answer generation</td></tr>
+</table>
+
+<p>Because spans are nested, a tool that hangs or a model call that returns garbage is easy to isolate: you look at the span where the anomaly appears and read its attributes.</p>
+
+<h2>What Attributes a Span Carries</h2>
+<p>Attributes are the key-value pairs that make a span useful. A well-instrumented span records at least:</p>
+<ul>
+<li><strong>Identity:</strong> trace ID, span ID, parent span ID, service name.</li>
+<li><strong>Timing:</strong> start time, duration, end status.</li>
+<li><strong>Context:</strong> the conversation or session ID, the application version, and any custom tags.</li>
+<li><strong>Payload:</strong> for model calls, the prompt, response, token counts, and finish reason; for tools, the arguments and return value.</li>
+</ul>
+
+<p>This is the data that lets you replay a failure after the fact. Without attributes, a trace tells you <em>what ran</em>; with them, it tells you <em>what was seen and decided</em>.</p>
+
+<h2>How Tracing Reaches Application Insights</h2>
+<p>In the continuous evaluation labs, your agent reported to Application Insights. The standard path is OpenTelemetry: the agent's instrumentation library emits spans and metrics using the OpenTelemetry protocol, and an exporter forwards them to Application Insights, which stores them as trace, dependency, and request records. Foundry agents have this wiring built in, so enabling the connection was mostly configuration rather than hand-written code.</p>
+<p>The important consequence is that trace data and evaluation data live side by side. You can query a conversation, jump to its trace, see the exact tool sequence, and correlate that with the evaluation score for the same conversation — a combination that turns a low score into a concrete diagnosis.</p>
+
+<h2>What to Look For in an Agent Trace</h2>
+<p>When you open a trace, keep a short checklist in mind:</p>
+<ul>
+<li><strong>Did the loop terminate?</strong> A trace with an unusually large number of model or tool spans suggests the agent never reached a final answer and kept iterating.</li>
+<li><strong>Did every tool return successfully?</strong> A tool span with an error status explains missing context.</li>
+<li><strong>Were there wasted calls?</strong> Repeated identical tool calls signal a prompt or routing problem.</li>
+<li><strong>Where did the time go?</strong> Latency is usually dominated by model calls; a slow tool is the exception worth investigating.</li>
+<li><strong>Was the answer grounded in what was retrieved?</strong> Compare the final model span's context with the response to spot hallucination.</li>
+</ul>
+
+<div class="tip">
+<p>Make traces linkable from user feedback. If a user marks an answer as poor, log the trace ID alongside the feedback. Later you can open the exact trace, see the full reasoning path, and fix the real cause instead of guessing.</p>
+</div>
+
+<div class="warn">
+<p>Trace payloads can contain full prompts, retrieved documents, and user questions — all potentially sensitive. Set retention and access policies on the Application Insights workspace, redact secrets, and avoid logging raw credentials or PII in span attributes unless you have a compliance reason and appropriate protection.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Tracing captures the causal structure of a single agent run as a tree of nested spans, each carrying timing, identity, and payload attributes. OpenTelemetry instrumentation streams these spans to Application Insights, where they join evaluation data in one place. With traces you can answer the questions metrics cannot: which tools ran, what they returned, why the loop continued, and where the answer lost its grounding. The next chapter shifts to the safety layer — the guardrails that run around the agent to keep its behaviour in check.</p>
+<nav>
+<a href="87-diagnostic-settings-and-resource-level-monitoring.html">&larr; Previous: Diagnostic Settings and Resource-Level Monitoring</a><a href="89-introduction-to-guardrails-in-microsoft-foundry.html">Next: Introduction to Guardrails in Microsoft Foundry &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

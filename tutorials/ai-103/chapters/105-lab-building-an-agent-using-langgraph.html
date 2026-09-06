@@ -1,0 +1,175 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>105. Lab - Building an agent using LangGraph - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 105</span>
+<h1>Lab - Building an agent using LangGraph</h1>
+<p>In this lab you will implement the LangGraph agent designed in the previous chapter: a stateful, graph-based agent that can call tools, remember the conversation, and answer naturally. This is the point where LangGraph's ideas stop being vocabulary and become working code on your machine.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>Your Python virtual environment with <code>langchain</code> and <code>langchain-openai</code> installed.</li>
+<li>Your Foundry chat deployment details in a <code>.env</code> file.</li>
+<li>Install LangGraph in the activated environment:</li>
+</ul>
+
+<pre><code>pip install langgraph</code></pre>
+
+<div class="warn">
+<p>LangGraph has its own versioning and depends on LangChain core. If you get import errors after installing, upgrade both packages together: <code>pip install -U langgraph langchain langchain-openai</code>.</p>
+</div>
+
+<h2>Step 1: Define a Tool</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Create a weather tool and the state</h3>
+<p>Create <code>graph_agent.py</code> and start with the imports, state, and tool:</p>
+
+<pre><code>import os
+from typing import Annotated, TypedDict
+
+from dotenv import load_dotenv
+from langchain_core.tools import tool
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.checkpoint.memory import InMemorySaver
+from langchain_openai import AzureChatOpenAI
+
+load_dotenv()
+
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+
+@tool
+def get_weather(city: str) -&gt; str:
+    """Return a sample weather summary for a city."""
+    return f"Sunny, 24 degrees Celsius in {city}."
+
+@tool
+def get_local_time(city: str) -&gt; str:
+    """Return a sample local time for a city."""
+    return f"Currently 14:30 local time in {city}."</code></pre>
+</div>
+
+<div class="tip">
+<p>Two tools makes the tool-calling decision visible. Watch whether the model picks the right tool for the right question — that is the behavior you are really testing.</p>
+</div>
+
+<h2>Step 2: Build the Nodes and Graph</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Wire the model, nodes, and conditional edges</h3>
+<p>Continue the same file:</p>
+
+<pre><code>model = AzureChatOpenAI(
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+    api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+    deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
+    temperature=0,
+)
+
+tools = [get_weather, get_local_time]
+model_with_tools = model.bind_tools(tools)
+tool_node = ToolNode(tools)
+
+def agent_node(state: AgentState) -&gt; dict:
+    return {"messages": [model_with_tools.invoke(state["messages"])]}
+
+graph = StateGraph(AgentState)
+graph.add_node("agent", agent_node)
+graph.add_node("tools", tool_node)
+
+graph.add_edge(START, "agent")
+graph.add_conditional_edges("agent", tools_condition)
+graph.add_edge("tools", "agent")
+
+app = graph.compile(
+    checkpointer=InMemorySaver(),
+    recursion_limit=20,
+)</code></pre>
+
+<p>Everything here mirrors the implementation chapter: the agent node invokes the bound model, the <code>ToolNode</code> runs requested tools, and <code>tools_condition</code> routes back to tools or to the end.</p>
+</div>
+
+<h2>Step 3: Run the Agent</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Test single and multi-turn conversations</h3>
+<p>Add a test block to the bottom of the file:</p>
+
+<pre><code>if __name__ == "__main__":
+    config = {"configurable": {"thread_id": "thread-demo"}}
+
+    first = app.invoke(
+        {"messages": [("user", "What is the weather in London?")]},
+        config,
+    )
+    print("Answer 1:", first["messages"][-1].content)
+
+    second = app.invoke(
+        {"messages": [("user", "And what time is it there?")]},
+        config,
+    )
+    print("Answer 2:", second["messages"][-1].content)</code></pre>
+
+<p>Run it from the activated environment:</p>
+
+<pre><code>python graph_agent.py</code></pre>
+
+<ol>
+<li>The first question should route through the <code>tools</code> node — you can see it if you enable verbose printing on the model — and produce a weather answer.</li>
+<li>The second question relies on memory: the checkpointer restored <code>thread-demo</code>, so the model knows <em>"there"</em> means London. Answer 2 should mention London's time.</li>
+<li>Try both questions with a fresh thread ID. The second answer will not know about London, because the new thread starts with an empty history.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>Contrast this with the LangChain <code>AgentExecutor</code> lab. There, memory required an external chain to manage history. Here, state persistence is built into the graph — the checkpointer <em>is</em> the memory. That is the core architectural difference you are experiencing.</p>
+</div>
+
+<h2>Step 4: Inspect the State at Each Step</h2>
+<p>You can peek at the graph's internal reasoning by printing the full state after a run:</p>
+
+<pre><code>for msg in first["messages"]:
+    role = getattr(msg, "type", msg.__class__.__name__)
+    content = msg.content if isinstance(msg.content, str) else str(msg.content)[:120]
+    print(f"[{role}] {content}")</code></pre>
+
+<p>You will see the full message trail: the user question, the model's tool-call request, the tool message with the weather result, and the final natural-language answer. This trail is exactly what the OpenTelemetry tracing from the earlier chapter would record as spans.</p>
+
+<h2>Step 5: Raise the Complexity Safely</h2>
+<p>Try pushing the agent in controlled ways to see how the graph behaves:</p>
+<ul>
+<li>Ask for weather in two cities at once. The model may request <em>two</em> tool calls in one message; the <code>ToolNode</code> runs both.</li>
+<li>Ask a question with no tool involved. The conditional edge routes straight to the end — one step, no tools.</li>
+<li>Temporarily remove <code>recursion_limit</code> or lower it to 2 and ask a multi-step question. You will see the guard rail in action: LangGraph stops the run instead of looping forever.</li>
+</ul>
+
+<div class="warn">
+<p>Lowering the recursion limit intentionally forces a run to hit its ceiling. When it does, invoke raises an error rather than returning a partial answer. In production, wrap your invocations in a try/except and return a graceful message when the limit is reached.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You implemented the full LangGraph agent: a two-node graph with conditional routing, a tool node, an in-memory checkpointer, and a recursion limit. You verified single-turn tool use, multi-turn memory across thread IDs, and the state trail behind each run. You also probed the safety rails by testing parallel tool calls and the recursion ceiling. In the next chapters you leave the LangChain family and turn to the Model Context Protocol for connecting agents to external systems.</p>
+<nav>
+<a href="104-building-an-agent-using-langgraph-implementation-overview.html">&larr; Previous: Building an agent using LangGraph - Implementation overview</a><a href="106-what-is-the-model-context-protocol.html">Next: What is the Model Context Protocol &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

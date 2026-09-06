@@ -1,0 +1,178 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>41. Lab - Function Tool Calling - Defining the agent - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 41</span>
+<h1>Lab - Function Tool Calling - Defining the agent</h1>
+<p>Web Search was a managed capability: the platform executed it for you. Function tool calling is the other side of the tool story — you define a function, describe it to the model, and write the code that actually runs it. This lab covers the first half of that contract: defining the functions and building an agent that knows they exist. The next lab covers the application side that executes the calls.</p>
+
+<h2>Objectives</h2>
+<ul>
+<li>Write JSON schema definitions for two custom functions.</li>
+<li>Attach those functions to an agent so the model can request them.</li>
+<li>Verify the agent's definition contains the functions and triggers a tool call on the right question.</li>
+</ul>
+
+<h2>The Functions You Will Build</h2>
+<p>Your travel agent needs live data it cannot invent. Define two functions that a real backend could implement:</p>
+<ul>
+<li><code>get_weather</code> — returns a short forecast for a city.</li>
+<li><code>get_hotel_rate</code> — returns a nightly rate estimate for a city and a number of nights.</li>
+</ul>
+<p>The model will never run these functions. It will <em>emit a call</em> with arguments, and your application — the topic of the next lab — will run them. Your job here is to make sure the model knows exactly how to ask.</p>
+
+<h2>Step 1: Write the function schemas</h2>
+<p>Each function needs a name, a description, and a JSON schema for its parameters. The description is what the model reads to decide when to call it, so be explicit about when each function applies.</p>
+
+<div class="exercise">
+<h3>Define the functions</h3>
+<pre><code>weather_schema = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": (
+            "Returns the current weather forecast for a city. Use this "
+            "whenever the customer asks about weather, temperature, "
+            "rain, or conditions at a destination."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "The city name, for example Paris.",
+                }
+            },
+            "required": ["city"],
+        },
+    },
+}
+
+hotel_schema = {
+    "type": "function",
+    "function": {
+        "name": "get_hotel_rate",
+        "description": (
+            "Returns an estimated nightly hotel rate for a city. Use "
+            "this when the customer asks about hotel prices or "
+            "accommodation costs."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "city": {"type": "string", "description": "The city name."},
+                "nights": {
+                    "type": "integer",
+                    "description": "Number of nights to stay.",
+                },
+            },
+            "required": ["city", "nights"],
+        },
+    },
+}
+</code></pre>
+</div>
+
+<div class="tip">
+<p>Keep parameter names short and meaningful, and mark <code>required</code> explicitly. The model fills in what the schema declares, so the schema is your contract — both for the model's calls and for the application code that will execute them.</p>
+</div>
+
+<h2>Step 2: Attach the functions to the agent</h2>
+<p>Pass the function schemas as the agent's tools when you create it. The exact class names differ slightly between SDK versions, so the important thing is the shape: a tool list where each entry declares one function with its schema.</p>
+
+<div class="exercise">
+<h3>Create the agent with function tools</h3>
+<pre><code>import os
+from dotenv import load_dotenv
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+
+load_dotenv()
+
+project_client = AIProjectClient.from_connection_string(
+    credential=DefaultAzureCredential(),
+    conn_str=os.getenv("PROJECT_CONNECTION_STRING"),
+)
+
+agent = project_client.agents.create_agent(
+    model="YOUR_DEPLOYMENT_NAME",
+    name="trip-planner-functions",
+    instructions=(
+        "You are a travel planning assistant. When the customer asks "
+        "about weather, call get_weather. When they ask about hotel "
+        "rates, call get_hotel_rate. Combine the answers into a short, "
+        "friendly itinerary suggestion."
+    ),
+    tools=[weather_schema, hotel_schema],
+    temperature=0.5,
+)
+
+print(f"Agent created: {agent.id}")
+</code></pre>
+</div>
+
+<div class="note">
+<p>The model only sees the descriptions you wrote. It does not know, or care, what your functions do internally — it trusts the description to tell it when to call and what arguments to send. That separation of concerns is the whole design: the model plans, your code executes.</p>
+</div>
+
+<h2>Step 3: Verify the agent triggers a tool call</h2>
+<p>Create a thread, ask a question that clearly needs one of the functions, and inspect the run. The run should pause at <code>requires_action</code> with the model's proposed function call instead of completing with an answer.</p>
+
+<div class="exercise">
+<h3>Probe the agent for a tool call</h3>
+<pre><code>import time
+
+thread = project_client.agents.create_thread()
+project_client.agents.create_message(
+    thread_id=thread.id,
+    role="user",
+    content="Should I bring an umbrella if I travel to Amsterdam tomorrow?",
+)
+
+run = project_client.agents.create_run(
+    thread_id=thread.id, agent_id=agent.id
+)
+
+while run.status in ("queued", "in_progress"):
+    run = project_client.agents.get_run(
+        thread_id=thread.id, run_id=run.id
+    )
+    time.sleep(1)
+
+print("Run status:", run.status)
+if run.status == "requires_action":
+    print("The agent wants to call a function.")
+    print(run.required_action.submit_tool_outputs)
+</code></pre>
+</div>
+
+<div class="warn">
+<p>The run stopping at <code>requires_action</code> is expected and correct — it is not a failure. It means the run is waiting for your application to execute the requested functions. A run left in this state will time out, which is exactly what happens if you connect this agent to a client that does not know how to handle tool calls.</p>
+</div>
+
+<div class="tip">
+<p>If the model answers the weather question directly instead of calling the function, refine the descriptions. A description that names the trigger ("whenever the customer asks about weather") usually fixes it faster than editing the general instructions.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You defined two custom functions with JSON schemas, attached them to an agent, and confirmed the agent requests a function call when the question calls for it. The agent now has a plan it cannot execute by itself — it needs an application that implements <code>get_weather</code> and <code>get_hotel_rate</code>. That is precisely what the next lab builds.</p>
+<nav>
+<a href="40-lab-agents-web-search-tool.html">&larr; Previous: Lab - Agents - Web Search tool</a><a href="42-lab-function-tool-calling-defining-the-application.html">Next: Lab - Function Tool Calling - Defining the application &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>11. Threat Intelligence Integration - SOAR &amp; SIEM Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>11. Threat Intelligence Integration</h1>
+<p class="tag">Chapter 11</p>
+
+<h2>What is Threat Intelligence?</h2>
+<p><strong>Threat intelligence (TI)</strong> is evidence-based knowledge about adversaries — their capabilities, infrastructure, and methods — that helps an organization detect, prioritize, and respond to threats. In practice, most SOCs use two kinds:</p>
+<ul>
+<li><strong>Strategic intelligence:</strong> high-level trends, adversary profiles, industry risk (for leadership and planning).</li>
+<li><strong>Tactical / operational intelligence:</strong> specific indicators of compromise (IOCs), tools, techniques, and procedures (TTPs) that feed detections and playbooks.</li>
+</ul>
+
+<p>For SIEM and SOAR, the tactical layer matters most: it is what gets queried during enrichment and matched against events.</p>
+
+<h2>Indicators of Compromise (IOCs)</h2>
+<p>IOCs are the concrete data points used to detect compromise:</p>
+<table>
+<tr><th>IOC Type</th><th>Example</th><th>How It's Used</th></tr>
+<tr><td>IP address</td><td>203.0.113.45</td><td>Block on firewall, match in SIEM connection logs</td></tr>
+<tr><td>Domain / hostname</td><td>evil-domain.example</td><td>Block on DNS/proxy, match in email logs</td></tr>
+<tr><td>URL</td><td>https://evil-domain.example/rz</td><td>Block on web filter, scan in phishing</td></tr>
+<tr><td>File hash (MD5/SHA1/SHA256)</td><td>e3b0c442... (SHA256)</td><td>Reputation check, block in EDR/AV</td></tr>
+<tr><td>Email address / sender</td><td>bad@evil.example</td><td>Quarantine in email gateway</td></tr>
+<tr><td>Mutual TLS certificate</td><td>SHA256 fingerprint</td><td>Detect C2 infrastructure reuse</td></tr>
+</table>
+
+<div class="note">
+<strong>Important nuance:</strong> An IP can change hands or be legitimate infrastructure shared with benign users. Hashes expire quickly as malware changes. Domains are dynamic (DGA, fast-flux). Good intelligence programs treat every IOC as a <em>temporal, confidence-weighted</em> fact, not an eternal truth.
+</div>
+
+<h2>STIX and TAXII: The Standard Formats</h2>
+<p>To share intelligence between tools and organizations, the industry standardized on:</p>
+<ul>
+<li><strong>STIX (Structured Threat Information Expression):</strong> a JSON format for representing threat data — indicators, observables, malware, campaigns, threat actors, relationships. Example: "This indicator (IP) is malicious, is part of campaign X, targeting finance sector."</li>
+<li><strong>TAXII (Trusted Automated Exchange of Intelligence Information):</strong> the transport protocol for exchanging STIX objects between TI servers and consumers.</li>
+</ul>
+
+<pre><code>// Simplified STIX 2.1 indicator (IP)
+{
+  "type": "indicator",
+  "id": "indicator--8e2e2d2b-17d4-4cbf-938f-98ee46b3cd3f",
+  "name": "Malicious IP",
+  "pattern": "[ipv4-addr:value = '203.0.113.45']",
+  "valid_from": "2026-01-01T00:00:00Z",
+  "labels": ["malicious-activity"],
+  "modified": "2026-06-01T00:00:00Z"
+}</code></pre>
+
+<p>Platforms like MISP, OpenCTI, and vendor feeds expose STIX/TAXII, letting a SIEM ingest indicators and a SOAR query them during playbooks.</p>
+
+<h2>Intelligence Feeds and Sources</h2>
+<ul>
+<li><strong>Open-source:</strong> AlienVault OTX, IBM X-Force Exchange, VirusTotal (partially), AbuseIPDB, free MISP instances.</li>
+<li><strong>Commercial:</strong> Recorded Future, CrowdStrike Intel, Mandiant, Palo Alto Unit 42, Anomali, ThreatConnect.</li>
+<li><strong>ISAC/ISAO:</strong> sector-specific sharing groups (finance, healthcare, energy) — often the most relevant to your industry.</li>
+<li><strong>Internal:</strong> intelligence your own IR team generates from past incidents — often the most valuable of all.</li>
+</ul>
+
+<h2>Intelligence-Driven Detection in the SIEM</h2>
+<p>In the SIEM, threat intelligence powers two things:</p>
+<ol>
+<li><strong>Enrichment at query time:</strong> each event's IPs, domains, and hashes are checked against TI. Alerts get a reputation field: "malicious", "suspicious", "unknown".</li>
+<li><strong>Indicator matching rules:</strong> a rule that flags "any event touching a known-malicious IOC". These are simple but noisy unless confidence and time-window are managed.</li>
+</ol>
+
+<pre><code># KQL concept: match connection events against an ingested TI watchlist
+let malicious_ips = ThreatIntelIndicator
+    | where isActive
+    | where IndicatorType == "Ipv4Address"
+    | project IpAddress;
+CommonSecurityLog
+| where TimeGenerated > ago(1h)
+| where SourceIP in (malicious_ips) or DestinationIP in (malicious_ips)
+| project TimeGenerated, SourceIP, DestinationIP, DeviceAction</code></pre>
+
+<h2>Intelligence Enrichment in the SOAR</h2>
+<p>During playbooks, the SOAR queries TI services to answer questions like:</p>
+<ul>
+<li>"Is this hash known-malicious? With what confidence?"</li>
+<li>"Who owns this IP? Is it a known C2 server?"</li>
+<li>"Was this domain registered recently? Does it resemble known phishing infrastructure?"</li>
+<li>"Has this file family been seen attacking our sector before?"</li>
+</ul>
+
+<p>Enrichment results drive decisions: escalate, block, or close. Without enrichment, automation is blind; with it, automation has the context to act correctly.</p>
+
+<h2>Intelligence Lifecycle and Hygiene</h2>
+<p>Poorly managed intelligence is worse than none — stale or wrong IOCs create false positives and missed detections. Run a lifecycle:</p>
+<ol>
+<li><strong>Collect:</strong> pull from sources on a schedule via TAXII/API.</li>
+<li><strong>Process:</strong> normalize, deduplicate, dedupe across feeds.</li>
+<li><strong>Validate &amp; score:</strong> apply confidence, relevance, and lifetime per IOC.</li>
+<li><strong>Deploy:</strong> push active indicators to SIEM watchlists, firewalls, email gateways, EDR.</li>
+<li><strong>Monitor &amp; retire:</strong> expire indicators on their valid-to date; review hits for accuracy.</li>
+</ol>
+
+<div class="warn">
+<strong>Common Failure:</strong> Organizations ingest 10M indicators, auto-block all of them, and break the internet for their users — or, conversely, disable intelligence after too many false positives. Quality over quantity: curate, validate, and set strict confidence thresholds before automation acts on intel.
+</div>
+
+<h2>The Intelligence-Feedback Loop</h2>
+<p>The best intelligence programs are bidirectional:</p>
+<ul>
+<li>Detections based on intel generate findings.</li>
+<li>Confirmed IOCs from incidents are <strong>published back</strong> to the TI platform and sector-sharing groups.</li>
+<li>Over time, the organization both consumes and produces intelligence, improving detection for the whole community.</li>
+</ul>
+
+<h2>Threat Hunting with Intelligence</h2>
+<p>Intelligence also powers proactive hunting: analysts use recent intel ("this group now uses PowerShell obfuscation") to design hunts across historical data, looking for missed compromises before they escalate.</p>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Sign up for a free TI source (OTX or AbuseIPDB) and a free malware-reputation API. Build a small enrichment "utility" in your head or on paper: for a given file hash and IP, list the fields you would query, the thresholds you would set for "malicious" vs "unknown", and the automation decisions each outcome would trigger. Then write a STIX 2.1 indicator for a hypothetical malicious domain with proper confidence and expiry.
+</div>
+
+<nav>
+  <a href="10-siem-soar-integration.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="12-cloud-modern-soc.html">Next: Cloud, XDR &amp; the Modern SOC &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

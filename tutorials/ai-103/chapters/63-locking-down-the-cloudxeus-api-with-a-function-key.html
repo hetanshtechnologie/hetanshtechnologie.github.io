@@ -1,0 +1,97 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>63. Locking Down the CloudXeus API with a Function Key - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 63</span>
+<h1>Locking Down the CloudXeus API with a Function Key</h1>
+<p>Right now the orders API is anonymous: anyone with the URL can read and cancel orders. This chapter closes that gap. You will require a function key on every endpoint, fetch the key, confirm the API rejects anonymous requests, and point the Foundry agent connection at the key so only the agent can call the service.</p>
+
+<h2>Why a Function Key</h2>
+<p>Azure Functions gives every function app a set of keys. When a route is configured with <code>auth_level=FUNCTION</code>, the runtime demands a valid key on every request and rejects calls without one. This is a shared-secret model: fast to set up, easy to understand, and entirely appropriate for a course project or an internal service behind an agent.</p>
+
+<h2>Step 1 &mdash; Require the Key in Code</h2>
+<p>Change the auth level on all three routes in <code>function_app.py</code>. For example, the first route becomes:</p>
+
+<pre><code>@app.route(route="orders/{order_id}", methods=["GET"],
+           auth_level=func.AuthLevel.FUNCTION)
+def get_order(req: func.HttpRequest) -&gt; func.HttpResponse:</code></pre>
+
+<p>Apply the same <code>FUNCTION</code> level to <code>list_orders</code> and <code>cancel_order</code>.</p>
+
+<div class="tip">
+<p>You can also raise the bar for the whole app by configuring the <code>function_authentication</code> settings at the app level. Per-route <code>FUNCTION</code> auth is enough here and keeps the change local to your code.</p>
+</div>
+
+<h2>Step 2 &mdash; Republish the App</h2>
+<p>Deploy the updated code to Azure so the runtime enforces the new auth level:</p>
+
+<pre><code>func azure functionapp publish func-cloudxeus-orders-001</code></pre>
+
+<h2>Step 3 &mdash; Fetch a Function Key</h2>
+<p>List the keys for the function app and copy the default host key:</p>
+
+<pre><code>az functionapp keys list --name func-cloudxeus-orders-001 `
+  --resource-group rg-cloudxeus-orders</code></pre>
+
+<p>Note the value of the <code>default</code> key; you will use it in the next step.</p>
+
+<div class="warn">
+<p>The key printed by the CLI is a live secret. Do not paste it into code, chat messages, or the OpenAPI document. It belongs in the agent's connection settings and in your secret storage.</p>
+</div>
+
+<h2>Step 4 &mdash; Confirm Anonymous Calls Fail</h2>
+<div class="exercise">
+<h3>Exercise &mdash; Prove the Lock Works Before Opening the Door</h3>
+<ol>
+<li>Call the API without a key. You should receive <code>401 Unauthorized</code>:</li>
+</ol>
+<pre><code>curl "https://func-cloudxeus-orders-001.azurewebsites.net/api/orders/ORD-1001"</code></pre>
+<ol start="2">
+<li>Call again with the key in the <code>x-functions-key</code> header. You should get the order JSON:</li>
+</ol>
+<pre><code>curl "https://func-cloudxeus-orders-001.azurewebsites.net/api/orders/ORD-1001" `
+  -H "x-functions-key: YOUR_FUNCTION_KEY"</code></pre>
+</div>
+
+<h2>Step 5 &mdash; Point the Agent Connection at the Key</h2>
+<p>Back in the Foundry portal, edit the agent's OpenAPI tool connection and select the API key (header) authentication method:</p>
+<ul>
+<li><strong>Header name:</strong> <code>x-functions-key</code></li>
+<li><strong>Header value:</strong> your function key</li>
+</ul>
+<p>Save the connection. Every request the agent makes to the orders API now carries the key automatically, and the model never sees it.</p>
+
+<h2>Test the End-to-End Flow</h2>
+<p>Return to the chat playground and repeat the earlier tests:</p>
+<ul>
+<li>Ask for the status of <code>ORD-1001</code>; the agent calls the API with the key and answers correctly.</li>
+<li>Ask to cancel an order; the mutation works only because the connection is authenticated.</li>
+<li>Confirm that attempting to reach the API directly, without the key, still returns 401.</li>
+</ul>
+
+<div class="note">
+<p>You now have a closed loop: the API refuses anonymous callers, the agent presents a valid key, and the credential stays hidden inside the platform connection. This is the minimum viable security posture for a real tool-backed agent.</p>
+</div>
+
+<h2>Summary</h2>
+<p>The orders API is locked down with a function key: routes require authentication, anonymous calls fail with 401, and the Foundry agent connection supplies the key on every request. The next chapter reviews everything covered in this section on OpenAPI tools before you check the cost implications and clean up.</p>
+<nav>
+<a href="62-the-authentication-methods-for-openapi-tools.html">&larr; Previous: The Authentication Methods for OpenAPI Tools</a><a href="64-using-openapi-tools-review.html">Next: Using OpenAPI Tools Review &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

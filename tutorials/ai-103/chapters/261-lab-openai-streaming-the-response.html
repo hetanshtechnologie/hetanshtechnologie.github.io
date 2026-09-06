@@ -1,0 +1,110 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>261. Lab - OpenAI - Streaming the response - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 261</span>
+<h1>Lab - OpenAI - Streaming the response</h1>
+<p>Waiting for a model to finish before showing anything makes an application feel slow, especially for long answers. Streaming fixes this: the API sends the answer in fragments as the model generates it, and your interface can render text as it arrives. In this lab you will stream a response with the OpenAI Python SDK and display the output incrementally.</p>
+
+<h2>Why Stream</h2>
+<ul>
+<li>Users see the first words in a fraction of the time it takes to complete a full answer.</li>
+<li>Long responses feel responsive instead of frozen.</li>
+<li>You can stop a generation early by interrupting the stream.</li>
+<li>Network and model latency is hidden behind incremental progress.</li>
+</ul>
+<p>The trade-off is that the caller must handle a stream of events instead of a single finished object.</p>
+
+<h2>Streaming with the Responses API</h2>
+<div class="exercise">
+<h3>Step 1 — Create the streaming script</h3>
+<p>Create a file named <code>stream_response.py</code>:</p>
+<pre><code>from openai import OpenAI
+
+client = OpenAI(api_key="YOUR_API_KEY")
+
+stream = client.responses.create(
+    model="gpt-4o-mini",
+    instructions="You write short, clear paragraphs.",
+    input="Explain how solar panels work in simple terms.",
+    stream=True,
+)
+
+for event in stream:
+    if event.type == "response.output_text.delta":
+        print(event.delta, end="", flush=True)
+
+print()</code></pre>
+
+<h3>Step 2 — Run it</h3>
+<pre><code>python stream_response.py</code></pre>
+<p>You should see the answer appear word by word in the terminal instead of all at once.</p>
+</div>
+
+<h2>How the Stream Works</h2>
+<p>Setting <code>stream=True</code> changes the return type. Instead of a completed response object, the call yields a sequence of event objects. Each event has a <code>type</code> field that tells you what happened:</p>
+<ul>
+<li><code>response.output_text.delta</code> — a chunk of new assistant text. Append <code>event.delta</code> to your running output.</li>
+<li><code>response.completed</code> — the generation finished successfully.</li>
+<li><code>response.failed</code> — something went wrong mid-generation.</li>
+</ul>
+
+<div class="note">
+<p>Each event is a snapshot of a moment in time, not the full answer. Your application is responsible for concatenating the <code>delta</code> fragments in order. That is why the loop above prints immediately with <code>flush=True</code> rather than buffering.</p>
+</div>
+
+<h2>Collecting the Full Text</h2>
+<p>Streaming apps usually need both the incremental display and the complete final text for saving or further processing. Accumulate the deltas in a list:</p>
+<pre><code>collected = []
+
+for event in stream:
+    if event.type == "response.output_text.delta":
+        collected.append(event.delta)
+        print(event.delta, end="", flush=True)
+
+full_text = "".join(collected)
+print("\n--- full text captured ---")
+print(full_text)</code></pre>
+
+<h2>Streaming in Chat Completions</h2>
+<p>The Chat Completions API streams with a different event vocabulary but the same idea. If you ever need to call it, the shape looks like this:</p>
+<pre><code>stream = client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": "Answer briefly."},
+        {"role": "user", "content": "What is a token?"},
+    ],
+    stream=True,
+)
+
+for chunk in stream:
+    piece = chunk.choices[0].delta.content
+    if piece:
+        print(piece, end="", flush=True)</code></pre>
+
+<div class="tip">
+<p>Choose one API and stick with it inside a project. The Responses API is the newer, unified path and is what the rest of this course uses, but recognizing the Chat Completions streaming shape will help you read older code.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You streamed a model response with the Responses API, consumed individual text deltas, accumulated the full answer, and saw the equivalent Chat Completions pattern. Streaming turns a long wait into an immediate, progressive experience — a key trait of good generative user interfaces.</p>
+<nav>
+<a href="260-lab-openai-using-the-new-responses-api.html">&larr; Previous: Lab - OpenAI - Using the New Responses API</a><a href="262-lab-openai-understanding-structured-outputs.html">Next: Lab - OpenAI - Understanding Structured Outputs &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

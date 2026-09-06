@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hash Table Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:850px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.3rem}
+.ht-area{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.ht-label{color:#94a3b8;font-weight:600;margin-bottom:12px}
+.ht-table{width:100%;border-collapse:collapse}
+.ht-table td,.ht-table th{padding:10px;text-align:center;border-bottom:1px solid #334155}
+.ht-table th{color:#94a3b8;font-weight:600;font-size:.85rem}
+.ht-table td{font-weight:600}
+.ht-table tr td:first-child{color:#64748b;font-size:.85rem}
+.ht-table tr td:nth-child(2){color:#38bdf8;font-weight:700;min-width:80px}
+.ht-table tr td:nth-child(3){color:#e2e8f0;min-width:150px}
+.ht-table tr.highlight{background:#1e3a5f}
+.ht-table tr.collision{background:#7f1d1d}
+.ht-table tr.empty td:nth-child(3){color:#475569;font-style:italic}
+.hash-formula{background:#1e293b;border-radius:12px;padding:16px;margin-bottom:20px;text-align:center}
+.hash-formula code{color:#facc15;font-size:1.1rem;background:#334155;padding:4px 12px;border-radius:6px}
+.probe-info{background:#1e293b;border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+.probe-chip{padding:4px 12px;border-radius:20px;font-size:.8rem;background:#334155;border:1px solid #475569}
+.probe-chip.active{border-color:#38bdf8;background:#1e3a5f}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.choice-btn{display:block;width:100%;padding:12px 20px;margin-bottom:8px;background:#334155;color:#e2e8f0;border:2px solid #475569;border-radius:8px;font-size:1rem;cursor:pointer;text-align:left;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.choice-btn.correct{border-color:#22c55e;background:#14532d}
+.choice-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:12px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&#8592; Home</a><h1>Hash Table Game</h1></div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Round: <span class="score-val" id="round">1</span></span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="hash-formula"><strong>Hash Function:</strong> <code>h(key) = key % TABLE_SIZE</code></div>
+  <div class="probe-info" id="probeInfo"></div>
+  <div class="ht-area">
+    <div class="ht-label">Hash Table (size=7):</div>
+    <table class="ht-table" id="htTable">
+      <tr><th>Index</th><th>Key</th><th>Status</th></tr>
+    </table>
+  </div>
+  <div class="instructions"><h2>How to Play</h2><p>Hash tables map keys to indices using a hash function. Predict hash values, detect collisions, or trace probe sequences!</p></div>
+  <div id="messageArea"></div>
+  <div id="choicesArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startRound()">Start Round</button>
+    <button class="btn btn-secondary" id="resetBtn" onclick="resetAll()" style="display:none">New Round</button>
+  </div>
+</div>
+<script>
+const SIZE=7;
+let table=[],inserted=[],score=0,round=1,streak=0,insertKey=0,phase='hash',probeIdx=0;
+
+function renderTable(){
+  const el=document.getElementById('htTable');
+  el.innerHTML='<tr><th>Index</th><th>Key</th><th>Status</th></tr>';
+  for(let i=0;i<SIZE;i++){
+    const tr=document.createElement('tr');
+    const key=table[i]!==null?table[i]:'-';
+    const status=table[i]!==null?'Occupied':'Empty';
+    if(table[i]!==null)tr.classList.add('highlight');
+    tr.innerHTML=`<td>${i}</td><td>${key}</td><td>${status}</td>`;
+    el.appendChild(tr);
+  }
+}
+
+function updateScore(ok){if(ok){score+=10+streak*5;streak++}else{streak=0}document.getElementById('score').textContent=score;document.getElementById('streak').textContent=streak}
+
+function startRound(){
+  table=Array(SIZE).fill(null);inserted=[];
+  const count=2+Math.floor(Math.random()*3);
+  for(let i=0;i<count;i++){
+    let k=Math.floor(Math.random()*99)+1;
+    while(inserted.includes(k))k=Math.floor(Math.random()*99)+1;
+    let idx=k%SIZE;while(table[idx]!==null)idx=(idx+1)%SIZE;
+    table[idx]=k;inserted.push(k);
+  }
+  insertKey=Math.floor(Math.random()*99)+1;while(inserted.includes(insertKey))insertKey=Math.floor(Math.random()*99)+1;
+  phase='hash';probeIdx=0;
+  renderTable();showQ();
+  document.getElementById('startBtn').style.display='none';
+  document.getElementById('resetBtn').style.display='';
+  document.getElementById('round').textContent=round;
+  document.getElementById('messageArea').innerHTML='';
+}
+
+function showQ(){
+  if(phase==='hash'){
+    const correctIdx=insertKey%SIZE;
+    const choices=[
+      {text:`h(${insertKey}) = ${insertKey} % ${SIZE} = ${correctIdx}`,correct:true},
+      {text:`h(${insertKey}) = ${insertKey} / ${SIZE} = ${Math.floor(insertKey/SIZE)}`,correct:false},
+      {text:`h(${insertKey}) = ${insertKey} % 10 = ${insertKey%10}`,correct:false}
+    ].sort(()=>Math.random()-.5);
+    let html=`<p style="margin-bottom:8px;color:#94a3b8">What is the hash index for key ${insertKey}? (table size = ${SIZE})</p>`;
+    choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answerHash(${c.correct},this)">${c.text}</button>`});
+    document.getElementById('choicesArea').innerHTML=html;
+  }else{
+    const idx=(insertKey%SIZE+probeIdx)%SIZE;
+    const collision=table[idx]!==null;
+    let choices=[];
+    if(collision){
+      choices=[
+        {text:`Collision at index ${idx}! Key ${table[idx]} is there. Probe next: ${(idx+1)%SIZE}`,correct:true},
+        {text:`Slot ${idx} is empty. Insert here.`,correct:false},
+        {text:`Insert at index ${insertKey%SIZE} (override existing)`,correct:false}
+      ];
+    }else{
+      choices=[
+        {text:`Index ${idx} is empty. Insert ${insertKey} here!`,correct:true},
+        {text:`Collision! Probe to ${(idx+1)%SIZE}`,correct:false},
+        {text:`Index ${idx} is occupied. Try index 0`,correct:false}
+      ];
+    }
+    choices.sort(()=>Math.random()-.5);
+    let html=`<p style="margin-bottom:8px;color:#94a3b8">Probing index ${idx} for key ${insertKey}...</p>`;
+    choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answerProbe(${c.correct},this)">${c.text}</button>`});
+    document.getElementById('choicesArea').innerHTML=html;
+  }
+}
+
+function answerHash(ok,el){
+  document.querySelectorAll('.choice-btn').forEach(b=>b.disabled=true);
+  el.classList.add(ok?'correct':'wrong');
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Correct! +'+(10+streak*5)+' points':'Wrong!'}</div>`;
+  updateScore(ok);
+  if(ok){phase='probe';probeIdx=0}
+  setTimeout(()=>showQ(),700);
+}
+
+function answerProbe(ok,el){
+  document.querySelectorAll('.choice-btn').forEach(b=>b.disabled=true);
+  el.classList.add(ok?'correct':'wrong');
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Correct! +'+(10+streak*5)+' points':'Wrong!'}</div>`;
+  updateScore(ok);
+  setTimeout(()=>{
+    if(ok){
+      const idx=(insertKey%SIZE+probeIdx)%SIZE;
+      if(table[idx]===null){
+        table[idx]=insertKey;renderTable();
+        round++;document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Next Round';
+        document.getElementById('resetBtn').style.display='none';
+        document.getElementById('choicesArea').innerHTML='';return;
+      }else{probeIdx++}
+    }else{probeIdx++}
+    showQ();
+  },700);
+}
+
+function resetAll(){
+  document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Start Round';
+  document.getElementById('resetBtn').style.display='none';
+  document.getElementById('choicesArea').innerHTML='';document.getElementById('messageArea').innerHTML='';
+  document.getElementById('htTable').innerHTML='<tr><th>Index</th><th>Key</th><th>Status</th></tr>';
+}
+</script>
+</body>
+</html>

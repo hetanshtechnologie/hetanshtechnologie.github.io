@@ -1,0 +1,134 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>192. Building the CloudXeus Invoice Intelligence Agent - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 192</span>
+<h1>Building the CloudXeus Invoice Intelligence Agent</h1>
+<p>With the remote tool ready, you can build the agent that uses it. The CloudXeus Invoice Intelligence Agent is an agent that answers questions about invoices — extracting fields from uploaded documents, summarizing what it finds, and answering follow-up questions in natural language. This chapter creates that agent: choosing the model, writing the system prompt, attaching the tool and the knowledge base, and creating it both in the Foundry portal and through code.</p>
+
+<h2>Choosing the Model and Agent Type</h2>
+<p>Start from the simplest agent shape that does the job. The invoice agent needs to call a remote tool and hold a short conversation, so a lightweight chat model with tool-calling support is a good baseline — for example a small GPT model deployed in your Foundry project. You do not need multi-agent orchestration yet; a single agent with a tool and a knowledge base covers the workflow.</p>
+
+<div class="note">
+<p>Agent type is a design decision, not a default. A single agent is right when one persona handles the whole request. Multi-agent designs earn their complexity only when the steps need different roles, different knowledge, or different guardrails — which is why workflows appear later in this section.</p>
+</div>
+
+<h2>Writing the System Prompt</h2>
+<p>The system prompt sets the agent's rules. A good prompt for this agent covers four things:</p>
+<ul>
+<li><strong>Role:</strong> what the agent is and who it serves.</li>
+<li><strong>Capability boundary:</strong> what it can and cannot do — it extracts and explains invoices, it does not create or modify them.</li>
+<li><strong>Tool discipline:</strong> call the invoice tool when a document must be analyzed, and use the knowledge base for questions about invoice policy.</li>
+<li><strong>Output behavior:</strong> answer with the extracted values clearly, flag low-confidence data, and refuse to invent fields that were not extracted.</li>
+</ul>
+
+<p>A concise version:</p>
+
+<pre><code>You are CloudXeus Invoice Intelligence, an assistant for the CloudXeus
+accounts team. You extract and explain information from invoices.
+
+Rules:
+1. When the user uploads or references an invoice document, call the
+   analyze-invoice tool and base your answer on its output.
+2. When a question is about invoice policy or procedures, retrieve from
+   the knowledge base instead of guessing.
+3. If a required field was not extracted, say so explicitly. Never
+   invent an invoice number, date, or amount.
+4. If the extraction confidence is low, mention it and recommend a
+   manual check.
+5. Answer concisely. Quote exact values you were given; never round or
+   change numbers.</code></pre>
+
+<div class="tip">
+<p>Write the prompt as explicit rules your model can follow line by line. "Be accurate" is not a rule; "if a required field was not extracted, say so explicitly" is.</p>
+</div>
+
+<h2>Attaching the Tool and Knowledge Base</h2>
+<p>An agent is a model plus the resources it can use. For this agent you attach two:</p>
+<ul>
+<li><strong>The remote tool</strong> — registered from the OpenAPI specification you wrote in the previous chapter, so the model knows it can call <code>analyze-invoice</code>.</li>
+<li><strong>The knowledge base</strong> — <code>cloudxeus-docs</code>, so policy and procedure questions can be answered from retrieval rather than from the model's general knowledge.</li>
+</ul>
+
+<div class="warn">
+<p>Every tool you attach is an additional attack surface. A remote tool that accepts arbitrary document uploads should enforce size limits and validation before the extraction call, as discussed in the previous chapter.</p>
+</div>
+
+<h2>Creating the Agent in the Foundry Portal</h2>
+<p>In Microsoft Foundry, create the agent from the portal:</p>
+<ol>
+<li>Open your project and navigate to <strong>Agents</strong>.</li>
+<li>Click <strong>Create</strong> and name it <code>cloudxeus-invoice-intelligence</code>.</li>
+<li>Select the chat model deployment from your project.</li>
+<li>Paste the system prompt into the instructions field.</li>
+<li>Add the <code>analyze-invoice</code> remote tool from the OpenAPI connection.</li>
+<li>Add the <code>cloudxeus-docs</code> knowledge base under the agent's knowledge resources.</li>
+<li>Enable tracing and, if available, attach the content safety configuration you will build later.</li>
+<li>Save the agent.</li>
+</ol>
+
+<h2>Creating the Agent via Code</h2>
+<p>The same definition is reproducible from Python with the Azure AI Foundry SDK. Install it, then create the agent from a connection string:</p>
+
+<pre><code>pip install azure-ai-projects</code></pre>
+
+<pre><code>import os
+
+from azure.ai.projects import AIProjectClient
+from azure.identity import DefaultAzureCredential
+
+project = AIProjectClient.from_connection_string(
+    conn_str=os.environ["PROJECT_CONNECTION_STRING"],
+    credential=DefaultAzureCredential(),
+)
+
+agent = project.agents.create_agent(
+    model="gpt-4o-mini",
+    name="cloudxeus-invoice-intelligence",
+    instructions=(
+        "You are CloudXeus Invoice Intelligence, an assistant for the "
+        "CloudXeus accounts team. Extract and explain information from "
+        "invoices using the analyze-invoice tool, and answer policy "
+        "questions from the knowledge base. Never invent fields."
+    ),
+    tools=[{"type": "openapi", "openapi": "YOUR_OPENAPI_TOOL_ID"}],
+    tool_resources={
+        "knowledge": [{"knowledge_base": "cloudxeus-docs"}]
+    },
+)
+
+print("Agent created:", agent.id)</code></pre>
+
+<div class="note">
+<p>The exact tool and resource shapes evolve with the SDK, and the portal always shows you the current options. Treat the code above as the structure to adapt: a project client, an agent definition, tools, and tool resources.</p>
+</div>
+
+<h2>Enabling Tracing and Guardrails</h2>
+<p>Turn on the observability and safety layers before you use the agent, not after:</p>
+<ul>
+<li><strong>Tracing</strong> records each conversation: the prompt, the tool calls, the retrieval hits, and the model output. This is how you will diagnose wrong answers in the next chapter.</li>
+<li><strong>Content safety</strong> screens input and output. You will build the content safety configuration in a later chapter and attach it to this agent.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>You created the CloudXeus Invoice Intelligence Agent: you picked a model, wrote a rule-based system prompt, attached the remote tool and knowledge base, and created the agent in both the portal and code. Tracing is enabled so every answer can be inspected. In the next chapter you will use the agent — testing it with realistic invoice questions and reading the traces it produces.</p>
+<nav>
+<a href="191-building-the-cloudxeus-invoice-intelligence-agent-remote-tool-connection.html">&larr; Previous: Building the CloudXeus Invoice Intelligence Agent - Remote Tool connection</a><a href="193-using-the-cloudxeus-invoice-intelligence-agent.html">Next: Using the CloudXeus Invoice Intelligence Agent &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

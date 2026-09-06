@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 32: NLP Projects &amp; Applications | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 32</span>
+    <h1>NLP Projects &amp; Applications</h1>
+
+    <h2>The Projects in This Chapter</h2>
+    <p>The previous chapter built the vocabulary of text representation. Now we use it. Every project here follows the same skeleton: load text data, clean it, convert it to numbers with a representation, train a classifier, and measure the result. Once you can repeat that skeleton, the specific dataset hardly matters.</p>
+    <div class="info">
+        <strong>Memory hook:</strong> The pipeline is the skill. Spam, reviews, and sentiment are just different coats of paint on the same engine.
+    </div>
+
+    <h2>Spam vs Ham: The Dataset</h2>
+    <p>The classic starter dataset is a collection of SMS or email messages labelled <strong>spam</strong> (unwanted) or <strong>ham</strong> (legitimate). Each message is a short document, which makes it perfect for trying representations quickly. Load the data and inspect the class balance first:</p>
+    <pre><code>import pandas as pd
+
+df = pd.read_csv("messages.csv")
+print(df["label"].value_counts())
+print(df.head())</code></pre>
+    <p>An imbalanced set needs handling, so always check the distribution before training.</p>
+
+    <h2>Spam vs Ham with Bag of Words</h2>
+    <p>The first model uses a bag of words and a Naive Bayes or logistic regression classifier. The plan:</p>
+    <ol>
+        <li>Split the messages into train and test sets.</li>
+        <li>Build a <code>CountVectorizer</code> on the training text only.</li>
+        <li>Transform both train and test text to count matrices.</li>
+        <li>Train a classifier and score it on the test set.</li>
+    </ol>
+    <pre><code>from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+X_train, X_test, y_train, y_test = train_test_split(
+    df["message"], df["label"], test_size=0.2, random_state=42)
+
+vectorizer = CountVectorizer(stop_words="english")
+X_train_vec = vectorizer.fit_transform(X_train)
+X_test_vec = vectorizer.transform(X_test)
+
+model = MultinomialNB()
+model.fit(X_train_vec, y_train)
+preds = model.predict(X_test_vec)
+print(accuracy_score(y_test, preds))
+print(confusion_matrix(y_test, preds))</code></pre>
+    <p>BOW plus Naive Bayes is a classic pair for spam because spam messages share heavy word overlap.</p>
+
+    <h2>Spam vs Ham with TF-IDF</h2>
+    <p>The same pipeline with <code>TfidfVectorizer</code> often performs better, because it de-emphasises words like "the" and "you" that appear everywhere and rewards the distinctive terms spammers use:</p>
+    <pre><code>from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+
+tfidf = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
+X_train_vec = tfidf.fit_transform(X_train)
+X_test_vec = tfidf.transform(X_test)
+
+model = LogisticRegression(max_iter=1000)
+model.fit(X_train_vec, y_train)
+preds = model.predict(X_test_vec)
+print(accuracy_score(y_test, preds))</code></pre>
+    <p>Adding bigrams lets the model catch phrases, and comparing the two representations on the same split tells you which suits your data.</p>
+    <div class="note">
+        <strong>Heads-up:</strong> Never call <code>fit</code> on the test text. The vectorizer must be fitted on the training set alone and only <em>transformed</em> on test data, otherwise the model's score is misleadingly optimistic.
+    </div>
+
+    <h2>Best Practices for Solving ML Problems</h2>
+    <p>Across these projects a handful of habits separate reliable results from lucky ones:</p>
+    <ul>
+        <li><strong>Start simple</strong>: get a baseline working before adding complexity.</li>
+        <li><strong>Split before touching the data</strong>: any statistic computed before splitting leaks information.</li>
+        <li><strong>Watch class balance</strong>: accuracy hides failure on rare classes; check precision, recall, and the confusion matrix.</li>
+        <li><strong>Compare representations fairly</strong>: use the same train-test split for every model you compare.</li>
+        <li><strong>Set a random seed</strong> so results are reproducible.</li>
+        <li><strong>Log everything</strong>: the dataset, split, parameters, and scores of each run.</li>
+        <li><strong>Validate on unseen data</strong>: a model must eventually face messages it never saw in training.</li>
+    </ul>
+
+    <h2>Text Classification with Word2Vec and Average Word2Vec</h2>
+    <p>Counting representations work, but word embeddings capture meaning. This project classifies messages by converting them to averaged Word2Vec vectors.</p>
+    <h3>Part 1: Preparing the Averaged Vectors</h3>
+    <p>Train or load a Word2Vec model, then write a helper that averages the vectors of every word in a message. Messages with no known words become a zero vector:</p>
+    <pre><code>import numpy as np
+from gensim.models import Word2Vec
+
+sentences = [msg.split() for msg in df["message"]]
+w2v = Word2Vec(sentences, vector_size=100, window=5,
+               min_count=1, sg=1, epochs=10)
+
+def avg_vector(text):
+    tokens = text.split()
+    vectors = [w2v.wv[w] for w in tokens if w in w2v.wv]
+    if not vectors:
+        return np.zeros(w2v.vector_size)
+    return np.mean(vectors, axis=0)
+
+X = np.array([avg_vector(msg) for msg in df["message"]])</code></pre>
+    <h3>Part 2: Training and Evaluating</h3>
+    <p>Once each message is a fixed-size vector, any normal classifier applies:</p>
+    <pre><code>from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, df["label"], test_size=0.2, random_state=42)
+
+model = RandomForestClassifier(random_state=42)
+model.fit(X_train, y_train)
+print(model.score(X_test, y_test))</code></pre>
+    <p>Averaging loses word order, but it is fast and often competitive with TF-IDF, while giving you vectors you can reuse for clustering and similarity.</p>
+
+    <h2>Kindle Review Sentiment Analysis</h2>
+    <p>The Kindle review dataset contains book reviews with star ratings. Converting ratings into positive and negative sentiment gives a natural classification task: reviews with four or five stars are positive, one or two stars are negative, and three stars are dropped to keep the signal clear.</p>
+    <h3>Part 1: Loading and Exploring</h3>
+    <pre><code>import pandas as pd
+
+reviews = pd.read_csv("kindle_reviews.csv")
+reviews["label"] = reviews["rating"].apply(
+    lambda r: "pos" if r &gt;= 4 else ("neg" if r &lt;= 2 else None)
+)
+reviews = reviews.dropna(subset=["label"])
+print(reviews["label"].value_counts())
+print(reviews["review"][0])</code></pre>
+    <p>Exploration should also look at review lengths and a few samples per class, so you know what the model is actually reading.</p>
+    <h3>Part 2: Modeling and Evaluation</h3>
+    <p>Reuse the pipeline: split, vectorize with TF-IDF (bigrams help sentiment), train, and report a confusion matrix alongside accuracy:</p>
+    <pre><code>from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(
+    reviews["review"], reviews["label"],
+    test_size=0.2, random_state=42)
+
+vec = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
+X_tr = vec.fit_transform(X_train)
+X_te = vec.transform(X_test)
+
+model = LogisticRegression(max_iter=1000)
+model.fit(X_tr, y_train)
+print(classification_report(y_test, model.predict(X_te)))</code></pre>
+    <p>Use <code>classification_report</code> so you see precision and recall for both classes. A model that says "positive" for everything would score decently on accuracy but uselessly on negative reviews, and the report exposes exactly that.</p>
+    <div class="note">
+        <strong>Heads-up:</strong> Reviews are noisier than SMS spam. Typos, slang, and emojis are common, so a little cleaning, lowercasing, and punctuation removal usually buys a measurable accuracy gain before you train anything.
+    </div>
+
+    <h2>Choosing the Right Representation</h2>
+    <p>You now have three representations and can reason about when to reach for each:</p>
+    <ul>
+        <li><strong>Bag of words</strong>: fast, transparent, good for short texts with distinctive vocabularies.</li>
+        <li><strong>TF-IDF</strong>: the go-to default for most text classification; strong and still simple.</li>
+        <li><strong>Averaged Word2Vec</strong>: captures meaning and gives compact dense vectors, best when you have enough in-domain text to learn useful embeddings.</li>
+    </ul>
+    <p>None is universally best; the winning choice depends on your dataset. That is why every project in this chapter evaluates the same split with each representation and lets the scores decide.</p>
+    <div class="info">
+        <strong>Tip:</strong> Keep a shared helper file with your split, cleaning, and scoring functions. Reusing the same evaluation harness is what makes comparison honest.
+    </div>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> Run the spam vs ham project twice, once with bag of words and once with TF-IDF, on the same split, and record both scores. Then run the Kindle sentiment project and print the classification report. Finally, take the ten messages your best model misclassified, read them, and write one sentence about why each was wrong. This last step is where real learning happens.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="31-nlp-text-representation.html">Prev: NLP: Text Representation</a>
+        <a href="33-deep-learning-ann.html">Next: Deep Learning: Neural Networks</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

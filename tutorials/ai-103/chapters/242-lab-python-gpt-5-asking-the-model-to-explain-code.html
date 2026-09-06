@@ -1,0 +1,180 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>242. Lab - Python - GPT 5- Asking the model to explain code - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 242</span>
+<h1>Lab - Python - GPT 5- Asking the model to explain code</h1>
+<p>Large language models are trained on enormous amounts of source code, which makes them surprisingly good at reading it back to you. In this lab you will treat the model as a code explainer: you will feed it functions and snippets, ask for plain-English explanations, and use prompts to control how deep and how structured the explanation is.</p>
+
+<h2>Why Ask a Model to Explain Code</h2>
+<p>Code explanation is one of the most practical everyday uses of a chat model. It helps in several situations:</p>
+<ul>
+<li>You inherit a project and need to understand a function quickly.</li>
+<li>A colleague wrote something terse and you want it restated in plain words.</li>
+<li>You are reviewing a snippet and want a second opinion on what it does.</li>
+<li>You are learning a new language or library and need the idioms explained.</li>
+</ul>
+<p>The model is not a substitute for reading code, but it compresses the time to first understanding dramatically — as long as you ask it well.</p>
+
+<h2>Designing a Good Explainer Prompt</h2>
+<p>Raw code dump, vague question: the model will answer, but the answer is hit-or-miss. Add structure to the request and you get reliable, consistent explanations. A strong explainer prompt specifies:</p>
+<ul>
+<li><strong>The audience:</strong> beginner, intermediate, or expert.</li>
+<li><strong>The output shape:</strong> bullet points, a paragraph, or a line-by-line walkthrough.</li>
+<li><strong>The focus:</strong> overall purpose, specific lines, or hidden pitfalls.</li>
+</ul>
+
+<div class="tip">
+<p>Put the explainer role and rules in a system message, then place the code in the user message. Keeping code out of the system prompt means the instructions stay stable while the code changes freely between requests.</p>
+</div>
+
+<h2>Step 1: Explain a Simple Function</h2>
+<div class="exercise">
+<h3>Exercise 1: Explain a small function</h3>
+<ol>
+<li>Create a folder named <code>ai103-lab242</code> and open it in VS Code.</li>
+<li>Create <code>explain.py</code> and set your environment variables:</li>
+</ol>
+<pre><code>$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+<ol start="3">
+<li>Paste this script and replace <code>YOUR_DEPLOYMENT_NAME</code> with your chat deployment:</li>
+</ol>
+<pre><code>import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+code = """
+def group_by(items, key):
+    result = {}
+    for item in items:
+        k = item[key]
+        result.setdefault(k, []).append(item)
+    return result
+"""
+
+messages = [
+    {
+        "role": "system",
+        "content": (
+            "You are a patient senior developer who explains code to a "
+            "junior colleague. Explain the purpose first, then describe "
+            "what each line does. Use plain language and avoid jargon."
+        ),
+    },
+    {"role": "user", "content": f"Please explain this function:\n\n{code}"},
+]
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=messages,
+)
+
+print(response.choices[0].message.content)
+</code></pre>
+<ol start="4">
+<li>Run the script:</li>
+</ol>
+<pre><code>python explain.py
+</code></pre>
+<p>You should get a purpose-first explanation. Notice that the answer also touches on why <code>setdefault</code> is used — the model explains intent, not just syntax.</p>
+</div>
+
+<h2>Step 2: Control the Level of Detail</h2>
+<p>The same snippet can produce a one-line summary or a line-by-line lecture depending on the instructions. This control is what makes the system prompt so valuable.</p>
+<div class="exercise">
+<h3>Exercise 2: Ask for a line-by-line walkthrough</h3>
+<p>Create <code>walkthrough.py</code>. Reuse the same code string but change the system message:</p>
+<pre><code>messages = [
+    {
+        "role": "system",
+        "content": (
+            "You explain code line by line. For each line, quote it and then "
+            "explain what it does and why it is needed. Start with a single "
+            "sentence that states the overall purpose of the function."
+        ),
+    },
+    {"role": "user", "content": f"Walk me through this function:\n\n{code}"},
+]
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=messages,
+)
+
+print(response.choices[0].message.content)
+</code></pre>
+<pre><code>python walkthrough.py
+</code></pre>
+<p>Compare the two outputs side by side. The request stayed almost identical; only the system instructions changed, and the response changed with them.</p>
+</div>
+
+<h2>Step 3: Explain a Snippet That Has a Bug</h2>
+<p>Explaining code is also a quick debugging sanity check. Ask the model to explain a snippet that contains a subtle bug — its explanation often reveals the flaw because the model has to reason about what the code actually does.</p>
+<div class="exercise">
+<h3>Exercise 3: Find the bug through explanation</h3>
+<p>Create <code>find_bug.py</code> and pass this function, which intends to sum a list of numbers:</p>
+<pre><code>buggy_code = """
+def total(values):
+    total = 0
+    for v in values:
+        total = v
+    return total
+"""
+
+messages = [
+    {
+        "role": "system",
+        "content": (
+            "You are a code reviewer. Explain what this function does, "
+            "then point out any behavior that does not match its apparent "
+            "intent, and suggest a corrected version."
+        ),
+    },
+    {"role": "user", "content": f"Review this function:\n\n{buggy_code}"},
+]
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=messages,
+)
+
+print(response.choices[0].message.content)
+</code></pre>
+<pre><code>python find_bug.py
+</code></pre>
+<p>The model should identify that <code>total = v</code> overwrites the accumulator instead of adding to it.</p>
+</div>
+
+<div class="warn">
+<p>The model's explanation can be confidently wrong, especially for obscure or very new APIs. Treat explanations as a fast first draft and verify with the documentation or a quick test — never paste generated code into production without understanding it yourself.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You used a chat model as a code explainer in three ways: a purpose-first explanation of a simple function, a line-by-line walkthrough driven by the system prompt, and a review of a buggy snippet that revealed its flaw. The key skill is prompt control — the same code produces different depths of explanation depending on the instructions. In the next lab you will switch direction and use a model to generate an image from a prompt.</p>
+<nav>
+<a href="241-lab-multi-modal-support-for-models.html">&larr; Previous: Lab - Multi-Modal support for models</a><a href="243-lab-python-using-a-model-to-generate-an-image.html">Next: Lab - Python - Using a model to generate an image &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

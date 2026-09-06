@@ -1,0 +1,124 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>179. Preparing the Data Store Uploading Course PDFs to Azure Blob Storage - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 179</span>
+<h1>Preparing the Data Store Uploading Course PDFs to Azure Blob Storage</h1>
+<p>Every knowledge assistant needs a source of truth. For the capstone, that source is the course itself: a set of PDF documents the assistant will answer from. This chapter prepares the data store — gathering the PDFs, creating blob storage, uploading the files, and verifying the container. When you finish, your course material is safely in Azure and ready for the knowledge-base chapters that follow.</p>
+
+<h2>What You Are Preparing</h2>
+<p>The data store has three layers:</p>
+<ul>
+<li><strong>Local source folder</strong> — your original PDFs, kept as the master copy.</li>
+<li><strong>Storage account</strong> — the Azure service that hosts blob containers.</li>
+<li><strong>Blob container</strong> — the named folder inside storage that holds the PDFs.</li>
+</ul>
+<p>Everything downstream — chunking, embedding, indexing — reads from this container. Choose its contents carefully because it defines the assistant's entire knowledge boundary.</p>
+
+<h2>Step 1 - Gather the Source PDFs</h2>
+<p>Collect the documents the assistant should know. For this course, five to ten chapters or articles are enough to produce meaningful answers while keeping costs tiny. Put them in a single local folder named <code>course-docs</code>.</p>
+
+<div class="tip">
+<p>Prefer clean, text-based PDFs. Scanned or image-only pages will not extract text with the default parser and will be skipped during indexing. If your documents are scanned, you will need OCR enrichment, which the course covers but the capstone keeps simple.</p>
+</div>
+
+<h2>Step 2 - Set Up the Variables</h2>
+<p>Start a PowerShell terminal, sign in, and set the variables the commands will reuse. You can reuse the storage account from the ingestion lab or create a fresh one:</p>
+<pre><code>$rg = "rg-ai103"
+$storageName = "saai103&lt;yourname&gt;"
+$containerName = "docs"
+
+az login
+</code></pre>
+
+<div class="note">
+<p>Storage account names must be globally unique and use only lowercase letters and numbers. If the name is taken, append a few characters and retry.</p>
+</div>
+
+<h2>Step 3 - Create the Storage Account and Container</h2>
+<p>Create the storage account (or skip this command if you are reusing one) and the container:</p>
+<pre><code>az group create --name $rg --location eastus
+
+az storage account create `
+  --name $storageName `
+  --resource-group $rg `
+  --location eastus `
+  --sku Standard_LRS
+
+az storage container create `
+  --name $containerName `
+  --account-name $storageName
+</code></pre>
+
+<div class="warn">
+<p>The container creation command above uses your signed-in identity, so it requires the Azure CLI to have permission on the storage account. If you prefer explicit credentials, fetch the connection string and pass <code>--connection-string</code> instead:</p>
+<pre><code>$conn = az storage account show-connection-string `
+  --name $storageName `
+  --resource-group $rg `
+  --query connectionString -o tsv
+
+az storage container create --name $containerName --connection-string $conn
+</code></pre>
+</div>
+
+<h2>Step 4 - Upload the PDFs</h2>
+<p>Upload every file in <code>course-docs</code> to the container in one batch command:</p>
+<pre><code>$conn = az storage account show-connection-string `
+  --name $storageName `
+  --resource-group $rg `
+  --query connectionString -o tsv
+
+az storage blob upload-batch `
+  --destination $containerName `
+  --source ./course-docs `
+  --connection-string $conn
+</code></pre>
+<p>Each file becomes a blob whose name matches the local file name. The batch command is idempotent — re-running it after adding new files uploads only what is missing or changed.</p>
+
+<h2>Step 5 - Verify the Upload</h2>
+<p>Confirm every document made it into the container:</p>
+<pre><code>az storage blob list `
+  --container-name $containerName `
+  --connection-string $conn `
+  --query "[].{name:name, size:properties.contentLength}" -o table
+</code></pre>
+<p>You should see one row per PDF with a non-zero size. If a file is missing, check that it is actually inside the <code>course-docs</code> folder and that the file names contain no characters that could confuse the indexer.</p>
+
+<div class="tip">
+<p>Consider organizing files into subfolders such as <code>concepts/</code>, <code>labs/</code>, and <code>reference/</code>. Blob paths become part of the file name in search metadata, so a clean structure makes filters and citations more readable later.</p>
+</div>
+
+<h2>Step 6 - Note the Access Method</h2>
+<p>The upload used the connection string for simplicity. For the capstone's agent, prefer managed identity so no secret travels with code — the assistant's identity will be granted read access to this container in the permissions chapter. Record the container name, account name, and resource group; you will need them for the knowledge-base and permission steps.</p>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td>Storage name already in use</td><td>Name not globally unique</td><td>Append more characters and retry.</td></tr>
+<tr><td>Batch uploads nothing</td><td>Wrong source path or empty folder</td><td>Confirm <code>./course-docs</code> contains files.</td></tr>
+<tr><td><code>AuthorizationFailure</code></td><td>Signed-in identity lacks storage access</td><td>Use the connection string form of the command.</td></tr>
+<tr><td>Blob list is empty</td><td>Container name typo or wrong account</td><td>Verify <code>$containerName</code> and <code>$storageName</code> match the portal.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You gathered the course PDFs, created a storage account and container, uploaded the files in one batch, and verified them with a listing. Your data store is ready and every downstream step will read from this container. The next chapter explains how this store becomes a knowledge source and a knowledge base for agentic retrieval.</p>
+<nav>
+<a href="178-capstone-project-overview-building-the-cloudxeus-ai-course-assistant.html">&larr; Previous: Capstone Project Overview Building the CloudXeus AI Course Assistant</a><a href="180-understanding-knowledge-sources-and-knowledge-bases-for-agentic-retrieval.html">Next: Understanding Knowledge Sources and Knowledge Bases for Agentic Retrieval &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

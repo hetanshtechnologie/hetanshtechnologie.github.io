@@ -1,0 +1,160 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>7. Python for Data Engineering - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>7. Python for Data Engineering</h1>
+<p class="tag">Chapter 7</p>
+
+<h2>Why Python?</h2>
+<p>Python is the de facto language of data engineering. It is the scripting layer for orchestration (Airflow DAGs are Python), distributed processing (PySpark), ingestion (client libraries), transformation (dbt custom tests, Airbyte), and ML. A strong Python foundation multiplies everything else in this book.</p>
+
+<h2>Python Fundamentals You Actually Use</h2>
+<ul>
+<li><strong>Data structures:</strong> dicts, lists, tuples, sets; comprehension and generator patterns for transforming data.</li>
+<li><strong>Functions and typing:</strong> well-typed signatures with type hints; dataclasses for row-like structures.</li>
+<li><strong>Iterators and lazy processing:</strong> reading files line-by-line without loading all into memory.</li>
+<li><strong>Exceptions and logging:</strong> structured try/except, the <code>logging</code> module, never bare <code>except</code>.</li>
+<li><strong>Context managers:</strong> <code>with open(...)</code> for safe resource handling.</li>
+<li><strong>Virtual environments and dependency management:</strong> venv/pip and lock files (uv, pip-tools).</li>
+</ul>
+
+<pre><code>from dataclasses import dataclass
+from typing import Iterator
+import logging
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class OrderRow:
+    order_id: int
+    customer_id: int
+    amount: float
+
+def parse_orders(path: str) -> Iterator[OrderRow]:
+    with open(path) as f:
+        for line in f:
+            parts = line.strip().split(",")
+            try:
+                yield OrderRow(int(parts[0]), int(parts[1]), float(parts[2]))
+            except (ValueError, IndexError) as e:
+                logger.warning("Skipping bad line %r: %s", line, e)
+
+# Usage
+for row in parse_orders("orders.csv"):
+    print(row.order_id, row.amount)</code></pre>
+
+<h2>The Essential Libraries</h2>
+<table>
+<tr><th>Library</th><th>Use</th></tr>
+<tr><td>pandas</td><td>In-memory tabular data for small-to-medium data, exploration, local testing</td></tr>
+<tr><td>numpy</td><td>Numerical arrays, math on vectors</td></tr>
+<tr><td>requests / httpx</td><td>Calling REST APIs (SaaS sources, internal services)</td></tr>
+<tr><td>google-cloud-bigquery</td><td>BigQuery client (loads, queries, jobs)</td></tr>
+<tr><td>google-cloud-storage</td><td>GCS client (objects, transfer)</td></tr>
+<tr><td>google-cloud-pubsub</td><td>Pub/Sub publish/subscribe</td></tr>
+<tr><td>google-cloud-secret-manager</td><td>Store and fetch secrets</td></tr>
+<tr><td>SQLAlchemy / psycopg2</td><td>Relational DB access</td></tr>
+<tr><td>PyYAML / Jinja2</td><td>Config parsing and templating (dbt, Airflow)</td></tr>
+<tr><td>pytest</td><td>Testing</td></tr>
+</table>
+
+<h2>Cloud Client Libraries and Application Default Credentials</h2>
+<p>The Google Cloud Python libraries authenticate via <strong>Application Default Credentials (ADC)</strong>: on GCE/GKE/Airflow workers they use the metadata server; locally they use <code>gcloud auth application-default login</code>; in CI they use service account keys or Workload Identity Federation.</p>
+
+<pre><code>from google.cloud import storage, bigquery
+
+# GCS
+client = storage.Client(project="my-data-project")
+bucket = client.bucket("my-bucket")
+blob = bucket.blob("raw/orders_20260801.csv")
+blob.upload_from_filename("orders_20260801.csv")
+
+# BigQuery: run a query
+bq = bigquery.Client()
+query_job = bq.query("SELECT COUNT(*) AS n FROM myproj.analytics.orders")
+print(query_job.result().to_dataframe())</code></pre>
+
+<h2>Writing Robust Scripts</h2>
+<ul>
+<li><strong>Entry points with argparse:</strong> every job takes parameters (date, environment, project) — no hardcoded values.</li>
+<li><strong>Retries:</strong> wrap flaky API calls in retry logic with exponential backoff (tenacity or manual).</li>
+<li><strong>Idempotency:</strong> the script should produce the same result whether run once or re-run (overwrite, upsert, or partitioned writes).</li>
+<li><strong>Logging:</strong> structured, queryable logs with enough context to debug (job id, parameters, timings).</li>
+<li><strong>Exit codes:</strong> fail loudly with non-zero exit codes so the orchestrator (Airflow) can detect and retry.</li>
+</ul>
+
+<pre><code>import argparse
+import logging
+from google.cloud import bigquery
+
+logger = logging.getLogger("load_orders")
+logging.basicConfig(level=logging.INFO)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", required=True)
+    parser.add_argument("--destination", required=True)
+    parser.add_argument("--date", required=True)
+    args = parser.parse_args()
+
+    logger.info("Starting load: %s -> %s (%s)", args.source, args.destination, args.date)
+    client = bigquery.Client()
+    # ... do the work ...
+    logger.info("Completed")
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+<h2>Packaging for Dataproc and Composer</h2>
+<p>Distributed jobs should be packaged and versioned:</p>
+<ul>
+<li>Build a <strong>wheel</strong> of your code (<code>pip wheel .</code>) and reference it in the Spark submit.</li>
+<li>Ship a <strong>requirements.txt</strong> or container image with pinned versions for reproducibility.</li>
+<li>Use <strong>Dataproc custom images</strong> or <strong>initialization actions</strong> to install your package on clusters.</li>
+<li>For Cloud Composer, install custom Python packages into the environment or use an <code>airflow worker</code> with dependencies preloaded.</li>
+</ul>
+
+<pre><code># Build and submit a packaged job to Dataproc
+pip wheel --no-deps -w ./wheels .
+gcloud dataproc jobs submit pyspark \
+  --cluster=my-cluster --region=us-central1 \
+  --py-files=gs://my-bucket/wheels/my_etl-1.0-py3-none-any.whl \
+  gs://my-bucket/src/main.py -- --date=2026-08-01</code></pre>
+
+<h2>Testing and Code Quality</h2>
+<ul>
+<li>Unit-test pure logic with pytest; mock cloud clients for I/O paths.</li>
+<li>Use <strong>mypy</strong> for type checking and <strong>ruff</strong>/black for style — cheap insurance on a shared codebase.</li>
+<li>Run tests in CI (GitHub Actions / Cloud Build) on every push.</li>
+<li>Test against real (small) cloud resources in a dev project before production.</li>
+</ul>
+
+<h2>Security in Python Data Code</h2>
+<ul>
+<li>Never commit secrets; use Secret Manager, environment variables, or Airflow connections.</li>
+<li>Sanitize inputs; avoid <code>eval</code>/<code>exec</code> on external strings (dangerous in DAG code).</li>
+<li>Use least-privilege service accounts; keep credentials out of logs (redact in logging).</li>
+<li>Scan dependencies (pip-audit, Dependabot) for vulnerabilities.</li>
+</ul>
+
+<h2>Python + SQL: The Practical Combination</h2>
+<p>Most production data work is a mix: Python orchestrates, extracts, and glues; SQL transforms. dbt (Chapter 11) uses Python + Jinja to manage SQL models. PySpark gives SQL a distributed engine. Mastery means knowing when to reach for each — Python for control flow and I/O, SQL for set-based transformation.</p>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Write a small Python package "orders_loader" with: (1) a module that reads a CSV from GCS and validates rows (logging bad ones), (2) an argparse CLI that loads validated rows into a BigQuery table idempotently for a given date, (3) three pytest tests with mocked GCS/BigQuery clients, (4) type hints checked by mypy. Package it as a wheel and submit it to Dataproc. Note: use a dev project or the free tier to avoid costs.
+</div>
+
+<nav>
+  <a href="6-pyspark.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="8-airflow-orchestration.html">Next: Apache Airflow &amp; Orchestration &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

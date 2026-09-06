@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Documents — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Documents</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-4">
+      <h1 class="text-2xl font-bold">Documents</h1>
+      <div class="flex gap-2">
+        <select id="new-doc-type" class="border rounded-lg px-3 py-2 text-sm">
+          <option value="invoice">Invoice</option>
+          <option value="quotation">Quotation</option>
+          <option value="order">Order</option>
+          <option value="challan">Delivery Challan</option>
+          <option value="proforma">Proforma Invoice</option>
+        </select>
+        <a href="invoice-create.html" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700" onclick="return setDocType()">+ New</a>
+      </div>
+    </div>
+
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <button class="filter-btn px-3 py-1.5 rounded text-sm font-medium bg-blue-600 text-white" data-filter="">All</button>
+      <button class="filter-btn px-3 py-1.5 rounded text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300" data-filter="invoice">Invoices</button>
+      <button class="filter-btn px-3 py-1.5 rounded text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300" data-filter="quotation">Quotations</button>
+      <button class="filter-btn px-3 py-1.5 rounded text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300" data-filter="order">Orders</button>
+      <button class="filter-btn px-3 py-1.5 rounded text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300" data-filter="challan">Challans</button>
+      <button class="filter-btn px-3 py-1.5 rounded text-sm font-medium bg-gray-200 text-gray-700 hover:bg-gray-300" data-filter="proforma">Proformas</button>
+    </div>
+
+    <div id="alert"></div>
+    <div id="loading" class="text-gray-500 mb-4">Loading...</div>
+    <div id="invoices-section" class="hidden bg-white rounded-xl shadow-sm border overflow-x-auto"></div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let currentFilter = '';
+
+    const DOC_LABELS = { quotation:'Quotation', order:'Order', challan:'Challan', proforma:'Proforma', invoice:'Invoice' };
+    const DOC_COLORS = { quotation:'yellow', order:'blue', challan:'orange', proforma:'purple', invoice:'green' };
+
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin(); if (!user) return;
+      document.querySelectorAll('.filter-btn').forEach(b => b.addEventListener('click', function() {
+        currentFilter = this.dataset.filter;
+        document.querySelectorAll('.filter-btn').forEach(f => { f.classList.remove('bg-blue-600','text-white'); f.classList.add('bg-gray-200','text-gray-700'); });
+        this.classList.add('bg-blue-600','text-white'); this.classList.remove('bg-gray-200','text-gray-700');
+        loadInvoices();
+      }));
+      await loadInvoices();
+    });
+
+    function setDocType() {
+      const dt = document.getElementById('new-doc-type').value;
+      localStorage.setItem('newDocType', dt);
+      return true;
+    }
+
+    async function loadInvoices() {
+      const orgId = await getOrgId(); if (!orgId) return;
+      const orgId = await getOrgId(); if (!orgId) return;
+      let query = erp.from('invoices').select('*, parties(name)').eq('org_id', orgId);
+      if (currentFilter) query = query.eq('doc_type', currentFilter);
+      const { data, error } = await query.order('created_at', { ascending: false }).limit(100);
+      if (error) { document.getElementById('loading').textContent = 'Error: ' + error.message; return; }
+      document.getElementById('loading').classList.add('hidden');
+      const div = document.getElementById('invoices-section'); div.classList.remove('hidden');
+      if (!data || !data.length) { div.innerHTML = '<div class="p-6 text-gray-500 text-center">No documents found.</div>'; return; }
+
+      div.innerHTML = `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b text-left"><th class="p-3 font-semibold">#</th><th class="p-3 font-semibold">Type</th><th class="p-3 font-semibold">Date</th><th class="p-3 font-semibold">Customer</th><th class="p-3 font-semibold">Amount</th><th class="p-3 font-semibold">Status</th><th class="p-3 font-semibold"></th></tr></thead><tbody>${data.map(inv => {
+        const dt = inv.doc_type || 'invoice';
+        const color = DOC_COLORS[dt]||'green';
+        return `<tr class="border-b hover:bg-gray-50">
+          <td class="p-3 font-mono text-xs font-semibold">${escapeHtml(inv.invoice_no)}</td>
+          <td class="p-3"><span class="bg-${color}-100 text-${color}-700 text-xs font-bold px-2 py-0.5 rounded">${DOC_LABELS[dt]||'Invoice'}</span></td>
+          <td class="p-3 text-xs">${formatDate(inv.invoice_date)}</td>
+          <td class="p-3">${escapeHtml(inv.parties?.name||'-')}</td>
+          <td class="p-3 font-medium">${formatCurrency(inv.total)}</td>
+          <td class="p-3">${statusBadge(inv.status)}</td>
+          <td class="p-3"><a href="invoice-view.html?id=${inv.id}" class="text-blue-600 hover:underline text-xs mr-2">View</a><a href="invoice-create.html?id=${inv.id}" class="text-gray-600 hover:underline text-xs mr-2">Edit</a><button onclick="quickClone(${inv.id})" class="text-purple-600 hover:underline text-xs" title="Clone as draft">Clone</button></td>
+        </tr>`;}).join('')}</tbody></table>
+      <div class="p-3 text-xs text-gray-400 border-t">Total: ${data.length} document${data.length!==1?'s':''}</div>`;
+    }
+
+    async function quickClone(id) {
+      if(!confirm('Clone this document as draft?')) return;
+      const orgId = await getOrgId(); if(!orgId) return;
+      const { data: inv } = await erp.from('invoices').select('*, parties(*)').eq('id',id).single();
+      if(!inv) return;
+      const { data: newInv, error: ie } = await erp.from('invoices').insert({
+        org_id: orgId, party_id: inv.party_id, invoice_date: new Date().toISOString().split('T')[0],
+        due_date: inv.due_date, doc_type: inv.doc_type, status: 'draft',
+        invoice_type: inv.invoice_type||'regular', place_of_supply: inv.place_of_supply,
+        party_name: inv.party_name||inv.parties?.name||'', party_gstin: inv.party_gstin||'',
+        party_address: inv.party_address||'', ref_number: '', notes: inv.notes||'',
+        terms_conditions: inv.terms_conditions||'', discount_pct: inv.discount_pct||0,
+        subtotal: inv.subtotal, discount_amt: inv.discount_amt||0,
+        taxable_amt: inv.taxable_amt, cgst_amt: inv.cgst_amt, sgst_amt: inv.sgst_amt,
+        igst_amt: inv.igst_amt, tds_rate: inv.tds_rate||0, tds_amt: inv.tds_amt||0,
+        tcs_rate: inv.tcs_rate||0, tcs_amt: inv.tcs_amt||0,
+        total: inv.total, round_off: inv.round_off||0
+      }).select().single();
+      if(ie) return showAlert('Clone failed: '+ie.message, 'error');
+      const { data: lines } = await erp.from('invoice_lines').select('*').eq('invoice_id',id);
+      if(lines?.length) {
+        await erp.from('invoice_lines').insert(lines.map(l => ({
+          invoice_id: newInv.id, product_id: l.product_id, description: l.description,
+          quantity: l.quantity, rate: l.rate, unit: l.unit||'', discount_pct: l.discount_pct||0,
+          taxable_amt: l.taxable_amt, gst_rate: l.gst_rate||0,
+          cgst_rate: l.cgst_rate||0, sgst_rate: l.sgst_rate||0, igst_rate: l.igst_rate||0,
+          cgst_amt: l.cgst_amt||0, sgst_amt: l.sgst_amt||0, igst_amt: l.igst_amt||0, total: l.total
+        })));
+      }
+      showAlert('Cloned! <a href="invoice-view.html?id='+newInv.id+'" class="underline">View</a>', 'success');
+      loadInvoices();
+    }
+
+    function statusBadge(s) {
+      const badges = {
+        draft:'bg-gray-100 text-gray-600', sent:'bg-blue-100 text-blue-700', paid:'bg-green-100 text-green-700',
+        overdue:'bg-red-100 text-red-700', accepted:'bg-green-100 text-green-700', rejected:'bg-red-100 text-red-700',
+        expired:'bg-gray-100 text-gray-500', confirmed:'bg-indigo-100 text-indigo-700', converted:'bg-teal-100 text-teal-700'
+      };
+      const cls = badges[s] || 'bg-gray-100 text-gray-600';
+      return `<span class="inline-block ${cls} text-xs font-semibold px-2 py-0.5 rounded">${s}</span>`;
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

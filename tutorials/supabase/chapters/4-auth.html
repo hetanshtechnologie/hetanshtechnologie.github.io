@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapter 4: Authentication - Supabase Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+
+    <span class="tag">Chapter 4</span>
+    <h1>Authentication</h1>
+
+    <h2>Supabase Auth System Overview</h2>
+    <p>Supabase Auth is built on GoTrue, a SWT (Self-contained Web Token) authentication server written in Go. It handles user sign-up, sign-in, session management, token refresh, and social logins. User records are stored in the <code>auth.users</code> table within your PostgreSQL database, and the system generates JWT tokens that include user identity claims.</p>
+    <p>The auth system integrates deeply with Row Level Security. When a user authenticates, Supabase sets the <code>auth.uid()</code> and <code>auth.jwt()</code> context in PostgreSQL, allowing your RLS policies to reference the current user directly. This means you can write policies like "users can only see their own data" without managing session state manually.</p>
+
+    <div class="info">
+      <strong>JWT Token Contents</strong><br>
+      When a user signs in, Supabase returns a JWT access token. This token contains the user's ID, email, role (authenticated or anon), and any custom claims you have added via user metadata. You can decode the JWT at jwt.io to inspect its payload. The token is sent with every API request in the Authorization header, allowing PostgREST to identify the user and enforce RLS.
+    </div>
+
+    <h2>Email / Password Authentication</h2>
+    <p>Email and password auth is the most common authentication method. Supabase handles password hashing with bcrypt and provides methods for sign-up, sign-in, and sign-out.</p>
+
+    <h3>Sign Up</h3>
+    <pre><code>const { data, error } = await supabase.auth.signUp({
+  email: 'user@example.com',
+  password: 'secure-password-123',
+})</code></pre>
+    <p>The <code>signUp</code> method creates a new user in the <code>auth.users</code> table. By default, Supabase sends a confirmation email to verify the address. The user is created immediately but cannot sign in until they confirm their email. You can disable email confirmation in the Auth settings of the dashboard for development purposes.</p>
+
+    <div class="note">
+      <strong>Email Confirmation Default</strong><br>
+      By default, Supabase requires email confirmation. New users receive a verification email with a link. The user's <code>email_confirmed_at</code> field stays null until they click the link. For development, you can disable this requirement in Authentication > Settings > Disable email confirmation. In production, keep it enabled for security.
+    </div>
+
+    <h3>Sign In</h3>
+    <pre><code>const { data, error } = await supabase.auth.signInWithPassword({
+  email: 'user@example.com',
+  password: 'secure-password-123',
+})</code></pre>
+    <p>On successful sign-in, Supabase returns a <code>session</code> object containing an access token, refresh token, and user information. The client automatically stores the session and attaches the access token to subsequent API requests.</p>
+
+    <h3>Sign Out</h3>
+    <pre><code>const { error } = await supabase.auth.signOut()</code></pre>
+    <p>Calling <code>signOut</code> clears the local session and invalidates the refresh token on the server. After sign-out, subsequent API calls use the anon role with RLS restricted to public policies only.</p>
+
+    <h2>Session Management</h2>
+    <p>Supabase handles session persistence and token refresh automatically. When a user refreshes the page, the client restores the session from local storage. The access token expires after one hour, and the client auto-refreshes it using the refresh token before it expires.</p>
+
+    <pre><code>const { data: { session } } = await supabase.auth.getSession()
+
+supabase.auth.onAuthStateChange((event, session) => {
+  console.log('Auth event:', event, 'Session:', session)
+})</code></pre>
+    <p>The <code>onAuthStateChange</code> listener fires on sign-in, sign-out, token refresh, and password recovery. Use it to update your UI when authentication state changes. The <code>getSession</code> method retrieves the current session, useful for checking auth status on page load.</p>
+
+    <h2>Social Login Providers</h2>
+    <p>Supabase supports over 50 OAuth providers including Google, GitHub, Twitter, Discord, and Microsoft. Configure providers in the Authentication > Providers section of the dashboard.</p>
+    <pre><code>const { data, error } = await supabase.auth.signInWithOAuth({
+  provider: 'github',
+})</code></pre>
+    <p>This redirects the user to GitHub for authorization. After successful authentication, GitHub redirects back to your site with a callback URL containing the auth code. Supabase exchanges this code for a session automatically.</p>
+
+    <h2>Protected Routes Pattern</h2>
+    <p>A common pattern is to protect pages by checking the session and redirecting unauthenticated users:</p>
+    <pre><code>async function protectPage() {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) {
+    window.location.href = '/login.html'
+    return
+  }
+  document.getElementById('user-email').textContent = session.user.email
+}
+
+protectPage()</code></pre>
+
+    <h2>User Metadata</h2>
+    <p>You can store additional user data in <code>user_metadata</code> during sign-up:</p>
+    <pre><code>const { data, error } = await supabase.auth.signUp({
+  email: 'user@example.com',
+  password: 'secure-password-123',
+  options: {
+    data: {
+      full_name: 'Jane Doe',
+      avatar_url: 'https://example.com/avatar.jpg'
+    }
+  }
+})</code></pre>
+    <p>Metadata is stored in the JWT token and accessible via <code>session.user.user_metadata</code>. Use it for display names, preferences, or profile data that does not need its own database table.</p>
+
+    <h2>Auth UI Component</h2>
+    <p>Supabase offers an Auth UI component that renders ready-made login forms for email/password and social providers. Install it with <code>npm install @supabase/auth-ui-react @supabase/auth-ui-shared</code> for React projects, or use the pre-built HTML forms from the Supabase documentation.</p>
+
+    <h2>RLS and Auth Integration</h2>
+    <p>The real power of Supabase Auth is its integration with Row Level Security. Within RLS policies, you can reference the authenticated user:</p>
+    <pre><code>-- Allow users to read only their own todos
+CREATE POLICY "Users can read own todos"
+ON todos FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Read user email via JWT
+CREATE POLICY "Insert with user email"
+ON profiles FOR INSERT
+WITH CHECK (auth.jwt() ->> 'email' = email);</code></pre>
+    <p>The <code>auth.uid()</code> function returns the user's UUID from the JWT. The <code>auth.jwt()</code> function returns the entire JWT payload as JSON. These functions are available inside any RLS policy and are automatically populated with the current user's information when they send a valid access token.</p>
+
+    <div class="exercise">
+      <strong>Exercise</strong><br>
+      Build a login/signup page with email and password. Create two HTML files: <code>login.html</code> with sign-in and sign-up forms, and <code>profile.html</code> that shows the user email after login. Use <code>onAuthStateChange</code> to redirect the user after sign-in. Use <code>getSession</code> to check if the user is already logged in when profile.html loads. Implement sign-out with a button. Test by creating a new account and signing in.
+    </div>
+
+    <nav>
+      <a href="../index.html">Back to Index</a>
+      <a href="3-setup-account.html">&laquo; Previous: Setup: Create Your Supabase Account</a>
+      <a href="5-database-inserts-rls.html">Next: Database Inserts and RLS &raquo;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

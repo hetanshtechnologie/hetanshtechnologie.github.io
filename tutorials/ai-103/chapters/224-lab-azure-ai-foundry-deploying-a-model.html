@@ -1,0 +1,177 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>224. Lab - Azure AI Foundry - Deploying a model - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 224</span>
+<h1>Lab - Azure AI Foundry - Deploying a model</h1>
+<p>This lab deploys your first real model in Azure AI Foundry and then calls it from three places: the playground, the command line, and Python. When you finish, you will hold the endpoint, deployment name, and key that every later chapter reuses, and you will have repeated the create-test-cleanup cycle that the rest of the course is built on.</p>
+
+<h2>What You Will Need</h2>
+<ul>
+<li>The hub and project from the earlier lab (<code>ai103-hub</code> and <code>ai103-project</code>).</li>
+<li>Your endpoint URL and one key, from the model service's <strong>Keys and Endpoint</strong> page in the Azure portal.</li>
+<li>A chat-completion model chosen from the catalog that is available in your region with a free or standard tier.</li>
+<li>Python 3.9 or newer and the <code>openai</code> package installed (<code>pip install openai</code>).</li>
+</ul>
+
+<div class="warn">
+<p>Pay-as-you-go deployments are billed per token, and lab traffic is tiny — fractions of a cent. The real cost risk is leaving the deployment running forever. Follow the cleanup step at the end and delete the deployment when you are done, or your account will quietly accrue small charges over time.</p>
+</div>
+
+<h2>Step 1: Deploy the Model</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Deploy a chat model to an endpoint</h3>
+<ol>
+<li>In the Foundry portal, open your project and click <strong>Model catalog</strong>.</li>
+<li>Filter to <strong>chat completion</strong> and choose a general-purpose model available in your region (for example a GPT family model).</li>
+<li>Open the model card, read the summary, and click <strong>Deploy</strong> (or <strong>Deploy to endpoint</strong>).</li>
+<li>Set the deployment name to <code>ai103-chat-deploy</code>. Type it exactly — your code will reference this string.</li>
+<li>Choose your region and the smallest capacity option. Prefer a free tier if one is offered; otherwise standard pay-as-you-go.</li>
+<li>Leave content filtering at its default.</li>
+<li>Click <strong>Deploy</strong> and wait for the status to change to <strong>Ready</strong> on the Deployments page.</li>
+<li>Open the deployment and note its <strong>Endpoint</strong> URL and <strong>Deployment name</strong>.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>If deployment fails, the error usually names the problem: region availability or quota. Try a smaller sibling model or a different region — do not change your resource group or project to work around it.</p>
+</div>
+
+<h2>Step 2: Test in the Playground</h2>
+<p>Before writing code, confirm the endpoint is healthy from the playground:</p>
+<ol>
+<li>Open <strong>Playground</strong> in the left menu.</li>
+<li>Select <code>ai103-chat-deploy</code> from the model dropdown.</li>
+<li>Send the prompt <em>"Explain the difference between a deployment name and a model name in one sentence."</em></li>
+<li>Move the temperature slider and resend. Notice the same prompt can produce different wording — sampling in action.</li>
+</ol>
+
+<div class="note">
+<p>The playground calls the exact endpoint your code will use. If the playground works, your deployment is healthy; if your code then fails, the bug is in the code or the connection values, not the deployment.</p>
+</div>
+
+<h2>Step 3: Call the Deployment with curl</h2>
+<p>Now verify the endpoint from outside the portal. Replace <code>YOUR_ENDPOINT</code>, <code>YOUR_KEY</code>, and <code>YOUR_DEPLOYMENT_NAME</code> with your own values. On Windows PowerShell, put the JSON body in a file to avoid quoting problems:</p>
+
+<pre><code># request-body.json
+{
+  "messages": [
+    {"role": "system", "content": "You are a concise study assistant."},
+    {"role": "user", "content": "List three steps to deploy a model in Foundry."}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 120
+}</code></pre>
+
+<pre><code># Call the deployment (Windows PowerShell)
+curl.exe "https://YOUR_ENDPOINT/openai/deployments/YOUR_DEPLOYMENT_NAME/chat/completions?api-version=2024-06-01" `
+  -H "api-key: YOUR_KEY" `
+  -H "Content-Type: application/json" `
+  -d "@request-body.json"</code></pre>
+
+<pre><code># Same call on macOS or Linux in one line
+curl "https://YOUR_ENDPOINT/openai/deployments/YOUR_DEPLOYMENT_NAME/chat/completions?api-version=2024-06-01" \
+  -H "api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"system","content":"You are a concise study assistant."},{"role":"user","content":"Say hello in five words."}],"max_tokens":50}'</code></pre>
+
+<p>A healthy response contains a <code>choices</code> array with the model's text and a <code>usage</code> block with token counts. An authentication error points at the key; a 404 points at the deployment name or API version.</p>
+
+<h2>Step 4: Call the Deployment from Python</h2>
+<p>Save the following as <code>chat_demo.py</code>. It reads your credentials from environment variables so the key never sits in the source file:</p>
+
+<pre><code>import os
+from openai import AzureOpenAI
+
+endpoint = os.environ["AZURE_OPENAI_ENDPOINT"]
+api_key = os.environ["AZURE_OPENAI_KEY"]
+deployment = os.environ["AZURE_OPENAI_DEPLOYMENT"]
+
+client = AzureOpenAI(
+    azure_endpoint=endpoint,
+    api_key=api_key,
+    api_version="2024-06-01",
+)
+
+messages = [
+    {"role": "system", "content": "You are a friendly tutor."},
+    {"role": "user", "content": "What is a token in a language model?"},
+]
+
+response = client.chat.completions.create(
+    model=deployment,
+    messages=messages,
+    temperature=0.5,
+    max_tokens=150,
+)
+
+print(response.choices[0].message.content)
+print("Tokens used:", response.usage.total_tokens)</code></pre>
+
+<p>Set the environment variables and run it:</p>
+
+<pre><code># Windows PowerShell
+$env:AZURE_OPENAI_ENDPOINT = "https://YOUR_ENDPOINT"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+$env:AZURE_OPENAI_DEPLOYMENT = "ai103-chat-deploy"
+python chat_demo.py
+
+# macOS / Linux
+export AZURE_OPENAI_ENDPOINT="https://YOUR_ENDPOINT"
+export AZURE_OPENAI_KEY="YOUR_KEY"
+export AZURE_OPENAI_DEPLOYMENT="ai103-chat-deploy"
+python chat_demo.py</code></pre>
+
+<div class="warn">
+<p>Notice the key is never typed into the script. The environment-variable pattern is the minimum bar for keeping secrets out of code. Once this works, you have a complete, reusable calling pattern for every model you deploy in the course.</p>
+</div>
+
+<h2>Step 5: Inspect the Response</h2>
+<p>Print the full response object once to see what the API returns:</p>
+<ul>
+<li><code>choices[0].message.content</code> — the generated text your app uses.</li>
+<li><code>choices[0].finish_reason</code> — why generation stopped (<code>stop</code> naturally, <code>length</code> when the cap was hit, or a filter reason).</li>
+<li><code>usage.prompt_tokens</code> and <code>usage.completion_tokens</code> — the basis of your per-token cost.</li>
+</ul>
+
+<div class="tip">
+<p>If <code>finish_reason</code> is <code>length</code>, the output was cut off. Production code should detect this and tell the user the answer was truncated rather than silently presenting an incomplete answer.</p>
+</div>
+
+<h2>Step 6: Clean Up</h2>
+<p>When you finish, delete the deployment unless you are immediately continuing:</p>
+<ol>
+<li>Open <strong>Deployments</strong> in your project.</li>
+<li>Select <code>ai103-chat-deploy</code> and choose <strong>Delete</strong>.</li>
+<li>Confirm. The catalog entry stays available; you can redeploy any time.</li>
+</ol>
+
+<pre><code># Optional: delete via Azure CLI
+az cognitiveservices account deployment delete \
+  --resource-group rg-ai103 \
+  --name YOUR_MODEL_SERVICE_NAME \
+  --deployment-name ai103-chat-deploy</code></pre>
+
+<h2>Summary</h2>
+<p>You deployed a chat model to a named endpoint, verified it in the playground, called it with curl, called it from Python through environment-variable credentials, read its response structure, and cleaned up. You now hold the endpoint, deployment name, and key that power the rest of the course, plus a Python pattern you will reuse dozens of times. Next you will practice more with the playground.</p>
+<nav>
+<a href="223-azure-ai-foundry-deploying-a-model-overview.html">&larr; Previous: Azure AI Foundry - Deploying a model - Overview</a><a href="225-lab-azure-ai-foundry-using-the-playground.html">Next: Lab - Azure AI Foundry - Using the playground &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cost Centres & Budgeting — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}td{padding:6px 10px;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Cost Centres & Budgeting</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-7xl mx-auto p-6">
+    <!-- Tabs -->
+    <div class="flex gap-2 mb-6">
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white active" data-tab="cc" onclick="switchTab('cc')">Cost Centres</button>
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700" data-tab="budget" onclick="switchTab('budget')">Budgets</button>
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700" data-tab="report" onclick="switchTab('report')">Budget vs Actual</button>
+    </div>
+    <div id="content" class="bg-white rounded-xl shadow-sm border p-6">
+      <div id="loading" class="text-center text-gray-500 py-8">Loading...</div>
+      <div id="tab-content" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- Cost Centre Modal -->
+  <div id="cc-modal" class="fixed inset-0 bg-black bg-opacity-40 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
+      <h3 class="text-lg font-bold mb-4" id="cc-modal-title">Add Cost Centre</h3>
+      <div class="space-y-3">
+        <input type="text" id="cc-name" placeholder="Name (e.g. Marketing, R&D, Admin)" class="w-full border rounded px-3 py-2 text-sm" required>
+        <input type="text" id="cc-code" placeholder="Code (e.g. MKG-001)" class="w-full border rounded px-3 py-2 text-sm">
+        <textarea id="cc-desc" placeholder="Description" class="w-full border rounded px-3 py-2 text-sm"></textarea>
+        <select id="cc-parent" class="w-full border rounded px-3 py-2 text-sm"><option value="">No Parent (Top Level)</option></select>
+      </div>
+      <div class="flex gap-3 mt-4">
+        <button onclick="saveCC()" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700">Save</button>
+        <button onclick="closeCCModal()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm font-semibold">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Budget Modal -->
+  <div id="budget-modal" class="fixed inset-0 bg-black bg-opacity-40 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
+      <h3 class="text-lg font-bold mb-4">Add Budget</h3>
+      <div class="space-y-3">
+        <input type="text" id="budget-fy" placeholder="Fiscal Year (e.g. 2025-26)" class="w-full border rounded px-3 py-2 text-sm" required>
+        <select id="budget-account" class="w-full border rounded px-3 py-2 text-sm"><option value="">All (Company-wide)</option></select>
+        <select id="budget-cc" class="w-full border rounded px-3 py-2 text-sm"><option value="">All Cost Centres</option></select>
+        <input type="number" id="budget-amount" step="0.01" placeholder="Budget Amount" class="w-full border rounded px-3 py-2 text-sm" required>
+        <textarea id="budget-notes" placeholder="Notes" class="w-full border rounded px-3 py-2 text-sm"></textarea>
+      </div>
+      <div class="flex gap-3 mt-4">
+        <button onclick="saveBudget()" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700">Save</button>
+        <button onclick="closeBudgetModal()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm font-semibold">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId, activeTab = 'cc', costCentres = [], accounts = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const user = await requireLogin(); if(!user) return;
+      orgId = await getOrgId(); if(!orgId) return;
+      const { data: cc } = await erp.from('cost_centres').select('*').eq('org_id', orgId);
+      costCentres = cc || [];
+      const { data: accts } = await erp.from('chart_of_accounts').select('id,code,name,type').eq('org_id', orgId).eq('is_active', true);
+      accounts = accts || [];
+      populateSelects();
+      loadCC();
+    });
+
+    function populateSelects() {
+      // Parent CC selector
+      const selP = document.getElementById('cc-parent');
+      selP.innerHTML = '<option value="">No Parent (Top Level)</option>' + costCentres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+      // Budget account selector
+      const selA = document.getElementById('budget-account');
+      selA.innerHTML = '<option value="">All (Company-wide)</option>' + accounts.filter(a => a.type==='expense'||a.type==='income').map(a => `<option value="${a.id}">${escapeHtml(a.code)} - ${escapeHtml(a.name)}</option>`).join('');
+      // Budget cost centre selector
+      const selC = document.getElementById('budget-cc');
+      selC.innerHTML = '<option value="">All Cost Centres</option>' + costCentres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+    }
+
+    function switchTab(t) {
+      activeTab = t;
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('bg-blue-600','text-white','active');
+        b.classList.add('bg-gray-200','text-gray-700');
+        if(b.dataset.tab === t) { b.classList.add('bg-blue-600','text-white','active'); b.classList.remove('bg-gray-200','text-gray-700'); }
+      });
+      if(t === 'cc') loadCC();
+      else if(t === 'budget') loadBudgets();
+      else if(t === 'report') loadBudgetReport();
+    }
+
+    async function loadCC() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('tab-content').classList.add('hidden');
+      const { data: list } = await erp.from('cost_centres').select('*, parent:parent_id(name)').eq('org_id', orgId).order('name');
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('tab-content').classList.remove('hidden');
+      let rows = (list||[]).map(c => `<tr class="border-b">
+        <td>${escapeHtml(c.code||'')}</td><td class="font-medium">${escapeHtml(c.name)}</td>
+        <td>${c.parent ? escapeHtml(c.parent.name) : '<span class="text-gray-400">-</span>'}</td>
+        <td>${escapeHtml(c.description||'')}</td>
+        <td><span class="px-2 py-0.5 rounded text-xs font-medium ${c.is_active?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}">${c.is_active?'Active':'Inactive'}</span></td>
+        <td><button onclick="editCC(${c.id})" class="text-blue-500 hover:underline text-xs mr-2">Edit</button><button onclick="deleteCC(${c.id})" class="text-red-500 hover:underline text-xs">Delete</button></td></tr>`).join('');
+      document.getElementById('tab-content').innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-lg font-bold">Cost Centres</h2>
+          <button onclick="openCCModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700">+ Add Cost Centre</button>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">Code</th><th class="text-left p-2 font-semibold">Name</th><th class="text-left p-2 font-semibold">Parent</th><th class="text-left p-2 font-semibold">Description</th><th class="text-left p-2 font-semibold">Status</th><th class="text-left p-2 font-semibold"></th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="text-center text-gray-400 py-6">No cost centres created yet</td></tr>'}</tbody></table></div>`;
+    }
+
+    async function loadBudgets() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('tab-content').classList.add('hidden');
+      const { data: list } = await erp.from('budgets').select('*, account:account_id(code,name), cost_centre:cost_centre_id(name)').eq('org_id', orgId).order('fiscal_year', { ascending: false });
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('tab-content').classList.remove('hidden');
+      let rows = (list||[]).map(b => {
+        const spent = Number(b.spent_amount||0);
+        const budget = Number(b.budget_amount||1);
+        const pct = Math.min(100, (spent/budget*100)).toFixed(1);
+        return `<tr class="border-b text-sm">
+          <td>${b.fiscal_year}</td>
+          <td>${b.account ? escapeHtml(`${b.account.code} - ${b.account.name}`) : '<span class="text-gray-400">Company-wide</span>'}</td>
+          <td>${b.cost_centre ? escapeHtml(b.cost_centre.name) : '<span class="text-gray-400">All</span>'}</td>
+          <td class="text-right">${formatCurrency(b.budget_amount)}</td>
+          <td class="text-right">${formatCurrency(spent)}</td>
+          <td class="text-right">${pct}%</td>
+          <td><div class="w-24 bg-gray-200 rounded h-2"><div class="bg-blue-600 rounded h-2 ${spent>budget?'bg-red-600':''}" style="width:${pct}%"></div></div></td>
+          <td><button onclick="deleteBudget(${b.id})" class="text-red-500 hover:underline text-xs">Delete</button></td></tr>`;
+      }).join('');
+      document.getElementById('tab-content').innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-lg font-bold">Budgets</h2>
+          <button onclick="openBudgetModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700">+ Add Budget</button>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">FY</th><th class="text-left p-2 font-semibold">Account</th><th class="text-left p-2 font-semibold">Cost Centre</th><th class="text-right p-2 font-semibold">Budget</th><th class="text-right p-2 font-semibold">Spent</th><th class="text-right p-2 font-semibold">% Used</th><th class="text-left p-2 font-semibold">Progress</th><th class="text-left p-2 font-semibold"></th></tr></thead><tbody>${rows||'<tr><td colspan="8" class="text-center text-gray-400 py-6">No budgets created yet</td></tr>'}</tbody></table></div>`;
+    }
+
+    async function loadBudgetReport() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('tab-content').classList.add('hidden');
+      const { data: budgets } = await erp.from('budgets').select('*, account:account_id(code,name,type), cost_centre:cost_centre_id(name)').eq('org_id', orgId).order('fiscal_year', { ascending: false });
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('tab-content').classList.remove('hidden');
+
+      if(!budgets||!budgets.length) {
+        document.getElementById('tab-content').innerHTML = '<p class="text-center text-gray-400 py-6">No budgets yet. Create budgets first to see the report.</p>';
+        return;
+      }
+
+      // Group by FY
+      const fyGroups = {};
+      budgets.forEach(b => {
+        if(!fyGroups[b.fiscal_year]) fyGroups[b.fiscal_year] = [];
+        fyGroups[b.fiscal_year].push(b);
+      });
+
+      let html = '';
+      Object.entries(fyGroups).forEach(([fy, items]) => {
+        const totalBudget = items.reduce((s,b) => s + Number(b.budget_amount), 0);
+        const totalSpent = items.reduce((s,b) => s + Number(b.spent_amount||0), 0);
+        html += `<div class="mb-6"><h3 class="font-bold text-base mb-2">${fy}</h3>
+          <table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">Account</th><th class="text-left p-2 font-semibold">Cost Centre</th><th class="text-right p-2 font-semibold">Budget</th><th class="text-right p-2 font-semibold">Actual</th><th class="text-right p-2 font-semibold">Variance</th><th class="text-right p-2 font-semibold">%</th></tr></thead><tbody>`;
+        items.forEach(b => {
+          const budget = Number(b.budget_amount);
+          const spent = Number(b.spent_amount||0);
+          const variance = budget - spent;
+          const pct = budget > 0 ? (spent/budget*100).toFixed(1) : '0.0';
+          html += `<tr class="border-b">
+            <td>${b.account ? escapeHtml(`${b.account.code} - ${b.account.name}`) : 'Company-wide'}</td>
+            <td>${b.cost_centre ? escapeHtml(b.cost_centre.name) : 'All'}</td>
+            <td class="text-right">${formatCurrency(budget)}</td>
+            <td class="text-right">${formatCurrency(spent)}</td>
+            <td class="text-right ${variance>=0?'text-green-600':'text-red-600'}">${variance>=0?'+':''}${formatCurrency(variance)}</td>
+            <td class="text-right">${pct}%</td></tr>`;
+        });
+        const totalVar = totalBudget - totalSpent;
+        html += `<tr class="font-bold border-t bg-gray-50"><td colspan="2">Total</td><td class="text-right">${formatCurrency(totalBudget)}</td><td class="text-right">${formatCurrency(totalSpent)}</td><td class="text-right ${totalVar>=0?'text-green-600':'text-red-600'}">${totalVar>=0?'+':''}${formatCurrency(totalVar)}</td><td class="text-right">${totalBudget>0 ? (totalSpent/totalBudget*100).toFixed(1) : '0.0'}%</td></tr>`;
+        html += '</tbody></table></div>';
+      });
+      document.getElementById('tab-content').innerHTML = html;
+    }
+
+    // Cost Centre CRUD
+    function openCCModal() {
+      document.getElementById('cc-modal-title').textContent = 'Add Cost Centre';
+      document.getElementById('cc-modal').dataset.editId = '';
+      ['cc-name','cc-code','cc-desc'].forEach(id => document.getElementById(id).value = '');
+      document.getElementById('cc-parent').selectedIndex = 0;
+      document.getElementById('cc-modal').style.display = 'flex';
+    }
+    function closeCCModal() { document.getElementById('cc-modal').style.display = 'none'; }
+    async function saveCC() {
+      const id = document.getElementById('cc-modal').dataset.editId;
+      const data = { name: document.getElementById('cc-name').value, code: document.getElementById('cc-code').value, description: document.getElementById('cc-desc').value, parent_id: document.getElementById('cc-parent').value || null };
+      if(!data.name) return alert('Name is required');
+      let err;
+      if(id) { ({ error: err } = await erp.from('cost_centres').update(data).eq('id',id)); }
+      else { data.org_id = orgId; ({ error: err } = await erp.from('cost_centres').insert(data)); }
+      if(err) return alert('Error: '+err.message);
+      closeCCModal(); await refreshCC(); loadCC();
+    }
+    async function editCC(id) {
+      const c = costCentres.find(x => x.id === id); if(!c) return;
+      document.getElementById('cc-modal-title').textContent = 'Edit Cost Centre';
+      document.getElementById('cc-modal').dataset.editId = id;
+      document.getElementById('cc-name').value = c.name;
+      document.getElementById('cc-code').value = c.code||'';
+      document.getElementById('cc-desc').value = c.description||'';
+      document.getElementById('cc-parent').value = c.parent_id||'';
+      document.getElementById('cc-modal').style.display = 'flex';
+    }
+    async function deleteCC(id) { if(!confirm('Delete this cost centre?')) return; await erp.from('cost_centres').delete().eq('id',id); await refreshCC(); loadCC(); }
+    async function refreshCC() { const { data: cc } = await erp.from('cost_centres').select('*').eq('org_id', orgId); costCentres = cc || []; populateSelects(); }
+
+    // Budget CRUD
+    async function openBudgetModal() {
+      await refreshCC();
+      const selC = document.getElementById('budget-cc');
+      selC.innerHTML = '<option value="">All Cost Centres</option>' + costCentres.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+      document.getElementById('budget-fy').value = '';
+      document.getElementById('budget-account').selectedIndex = 0;
+      document.getElementById('budget-cc').selectedIndex = 0;
+      document.getElementById('budget-amount').value = '';
+      document.getElementById('budget-notes').value = '';
+      document.getElementById('budget-modal').style.display = 'flex';
+    }
+    function closeBudgetModal() { document.getElementById('budget-modal').style.display = 'none'; }
+    async function saveBudget() {
+      const data = {
+        org_id: orgId, fiscal_year: document.getElementById('budget-fy').value,
+        account_id: document.getElementById('budget-account').value || null,
+        cost_centre_id: document.getElementById('budget-cc').value || null,
+        budget_amount: parseFloat(document.getElementById('budget-amount').value)||0,
+        notes: document.getElementById('budget-notes').value
+      };
+      if(!data.fiscal_year) return alert('Fiscal Year is required');
+      if(!data.budget_amount) return alert('Budget Amount is required');
+      const { error } = await erp.from('budgets').insert(data);
+      if(error) return alert('Error: '+error.message);
+      closeBudgetModal(); loadBudgets();
+    }
+    async function deleteBudget(id) { if(!confirm('Delete this budget?')) return; await erp.from('budgets').delete().eq('id',id); loadBudgets(); }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>57. Lab - Building the CloudXeus Orders API with Azure Functions - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 57</span>
+<h1>Lab - Building the CloudXeus Orders API with Azure Functions</h1>
+<p>With the Core Tools installed and verified, you are ready to build the real CloudXeus orders API. In this lab you scaffold a Python function app, add an HTTP-triggered function, and implement three operations that a support agent will later call: fetch one order by id, list orders for a customer email, and cancel an order. The functions run in memory for now; publishing to Azure comes in the next lab.</p>
+
+<h2>The Three Operations</h2>
+<p>The CloudXeus support agent needs these capabilities from the API:</p>
+<table>
+<tr><th>Operation</th><th>HTTP method and path</th><th>What it does</th></tr>
+<tr><td>Get an order</td><td><code>GET /api/orders/{order_id}</code></td><td>Returns a single order by its id, or a 404 if missing</td></tr>
+<tr><td>List orders</td><td><code>GET /api/orders?email=...</code></td><td>Returns every order belonging to one customer</td></tr>
+<tr><td>Cancel an order</td><td><code>POST /api/orders/{order_id}/cancel</code></td><td>Changes an order's status to cancelled</td></tr>
+</table>
+<p>Keeping the paths flat and the operationIds obvious will make the OpenAPI specification in a later chapter almost write itself.</p>
+
+<h2>Scaffold the Project</h2>
+<p>Create a folder for the API and initialize a Python function app with the v2 programming model:</p>
+
+<pre><code>mkdir cloudxeus-orders-api
+cd cloudxeus-orders-api
+func init --worker-runtime python --model v2</code></pre>
+
+<p>This produces a project with a <code>function_app.py</code> file, a <code>local.settings.json</code> for local configuration, and a <code>requirements.txt</code>.</p>
+
+<div class="tip">
+<p>If you worked through the earlier Core Tools lab, the <code>hello</code> function may still be in <code>function_app.py</code>. Remove it and its imports so only the orders code below remains.</p>
+</div>
+
+<h2>Write the Orders Function</h2>
+<p>Replace the contents of <code>function_app.py</code> with the code below. The data lives in an in-memory dictionary so the API works without a database; in production you would back these operations with a database or another durable store.</p>
+
+<pre><code>import json
+
+import azure.functions as func
+
+app = func.FunctionApp()
+
+ORDERS = {
+    "ORD-1001": {
+        "id": "ORD-1001",
+        "customer_email": "ada@example.com",
+        "status": "shipped",
+        "total": 49.98,
+    },
+    "ORD-1002": {
+        "id": "ORD-1002",
+        "customer_email": "grace@example.com",
+        "status": "placed",
+        "total": 15.00,
+    },
+    "ORD-1003": {
+        "id": "ORD-1003",
+        "customer_email": "ada@example.com",
+        "status": "placed",
+        "total": 89.50,
+    },
+}
+
+
+@app.route(route="orders/{order_id}", methods=["GET"],
+           auth_level=func.AuthLevel.ANONYMOUS)
+def get_order(req: func.HttpRequest) -&gt; func.HttpResponse:
+    order_id = req.route_params.get("order_id")
+    order = ORDERS.get(order_id)
+    if order is None:
+        body = json.dumps({"error": "Order not found"})
+        return func.HttpResponse(body, status_code=404,
+                                 mimetype="application/json")
+    return func.HttpResponse(json.dumps(order), mimetype="application/json")
+
+
+@app.route(route="orders", methods=["GET"],
+           auth_level=func.AuthLevel.ANONYMOUS)
+def list_orders(req: func.HttpRequest) -&gt; func.HttpResponse:
+    email = req.params.get("email")
+    matches = [o for o in ORDERS.values()
+               if o["customer_email"] == email]
+    return func.HttpResponse(json.dumps(matches), mimetype="application/json")
+
+
+@app.route(route="orders/{order_id}/cancel", methods=["POST"],
+           auth_level=func.AuthLevel.ANONYMOUS)
+def cancel_order(req: func.HttpRequest) -&gt; func.HttpResponse:
+    order_id = req.route_params.get("order_id")
+    order = ORDERS.get(order_id)
+    if order is None:
+        body = json.dumps({"error": "Order not found"})
+        return func.HttpResponse(body, status_code=404,
+                                 mimetype="application/json")
+    if order["status"] == "cancelled":
+        body = json.dumps({"error": "Order already cancelled"})
+        return func.HttpResponse(body, status_code=409,
+                                 mimetype="application/json")
+    order["status"] = "cancelled"
+    return func.HttpResponse(json.dumps(order), mimetype="application/json")</code></pre>
+
+<div class="note">
+<p>Each endpoint is declared with the <code>@app.route</code> decorator. The route pattern, the HTTP methods, and the auth level are all set in one place, which is the v2 programming model's main benefit over the older per-function <code>function.json</code> files.</p>
+</div>
+
+<h2>Run and Test Locally</h2>
+<div class="exercise">
+<h3>Exercise &mdash; Start the Host and Exercise Every Endpoint</h3>
+<ol>
+<li>Start the local host from the project folder:</li>
+</ol>
+<pre><code>func start</code></pre>
+<ol start="2">
+<li>In a second terminal, fetch one order:</li>
+</ol>
+<pre><code>curl "http://localhost:7071/api/orders/ORD-1001"</code></pre>
+<ol start="3">
+<li>List orders for a customer:</li>
+</ol>
+<pre><code>curl "http://localhost:7071/api/orders?email=ada@example.com"</code></pre>
+<ol start="4">
+<li>Cancel an order and confirm the status flips to <code>cancelled</code>:</li>
+</ol>
+<pre><code>curl -X POST "http://localhost:7071/api/orders/ORD-1002/cancel"</code></pre>
+<ol start="5">
+<li>Check the failure paths too: a missing order id should return <code>404</code>, and cancelling an already-cancelled order should return <code>409</code>.</li>
+</ol>
+</div>
+
+<div class="warn">
+<p>Because the data is in memory, restarting the host resets every change, including cancelled orders. That is fine for a lab; the moment the API is published, each instance gets its own fresh dictionary. A real deployment would store orders in a database such as Azure Cosmos DB or SQL.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You have a working, locally tested CloudXeus orders API with three HTTP endpoints, all built with the Python v2 programming model. The next chapter walks through what each piece of the code does before you publish the API to Azure.</p>
+<nav>
+<a href="56-installing-azure-function-core-tools.html">&larr; Previous: Installing Azure Function Core tools</a><a href="58-notes-explaining-the-function-code.html">Next: Notes - Explaining the Function code &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

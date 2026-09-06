@@ -1,0 +1,277 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Security, Monitoring, and Governance - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 3</span>
+<h1>Security, Monitoring, and Governance</h1>
+
+<h2>The Security Triad for AI Services</h2>
+<p>Securing Azure AI solutions requires attention to three layers: network security, authentication and authorization, and key management. Network security controls which traffic can reach your service. Authentication ensures the caller is who they claim to be. Authorization determines what actions the caller can perform. A production-ready AI solution implements all three layers and combines them with monitoring to detect anomalous activity and cost governance to prevent budget overruns.</p>
+<p>The AI-102 exam tests your ability to design secure AI solution architectures. You should understand when to use private endpoints versus service endpoints, how to configure managed identities for Azure services, and which RBAC roles grant the appropriate level of access. You should also understand how to detect security issues through diagnostic logs and metrics.</p>
+
+<h2>Virtual Networks and Private Endpoints</h2>
+<p>By default, Azure AI services are accessible from any internet-connected client that possesses the endpoint URL and authentication key. For many applications, this is too permissive. Virtual network integration restricts incoming traffic to only those requests originating from specified virtual networks, effectively making the service private to your Azure environment.</p>
+<p>There are two approaches to network isolation: service endpoints and private endpoints. Service endpoints extend your virtual network identity to the Azure service over the Microsoft backbone network. They are easier to configure but do not remove the service from the public internet entirely. Private endpoints assign a network interface with a private IP address from your virtual network to the Azure service. All traffic to the service stays entirely within the Microsoft network and never traverses the public internet. Private endpoints also support network policies like network security groups and route tables.</p>
+<p>To configure a private endpoint for an Azure AI service, you create a Private Endpoint resource in the Azure portal, specify the Azure AI service as the target, and select the virtual network and subnet. After creation, you must disable public network access on the AI service resource itself. The following Azure CLI commands accomplish this:</p>
+<pre><code># Disable public network access
+az cognitiveservices account update \
+    --name cv-ai102-study \
+    --resource-group rg-ai102-study \
+    --public-network-access Disabled
+
+# Create a private endpoint
+az network private-endpoint create \
+    --name pe-cv-ai102-study \
+    --resource-group rg-ai102-study \
+    --vnet-name vnet-ai102 \
+    --subnet default \
+    --private-connection-resource-id $(az cognitiveservices account show \
+        --name cv-ai102-study \
+        --resource-group rg-ai102-study \
+        --query id -o tsv) \
+    --group-id cognitiveservices \
+    --connection-name conn-cv-ai102-study</code></pre>
+
+<div class="warn">
+<p>When you disable public network access, all clients outside the configured virtual network lose access to the service, including the Azure portal. Ensure your development machine is connected to the virtual network through VPN or ExpressRoute before disabling public access.</p>
+</div>
+
+<h2>Managed Identity Authentication</h2>
+<p>Managed identities provide Azure services with an automatically managed identity in Azure Active Directory. Instead of storing keys in connection strings or configuration files, your application uses the managed identity to obtain Azure AD tokens. This approach eliminates credential management from your code and improves security by removing long-lived secrets.</p>
+<p>To use managed identity, you enable it on the Azure resource that calls your AI service (such as an Azure Function, App Service, or Virtual Machine), then grant that identity the appropriate RBAC role on the AI service. There are two types of managed identities. System-assigned identities are tied to a single resource and are deleted when the resource is deleted. User-assigned identities are independent resources that can be assigned to multiple Azure resources and have their own lifecycle.</p>
+<p>The following example shows how to use managed identity to authenticate to a Language service from an Azure Function using the DefaultAzureCredential class:</p>
+<pre><code>// C# - using managed identity
+using Azure.Identity;
+using Azure.AI.TextAnalytics;
+
+var credential = new DefaultAzureCredential();
+var endpoint = Environment.GetEnvironmentVariable("LANGUAGE_ENDPOINT");
+var client = new TextAnalyticsClient(new Uri(endpoint), credential);
+
+DocumentSentiment sentiment = client.AnalyzeSentiment(
+    "Azure AI services are powerful and easy to use.");
+Console.WriteLine($"Sentiment: {sentiment.Sentiment}");
+Console.WriteLine($"Positive: {sentiment.ConfidenceScores.Positive:F2}");
+Console.WriteLine($"Neutral: {sentiment.ConfidenceScores.Neutral:F2}");
+Console.WriteLine($"Negative: {sentiment.ConfidenceScores.Negative:F2}");</code></pre>
+
+<pre><code># Python - using managed identity
+from azure.identity import DefaultAzureCredential
+from azure.ai.textanalytics import TextAnalyticsClient
+import os
+
+credential = DefaultAzureCredential()
+endpoint = os.environ["LANGUAGE_ENDPOINT"]
+client = TextAnalyticsClient(endpoint=endpoint, credential=credential)
+
+docs = ["Azure AI services are powerful and easy to use."]
+for result in client.analyze_sentiment(docs):
+    print(f"Sentiment: {result.sentiment}")
+    print(f"Positive: {result.confidence_scores.positive:.2f}")
+    print(f"Neutral: {result.confidence_scores.neutral:.2f}")
+    print(f"Negative: {result.confidence_scores.negative:.2f}")</code></pre>
+
+<h2>Azure Key Vault Integration</h2>
+<p>When you cannot use managed identity, store your API keys in Azure Key Vault instead of configuration files or environment variables. Key Vault provides secure storage for secrets, keys, and certificates, with access policies that control who can read or modify them. Applications retrieve secrets at runtime using the Key Vault SDK, eliminating hardcoded secrets from your source code.</p>
+<p>The integration pattern follows three steps. First, store the AI service key as a secret in Key Vault. Second, grant the application's identity read access to the Key Vault secrets using an access policy. Third, modify the application to retrieve the secret from Key Vault instead of reading from configuration.</p>
+
+<pre><code>// C# - retrieving secrets from Key Vault
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+
+var vaultUrl = new Uri("https://kv-ai102-study.vault.azure.net/");
+var client = new SecretClient(vaultUrl, new DefaultAzureCredential());
+
+// Retrieve the AI service key from Key Vault
+KeyVaultSecret secret = client.GetSecret("vision-service-key");
+string visionKey = secret.Value;
+
+// Use the key to create the Vision client
+var credential = new AzureKeyCredential(visionKey);
+var endpoint = Environment.GetEnvironmentVariable("VISION_ENDPOINT");
+var imageClient = new ImageAnalysisClient(new Uri(endpoint), credential);</code></pre>
+
+<pre><code># Python - retrieving secrets from Key Vault
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+
+vault_url = "https://kv-ai102-study.vault.azure.net/"
+credential = DefaultAzureCredential()
+client = SecretClient(vault_url=vault_url, credential=credential)
+
+# Retrieve the AI service key from Key Vault
+vision_key = client.get_secret("vision-service-key").value
+
+# Use the key to create the Vision client
+from azure.ai.vision import ImageAnalysisClient
+from azure.core.credentials import AzureKeyCredential
+
+endpoint = os.environ["VISION_ENDPOINT"]
+image_client = ImageAnalysisClient(
+    endpoint=endpoint,
+    credential=AzureKeyCredential(vision_key)
+)</code></pre>
+
+<h2>Role-Based Access Control for AI Services</h2>
+<p>RBAC for Azure AI services lets you assign granular permissions to users, groups, service principals, and managed identities. Microsoft defines several built-in roles for Cognitive Services:</p>
+
+<table>
+<tr><th>Role Name</th><th>Permissions</th><th>Use Case</th></tr>
+<tr><td>Cognitive Services Contributor</td><td>Full access to create, read, update, and delete resources</td><td>AI administrators and DevOps engineers</td></tr>
+<tr><td>Cognitive Services User</td><td>Read keys and endpoints, use the service</td><td>Application developers and runtime identities</td></tr>
+<tr><td>Cognitive Services Metrics Reader</td><td>Read-only access to metrics</td><td>Monitoring dashboards and read-only auditors</td></tr>
+<tr><td>Cognitive Services Custom Vision Contributor</td><td>Full access to Custom Vision projects and training</td><td>Data scientists training custom models</td></tr>
+<tr><td>Cognitive Services Custom Vision Labeler</td><td>Access to label images in Custom Vision</td><td>Labeling teams</td></tr>
+<tr><td>Cognitive Services Custom Vision Trainer</td><td>View, train, and publish Custom Vision models</td><td>Model training role</li></td></tr>
+<tr><td>Cognitive Services Custom Vision Deployment</td><td>Publish and unpublish Custom Vision models</td><td>Release management</td></tr>
+</table>
+
+<p>You can also create custom roles when the built-in roles do not provide the exact permissions you need. Custom roles define a set of allowed actions (e.g., <code>Microsoft.CognitiveServices/accounts/read</code>) and can be scoped to a subscription, resource group, or individual resource.</p>
+
+<div class="exam-tip">
+<h3>Exam Tip: RBAC Scenario Questions</h3>
+<p>Exam questions frequently present a scenario with multiple personas (developer, data scientist, operator) and ask which role to assign to each. Remember that the Cognitive Services User role is sufficient for application code that calls the APIs, while the Contributor role is needed for creating and managing the resources themselves. The Custom Vision roles are more granular than the general Cognitive Services roles.</p>
+</div>
+
+<h2>Monitoring with Azure Monitor</h2>
+<p>Azure Monitor aggregates metrics and logs from Azure resources, including AI services. For each AI service, Azure Monitor automatically collects platform metrics such as Total Calls, Successful Calls, Failed Calls, Data In, Data Out, and Latency (Response Time). These metrics are available in the Azure portal under the "Metrics" blade of the AI service resource. You can chart metrics over time, pin them to dashboards, and create alert rules that trigger when a metric crosses a threshold.</p>
+<p>Metric alerts are critical for production AI solutions. Common alert rules include:</p>
+<ul>
+<li><strong>Rate limit threshold:</strong> Trigger when the call rate approaches 80% of the service limit.</li>
+<li><strong>Error rate spike:</strong> Trigger when the percentage of failed calls exceeds 5% over a five-minute window.</li>
+<li><strong>Latency breach:</strong> Trigger when the average response time exceeds a threshold like 2000 milliseconds.</li>
+<li><strong>Throttled requests:</strong> Trigger when HTTP 429 responses occur, indicating the rate limit was exceeded.</li>
+</ul>
+<p>The following Azure CLI command creates a metric alert that fires when the number of failed calls exceeds 10 in a five-minute window:</p>
+<pre><code>az monitor metrics alert create \
+    --name "FailedCallsAlert" \
+    --resource-group rg-ai102-study \
+    --scopes $(az cognitiveservices account show \
+        --name cv-ai102-study \
+        --resource-group rg-ai102-study \
+        --query id -o tsv) \
+    --condition "Total Failures > 10" \
+    --window-size 5m \
+    --evaluation-frequency 1m \
+    --action-groups "/subscriptions/.../actionGroups/my-ag"</code></pre>
+
+<h2>Diagnostic Settings and Log Analytics</h2>
+<p>While metrics provide aggregated data, diagnostic logs provide detailed records of individual requests. Enabling diagnostic logging requires configuring diagnostic settings on the AI service resource. You choose which log categories to collect and where to send them.</p>
+<p>The available log categories for Azure AI services include:</p>
+<ul>
+<li><strong>Audit:</strong> Records all authenticated API requests. Each log entry includes the timestamp, caller IP address, operation name, HTTP method, URI, status code, response size, and duration.</li>
+<li><strong>RequestResponse:</strong> Logs the request and response payloads for debugging. Enable this only temporarily because it captures potentially sensitive data and generates large volumes of log data.</li>
+<li><strong>AllMetrics:</strong> Sends platform metrics to the destination, enabling you to query metrics using Log Analytics queries alongside log data.</li>
+</ul>
+<p>You can send logs to three destinations. Log Analytics Workspace enables rich Kusto Query Language queries across logs from multiple resources. Azure Storage provides low-cost archival for compliance. Azure Event Hub streams logs to third-party monitoring tools like Splunk or Datadog.</p>
+<p>To configure diagnostic settings using the Azure CLI:</p>
+<pre><code>az monitor diagnostic-settings create \
+    --name "ai102-logs" \
+    --resource $(az cognitiveservices account show \
+        --name cv-ai102-study \
+        --resource-group rg-ai102-study \
+        --query id -o tsv) \
+    --logs '[{"category":"Audit","enabled":true}]' \
+    --workspace /subscriptions/.../workspaces/log-analytics-ws</code></pre>
+
+<h2>Querying Diagnostic Logs with KQL</h2>
+<p>Once diagnostic logs flow into a Log Analytics workspace, you can query them using Kusto Query Language (KQL). The following query retrieves the most recent 100 calls, showing the timestamp, caller IP, operation, and HTTP status code:</p>
+<pre><code>AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.COGNITIVESERVICES"
+| project TimeGenerated, CallerIpAddress, OperationName, HttpStatusCode
+| order by TimeGenerated desc
+| take 100</code></pre>
+<p>Use more specific queries to identify patterns:</p>
+<pre><code>// Top 10 callers by volume
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.COGNITIVESERVICES"
+| summarize CallCount = count() by CallerIpAddress
+| top 10 by CallCount desc
+
+// Failed requests in the last hour
+AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.COGNITIVESERVICES"
+| where HttpStatusCode >= 400
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, CallerIpAddress, OperationName, HttpStatusCode, ResultSignature
+| order by TimeGenerated desc</code></pre>
+
+<h2>Rate Limits and Throttling</h2>
+<p>Every Azure AI service enforces rate limits at the resource level. For the Free F0 tier, the limit is typically 20 calls per minute. For the Standard S0 tier, the limit varies by service and region, ranging from 10 to several thousand calls per second. When you exceed the limit, the service returns HTTP 429 (Too Many Requests) with a <code>Retry-After</code> header indicating the number of seconds to wait before retrying.</p>
+<p>Your application should implement retry logic with exponential backoff when it receives a 429 response. The Azure SDKs include built-in retry policies that handle this automatically. You can configure the retry policy parameters such as the maximum number of retries, delay between retries, and the retry mode (fixed or exponential).</p>
+<pre><code>// C# - configuring retry policy in the SDK
+using Azure;
+using Azure.AI.TextAnalytics;
+
+var options = new TextAnalyticsClientOptions
+{
+    Retry =
+    {
+        Mode = RetryMode.Exponential,
+        MaxRetries = 5,
+        Delay = TimeSpan.FromSeconds(1),
+        MaxDelay = TimeSpan.FromSeconds(30)
+    }
+};
+var client = new TextAnalyticsClient(
+    new Uri(endpoint),
+    new AzureKeyCredential(key),
+    options);</code></pre>
+
+<h2>Cost Governance</h2>
+<p>Cost management for AI services involves three activities: setting budgets, creating cost alerts, and analyzing spending patterns. Azure Cost Management provides a unified view of spending across all services.</p>
+<p>Create a budget in the Azure portal under "Cost Management + Billing" with a monthly amount and alert thresholds at 50%, 90%, and 100% of the budget. Configure action groups to send email notifications when thresholds are crossed. For production applications, create budgets at the resource group level to track AI spending separately from other resources.</p>
+<p>To analyze costs, use the Cost Analysis view. Filter by service name (e.g., "Cognitive Services") to see the breakdown by resource, region, and pricing tier. The Cost Analysis data also shows trends over time, helping you identify unexpected spikes before they become budget problems.</p>
+
+<div class="note">
+<p>commitment tiers offer significant savings for predictable workloads. When you purchase a commitment tier, you commit to a specific monthly throughput and receive a lower per-transaction rate. The commitment tier pricing applies 24 hours after purchase. If your traffic drops below the committed amount, you still pay for the full commitment.</p>
+</div>
+
+<h2>Compliance and Data Residency</h2>
+<p>Different regions have different data residency requirements. Some organizations require that all AI processing occurs within specific geographic boundaries. Azure AI services are available in most Azure regions, but not all services are available in all regions. You should check the Azure Products by Region page to confirm availability for the specific AI services your solution needs.</p>
+<p>For data residency, pay attention to where your data is processed and stored. When you call an Azure AI service in a specific region, your data is processed in that region. For container deployments, all processing occurs locally within the container, which addresses data residency concerns because data never leaves the host machine. However, the container still requires periodic billing updates to Azure.</p>
+<p>The exam may present scenarios where you must choose between cloud APIs and containers based on data residency, connectivity, or compliance requirements. Containers are always the right choice when the data must not leave the premises.</p>
+
+<h2>Security Best Practices Summary</h2>
+<p>The following checklist summarizes the security measures you should implement for production AI solutions:</p>
+<ul>
+<li>Use private endpoints to keep traffic within your virtual network.</li>
+<li>Disable public network access when private endpoints are configured.</li>
+<li>Use managed identities instead of keys for authentication where possible.</li>
+<li>Store keys in Key Vault when managed identities are not available.</li>
+<li>Assign the least privileged RBAC role to each identity.</li>
+<li>Enable diagnostic logging and send logs to a Log Analytics workspace.</li>
+<li>Create metric alerts for error rate, throttling, and latency.</li>
+<li>Set up budgets and cost alerts to prevent unexpected charges.</li>
+<li>Rotate API keys regularly using Key Vault integration.</li>
+<li>Apply network security groups to restrict outbound traffic from containers.</li>
+</ul>
+
+<div class="exercise">
+<h3>Exercise: Configure Diagnostic Logging and Create a Metric Alert</h3>
+<p>Using the AI service you provisioned in Chapter 1 or Chapter 2, perform the following steps. First, navigate to the Diagnostic settings blade and create a new diagnostic setting. Enable the Audit log category and send it to a new Log Analytics workspace. Second, navigate to the Alerts blade and create a new metric alert rule that fires when the total number of failed calls exceeds 5 in any 5-minute period. Configure the alert to send an email to your own address. Third, induce a failure by calling the service with an invalid key using curl or a REST client. Wait for the alert to trigger and verify you received the email notification.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Security, monitoring, and governance form the operational backbone of any Azure AI solution. Network isolation with private endpoints, authentication via managed identities or Key Vault, and granular RBAC permissions protect your services from unauthorized access. Azure Monitor metrics and diagnostic logs provide visibility into service health and usage patterns. Budgets and cost alerts prevent financial surprises. Together, these practices ensure that your AI solution is secure, observable, and cost-effective. The next chapter begins our deep dive into specific AI capabilities, starting with Azure AI Vision for image analysis.</p>
+
+<nav>
+<a href="2-azure-ai-services-overview.html">&larr; Previous: Azure AI Services Overview</a>
+<a href="4-computer-vision.html">Next: Azure AI Vision: Image Analysis &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>5. Dataproc &amp; Managed Spark - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>5. Dataproc &amp; Managed Spark</h1>
+<p class="tag">Chapter 5</p>
+
+<h2>What is Dataproc?</h2>
+<p><strong>Dataproc</strong> is Google Cloud's managed service for <strong>Apache Spark</strong>, <strong>Hadoop</strong>, <strong>Flink</strong>, <strong>Presto/Trino</strong>, and related open-source data processing frameworks. It gives you clusters of virtual machines pre-installed with these engines, managed for you — you create a cluster, submit jobs, and let it scale or shut down. You pay for the underlying VMs plus a small managed service fee.</p>
+
+<p>Dataproc is the natural home on GCP for workloads that already run on open-source tools (especially those migrating from AWS EMR, as we'll cover in Chapter 13).</p>
+
+<h2>When to Use Dataproc vs Dataflow vs BigQuery</h2>
+<table>
+<tr><th>Tool</th><th>Best For</th><th>Model</th></tr>
+<tr><td>BigQuery</td><td>SQL analytics, warehouse workloads, BI</td><td>Serverless SQL</td></tr>
+<tr><td>Dataflow</td><td>Streaming and batch pipelines with Beam (portable code, unified model)</td><td>Serverless, autoscaling</td></tr>
+<tr><td>Dataproc</td><td>Open-source Spark/Hadoop/Flink workloads, ML with PySpark, migrating EMR jobs</td><td>Managed VMs, full engine control</td></tr>
+</table>
+
+<p>Choose Dataproc when you have existing Spark code, need specific engine versions, use ML libraries that require Spark, or want control over cluster configuration. Choose Dataflow for new unified batch+stream pipelines. Choose BigQuery when SQL is enough.</p>
+
+<h2>Cluster Types</h2>
+<ul>
+<li><strong>Standard cluster:</strong> a long-running cluster of master + worker VMs, used for many jobs. Simple but can waste money when idle.</li>
+<li><strong>Single node cluster:</strong> one VM runs both master and worker roles — ideal for development and small jobs.</li>
+<li><strong>Ephemeral (transient) clusters:</strong> created per job, deleted when the job finishes. The cost-efficient default for scheduled batch jobs.</li>
+<li><strong>Autoscaling clusters:</strong> workers scale up and down based on utilization. Requires careful sizing of secondary worker pools.</li>
+</ul>
+
+<pre><code># Create an ephemeral cluster and run a job in one step
+gcloud dataproc jobs submit pyspark \
+  --cluster=my-cluster \
+  --region=us-central1 \
+  gs://my-bucket/etl.py
+
+# Cluster itself is created via:
+gcloud dataproc clusters create my-cluster \
+  --region=us-central1 \
+  --master-machine-type n2-standard-4 \
+  --worker-machine-type n2-standard-8 \
+  --num-workers 4</code></pre>
+
+<h2>Job Submission</h2>
+<p>Dataproc supports several job types: PySpark, Spark (Scala/Java), Spark SQL, Hadoop MapReduce, Hive, Pig, Flink, Trino/Presto, and shell. Jobs can be submitted:</p>
+<ul>
+<li>Via the <strong>gcloud CLI</strong> or console (for manual runs).</li>
+<li>Via the <strong>REST API</strong> from Cloud Composer/Airflow (the production pattern).</li>
+<li>As <strong>Workflow Templates</strong> — predefined job sequences with dependencies, parameters, and orchestration, which Composer/Airflow can trigger.</li>
+</ul>
+
+<pre><code># Submit Spark SQL job
+gcloud dataproc jobs submit spark-sql \
+  --cluster=my-cluster --region=us-central1 \
+  --file=gs://my-bucket/queries.sql</code></pre>
+
+<h2>Components and Customization</h2>
+<ul>
+<li><strong>Optional components:</strong> Jupyter, Zeppelin, Docker, Anaconda, Presto, Flink, Zookeeper, etc. — enabled at cluster creation.</li>
+<li><strong>Initialization actions:</strong> scripts that run on cluster VMs at startup (install packages, mount drives, configure clients).</li>
+<li><strong>Custom images:</strong> pre-built images with your libraries for faster, reproducible startup.</li>
+</ul>
+
+<pre><code># Enable Jupyter notebook component
+gcloud dataproc clusters create ml-cluster \
+  --region=us-central1 \
+  --optional-components=JUPYTER \
+  --enable-component-gateway</code></pre>
+
+<h2>Integrating with BigQuery and GCS</h2>
+<p>Dataproc natively reads and writes Google services:</p>
+<ul>
+<li><strong>GCS:</strong> the <code>gs://</code> filesystem is available out of the box — Spark jobs read/write files directly (no copying to HDFS).</li>
+<li><strong>BigQuery:</strong> the Spark BigQuery connector (<code>com.google.cloud.spark.bigquery</code>) lets Spark DataFrames read and write BigQuery tables with the Storage Read/Write API. This is how you bridge "Spark processing" and "warehouse analytics".</li>
+<li><strong>Pub/Sub:</strong> the Spark Pub/Sub connector enables streaming ingestion.</li>
+</ul>
+
+<pre><code># PySpark: read from BigQuery
+df = spark.read.format("bigquery").option("table", "myproj.analytics.orders").load()
+# write back
+df.write.format("bigquery").option("table", "myproj.analytics.orders_processed").mode("append").save()</code></pre>
+
+<h2>Cost Management</h2>
+<ul>
+<li>Prefer <strong>ephemeral clusters</strong> for scheduled jobs — pay only while jobs run.</li>
+<li>Use <strong>preemptible (spot) workers</strong> for fault-tolerant, cost-sensitive workloads — they can be reclaimed, so design jobs to tolerate it.</li>
+<li>Right-size VMs: monitor CPU/memory with Cloud Monitoring and adjust.</li>
+<li>Use <strong>secondary worker pools</strong> (scaled-down spot nodes without HDFS) for pure compute.</li>
+<li>Turn off idle standard clusters via scheduled autoscaling.</li>
+</ul>
+
+<div class="note">
+<strong>Cost math example:</strong> An ephemeral cluster with 1 master (n2-standard-4) + 4 workers (n2-standard-8), running 2 hours/day: roughly 5 vCPUs master + 32 worker vCPUs × 2h/day × ~30 days — a small fraction of leaving a 24x7 cluster running. Ephemeral clusters commonly cut Dataproc bills by 60-90%.
+</div>
+
+<h2>High Availability and Reliability</h2>
+<ul>
+<li><strong>HA clusters</strong> add multiple masters so driver/coordination failures don't stop the cluster.</li>
+<li><strong>Job retries:</strong> design Spark jobs as idempotent so a retried run is safe.</li>
+<li><strong>Cloud Monitoring + Logging:</strong> cluster metrics, job status, and logs in one place; alert on job failures.</li>
+<li><strong>Workflow templates</strong> provide retry and failure policies at the sequence level.</li>
+</ul>
+
+<h2>Dataproc Serverless</h2>
+<p><strong>Dataproc Serverless</strong> runs Spark batch workloads without managing clusters at all: you submit a job with a runtime and resource limits, and Google provisions compute for you. No cluster creation or deletion — ideal for teams that want the Spark API without cluster operations. Choose between managed clusters (control) and serverless (simplicity).</p>
+
+<h2>Migration Note for AWS Users</h2>
+<p>If you are coming from AWS: Dataproc is the managed equivalent of <strong>EMR</strong> (covered in detail in Chapter 13). Cluster-level concepts, Spark job code, and Hive tables port over directly — the main change is the console/CLI/API and networking (VPC, IAM, service accounts instead of instance roles).</p>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Using Dataproc's free tier budget: (1) create a single-node cluster with Jupyter enabled, (2) run a small PySpark job that reads a public CSV from GCS, does a group-by, and writes Parquet back to GCS, (3) run the same data through the Spark BigQuery connector into a BigQuery table, (4) submit the same job via a Workflow Template and via a simple curl to the API. Document cluster create time, job time, and what the cluster cost by the hour.
+</div>
+
+<nav>
+  <a href="4-bigquery-advanced.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="6-pyspark.html">Next: PySpark for Data Engineering &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

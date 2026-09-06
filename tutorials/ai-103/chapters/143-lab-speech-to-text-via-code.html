@@ -1,0 +1,124 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>143. Lab - Speech to Text via Code - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 143</span>
+<h1>Lab - Speech to Text via Code</h1>
+<p>In this lab you will transcribe a pre-recorded audio file using the Azure Speech SDK from Python. This is the batch-style workflow: you point the SDK at a local audio file, it runs recognition, and you print the transcript together with confidence scores and word-level timings. You will need an Azure AI Speech resource with its key and region, which you can create in the portal or with the Azure CLI.</p>
+
+<h2>What You Will Build</h2>
+<p>You will write a small Python program that:</p>
+<ul>
+<li>Loads a WAV audio file from disk.</li>
+<li>Sends it to the Speech service for recognition.</li>
+<li>Prints the recognized text and the overall confidence.</li>
+<li>Prints per-word detail, including start and end times.</li>
+</ul>
+
+<div class="exercise">
+<h3>Exercise: Transcribing an audio file with the Speech SDK</h3>
+
+<h3>Step 1 — Create the Speech resource</h3>
+<p>If you do not already have a Speech resource, create one. From the Azure portal, search for <strong>Speech services</strong> and create a new resource, or run this from your terminal:</p>
+<pre><code>az cognitiveservices account create \
+  --name speech103 \
+  --resource-group rg-ai103 \
+  --kind SpeechServices \
+  --sku F0 \
+  --location eastus \
+  --yes</code></pre>
+<p>Note the endpoint, key, and region of the resource — you will paste them into the script as environment variables.</p>
+
+<h3>Step 2 — Prepare the audio file</h3>
+<p>Create a folder for the lab and place an audio recording of clear speech in it, for example <code>sample.wav</code>. You can record a short sentence with any recorder and export it as a WAV file. Keep it short — a few seconds of clean speech is enough for this exercise.</p>
+
+<h3>Step 3 — Install the Speech SDK</h3>
+<p>Create a Python virtual environment and install the Speech package:</p>
+<pre><code>python -m venv .venv
+.\.venv\Scripts\activate
+pip install azure-cognitiveservices-speech</code></pre>
+
+<h3>Step 4 — Write the transcription script</h3>
+<p>Create a file named <code>transcribe_file.py</code> with the code below. The script reads the key and region from environment variables, so no secret is hard-coded.</p>
+<pre><code>import os
+
+import azure.cognitiveservices.speech as speechsdk
+
+SPEECH_KEY = os.environ.get("YOUR_SPEECH_KEY", "")
+SPEECH_REGION = os.environ.get("YOUR_SPEECH_REGION", "")
+AUDIO_FILE = os.environ.get("AUDIO_FILE", "sample.wav")
+
+if not SPEECH_KEY or not SPEECH_REGION:
+    raise SystemExit("Set YOUR_SPEECH_KEY and YOUR_SPEECH_REGION first.")
+
+speech_config = speechsdk.SpeechConfig(
+    subscription=SPEECH_KEY,
+    region=SPEECH_REGION,
+)
+speech_config.speech_recognition_language = "en-US"
+
+audio_config = speechsdk.audio.AudioConfig(filename=AUDIO_FILE)
+recognizer = speechsdk.SpeechRecognizer(
+    speech_config=speech_config,
+    audio_config=audio_config,
+)
+
+result = recognizer.recognize_once()
+
+if result.reason == speechsdk.ResultReason.RecognizedSpeech:
+    print("Transcript:", result.text)
+    print("Confidence:", result.properties[
+        speechsdk.PropertyId.SpeechServiceResponse_JsonResult
+    ])
+elif result.reason == speechsdk.ResultReason.NoMatch:
+    print("No speech was recognized.")
+elif result.reason == speechsdk.ResultReason.Canceled:
+    cancellation = speechsdk.CancellationDetails(result)
+    print(f"Canceled: {cancellation.reason}")
+    print("Error details:", cancellation.error_details)</code></pre>
+
+<h3>Step 5 — Run it</h3>
+<p>Set the environment variables and run the script:</p>
+<pre><code>$env:YOUR_SPEECH_KEY = "PASTE_YOUR_KEY_HERE"
+$env:YOUR_SPEECH_REGION = "eastus"
+$env:AUDIO_FILE = "sample.wav"
+python transcribe_file.py</code></pre>
+<p>You should see the transcript of your recording printed to the console.</p>
+</div>
+
+<h2>Reading the Detailed Result</h2>
+<p>The printed confidence value is the raw JSON payload the service returned. Open it up and you will find not only the full transcript but also <code>NBest</code> alternatives and a <code>Words</code> array with each word's <code>Offset</code> and <code>Duration</code>, expressed in hundreds of nanoseconds. That timing information is what lets you build word-for-word subtitles or jump a video to the moment a specific phrase was spoken.</p>
+
+<div class="tip">
+<p>To see the structured payload on its own, add a couple of lines that parse it with <code>json</code> and pretty-print it. Inspecting the raw result is the fastest way to learn what the service gives you beyond the plain text.</p>
+</div>
+
+<h2>What Can Go Wrong</h2>
+<ul>
+<li><strong>Authentication errors:</strong> double-check the key and region; the key must come from the Speech resource, not a generic AI services key.</li>
+<li><strong>Empty results:</strong> your audio may be too quiet, too short, or in a language other than the configured recognition language.</li>
+<li><strong>Unsupported format:</strong> if you point the SDK at a format it cannot parse, try converting the file to PCM WAV at 16 kHz first.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>You transcribed a pre-recorded audio file with the Azure Speech SDK using <code>SpeechConfig</code>, <code>AudioConfig</code>, and <code>SpeechRecognizer</code>. The <code>recognize_once</code> pattern is the simplest request-response call in the SDK. In the next lab you will move from files to a live microphone, where results stream back in real time.</p>
+<nav>
+<a href="142-speech-to-text.html">&larr; Previous: Speech to Text</a><a href="144-lab-real-time-speech-recognition.html">Next: Lab - Real-Time Speech Recognition &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

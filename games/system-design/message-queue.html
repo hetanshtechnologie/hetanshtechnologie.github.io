@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Message Queue Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:1000px;margin:24px auto;padding:0 16px}
+.flow-diagram{display:flex;align-items:center;justify-content:center;gap:12px;margin:20px 0;flex-wrap:wrap}
+.producer,.queue,.consumer{background:#1e293b;border:2px solid #334155;border-radius:12px;padding:14px;text-align:center;min-width:120px}
+.producer{border-color:#4ade80}
+.queue{border-color:#fbbf24;flex:1;max-width:300px}
+.consumer{border-color:#38bdf8}
+.flow-label{font-size:11px;color:#94a3b8;margin-bottom:4px}
+.flow-name{font-size:13px;font-weight:600;color:#f8fafc}
+.arrow{color:#475569;font-size:24px}
+.message-stream{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;overflow:hidden}
+.message-stream h3{font-size:14px;margin-bottom:12px}
+.messages{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px}
+.message{background:#334155;border-radius:6px;padding:6px 12px;font-size:11px;white-space:nowrap;border-left:3px solid;animation:msgIn .4s;flex-shrink:0}
+.msg-order{border-color:#4ade80}
+.msg-email{border-color:#38bdf8}
+.msg-payment{border-color:#a78bfa}
+.msg-notification{border-color:#fbbf24}
+@keyframes msgIn{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:translateX(0)}}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.queue-visual{display:flex;gap:8px;justify-content:center;margin:12px 0}
+.queue-slot{background:#334155;border-radius:8px;padding:8px 16px;font-size:12px;border:2px solid transparent;transition:all .2s}
+.queue-slot.filled{border-color:#fbbf24;animation:msgIn .3s}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>Message Queue Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/15</div>
+<div class="hud-item"><span id="throughput">0</span>Throughput</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="scenario-card">
+<h3 id="scenario-title">Message Routing</h3>
+<p id="scenario-desc">Route messages to the correct consumer/topic.</p>
+</div>
+<div class="flow-diagram">
+<div class="producer"><div class="flow-label">Producer</div><div class="flow-name" id="producer-name">API Server</div></div>
+<div class="arrow">→</div>
+<div class="queue"><div class="flow-label">Queue</div><div class="flow-name" id="queue-name">message-queue</div><div class="queue-visual" id="queue-visual"></div></div>
+<div class="arrow">→</div>
+<div class="consumer"><div class="flow-label">Consumer</div><div class="flow-name" id="consumer-name">Worker</div></div>
+</div>
+<div class="message-stream">
+<h3>Message Stream</h3>
+<div class="messages" id="messages"></div>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Queue Master!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=15,throughput=0,answered=false;
+const scenarios=[
+{title:"Order Processing",desc:"New order placed. Which consumer handles fulfillment?",message:"order.created",msgType:"order",consumers:["Order Fulfillment","Email Service","Inventory Check","Analytics"],correct:"Order Fulfillment",reason:"Orders must be processed by the fulfillment service first"},
+{title:"Payment Webhook",desc:"Payment confirmed by Stripe. Where does this go?",message:"payment.confirmed",msgType:"payment",consumers:["Payment Handler","Order Service","Notification Service","Audit Log"],correct:"Payment Handler",reason:"Payment webhooks go to the payment handler for processing"},
+{title:"User Signup",desc:"New user registered. What's the first consumer?",message:"user.registered",msgType:"email",consumers:["Welcome Email","User Profile Setup","Analytics","Credit Service"],correct:"User Profile Setup",reason:"User profile setup should happen before sending emails"},
+{title:"Inventory Update",desc:"Product stock changed. Route to consumers.",message:"inventory.updated",msgType:"notification",consumers:["Inventory Service","Price Calculator","Search Indexer","Notification Service"],correct:"Inventory Service",reason:"Inventory updates should go to the inventory service"},
+{title:"Search Query",desc:"User searched for products. Which consumer?",message:"search.query",msgType:"order",consumers:["Search Service","Analytics","Recommendation Engine","Cache Warmer"],correct:"Search Service",reason:"Search queries go to the search service"},
+{title:"Email Bounce",desc:"Email bounced back. Route appropriately.",message:"email.bounced",msgType:"email",consumers:["Email Handler","User Service","Compliance Service","Notification Service"],correct:"Email Handler",reason:"Bounced emails should be handled by the email service"},
+{title:"Refund Request",desc:"Customer requested refund. Where to?",message:"order.refund",msgType:"payment",consumers:["Refund Service","Order Service","Customer Support","Finance"],correct:"Refund Service",reason:"Refund requests go to the dedicated refund service"},
+{title:"Session Expired",desc:"User session timed out.",message:"session.expired",msgType:"notification",consumers:["Session Manager","Auth Service","Analytics","Cache Cleaner"],correct:"Session Manager",reason:"Session cleanup goes to the session manager"},
+{title:"File Upload",desc:"User uploaded a profile picture.",message:"file.uploaded",msgType:"notification",consumers:["File Processor","Thumbnail Generator","CDN Uploader","User Service"],correct:"File Processor",reason:"File uploads first go to the file processor"},
+{title:"Metrics Push",desc:"Application metrics ready for aggregation.",message:"metrics.push",msgType:"analytics",consumers:["Metrics Aggregator","Alert Manager","Dashboard Service","Log Store"],correct:"Metrics Aggregator",reason:"Metrics should be aggregated first"},
+{title:"Cache Invalidation",desc:"Cache key expired. Which consumer?",message:"cache.expired",msgType:"notification",consumers:["Cache Warmer","Data Sync","Query Engine","Notification Service"],correct:"Data Sync",reason:"Cache invalidation triggers data synchronization"},
+{title:"Scheduled Report",desc:"Daily report generation triggered.",message:"report.scheduled",msgType:"analytics",consumers:["Report Generator","Email Sender","Data Aggregator","PDF Builder"],correct:"Report Generator",reason:"Scheduled reports go to the report generator"},
+{title:"Webhook Retry",desc:"Third-party webhook failed, retrying.",message:"webhook.retry",msgType:"order",consumers:["Webhook Handler","Dead Letter Queue","Alert Service","Retry Manager"],correct:"Retry Manager",reason:"Failed webhooks go to the retry manager"},
+{title:"Audit Event",desc:"Security event needs audit logging.",message:"security.audit",msgType:"notification",consumers:["Audit Logger","Security Service","Alert Manager","Compliance"],correct:"Audit Logger",reason:"Security events go to the audit logger"},
+{title:"Data Pipeline",desc:"Raw data ready for ETL processing.",message:"data.ingest",msgType:"analytics",consumers:["ETL Pipeline","Data Validator","Schema Registry","Storage"],correct:"ETL Pipeline",reason:"Raw data goes to the ETL pipeline"}
+];
+let msgCounter=0;
+function init(){score=0;round=0;throughput=0;msgCounter=0;startRound();}
+function startRound(){
+answered=false;
+const s=scenarios[round%scenarios.length];
+document.getElementById('scenario-title').textContent=s.title;
+document.getElementById('scenario-desc').textContent=s.desc;
+document.getElementById('producer-name').textContent=s.message.split('.')[0].charAt(0).toUpperCase()+s.message.split('.')[0].slice(1)+' Service';
+document.getElementById('queue-name').textContent=s.message.split('.')[0]+'.events';
+document.getElementById('consumer-name').textContent=s.correct;
+// Add message to stream
+const msgEl=document.getElementById('messages');
+msgEl.innerHTML+=`<div class="message msg-${s.msgType}">${s.message} #${++msgCounter}</div>`;
+msgEl.scrollLeft=msgEl.scrollWidth;
+// Queue visual
+const qv=document.getElementById('queue-visual');
+qv.innerHTML=[1,2,3,4,5].map(i=>`<div class="queue-slot ${i<=2?'filled':''}">${i<=2?s.message.split('.')[0]:'—'}</div>`).join('');
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+document.getElementById('choices').innerHTML=s.consumers.map(c=>`<button class="choice-btn" onclick="answer('${c}','${s.correct}','${s.reason}')">${c}</button>`).join('');
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect){score+=10;throughput++;}else{score=Math.max(0,score-3);}
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+document.getElementById('throughput').textContent=throughput;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;document.getElementById('throughput').textContent=0;
+document.getElementById('messages').innerHTML='';
+}
+init();
+</script>
+</body>
+</html>

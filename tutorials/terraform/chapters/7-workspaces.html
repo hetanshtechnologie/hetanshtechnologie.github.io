@@ -1,0 +1,912 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 7: Workspaces &amp; Environments — Terraform eBook</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+
+<h1>Chapter 7: Workspaces &amp; Environment Separation</h1>
+
+<p>Running a single Terraform configuration against a single environment is a learning exercise. Real projects need <strong>multiple environments</strong>&mdash;development, staging, production, and more&mdash;each with its own state, its own variable values, and ideally its own blast radius. This chapter covers every major strategy for environment separation, from Terraform's built-in workspaces to the directory-based and backend-based patterns used in production.</p>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 id="why-separation">7.1 Why Environment Separation Matters</h2>
+
+<p>If you point one set of state files at your production database while a developer runs <code>terraform apply</code> from a feature branch, you are one accidental merge away from an outage. Separation exists for three reasons:</p>
+
+<ol>
+  <li><strong>Safety.</strong> Each environment has its own state, so a broken apply in dev cannot corrupt prod.</li>
+  <li><strong>Configuration drift.</strong> Dev and prod may legitimately differ (instance sizes, replica counts, feature flags). Isolating configs lets each environment evolve independently.</li>
+  <li><strong>Access control.</strong> Developers may be allowed to destroy dev infrastructure but must never touch prod without approval.</li>
+</ol>
+
+<div class="diagram">
+<pre>
+┌──────────────────────────────────────────────────────────────────┐
+│                     Environment Separation                      │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌────────────┐      ┌────────────┐      ┌────────────┐       │
+│   │    DEV     │      │  STAGING   │      │   PROD     │       │
+│   │            │      │            │      │            │       │
+│   │ tfstate   │      │ tfstate   │      │ tfstate   │       │
+│   │ variables │      │ variables │      │ variables │       │
+│   │ backend   │      │ backend   │      │ backend   │       │
+│   └────────────┘      └────────────┘      └────────────┘       │
+│        │                    │                    │               │
+│        ▼                    ▼                    ▼               │
+│   ┌─────────┐         ┌─────────┐         ┌─────────┐          │
+│   │ AWS Dev │         │AWS Stage│         │AWS Prod │          │
+│   │ Account │         │ Account │         │ Account │          │
+│   └─────────┘         └─────────┘         └─────────┘          │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<p>Without separation, a single <code>terraform destroy</code> or mis-scoped <code>apply</code> can take down production. The strategies below exist to prevent exactly that.</p>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 id="workspaces">7.2 Terraform Workspaces</h2>
+
+<p>Workspaces are Terraform's <em>built-in</em> mechanism for managing multiple states from the same configuration. Every Terraform root module starts in the <code>default</code> workspace, but you can create more.</p>
+
+<h3>How Workspaces Work</h3>
+
+<p>Workspaces are essentially <strong>named state files</strong>. The same <code>main.tf</code>, <code>variables.tf</code>, and <code>outputs.tf</code> are shared, but each workspace maintains its own state. When you switch workspaces, Terraform swaps the state file behind the scenes.</p>
+
+<div class="diagram">
+<pre>
+  terraform/
+  ├── main.tf          ← shared across all workspaces
+  ├── variables.tf     ← shared across all workspaces
+  └── terraform.tfstate.d/
+      ├── default/     ← default workspace state
+      │   └── terraform.tfstate
+      ├── dev/         ← dev workspace state
+      │   └── terraform.tfstate
+      └── prod/        ← prod workspace state
+          └── terraform.tfstate
+</pre>
+</div>
+
+<h3>CLI Commands</h3>
+
+<table>
+  <thead>
+    <tr><th>Command</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>terraform workspace list</code></td><td>List all workspaces; current one marked with <code>*</code></td></tr>
+    <tr><td><code>terraform workspace new dev</code></td><td>Create a new workspace named <code>dev</code> and switch to it</td></tr>
+    <tr><td><code>terraform workspace select dev</code></td><td>Switch to an existing workspace</td></tr>
+    <tr><td><code>terraform workspace delete dev</code></td><td>Delete a workspace (must not be current)</td></tr>
+    <tr><td><code>terraform workspace show</code></td><td>Print the current workspace name</td></tr>
+  </tbody>
+</table>
+
+<h3>Using Workspaces in Config</h3>
+
+<p>You can reference the current workspace inside configuration using the <code>terraform.workspace</code> built-in:</p>
+
+<pre><code>locals {
+  env = terraform.workspace
+
+  instance_type = terraform.workspace == "prod" ? "m5.xlarge" : "t3.medium"
+
+  tags = {
+    Environment = terraform.workspace
+    ManagedBy   = "terraform"
+    Project     = "myapp"
+  }
+}
+
+resource "aws_instance" "app" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = local.instance_type
+  tags          = local.tags
+}</code></pre>
+
+<p>This works, but it quickly becomes unwieldy. Every environment-specific value ends up in <code>if/else</code> conditionals scattered throughout your code.</p>
+
+<h3>Workspace Limitations</h3>
+
+<table>
+  <thead>
+    <tr><th>Limitation</th><th>Why It Matters</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Shared configuration</td><td>All workspaces run the exact same code; you cannot have a <code>prod</code>-only resource.</td></tr>
+    <tr><td>Conditional logic sprawl</td><td>Differences between environments require <code>terraform.workspace == "..."</code> conditionals everywhere.</td></tr>
+    <tr><td>No access isolation</td><td>Anyone who can run Terraform can switch to any workspace (including prod).</td></tr>
+    <tr><td>Local state by default</td><td>Workspaces only isolate state when using the local backend; remote backends add complexity.</td></tr>
+    <tr><td>Hard to review</td><td>A <code>plan</code> in the <code>prod</code> workspace looks identical to one in <code>dev</code>—easy to misread.</td></tr>
+  </tbody>
+</table>
+
+<p>Because of these limitations, workspaces are best reserved for <strong>ephemeral or personal environments</strong> (e.g., feature-branch previews). For anything long-lived, use directory-based or backend-based separation.</p>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 id="directory-based">7.3 Directory-Based Separation (Recommended)</h2>
+
+<p>The industry-standard approach is to give <strong>each environment its own directory</strong> (or its own set of variable files) so that each environment has an independent configuration and state.</p>
+
+<div class="diagram">
+<pre>
+terraform/
+├── modules/
+│   ├── vpc/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   ├── ecs/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── outputs.tf
+│   └── rds/
+│       ├── main.tf
+│       ├── variables.tf
+│       └── outputs.tf
+├── envs/
+│   ├── dev/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── backend.hcl
+│   ├── staging/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── backend.hcl
+│   └── prod/
+│       ├── main.tf
+│       ├── variables.tf
+│       ├── outputs.tf
+│       └── backend.hcl
+└── Makefile
+</pre>
+</div>
+
+<h3>Full Example: envs/dev/main.tf</h3>
+
+<pre><code>terraform {
+  required_version = "&gt;= 1.5.0"
+
+  backend "s3" {
+    bucket         = "myapp-terraform-state"
+    key            = "dev/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+
+  default_tags {
+    tags = {
+      Environment = "dev"
+      ManagedBy   = "terraform"
+      Project     = "myapp"
+    }
+  }
+}
+
+module "vpc" {
+  source = "../../modules/vpc"
+
+  vpc_cidr        = var.vpc_cidr
+  azs             = var.azs
+  environment     = "dev"
+  enable_nat_gateway = false
+}
+
+module "ecs" {
+  source = "../../modules/ecs"
+
+  vpc_id          = module.vpc.vpc_id
+  private_subnets = module.vpc.private_subnets
+  public_subnets  = module.vpc.public_subnets
+  environment     = "dev"
+  task_cpu        = 256
+  task_memory     = 512
+  desired_count   = 1
+}
+
+module "rds" {
+  source = "../../modules/rds"
+
+  vpc_id          = module.vpc.vpc_id
+  subnet_ids      = module.vpc.private_subnets
+  environment     = "dev"
+  instance_class  = "db.t3.micro"
+  engine_version  = "15.4"
+  multi_az        = false
+  backupRetention = 1
+}</code></pre>
+
+<h3>Full Example: envs/prod/main.tf</h3>
+
+<pre><code>terraform {
+  required_version = "&gt;= 1.5.0"
+
+  backend "s3" {
+    bucket         = "myapp-terraform-state"
+    key            = "prod/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+
+  default_tags {
+    tags = {
+      Environment = "prod"
+      ManagedBy   = "terraform"
+      Project     = "myapp"
+    }
+  }
+}
+
+module "vpc" {
+  source = "../../modules/vpc"
+
+  vpc_cidr        = var.vpc_cidr
+  azs             = var.azs
+  environment     = "prod"
+  enable_nat_gateway = true
+}
+
+module "ecs" {
+  source = "../../modules/ecs"
+
+  vpc_id          = module.vpc.vpc_id
+  private_subnets = module.vpc.private_subnets
+  public_subnets  = module.vpc.public_subnets
+  environment     = "prod"
+  task_cpu        = 1024
+  task_memory     = 2048
+  desired_count   = 3
+}
+
+module "rds" {
+  source = "../../modules/rds"
+
+  vpc_id          = module.vpc.vpc_id
+  subnet_ids      = module.vpc.private_subnets
+  environment     = "prod"
+  instance_class  = "db.r6g.xlarge"
+  engine_version  = "15.4"
+  multi_az        = true
+  backupRetention = 30
+}</code></pre>
+
+<p>Notice how the same modules are consumed but with different parameter values. No conditionals, no <code>terraform.workspace</code> checks&mdash;each file is self-documenting.</p>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 id="variable-files">7.4 Variable Files Per Environment</h2>
+
+<p>If your environments differ only in <strong>values</strong> (not in which resources exist), you can use a single root module with <strong>variable files</strong> per environment.</p>
+
+<pre><code>terraform/
+├── main.tf
+├── variables.tf
+├── outputs.tf
+├── dev.tfvars
+├── staging.tfvars
+└── prod.tfvars</code></pre>
+
+<h3>dev.tfvars</h3>
+
+<pre><code>aws_region      = "us-east-1"
+vpc_cidr        = "10.0.0.0/16"
+azs             = ["us-east-1a", "us-east-1b"]
+
+task_cpu        = 256
+task_memory     = 512
+desired_count   = 1
+
+db_instance_class = "db.t3.micro"
+db_multi_az       = false
+db_backup_retention = 1
+
+enable_nat_gateway = false</code></pre>
+
+<h3>prod.tfvars</h3>
+
+<pre><code>aws_region      = "us-east-1"
+vpc_cidr        = "10.100.0.0/16"
+azs             = ["us-east-1a", "us-east-1b", "us-east-1c"]
+
+task_cpu        = 1024
+task_memory     = 2048
+desired_count   = 3
+
+db_instance_class = "db.r6g.xlarge"
+db_multi_az       = true
+db_backup_retention = 30
+
+enable_nat_gateway = true</code></pre>
+
+<h3>Plan and Apply with Variable Files</h3>
+
+<pre><code># Initialize
+terraform init
+
+# Plan for dev
+terraform plan -var-file="dev.tfvars" -out=dev.tfplan
+
+# Apply for dev
+terraform apply dev.tfplan
+
+# Plan for prod
+terraform plan -var-file="prod.tfvars" -out=prod.tfplan
+
+# Apply for prod
+terraform apply prod.tfplan</code></pre>
+
+<div class="callout">
+  <strong>Important:</strong> With variable files you share <em>one</em> state file across environments unless you also use separate backends. Combine this pattern with backend-per-environment (Section 7.5) for full isolation.
+</div>
+
+<h3>Environment-Scoped Variable Defaults</h3>
+
+<p>For cleaner defaults, set environment-aware values inside the configuration itself:</p>
+
+<pre><code>variable "env" {
+  description = "Environment name"
+  type        = string
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class"
+  type        = string
+  default     = null
+}
+
+locals {
+  env_defaults = {
+    dev = {
+      db_instance_class  = "db.t3.micro"
+      db_multi_az        = false
+      db_backup_retention = 1
+    }
+    staging = {
+      db_instance_class  = "db.t3.medium"
+      db_multi_az        = false
+      db_backup_retention = 7
+    }
+    prod = {
+      db_instance_class  = "db.r6g.xlarge"
+      db_multi_az        = true
+      db_backup_retention = 30
+    }
+  }
+
+  env_config = lookup(local.env_defaults, var.env, {})
+}
+
+resource "aws_db_instance" "main" {
+  instance_class    = coalesce(var.db_instance_class, local.env_config.db_instance_class)
+  multi_az          = local.env_config.db_multi_az
+  backup_retention_period = local.env_config.db_backup_retention
+}</code></pre>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 id="backend-per-env">7.5 Backend-Per-Environment Pattern</h2>
+
+<p>Backend configuration in Terraform <strong>cannot use variables</strong>. This means you cannot write a single <code>backend "s3" { key = var.env }</code>. The workaround is to use <strong>partial configuration</strong> and initialize per environment.</p>
+
+<h3>Partial Backend Configuration</h3>
+
+<h4>envs/dev/backend.hcl</h4>
+
+<pre><code>bucket         = "myapp-terraform-state"
+key            = "dev/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "terraform-locks"
+encrypt        = true</code></pre>
+
+<h4>envs/prod/backend.hcl</h4>
+
+<pre><code>bucket         = "myapp-terraform-state"
+key            = "prod/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "terraform-locks"
+encrypt        = true</code></pre>
+
+<h3>Initialize with Backend Config</h3>
+
+<pre><code># Dev
+terraform init -backend-config="envs/dev/backend.hcl"
+
+# Staging
+terraform init -backend-config="envs/staging/backend.hcl"
+
+# Prod
+terraform init -backend-config="envs/prod/backend.hcl"</code></pre>
+
+<p>Each environment's state lives under a different key in the same S3 bucket, giving you full isolation with a single bucket.</p>
+
+<div class="diagram">
+<pre>
+  S3 Bucket: myapp-terraform-state
+  ┌──────────────────────────────────────┐
+  │  dev/terraform.tfstate               │ ← dev state
+  │  staging/terraform.tfstate           │ ← staging state
+  │  prod/terraform.tfstate              │ ← prod state
+  └──────────────────────────────────────┘
+  DynamoDB Table: terraform-locks
+  ┌──────────────────────────────────────┐
+  │  dev/terraform.tfstate    → Lock-ID  │
+  │  staging/terraform.tfstate → Lock-ID │
+  │  prod/terraform.tfstate   → Lock-ID  │
+  └──────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>Using Different S3 Buckets or Accounts</h3>
+
+<p>For organizations that need <strong>cross-account isolation</strong> (e.g., production state in a separate AWS account), each environment's <code>backend.hcl</code> can point to a different bucket and role ARN:</p>
+
+<pre><code># envs/prod/backend.hcl
+bucket         = "prod-terraform-state-account-123456789012"
+key            = "infra/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "prod-terraform-locks"
+encrypt        = true
+role_arn       = "arn:aws:iam::123456789012:role/TerraformStateAccess"
+</code></pre>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 id="promotion-workflows">7.6 Environment Promotion Workflows</h2>
+
+<p>Changes should flow in one direction: <strong>dev → staging → prod</strong>. A promotion workflow codifies that flow.</p>
+
+<div class="diagram">
+<pre>
+┌───────────────────────────────────────────────────────────────────────┐
+│                   Environment Promotion Pipeline                      │
+│                                                                       │
+│   1. Developer pushes Terraform change to feature branch               │
+│                         │                                              │
+│                         ▼                                              │
+│   2. CI runs: terraform fmt -check → terraform validate → tflint      │
+│                         │                                              │
+│                         ▼                                              │
+│   3. CI runs: terraform plan -var-file="dev.tfvars" -out=dev.plan     │
+│                         │                                              │
+│                         ▼                                              │
+│   4. Review dev plan → terraform apply dev.plan                        │
+│                         │                                              │
+│                         ▼                                              │
+│   5. Promote: terraform plan -var-file="staging.tfvars" -out=stage    │
+│                         │                                              │
+│                         ▼                                              │
+│   6. Review staging plan → terraform apply stage.plan                  │
+│                         │                                              │
+│                         ▼                                              │
+│   7. Promote: terraform plan -var-file="prod.tfvars" -out=prod.plan   │
+│                         │                                              │
+│                         ▼                                              │
+│   8. Manual approval gate → terraform apply prod.plan                  │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>GitHub Actions Example</h3>
+
+<pre><code># .github/workflows/terraform.yml
+name: "Terraform"
+
+on:
+  push:
+    branches: [main]
+    paths: ["terraform/**"]
+  pull_request:
+    branches: [main]
+    paths: ["terraform/**"]
+
+env:
+  TF_VERSION: "1.6.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - name: Terraform Format
+        run: terraform fmt -check -recursive
+        working-directory: terraform
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: terraform
+
+  plan-dev:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEV_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Terraform Init
+        run: terraform init -backend-config="envs/dev/backend.hcl"
+        working-directory: terraform
+      - name: Terraform Plan
+        run: terraform plan -var-file="envs/dev/variables.tfvars" -out=dev.tfplan
+        working-directory: terraform
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve dev.tfplan
+        working-directory: terraform
+
+  plan-prod:
+    needs: plan-dev
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.PROD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Terraform Init
+        run: terraform init -backend-config="envs/prod/backend.hcl"
+        working-directory: terraform
+      - name: Terraform Plan
+        run: terraform plan -var-file="envs/prod/variables.tfvars" -out=prod.tfplan
+        working-directory: terraform
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve prod.tfplan
+        working-directory: terraform</code></pre>
+
+<h3>Makefile for Local Workflow</h3>
+
+<pre><code>.PHONY: init plan apply destroy
+
+# Initialize for a specific environment
+init:
+	terraform init -backend-config=envs/$(ENV)/backend.hcl
+
+# Plan for a specific environment
+plan:
+	terraform plan -var-file=envs/$(ENV)/variables.tfvars -out=$(ENV).tfplan
+
+# Apply for a specific environment
+apply:
+	terraform apply $(ENV).tfplan
+
+# Destroy for a specific environment (with confirmation)
+destroy:
+	terraform destroy -var-file=envs/$(ENV)/variables.tfvars
+
+# Usage:
+#   make init ENV=dev
+#   make plan ENV=dev
+#   make apply ENV=dev
+#   make plan ENV=prod
+#   make apply ENV=prod</code></pre>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 id="drift-detection">7.7 Drift Detection Across Environments</h2>
+
+<p><strong>Drift</strong> occurs when real infrastructure diverges from what Terraform recorded in state. Drift detection means periodically running <code>terraform plan</code> to find and reconcile these differences.</p>
+
+<h3>Why Drift Happens</h3>
+
+<ul>
+  <li>Someone manually changes a security group rule in the AWS console.</li>
+  <li>An autoscaling group adds an instance that Terraform doesn't track.</li>
+  <li>A backup or snapshot is created outside of Terraform.</li>
+  <li>Cloud provider makes automatic changes (e.g., instance replacement after health check failure).</li>
+</ul>
+
+<h3>Drift Detection with <code>terraform plan</code></h3>
+
+<pre><code># Run plan for each environment and check the exit code
+terraform init -backend-config="envs/dev/backend.hcl"
+terraform plan -var-file="envs/dev/variables.tfvars" -detailed-exitcode
+
+# Exit codes:
+#   0 = no changes
+#   1 = error
+#   2 = changes detected (drift found)</code></pre>
+
+<h3>Automated Drift Detection Schedule</h3>
+
+<pre><code># .github/workflows/drift-detection.yml
+name: "Drift Detection"
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"  # Every Monday at 8:00 UTC
+
+jobs:
+  detect-drift:
+    strategy:
+      matrix:
+        env: [dev, staging, prod]
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.6.0"
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      - name: Terraform Init
+        run: terraform init -backend-config="envs/${{ matrix.env }}/backend.hcl"
+        working-directory: terraform
+      - name: Check for Drift
+        id: drift
+        run: |
+          terraform plan -var-file="envs/${{ matrix.env }}/variables.tfvars" -detailed-exitcode -no-color | tee drift-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+        working-directory: terraform
+        continue-on-error: true
+      - name: Create Issue if Drift Detected
+        if: steps.drift.outputs.exit_code == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Drift detected in ${{ matrix.env }} environment`,
+              body: 'Terraform detected changes outside of Terraform management.\n\n```\n' + require('fs').readFileSync('terraform/drift-output.txt', 'utf8') + '\n```',
+              labels: ['drift', '${{ matrix.env }}']
+            })</code></pre>
+
+<h3>Drift Mitigation Strategies</h3>
+
+<table>
+  <thead>
+    <tr><th>Strategy</th><th>Description</th><th>Best For</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Scheduled plan</strong></td><td>Run <code>terraform plan</code> on a schedule (daily/weekly) and alert on drift</td><td>All environments</td></tr>
+    <tr><td><strong>Webhook-driven</strong></td><td>Trigger plan on cloud events (e.g., CloudTrail → EventBridge → Lambda)</td><td>Critical prod resources</td></tr>
+    <tr><td><strong>Import changes</strong></td><td>Use <code>terraform import</code> to bring manual changes into state</td><td>One-off fixes</td></tr>
+    <tr><td><strong>Terraform Cloud run triggers</strong></td><td>Auto-run plans when upstream workspaces change</td><td>Cross-workspace dependencies</td></tr>
+    <tr><td><strong>Prevent drift at the source</strong></td><td>IAM policies deny manual console changes; only Terraform role can modify</td><td>Strictly managed environments</td></tr>
+  </tbody>
+</table>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 id="best-practices">7.8 Best Practices for Managing Multiple Environments</h2>
+
+<h3>1. Use Modules as the Single Source of Truth</h3>
+
+<p>All environments should consume the same modules. Differences live in variable values, not in duplicated code.</p>
+
+<pre><code># Good: same module, different variables
+module "ecs" {
+  source = "../../modules/ecs"
+  # ... variables differ per environment
+}
+
+# Bad: duplicated module code in each env directory
+module "ecs" {
+  source = "./modules/ecs"  # copy-pasted, drifts over time
+}</code></pre>
+
+<h3>2. Enforce State Locking</h3>
+
+<p>Always use a remote backend with locking (DynamoDB for S3, native lock for Terraform Cloud). This prevents concurrent applies from corrupting state.</p>
+
+<h3>3. Separate AWS Accounts for Production</h3>
+
+<p>The strongest isolation is separate AWS accounts per environment. This provides:</p>
+
+<ul>
+  <li>Independent billing</li>
+  <li>Independent IAM policies</li>
+  <li>Blast radius limited to a single account</li>
+  <li>Network-level isolation (no accidental cross-VPC communication)</li>
+</ul>
+
+<div class="diagram">
+<pre>
+  ┌─────────────────────────────────────────────────┐
+  │              AWS Organizations                   │
+  │                                                  │
+  │  ┌──────────────┐  ┌──────────────┐            │
+  │  │  Dev Account  │  │ Stage Account │            │
+  │  │  111111111111 │  │  222222222222 │            │
+  │  └──────────────┘  └──────────────┘            │
+  │                                                  │
+  │  ┌──────────────┐  ┌──────────────┐            │
+  │  │ Prod Account │  │  Shared acct  │            │
+  │  │  333333333333 │  │  444444444444 │            │
+  │  └──────────────┘  │ (DNS, IAM)   │            │
+  │                     └──────────────┘            │
+  └─────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>4. Tag Everything Consistently</h3>
+
+<pre><code>locals {
+  common_tags = {
+    Environment = var.environment
+    ManagedBy   = "terraform"
+    Project     = var.project_name
+    CostCenter  = var.cost_center
+    Team        = var.team
+  }
+}
+
+resource "aws_instance" "app" {
+  tags = merge(local.common_tags, {
+    Name = "${var.environment}-app-${var.instance_number}"
+  })
+}</code></pre>
+
+<h3>5. Use Sentinel or OPA for Policy Enforcement</h3>
+
+<p>In larger organizations, use policy-as-code to enforce constraints across all environments:</p>
+
+<pre><code># Sentinel policy: enforce instance size limits
+import "tfplan/v2" as tfplan
+
+instance_size_by_env = {
+  "dev":    ["t3.micro", "t3.small"],
+  "staging": ["t3.medium", "t3.large"],
+  "prod":   ["m5.large", "m5.xlarge", "m5.2xlarge"],
+}
+
+main = rule {
+  all tfplan.resource_changes as _, rc {
+    rc.type == "aws_instance" implies
+      rc.change.after.instance_type in
+        instance_size_by_env[rc.change.tags.Environment]
+  }
+}</code></pre>
+
+<h3>6. Maintain a Runbook</h3>
+
+<p>Document the promotion workflow, approval requirements, and rollback procedures for each environment:</p>
+
+<table>
+  <thead>
+    <tr><th>Environment</th><th>Approval Required</th><th>Maintenance Window</th><th>Rollback SLA</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>dev</td><td>None (auto-apply on merge)</td><td>Anytime</td><td>15 minutes</td></tr>
+    <tr><td>staging</td><td>Tech lead sign-off</td><td>Business hours</td><td>30 minutes</td></tr>
+    <tr><td>prod</td><td>Team lead + SRE approval</td><td>Maintenance window</td><td>Immediate rollback</td></tr>
+  </tbody>
+</table>
+
+<h3>7. Version-Pin Everything</h3>
+
+<pre><code>terraform {
+  required_version = "= 1.6.2"  # Pin exact version, not just ">= 1.5"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 5.0"  # Allow patch updates, block minors
+    }
+  }
+}</code></pre>
+
+<h3>8. Remote State Data Sources for Cross-Environment Reads</h3>
+
+<p>Sometimes a staging deployment needs to reference dev resources (or prod needs to reference shared DNS). Use <code>terraform_remote_state</code> or <code>data "terraform_remote_state"</code>:</p>
+
+<pre><code>data "terraform_remote_state" "shared" {
+  backend = "s3"
+  config = {
+    bucket = "myapp-terraform-state"
+    key    = "shared/terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+
+# Reference shared DNS zone
+resource "aws_route53_record" "api" {
+  zone_id = data.terraform_remote_state.shared.outputs.dns_zone_id
+  name    = "api.${var.environment}.example.com"
+  type    = "CNAME"
+  ttl     = 300
+  records = [module.ecs.alb_dns_name]
+}</code></pre>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 id="summary">7.9 Summary &amp; Checklist</h2>
+
+<p>This chapter covered the major strategies for environment separation in Terraform:</p>
+
+<table>
+  <thead>
+    <tr><th>Strategy</th><th>Pros</th><th>Cons</th><th>Best For</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Workspaces</strong></td>
+      <td>Simple, built-in, no code duplication</td>
+      <td>Shared code, no access control, conditional logic sprawl</td>
+      <td>Ephemeral/preview environments</td>
+    </tr>
+    <tr>
+      <td><strong>Variable files</strong></td>
+      <td>Single codebase, clean separation of values</td>
+      <td>Shared state unless combined with backend separation</td>
+      <td>Small projects with few differences between envs</td>
+    </tr>
+    <tr>
+      <td><strong>Directory-based</strong></td>
+      <td>Full isolation, self-documenting, supports per-env configs</td>
+      <td>Code duplication at root module level</td>
+      <td>Production workloads, enterprise teams</td>
+    </tr>
+    <tr>
+      <td><strong>Backend-per-env</strong></td>
+      <td>State isolation, same code, scalable</td>
+      <td>Manual <code>init</code> per environment</td>
+      <td>Most production setups</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Chapter Checklist</h3>
+
+<ul>
+  <li>☐ Decide on a separation strategy (workspaces vs. directories vs. variable files)</li>
+  <li>☐ Configure remote state with backend-per-environment</li>
+  <li>☐ Create environment-specific variable files for all environments</li>
+  <li>☐ Extract shared infrastructure into reusable modules</li>
+  <li>☐ Set up state locking (DynamoDB or Terraform Cloud)</li>
+  <li>☐ Define a promotion workflow (dev → staging → prod) with approval gates</li>
+  <li>☐ Implement drift detection on a schedule</li>
+  <li>☐ Tag all resources consistently across environments</li>
+  <li>☐ Separate AWS accounts for production workloads</li>
+  <li>☐ Enforce policy-as-code (Sentinel/OPA) for guardrails</li>
+  <li>☐ Document the runbook: promotion, approval, and rollback procedures</li>
+  <li>☐ Pin Terraform and provider versions to prevent surprises</li>
+</ul>
+
+<div class="callout">
+  <strong>Next up:</strong> <a href="8-cicd.html">Chapter 8: CI/CD with Terraform</a> — automate your plans and applies with GitHub Actions, GitLab CI, and Atlantis.
+</div>
+
+<!-- navigation -->
+<nav style="display:flex;justify-content:space-between;margin-top:2rem;padding-top:1rem;border-top:1px solid #e5e7eb;">
+  <a href="6-modules.html" style="color:#7c3aed;text-decoration:none;">&larr; Ch 6: Modules</a>
+  <a href="8-cicd.html" style="color:#7c3aed;text-decoration:none;">Ch 8: CI/CD &rarr;</a>
+</nav>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/feedback.js"></script>
+<script src="../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

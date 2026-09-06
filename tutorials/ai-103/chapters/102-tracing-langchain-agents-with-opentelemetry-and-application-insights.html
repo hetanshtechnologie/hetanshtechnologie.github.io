@@ -1,0 +1,101 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>102. Tracing LangChain Agents with OpenTelemetry and Application Insights - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 102</span>
+<h1>Tracing LangChain Agents with OpenTelemetry and Application Insights</h1>
+<p>An agent that calls tools in a loop is hard to debug by reading its code alone. When a request goes wrong — the wrong tool selected, a failed call, a truncated answer — you want to see exactly what happened, in order, with timing. That is the job of tracing. This chapter explains how LangChain agents emit traces, how OpenTelemetry standardizes those traces, and how you can stream them into Application Insights on Azure for a queryable view of every agent run.</p>
+
+<h2>Why Agent Tracing Is Hard</h2>
+<p>A single user request can involve several model calls, multiple tool invocations, and a chain of prompt-and-response round trips. The pieces are nested: one tool call happens <em>inside</em> one model step, which happens <em>inside</em> the overall agent invocation. Without instrumentation, the only evidence you have is the final answer. If that answer is wrong, you cannot tell whether the model misread the question, a tool returned bad data, or the prompt steered it wrong.</p>
+<p>Tracing solves this by recording the whole journey as structured data: each step, its inputs, its outputs, its duration, and its parent step. You can then replay a failed request and see the exact sequence that produced it.</p>
+
+<h2>The OpenTelemetry Model</h2>
+<p>OpenTelemetry is an open, vendor-neutral standard for collecting telemetry. Two concepts matter most for tracing:</p>
+<ul>
+<li><strong>A trace</strong> represents one logical unit of work — here, one agent invocation. It has a unique ID.</li>
+<li><strong>A span</strong> is a single operation inside the trace — one model call, one tool run. Spans are nested, with a parent and children, forming a tree that mirrors the agent loop.</li>
+</ul>
+<p>Because OpenTelemetry is a standard, the spans emitted by LangChain can be consumed by any tool that understands it. The exporter decides where the data goes: Jaeger, Zipkin, Azure Monitor, or any OTLP-compatible collector.</p>
+
+<table>
+<tr><th>Concept</th><th>Meaning in an agent run</th></tr>
+<tr><td>Trace</td><td>The entire user request, end to end</td></tr>
+<tr><td>Root span</td><td>The <code>invoke</code> of the agent executor</td></tr>
+<tr><td>Child span</td><td>A single LLM call or a single tool execution</td></tr>
+<tr><td>Attributes</td><td>Model name, tool name, prompt text, token counts</td></tr>
+<tr><td>Events</td><td>Significant moments, such as a tool starting or finishing</td></tr>
+</table>
+
+<div class="note">
+<p>You already met OpenTelemetry's ideas in the earlier chapter on Foundry observability. The difference here is that LangChain lives in your own application process, so <em>your code</em> must produce the spans — the model endpoint in Foundry does not see the agent loop at all.</p>
+</div>
+
+<h2>Instrumenting LangChain</h2>
+<p>LangChain publishes an instrumentation package, <code>langchain-opentelemetry</code>, that automatically creates spans for chains, models, tools, and agents. Install it and it hooks the framework at key points:</p>
+
+<pre><code>pip install langchain-opentelemetry</code></pre>
+
+<p>Once installed, every LangChain component that supports the tracing protocol starts emitting spans when an exporter is configured. The spans appear for <code>invoke</code>, <code>stream</code>, and the agent loop, so you get the full picture without touching your agent code.</p>
+
+<div class="tip">
+<p>LangChain also has a cloud-hosted tracing service, but in this course we keep telemetry in Azure. Pointing the OpenTelemetry exporter at Application Insights gives you the same span tree inside a service you already use.</p>
+</div>
+
+<h2>Exporting to Application Insights</h2>
+<p>Application Insights is Azure's application monitoring service, and it accepts OpenTelemetry data through its Azure Monitor exporter. The configuration is a few lines in Python:</p>
+
+<pre><code>from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+exporter = AzureMonitorTraceExporter(
+    connection_string="InstrumentationKey=YOUR_INSTRUMENTATION_KEY"
+)
+provider = TracerProvider()
+provider.add_span_processor(BatchSpanProcessor(exporter))
+from opentelemetry import trace
+trace.set_tracer_provider(provider)</code></pre>
+
+<pre><code>pip install azure-monitor-opentelemetry-exporter opentelemetry-sdk</code></pre>
+
+<p>The <code>connection_string</code> comes from your Application Insights resource. To create one, go to the Azure portal, search for <strong>Application Insights</strong>, create a resource in the same subscription you have been using, and copy the <strong>Instrumentation key</strong> from the resource overview.</p>
+
+<h2>What You See in the Portal</h2>
+<p>Once requests flow, open your Application Insights resource and explore:</p>
+<ul>
+<li><strong>Transaction search / End-to-end transaction details:</strong> find an agent run by its trace ID and see the span tree — the agent root, each LLM call, each tool run, with timings.</li>
+<li><strong>Failures:</strong> any span that errored appears here, which is invaluable when a tool raised an exception you never saw at runtime.</li>
+<li><strong>Performance:</strong> latency by component tells you whether the slow part is the model, a tool, or the loop overhead.</li>
+<li><strong>Logs (KQL):</strong> query spans directly, filter by operation name, tool name, or response code, and build dashboards over time.</li>
+</ul>
+
+<div class="warn">
+<p>Trace data can include prompt text and tool inputs, which may contain personal data. Decide what you are willing to store and consider redacting sensitive attributes at the exporter before they leave your network. Retention and filtering matter as much as collection.</p>
+</div>
+
+<h2>Correlating with Foundry Telemetry</h2>
+<p>Foundry already records model calls on the server side. Combining that with your client-side LangChain trace gives you both halves of the picture: the server log shows one model request with token counts, while the Application Insights trace shows how that request fit into the agent's decision loop. The two views answer different questions — the first "how much did this call cost?", the second "why was this call made?" — and together they cover most debugging scenarios.</p>
+
+<h2>Summary</h2>
+<p>Agent tracing records the nested series of model calls and tool runs behind a single user request. OpenTelemetry provides the standard span model, LangChain emits the spans automatically, and the Azure Monitor exporter streams them into Application Insights, where you can search failures, measure performance, and query the full trace tree. In the next chapter you will meet LangGraph, an orchestration framework that brings graph-based control flow to the same agent patterns.</p>
+<nav>
+<a href="101-lab-building-an-agent-using-langchain.html">&larr; Previous: Lab - Building an agent using LangChain</a><a href="103-introduction-to-langgraph.html">Next: Introduction to LangGraph &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

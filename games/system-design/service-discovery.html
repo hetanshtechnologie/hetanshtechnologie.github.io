@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Service Discovery Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:1000px;margin:24px auto;padding:0 16px}
+.registry{background:#1e293b;border:2px solid #fbbf24;border-radius:12px;padding:20px;margin:16px 0}
+.registry h3{color:#fbbf24;margin-bottom:12px;font-size:14px;display:flex;align-items:center;gap:8px}
+.registry h3::before{content:'';width:10px;height:10px;background:#fbbf24;border-radius:50%;display:inline-block}
+.service-list{display:flex;gap:8px;flex-wrap:wrap}
+.service-entry{background:#334155;border-radius:8px;padding:8px 14px;font-size:12px;display:flex;align-items:center;gap:8px;border:2px solid transparent;animation:fadeIn .3s}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+.service-entry.healthy{border-color:#4ade80}
+.service-entry.unhealthy{border-color:#f87171}
+.service-entry.unknown{border-color:#fbbf24}
+.status-dot{width:8px;height:8px;border-radius:50%}
+.status-dot.green{background:#4ade80}
+.status-dot.red{background:#f87171}
+.status-dot.yellow{background:#fbbf24}
+.service-detail{font-size:10px;color:#94a3b8}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.health-check{display:flex;justify-content:center;gap:8px;margin:12px 0}
+.hc-dot{width:12px;height:12px;border-radius:50%;animation:blink 1s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>Service Discovery</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/15</div>
+<div class="hud-item"><span id="healthy">5</span>Healthy</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="registry" id="registry">
+<h3>Service Registry</h3>
+<div class="service-list" id="service-list"></div>
+</div>
+<div class="health-check" id="health-check"></div>
+<div class="scenario-card">
+<h3 id="scenario-title">Service Discovery Event</h3>
+<p id="scenario-desc"></p>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Discovery Expert!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=15,answered=false;
+let services=[
+{name:"user-service",instances:[{id:"u1",host:"10.0.1.1",port:8080,status:"healthy"},{id:"u2",host:"10.0.1.2",port:8080,status:"healthy"}]},
+{name:"order-service",instances:[{id:"o1",host:"10.0.2.1",port:8081,status:"healthy"},{id:"o2",host:"10.0.2.2",port:8081,status:"healthy"}]},
+{name:"payment-service",instances:[{id:"p1",host:"10.0.3.1",port:8082,status:"healthy"}]},
+{name:"notification-service",instances:[{id:"n1",host:"10.0.4.1",port:8083,status:"healthy"}]},
+{name:"search-service",instances:[{id:"s1",host:"10.0.5.1",port:8084,status:"healthy"}]}
+];
+const scenarios=[
+{desc:"New instance of user-service joins the cluster. What should happen?",action:"register",service:"user-service",correct:"Register in registry, start health checks",reason:"New instances register and begin health checking immediately."},
+{desc:"payment-service fails health check 3 times. What to do?",action:"deregister",service:"payment-service",correct:"Remove from registry, notify dependents",reason:"Failed health checks trigger deregistration."},
+{desc:"order-service wants to call user-service. How to find it?",action:"discover",service:"user-service",correct:"Query registry for healthy instances",reason:"Services query registry for healthy endpoints."},
+{desc:"user-service instance going down for maintenance.",action:"graceful",service:"user-service",correct:"Deregister gracefully before shutdown",reason:"Graceful shutdown ensures in-flight requests complete."},
+{desc:"Network partition isolates payment-service. Registry sees it as down.",action:"partition",service:"payment-service",correct:"Keep in registry with 'unknown' status",reason:"Don't deregister on temporary failures. Mark as unknown."},
+{desc:"10 new instances of search-service start simultaneously.",action:"bulk",service:"search-service",correct:"Register all, rate-limit health checks",reason:"Bulk registration needs rate-limited health checks."},
+{desc:"Client caches service list. user-service scales from 2 to 5.",action:"cache",service:"user-service",correct:"Invalidate cache, notify with push update",reason:"Cached service lists need invalidation on changes."},
+{desc:"Health check passes but service returns 500 errors.",action:"deep",service:"order-service",correct:"Add deep health check endpoint",reason:"Deep health checks verify actual functionality, not just TCP."},
+{desc:"Service discovery DNS fails. Clients can't resolve.",action:"dns",service:"all",correct:"Fall back to cached service list",reason:"Cached service lists provide resilience during discovery failures."},
+{desc:"Deploying v2 of user-service alongside v1.",action:"versioning",service:"user-service",correct:"Register with version tag, route by version",reason:"Versioned registration enables canary and blue-green deploys."},
+{desc:"notification-service overloaded. 90% CPU.",action:"overload",service:"notification-service",correct:"Reduce weight in load balancer",reason:"Overloaded instances should get less traffic."},
+{desc:"Service starts but isn't ready yet (loading cache).",action:"startup",service:"search-service",correct:"Register as 'starting', health check when ready",reason:"Startup probe distinguishes 'not ready' from 'unhealthy'."},
+{desc:"Two services need to find each other simultaneously.",action:"mutual",service:"user+order",correct:"Both query registry independently",reason:"Service discovery is client-side, not server-side."},
+{desc:"Registry itself goes down. What happens to services?",action:"registry-fail",service:"all",correct:"Services use cached endpoints",reason:"Clients should cache endpoints for registry resilience."},
+{desc:"Canary deployment: 10% traffic to v2.",action:"canary",service:"user-service",correct:"Register v2 with lower weight",reason:"Weight-based registration enables canary traffic splitting."}
+];
+function renderServices(){
+const el=document.getElementById('service-list');
+el.innerHTML=services.map(s=>s.instances.map(inst=>`<div class="service-entry ${inst.status}"><div class="status-dot ${inst.status==='healthy'?'green':inst.status==='unhealthy'?'red':'yellow'}"></div><div><div style="font-weight:600">${s.name}</div><div class="service-detail">${inst.host}:${inst.port}</div></div></div>`).join('')).join('');
+const healthyCount=services.reduce((acc,s)=>acc+s.instances.filter(i=>i.status==='healthy').length,0);
+document.getElementById('healthy').textContent=healthyCount;
+// Health check dots
+document.getElementById('health-check').innerHTML=Array.from({length:8},(_,i)=>`<div class="hc-dot" style="background:${Math.random()>.2?'#4ade80':'#f87171'};animation-delay:${i*0.1}s"></div>`).join('');
+}
+function startRound(){
+answered=false;
+const s=scenarios[round%scenarios.length];
+document.getElementById('scenario-title').textContent=`Event: ${s.action}`;
+document.getElementById('scenario-desc').textContent=s.desc;
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+document.getElementById('choices').innerHTML=[
+'Register in registry',
+'Deregister from registry',
+'Query registry for instances',
+'Update health status'
+].map(c=>`<button class="choice-btn" onclick="answer('${c}','${s.correct}','${s.reason}')">${c}</button>`).join('');
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect)score+=10;else score=Math.max(0,score-3);
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;
+}
+function init(){score=0;round=0;renderServices();startRound();}
+init();
+</script>
+</body>
+</html>

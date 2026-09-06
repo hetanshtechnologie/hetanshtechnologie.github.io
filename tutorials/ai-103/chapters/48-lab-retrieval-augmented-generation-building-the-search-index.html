@@ -1,0 +1,131 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>48. Lab - Retrieval Augmented Generation - Building the search index - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 48</span>
+<h1>Lab - Retrieval Augmented Generation - Building the search index</h1>
+<p>The search service and the index schema are ready, but the <code>cloudxeus-docs</code> index still has no documents. This lab connects to the search service from Python, creates the index from the schema file, reads the chunks produced in the data preparation lab, generates an embedding for every chunk, and uploads the documents in batches.</p>
+
+<h2>Install the SDK</h2>
+<p>The <code>azure-search-documents</code> package drives the search service from Python. It should already be in your virtual environment from the overview lab; if not:</p>
+
+<pre><code>pip install azure-search-documents openai</code></pre>
+
+<h2>Configure the Clients</h2>
+<p>Create <code>scripts/create_index.py</code> and start with configuration values. Put your search endpoint and key and your Foundry embedding deployment name into environment variables or a small config block:</p>
+
+<pre><code>import os
+import json
+import urllib.request
+from pathlib import Path
+
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+from openai import AzureOpenAI
+
+SEARCH_ENDPOINT = os.getenv("SEARCH_ENDPOINT", "https://YOUR_SEARCH_ENDPOINT.search.windows.net")
+SEARCH_KEY = os.getenv("SEARCH_KEY", "YOUR_SEARCH_ADMIN_KEY")
+INDEX_NAME = "cloudxeus-docs"
+
+embedding_client = AzureOpenAI(
+    api_key=os.getenv("AZURE_OPENAI_KEY", "YOUR_KEY"),
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", "YOUR_ENDPOINT"),
+    api_version="2024-06-01",
+)
+EMBEDDING_DEPLOYMENT = "text-embedding-3-small"</code></pre>
+
+<div class="note">
+<p>The <code>AzureOpenAI</code> client points at your Foundry model deployment. Use the same embedding model here that the index schema's <code>dimensions</code> field expects; text-embedding-3-small produces 1536 dimensions by default.</p>
+</div>
+
+<h2>Build the Index from the Schema</h2>
+<p>The schema JSON you wrote in the previous lab can create the index directly through the search REST API. A PUT request to the index endpoint creates or updates the index definition:</p>
+
+<pre><code>def create_index_from_schema() -&gt; None:
+    with Path("scripts/index_schema.json").open(encoding="utf-8") as fh:
+        schema = json.load(fh)
+    name = schema["name"]
+    url = f"{SEARCH_ENDPOINT}/indexes/{name}?api-version=2023-11-01"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(schema).encode("utf-8"),
+        method="PUT",
+        headers={"Content-Type": "application/json", "api-key": SEARCH_KEY},
+    )
+    with urllib.request.urlopen(request) as response:
+        print("HTTP", response.status)
+    print("Index ready:", name)</code></pre>
+
+<h2>Generate Embeddings</h2>
+<p>Each chunk needs a vector so vector search can compare meaning. The embedding call is a simple API call; we process chunks in batches so the calls are efficient:</p>
+
+<pre><code>def embed_texts(texts: list[str]) -&gt; list[list[float]]:
+    response = embedding_client.embeddings.create(
+        model=EMBEDDING_DEPLOYMENT,
+        input=texts,
+    )
+    return [item.embedding for item in response.data]</code></pre>
+
+<h2>Upload Documents</h2>
+<p>Read the chunk file, attach a vector to every chunk, and push them to the index in batches:</p>
+
+<pre><code>def load_documents() -&gt; list[dict]:
+    docs = []
+    with Path("data/chunks.jsonl").open(encoding="utf-8") as fh:
+        for line in fh:
+            docs.append(json.loads(line))
+    return docs
+
+docs = load_documents()
+search_client = SearchClient(SEARCH_ENDPOINT, INDEX_NAME, AzureKeyCredential(SEARCH_KEY))
+BATCH = 50
+
+for i in range(0, len(docs), BATCH):
+    batch = docs[i:i + BATCH]
+    vectors = embed_texts([d["content"] for d in batch])
+    for d, vec in zip(batch, vectors):
+        d["content_vector"] = vec
+    search_client.upload_documents(batch)
+    print(f"Uploaded {i + len(batch)}/{len(docs)}")</code></pre>
+
+<h2>Run and Verify</h2>
+<div class="exercise">
+<h3>Exercise &mdash; Populate the Index</h3>
+<ol>
+<li>Complete the script by calling the functions in order at the bottom: create the index, load the documents, upload them.</li>
+<li>Run <code>python scripts/create_index.py</code> from the project root.</li>
+<li>Watch the progress lines count up to the total number of chunks.</li>
+<li>In the portal, open <strong>Indexes</strong> &gt; <strong>cloudxeus-docs</strong> and confirm the document count matches.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>The first embedding call pays a one-time cost to load the model, so it may take a few seconds. Later calls in the same script are faster.</p>
+</div>
+
+<div class="warn">
+<p>If you already created the index with the CLI in the previous lab, the PUT request above will update it in place. If the schema changed, re-run the upload so the stored vectors match the new schema.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Your index now holds every CloudXeus chunk together with its embedding. The pipeline you just ran is the indexing half of RAG, and it can be re-run any time the source documents change. The next lab shows the retrieval half: querying this index from Python.</p>
+<nav>
+<a href="47-lab-retrieval-augmented-generation-azure-ai-search.html">&larr; Previous: Lab - Retrieval Augmented Generation - Azure AI Search</a><a href="49-lab-retrieval-augmented-generation-searching-the-index-from-python.html">Next: Lab - Retrieval Augmented Generation - Searching the index from Python &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

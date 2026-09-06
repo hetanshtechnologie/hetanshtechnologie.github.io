@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>100. Building a LangChain agent - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 100</span>
+<h1>Building a LangChain agent</h1>
+<p>A LangChain agent is an application that lets a model decide, at runtime, what actions to take. Where a plain chain always follows the same fixed pipeline, an agent evaluates each incoming request and chooses whether to answer directly or to call a tool first — often in several steps. This chapter explains the pieces LangChain uses to build that decision loop and how they fit together.</p>
+
+<h2>What Makes a LangChain Agent</h2>
+<p>An agent in LangChain is built from a small set of components:</p>
+<ul>
+<li><strong>The model:</strong> the LLM that does the reasoning. It reads the user's request, decides whether a tool is needed, and eventually composes the final answer.</li>
+<li><strong>Tools:</strong> callable functions the model may invoke. A tool can be a Python function, an API wrapper, a database query, or any code you expose with a name and description.</li>
+<li><strong>The prompt:</strong> instructions that explain the agent's role, describe the tools available, and set the rules for producing tool calls.</li>
+<li><strong>The executor:</strong> the runtime loop that keeps calling the model and executing tools until the model produces a final answer.</li>
+</ul>
+
+<div class="note">
+<p>The key idea is that <em>the model decides</em>. You do not hard-code the sequence of steps. Instead you provide the tools and let the model reason about which one fits the user's intent. This is what separates an agent from a scripted chain.</p>
+</div>
+
+<h2>How Tool Calling Works</h2>
+<p>Modern chat models support a feature called tool calling (also called function calling). The model does not execute code — it <em>requests</em> a call by emitting a structured message that names a tool and supplies arguments. Your application inspects that request, runs the corresponding function, and sends the result back to the model as a tool-result message.</p>
+<p>This round trip is what gives an agent its power. The model can see a tool's output, reconsider, and either call another tool or write the final answer. Each round trip is called a <em>step</em>, and an agent may take several steps for one user request.</p>
+
+<pre><code># A tool exposed to the model
+from langchain_core.tools import tool
+
+@tool
+def convert_celsius_to_fahrenheit(celsius: float) -&gt; float:
+    """Convert a temperature in Celsius to Fahrenheit."""
+    return celsius * 9 / 5 + 32</code></pre>
+
+<p>Notice what the <code>@tool</code> decorator does. It converts an ordinary function into a tool that LangChain can describe to the model: the function name becomes the tool name, the docstring becomes the description, and the type hints define the expected arguments. The model reads exactly that metadata when it decides whether to call the tool.</p>
+
+<h2>Binding Tools to the Model</h2>
+<p>Before the model can request a tool call, it must know the tools exist. You attach them to the model with <code>bind_tools</code>:</p>
+
+<pre><code>from langchain_openai import AzureChatOpenAI
+
+model = AzureChatOpenAI(
+    azure_endpoint="YOUR_ENDPOINT",
+    api_key="YOUR_KEY",
+    api_version="2024-06-01",
+    deployment_name="ai103-chat-deploy",
+)
+
+model_with_tools = model.bind_tools([convert_celsius_to_fahrenheit])</code></pre>
+
+<p>Calling the bound model returns either a final text answer or one or more <code>tool_calls</code> — structured requests naming a tool and its arguments. The presence of tool calls is your signal to execute the tools and feed the results back.</p>
+
+<h2>The Agent Loop</h2>
+<p>LangChain wraps the entire decision cycle in an <code>AgentExecutor</code>. The executor runs the model, checks whether tool calls were requested, executes them, appends the results to the conversation, and repeats — stopping when the model finally answers without requesting a tool.</p>
+
+<pre><code>from langchain_core.prompts import ChatPromptTemplate
+from langchain.agents import AgentExecutor, create_tool_calling_agent
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant with access to tools."),
+    ("placeholder", "{chat_history}"),
+    ("human", "{input}"),
+    ("placeholder", "{agent_scratchpad}"),
+])
+
+agent = create_tool_calling_agent(model_with_tools, [convert_celsius_to_fahrenheit], prompt)
+executor = AgentExecutor(agent=agent, tools=[convert_celsius_to_fahrenheit], verbose=True)
+
+result = executor.invoke({"input": "What is 25 degrees Celsius in Fahrenheit?"})
+print(result["output"])</code></pre>
+
+<p>Two placeholders in the prompt are special. <code>{agent_scratchpad}</code> is where the executor stores the trail of tool calls and their results — the model reads it to decide the next step. <code>{chat_history}</code> holds the conversation so the agent can remember what was said earlier in the same session.</p>
+
+<div class="tip">
+<p>The <code>verbose=True</code> flag prints every model call and tool invocation as the agent runs. It is an excellent way to watch the decision loop in action while you are learning, and it is the first thing to enable when debugging a stubborn agent.</p>
+</div>
+
+<h2>Why Multiple Steps Matter</h2>
+<p>A single tool call handles many questions, but real work often needs several. Consider a request like <em>"Convert 68 degrees Fahrenheit to Celsius and double it."</em> The agent may convert first, then multiply the result — two tool steps in sequence, with the second depending on the first. The executor's loop makes this possible because each tool result becomes part of the conversation the model sees next.</p>
+
+<table>
+<tr><th>Scenario</th><th>Steps</th><th>Why the loop is needed</th></tr>
+<tr><td>Direct answer</td><td>1</td><td>The model has no tool to call, or none is relevant</td></tr>
+<tr><td>Single lookup</td><td>2</td><td>Call one tool, then answer from its output</td></tr>
+<tr><td>Multi-step task</td><td>3+</td><td>Results from earlier calls feed into later ones</td></tr>
+<tr><td>Wrong tool first</td><td>3+</td><td>The model corrects course after seeing an unexpected result</td></tr>
+</table>
+
+<h2>Handling Failure and Endless Loops</h2>
+<p>Agents are only as reliable as the reasoning behind them. Two failure modes deserve attention:</p>
+<ul>
+<li><strong>Tool errors:</strong> if a tool raises an exception, the executor can return the error to the model as a tool result. The model then explains the failure or tries a different approach, instead of crashing the whole request.</li>
+<li><strong>Runaway loops:</strong> a confused model might keep calling tools indefinitely. The <code>AgentExecutor</code> accepts <code>max_iterations</code> — the maximum number of steps before it forces a final answer. Setting a sensible limit is cheap insurance in production.</li>
+</ul>
+
+<pre><code>executor = AgentExecutor(
+    agent=agent,
+    tools=[convert_celsius_to_fahrenheit],
+    max_iterations=4,
+    handle_parsing_errors=True,
+)</code></pre>
+
+<div class="warn">
+<p>Without a step limit, a malfunctioning agent can burn tokens (and money) by looping. Always set <code>max_iterations</code> and think about what the agent should do when it cannot reach a good answer. A graceful fallback message is better than an endless tool-calling cycle.</p>
+</div>
+
+<h2>Summary</h2>
+<p>A LangChain agent combines a model, tools, a prompt, and an executor. The model decides whether to call tools, the executor runs the loop, and the conversation accumulates tool results until the model produces a final answer. Tool calling is the mechanism, the agent scratchpad is the memory of the loop, and iteration limits keep the process safe. In the next chapter you will build and run a complete agent in a hands-on lab.</p>
+<nav>
+<a href="99-lab-getting-started-with-langchain.html">&larr; Previous: Lab - Getting started with LangChain</a><a href="101-lab-building-an-agent-using-langchain.html">Next: Lab - Building an agent using LangChain &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

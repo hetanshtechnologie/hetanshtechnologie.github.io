@@ -1,0 +1,256 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>250. Lab - Retrieval Augmented Generation - Using Python - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 250</span>
+<h1>Lab - Retrieval Augmented Generation - Using Python</h1>
+<p>You have a working search index and a deployed chat model — two systems that do not yet know each other. This lab connects them in Python. You will query the index from code, use an embedding model to enable semantic retrieval, and then build the grounded prompt that produces a RAG answer. When you finish, a single Python script will implement the entire pipeline from question to sourced answer.</p>
+
+<h2>What You Will Need</h2>
+<ul>
+<li>The Azure AI Search service and <code>rag-index</code> from the previous labs, with the admin key.</li>
+<li>A deployed chat model and a deployed embedding model in Foundry, with endpoint and key.</li>
+<li>Python 3.9 or newer with the <code>azure-search-documents</code> and <code>openai</code> packages installed.</li>
+</ul>
+<pre><code>pip install azure-search-documents openai
+</code></pre>
+
+<h2>Step 1: Query the Index from Python</h2>
+<div class="exercise">
+<h3>Exercise 1: Run a keyword search with the SDK</h3>
+<ol>
+<li>Create a folder named <code>ai103-lab250</code> and open it in VS Code.</li>
+<li>Create <code>search.py</code> with the search client. Set these environment variables first:</li>
+</ol>
+<pre><code>$env:AZURE_SEARCH_ENDPOINT = "https://ai103-rag-search.search.windows.net"
+$env:AZURE_SEARCH_KEY = "YOUR_SEARCH_ADMIN_KEY"
+$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+<ol start="3">
+<li>Paste the script:</li>
+</ol>
+<pre><code>import os
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+
+search_client = SearchClient(
+    endpoint=os.environ["AZURE_SEARCH_ENDPOINT"],
+    index_name="rag-index",
+    credential=AzureKeyCredential(os.environ["AZURE_SEARCH_KEY"]),
+)
+
+results = search_client.search(search_text="return policy", top=3, include_total_count=True)
+
+print("Total matches:", results.get_count())
+for hit in results:
+    print("-", hit["title"], "| score:", round(hit["@search.score"], 3))
+</code></pre>
+<ol start="4">
+<li>Run it:</li>
+</ol>
+<pre><code>python search.py
+</code></pre>
+<p>The titles and scores come straight from the index you built. If you see zero results, your indexer may not have completed — check the indexer status as you did in the previous lab.</p>
+</div>
+
+<h2>Step 2: Embed the Query for Semantic Search</h2>
+<p>Keyword search finds exact terms. Semantic search needs the query converted to a vector, then compared against the <code>content_vector</code> field. The embedding model does that conversion.</p>
+<div class="exercise">
+<h3>Exercise 2: Vector search with an embedding model</h3>
+<p>Create <code>vector_search.py</code>. Replace <code>YOUR_EMBEDDING_DEPLOYMENT</code> with your embedding deployment name:</p>
+<pre><code>import os
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+from azure.search.documents.models import VectorizedQuery
+from openai import AzureOpenAI
+
+search_client = SearchClient(
+    endpoint=os.environ["AZURE_SEARCH_ENDPOINT"],
+    index_name="rag-index",
+    credential=AzureKeyCredential(os.environ["AZURE_SEARCH_KEY"]),
+)
+
+openai_client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+question = "What is the procedure for returning damaged goods?"
+
+embedding = openai_client.embeddings.create(
+    model="YOUR_EMBEDDING_DEPLOYMENT",
+    input=[question],
+).data[0].embedding
+
+vector_query = VectorizedQuery(
+    vector=embedding,
+    k_nearest_neighbors=3,
+    fields="content_vector",
+)
+
+results = search_client.search(
+    search_text=None,
+    vector_queries=[vector_query],
+    top=3,
+)
+
+for hit in results:
+    print("-", hit["title"], "| score:", round(hit["@search.score"], 3))
+</code></pre>
+<pre><code>python vector_search.py
+</code></pre>
+<p>Ask the same question but phrase it differently — "I bought something and it arrived broken, what do I do?" — and run again. The vector search still finds the same policy, which is exactly what keyword search would struggle with.</p>
+</div>
+
+<div class="warn">
+<p>The vector dimension of <code>content_vector</code> was set when you created the index. If your embedding model returns a different number of dimensions, the request fails with a dimension-mismatch error. Recreate the index with matching <code>dimensions</code> and re-run the indexer, then retry.</p>
+</div>
+
+<h2>Step 3: Build the Full RAG Answer</h2>
+<p>Retrieval is only half the pipeline. The retrieved text must reach the chat model inside a prompt, with instructions that keep the answer grounded in the provided context.</p>
+<div class="exercise">
+<h3>Exercise 3: Grounded question answering end to end</h3>
+<p>Create <code>rag.py</code> that retrieves, augments, and generates in one flow. Replace <code>YOUR_CHAT_DEPLOYMENT</code> and <code>YOUR_EMBEDDING_DEPLOYMENT</code>:</p>
+<pre><code>import os
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+from azure.search.documents.models import VectorizedQuery
+from openai import AzureOpenAI
+
+search_client = SearchClient(
+    endpoint=os.environ["AZURE_SEARCH_ENDPOINT"],
+    index_name="rag-index",
+    credential=AzureKeyCredential(os.environ["AZURE_SEARCH_KEY"]),
+)
+
+openai_client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+def retrieve_chunks(question: str, top: int = 3):
+    embedding = openai_client.embeddings.create(
+        model="YOUR_EMBEDDING_DEPLOYMENT",
+        input=[question],
+    ).data[0].embedding
+
+    vector_query = VectorizedQuery(
+        vector=embedding,
+        k_nearest_neighbors=top,
+        fields="content_vector",
+    )
+
+    hits = search_client.search(
+        search_text=question,
+        vector_queries=[vector_query],
+        top=top,
+        select=["title", "content"],
+    )
+    return [h["content"] for h in hits]
+
+question = "What is the return procedure for damaged items?"
+
+context = "\n\n".join(retrieve_chunks(question))
+
+response = openai_client.chat.completions.create(
+    model="YOUR_CHAT_DEPLOYMENT",
+    messages=[
+        {
+            "role": "system",
+            "content": (
+                "Answer using only the provided context. If the context does not "
+                "contain the answer, say you do not know. Never invent details."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Context:\n{context}\n\nQuestion:\n{question}",
+        },
+    ],
+)
+
+print(response.choices[0].message.content)
+</code></pre>
+<pre><code>python rag.py
+</code></pre>
+<p>Ask a question whose answer is genuinely in your uploaded documents. The model answers from the context. Now ask a question that is <em>not</em> in the documents — the model should refuse or say it does not know, rather than inventing an answer.</p>
+</div>
+
+<div class="tip">
+<p>This version also passes the raw question as <code>search_text</code>, making it a hybrid search: keyword matching and vector similarity run together and the results are merged. Hybrid retrieval is a strong default for RAG and is what production systems typically use.</p>
+</div>
+
+<h2>Step 4: Label Your Sources</h2>
+<p>Grounded answers are more trustworthy when they are traceable. Have the model cite which document it used:</p>
+<pre><code>def retrieve_with_titles(question: str, top: int = 3):
+    embedding = openai_client.embeddings.create(
+        model="YOUR_EMBEDDING_DEPLOYMENT",
+        input=[question],
+    ).data[0].embedding
+
+    vector_query = VectorizedQuery(
+        vector=embedding,
+        k_nearest_neighbors=top,
+        fields="content_vector",
+    )
+
+    hits = search_client.search(
+        search_text=question,
+        vector_queries=[vector_query],
+        top=top,
+        select=["title", "content"],
+    )
+    return [(h["title"], h["content"]) for h in hits]
+
+question = "Are refunds available on sale items?"
+
+blocks = []
+sources = []
+for title, content in retrieve_with_titles(question):
+    blocks.append(content)
+    sources.append(title)
+
+context = "\n\n".join(blocks)
+
+response = openai_client.chat.completions.create(
+    model="YOUR_CHAT_DEPLOYMENT",
+    messages=[
+        {
+            "role": "system",
+            "content": (
+                "Answer using only the provided context. End your reply with a "
+                "line listing the source document names you used."
+            ),
+        },
+        {"role": "user", "content": f"Context:\n{context}\n\nQuestion:\n{question}"},
+    ],
+)
+
+print(response.choices[0].message.content)
+</code></pre>
+
+<h2>Summary</h2>
+<p>You completed the RAG pipeline in Python: keyword and vector retrieval against the search index, embedding the query with a deployed embedding model, augmenting the prompt with retrieved context, and generating a grounded answer that refuses to guess when the context is silent. From here, the pattern scales into full applications — richer chunking, reranking, and conversation memory — but the core loop is the one you just built.</p>
+<nav>
+<a href="249-lab-retrieval-augmented-generation-implementation.html">&larr; Previous: Lab - Retrieval Augmented Generation - Implementation</a><a href="251-azure-ai-content-safety.html">Next: Azure AI Content Safety &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

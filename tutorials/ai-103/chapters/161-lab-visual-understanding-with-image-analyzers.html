@@ -1,0 +1,166 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>161. Lab - Visual Understanding with Image Analyzers - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 161</span>
+<h1>Lab - Visual Understanding with Image Analyzers</h1>
+<p>In this lab you will analyze images with Azure Content Understanding. You will register an image analyzer that produces captions, dense captions, tags, and OCR, then run it against sample photos from Python and inspect the structured results. When you finish, you will have a script that can describe any image you give it.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>Python 3.9 or newer with the <code>requests</code> library installed.</li>
+<li>Your Content Understanding <strong>endpoint</strong> and <strong>API key</strong> from the earlier labs.</li>
+<li>Two or three sample images — a photo of a scene, a product shot, and an image that contains some visible text (such as a sign or screenshot).</li>
+<li>The environment variables <code>CONTENT_UNDERSTANDING_ENDPOINT</code> and <code>CONTENT_UNDERSTANDING_KEY</code> set in your terminal.</li>
+</ul>
+
+<h2>Step 1 - Register an Image Analyzer</h2>
+<p>Unlike the prebuilt document analyzers, the image analyzer in this lab is custom, so you define which capabilities you want. The analyzer below requests a caption, dense captions, tags, people detection, and OCR:</p>
+<pre><code>{
+  "contentType": "image",
+  "description": "Describes scenes, labels regions, and reads text from images",
+  "config": {
+    "returnDetails": true,
+    "modelKind": "gpt-4o-mini"
+  },
+  "fields": {
+    "caption": { "type": "string", "method": "caption", "description": "Short sentence describing the scene" },
+    "denseCaptions": { "type": "string", "method": "denseCaptions", "description": "Captions for image regions" },
+    "tags": { "type": "array", "method": "tag", "description": "Relevant concepts in the image" },
+    "ocr": { "type": "string", "method": "ocr", "description": "Text read from the image" },
+    "people": { "type": "array", "method": "people", "description": "Detected persons with bounding boxes" }
+  }
+}
+</code></pre>
+
+<div class="note">
+<p>Capabilities vary by model and by the Content Understanding API version you use. If a capability is not accepted by your API version, check the portal's analyzer editor — the same capabilities you enable in the UI correspond to the fields shown here.</p>
+</div>
+
+<h2>Step 2 - Write the Analysis Script</h2>
+<div class="exercise">
+<h3>2.1 - Create the project</h3>
+<p>Create a folder named <code>ai103-lab161</code> and add <code>analyze_image.py</code> with the code below. It registers the analyzer, analyzes an image file, and prints a readable summary.</p>
+<pre><code>import json
+import os
+import requests
+
+ENDPOINT = os.environ["CONTENT_UNDERSTANDING_ENDPOINT"]
+KEY = os.environ["CONTENT_UNDERSTANDING_KEY"]
+API_VERSION = "2024-12-01-preview"
+MODEL_NAME = "image-scene-analyzer"
+
+ANALYZER = {
+    "contentType": "image",
+    "description": "Describes scenes, labels regions, and reads text from images",
+    "config": {"returnDetails": True, "modelKind": "gpt-4o-mini"},
+    "fields": {
+        "caption": {"type": "string", "method": "caption",
+                    "description": "Short sentence describing the scene"},
+        "denseCaptions": {"type": "string", "method": "denseCaptions",
+                          "description": "Captions for image regions"},
+        "tags": {"type": "array", "method": "tag",
+                 "description": "Relevant concepts in the image"},
+        "ocr": {"type": "string", "method": "ocr",
+                "description": "Text read from the image"},
+        "people": {"type": "array", "method": "people",
+                   "description": "Detected persons with bounding boxes"},
+    },
+}
+
+
+def ensure_analyzer():
+    url = f"{ENDPOINT}/models/{MODEL_NAME}?api-version={API_VERSION}"
+    response = requests.put(url, headers={
+        "Content-Type": "application/json",
+        "Ocp-Apim-Subscription-Key": KEY,
+    }, json=ANALYZER)
+    response.raise_for_status()
+    print(f"Analyzer ready: {response.json().get('id')}")
+
+
+def analyze_image(file_path):
+    url = f"{ENDPOINT}/models/{MODEL_NAME}:analyze?api-version={API_VERSION}"
+    with open(file_path, "rb") as fh:
+        response = requests.post(url, headers={
+            "Ocp-Apim-Subscription-Key": KEY,
+        }, files={"file": fh})
+    response.raise_for_status()
+    return response.json()
+
+
+def summarize(result):
+    fields = result["content"]["documents"][0]["fields"]
+    print("Caption:", fields["caption"]["valueString"])
+    print("Tags:", ", ".join(fields["tags"]["valueArray"]))
+    print("OCR:", fields["ocr"]["valueString"] or "(no text found)")
+    people = fields.get("people", {})
+    print("People detected:", len(people.get("valueArray", [])))
+
+
+if __name__ == "__main__":
+    ensure_analyzer()
+    result = analyze_image("scene.jpg")
+    summarize(result)
+</code></pre>
+
+<h3>2.2 - Run the script</h3>
+<p>Save your photo as <code>scene.jpg</code> (or update the filename) and run:</p>
+<pre><code>python analyze_image.py
+</code></pre>
+<p>Expect output along the lines of:</p>
+<pre><code>Analyzer ready: image-scene-analyzer
+Caption: A busy outdoor market with colorful stalls and shoppers.
+Tags: market, outdoor, shopping, people
+OCR: FRESH PRODUCE
+People detected: 4
+</code></pre>
+</div>
+
+<h2>Step 3 - Test with a Text-Heavy Image</h2>
+<p>Run the same script against an image that contains visible text, such as a photographed sign or a screenshot:</p>
+<pre><code>python -c "import analyze_image as a; a.ensure_analyzer(); print(a.analyze_image('sign.jpg'))"
+</code></pre>
+<p>Compare the <code>ocr</code> field across the two images. You will notice that the analyzer reads text that a caption-only model would ignore entirely — a strong reason to enable OCR on any image analyzer that feeds a search index.</p>
+
+<h2>Inspecting the Raw JSON</h2>
+<p>To see the full structured response, save it to a file:</p>
+<pre><code>python -c "import analyze_image as a; a.ensure_analyzer(); open('result.json','w').write(a.analyze_image('scene.jpg').__str__())"
+</code></pre>
+<p>Open <code>result.json</code> and look for the polygons attached to each people detection and dense caption. Those coordinates let an application draw boxes on the original image or crop a region for a downstream model.</p>
+
+<div class="tip">
+<p>For a quick interactive check, upload the same image in the Content Understanding section of the Foundry portal and enable the same capabilities. Comparing portal and API output for the same image is a fast way to confirm your field definitions behave as expected.</p>
+</div>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>400</code> on analyzer registration</td><td>Unsupported capability for the API version</td><td>Remove the capability or bump the <code>api-version</code>.</td></tr>
+<tr><td>Empty OCR field</td><td>The image contains no recognizable text</td><td>Use an image with clearly legible text and test again.</td></tr>
+<tr><td><code>404</code> on analyze</td><td>Analyzer name mismatch</td><td>Confirm <code>MODEL_NAME</code> matches the registered name.</td></tr>
+<tr><td>Slow responses</td><td>Large images or heavier model kinds</td><td>Downscale the image or choose a lighter model kind.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You registered a custom image analyzer, analyzed photos from Python, and inspected captions, tags, OCR, and people detections. The structured output is ready to feed a search index or an agent tool — both of which you will connect in the upcoming chapters. Next, you will look under the hood at how Content Understanding pipelines are configured, including the standard and pro modes.</p>
+<nav>
+<a href="160-visual-understanding-with-image-analyzers.html">&larr; Previous: Visual Understanding with Image Analyzers</a><a href="162-standard-mode-and-pro-mode-pipelines-in-azure-content-understanding.html">Next: Standard Mode and Pro Mode Pipelines in Azure Content Understanding &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

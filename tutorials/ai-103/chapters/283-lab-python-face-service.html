@@ -1,0 +1,173 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>283. Lab - Python - Face service - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 283</span>
+<h1>Lab - Python - Face service</h1>
+<p>In this chapter you will move from hand-written REST calls to the official Python SDK. You will write a small application that loads a photo, detects every face, draws a rectangle around each one, and prints the attributes the service recovered. This is the same pipeline you built with raw HTTP in the previous chapter, but expressed in idiomatic Python that is far easier to maintain.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>A <strong>Face resource</strong> (or multi-service Cognitive Services account) from the previous lab, with its endpoint and key.</li>
+<li><strong>Python 3.9 or newer</strong> and VS Code.</li>
+<li>A local photo with at least one clear face.</li>
+</ul>
+
+<h2>Install the Python Package</h2>
+<p>The current Face SDK for Python lives in the <code>azure-ai-vision</code> package. This package also covers other computer-vision capabilities, but the classes you need here are the ones used for face analysis. Install it with:</p>
+<pre><code>pip install azure-ai-vision
+</code></pre>
+
+<h2>Set Up the Project</h2>
+<div class="exercise">
+<h3>Step 1 - Create the folder and script</h3>
+<p>Create a folder named <code>ai103-lab283</code> and inside it a file called <code>face_detect.py</code>.</p>
+
+<h3>Step 2 - Provide your connection details</h3>
+<p>Set the endpoint and key as environment variables so they never end up hard-coded in source:</p>
+<pre><code>$env:AZURE_FACE_ENDPOINT = "https://YOUR-RESOURCE.cognitiveservices.azure.com/"
+$env:AZURE_FACE_KEY = "YOUR_KEY"
+</code></pre>
+</div>
+
+<h2>Detect Faces and Read Attributes</h2>
+<p>The SDK wraps the detection request in a small set of options objects. The vision service options carry the endpoint and credential, the source points at the image, and the analysis options tell the service which attributes to return.</p>
+<pre><code>from azure.ai.vision import VisionServiceOptions, VisionSource, FaceAnalysisOptions, FaceAnalysisFeature, VisualFeatures
+
+import os
+
+endpoint = os.environ["AZURE_FACE_ENDPOINT"]
+key = os.environ["AZURE_FACE_KEY"]
+
+service_options = VisionServiceOptions(endpoint=endpoint, key=key)
+
+analysis_options = FaceAnalysisOptions(
+    features=[
+        FaceAnalysisFeature.HEAD_POSE,
+        FaceAnalysisFeature.FACE_ATTRIBUTES,
+    ],
+    gender="female",
+    glasses="reading",
+    age="35",
+    emotion="happiness",
+)
+
+with open("photo.jpg", "rb") as stream:
+    image_bytes = stream.read()
+
+source = VisionSource(bytes=image_bytes)
+</code></pre>
+<p>Note that attribute hints like <code>gender</code> and <code>age</code> above are example values — the SDK's exact parameter names vary by preview version. The stable, documented approach is to pass the feature flags you care about and read the returned fields afterwards. The safest pattern that works across versions is to request detection plus the attributes you need, then iterate over the results:</p>
+<pre><code>from azure.ai.vision import VisionServiceOptions, VisionSource, FaceAnalysisOptions, FaceAnalysisFeature
+from azure.ai.vision.enums import VisualFeatures
+import os
+
+service_options = VisionServiceOptions(
+    endpoint=os.environ["AZURE_FACE_ENDPOINT"],
+    key=os.environ["AZURE_FACE_KEY"],
+)
+
+analysis_options = FaceAnalysisOptions(
+    features=[FaceAnalysisFeature.DETECT, FaceAnalysisFeature.FACE_ATTRIBUTES]
+)
+
+with open("photo.jpg", "rb") as stream:
+    source = VisionSource(bytes=stream.read())
+
+result = VisionSource.analyze(service_options, source, analysis_options)
+
+if result.reason == "SUCCEEDED":
+    for face in result.faces:
+        box = face.bounding_box
+        print(f"Face at x={box[0]} y={box[1]} w={box[2]} h={box[3]}")
+else:
+    print("Analysis failed:", result.reason)
+</code></pre>
+
+<div class="note">
+<p>The <code>azure-ai-vision</code> package is released as a preview and its API surface shifts between versions. If a member name no longer matches your installed version, run <code>dir(module)</code> in a REPL or check the package's own stub files to discover the current names. The concepts — service options, source, analysis options, and a results object with a face list — stay the same.</p>
+</div>
+
+<h2>Drawing Boxes Around the Faces</h2>
+<p>A list of coordinates is easier to judge when you can see it. The <code>Pillow</code> library lets you open the photo and draw the rectangles the service returned, then save the annotated copy:</p>
+<pre><code>pip install pillow
+</code></pre>
+<pre><code>from PIL import Image, ImageDraw
+
+image = Image.open("photo.jpg")
+draw = ImageDraw.Draw(image)
+
+for face in result.faces:
+    x, y, w, h = face.bounding_box
+    draw.rectangle([x, y, x + w, y + h], outline=(0, 255, 0), width=4)
+
+image.save("photo_annotated.jpg")
+print("Saved photo_annotated.jpg with", len(result.faces), "faces highlighted")
+</code></pre>
+<div class="tip">
+<p>Bounding boxes are returned in raw pixel coordinates, so they line up exactly with the source image at its original resolution. If you display the image scaled down, multiply the coordinates by the same scale factor before drawing.</p>
+</div>
+
+<h2>Verifying Two Photos Show the Same Person</h2>
+<p>Detection alone is not identity. To compare two photos you need to detect both, then call verify with the two face IDs. The <code>Verify</code> response includes an <code>isIdentical</code> flag and a confidence score:</p>
+<pre><code>import requests
+import os
+
+endpoint = os.environ["AZURE_FACE_ENDPOINT"].rstrip("/")
+key = os.environ["AZURE_FACE_KEY"]
+headers = {"Ocp-Apim-Subscription-Key": key, "Content-Type": "application/json"}
+
+def detect_face(url):
+    r = requests.post(
+        f"{endpoint}/face/v1.0/detect",
+        headers=headers,
+        json={"url": url},
+        params={"returnFaceId": "true"},
+    )
+    r.raise_for_status()
+    return r.json()[0]["faceId"]
+
+face_a = detect_face("https://example.com/person-a.jpg")
+face_b = detect_face("https://example.com/person-b.jpg")
+
+r = requests.post(
+    f"{endpoint}/face/v1.0/verify",
+    headers=headers,
+    json={"faceId1": face_a, "faceId2": face_b},
+)
+r.raise_for_status()
+print(r.json())
+</code></pre>
+<p>Depending on the service tier you created, verify may require a limited-access approval. If you receive a <code>403</code> or an access notice, remove the verify step — detection and analysis alone are enough to complete this lab.</p>
+
+<h2>Troubleshooting Common Errors</h2>
+<table>
+<tr><th>Error</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>401 Access denied</code></td><td>The key is wrong, or it belongs to a different account.</td><td>Re-run <code>az cognitiveservices account keys list</code> and copy the current key.</td></tr>
+<tr><td><code>404</code> or <code>Resource not found</code></td><td>The endpoint is mistyped, or the Face sub-path is missing.</td><td>Check the endpoint ends in <code>.cognitiveservices.azure.com/</code> and the URL includes <code>/face/v1.0/...</code>.</td></tr>
+<tr><td><code>InvalidImageSize</code></td><td>The image exceeds the accepted size for binary uploads.</td><td>Resize or re-encode the image below 6 MB.</td></tr>
+<tr><td><code>AttributeError</code> on the SDK</td><td>Your installed <code>azure-ai-vision</code> version uses different names.</td><td>Inspect the package and adapt the member names to your version.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You have now built a real Python application around the Face service: it loads an image, detects every face, draws the bounding boxes onto a copy of the photo, and prints the results. You also saw how to verify two faces against each other through the REST endpoint and how to recognise and fix the most common setup errors. This detection-and-annotate workflow is the same foundation you will use for the Custom Vision labs, where you will start training models that answer questions the prebuilt service cannot.</p>
+<nav>
+<a href="282-lab-face-service.html">&larr; Previous: Lab - Face service</a><a href="284-azure-ai-custom-vision.html">Next: Azure AI Custom Vision &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

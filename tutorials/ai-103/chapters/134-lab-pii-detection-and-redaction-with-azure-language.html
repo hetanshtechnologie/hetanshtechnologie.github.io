@@ -1,0 +1,145 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>134. Lab - PII Detection and Redaction with Azure Language - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 134</span>
+<h1>Lab - PII Detection and Redaction with Azure Language</h1>
+<p>Personal information — names, addresses, phone numbers, bank details — appears in support tickets, contracts, and logs whether you want it there or not. Azure AI Language's PII detection finds those values and its redaction feature masks them so documents can be stored, shared, or sent to an LLM without leaking personal data. In this lab you will detect PII, inspect its categories, and produce redacted text.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>An Azure AI Language resource with its endpoint and key. You can create it in the portal or reuse the service created for your Foundry project.</li>
+<li>Python with the text analytics SDK installed:</li>
+</ul>
+<pre><code>pip install azure-ai-textanalytics azure-core python-dotenv</code></pre>
+
+<h2>Step 1: Set Up the Client</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Create the analysis client</h3>
+<p>Create <code>lang_pii.py</code>:</p>
+<pre><code>import os
+
+from azure.ai.textanalytics import TextAnalyticsClient
+from azure.core.credentials import AzureKeyCredential
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = TextAnalyticsClient(
+    endpoint=os.getenv("AZURE_LANGUAGE_ENDPOINT"),
+    credential=AzureKeyCredential(os.getenv("AZURE_LANGUAGE_KEY")),
+)</code></pre>
+<p>Run the file once to confirm the imports and client construction succeed.</p>
+</div>
+
+<h2>Step 2: Detect PII in a Document</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Find and inspect personal information</h3>
+<p>Append the detection logic:</p>
+<pre><code>document = (
+    "Customer Dana Whitfield called about order 4821. Contact them at "
+    "dana.whitfield@example.com or +1 555 010 2233. The delivery "
+    "address is 12 Linden Street, Berlin, and payment was charged to "
+    "card ending 4412."
+)
+
+result = client.recognize_pii_entities(documents=[document])
+doc = result[0]
+if doc.is_error:
+    print("Error:", doc.error.code, doc.error.message)
+else:
+    print(f"Redacted text:\n{doc.redacted_text}\n")
+    for entity in doc.entities:
+        print(
+            f"{entity.category:16s} {entity.text!r:40s} "
+            f"confidence={entity.confidence_score:.2f}"
+        )</code></pre>
+<ol>
+<li>Run the script. The output shows two things: the fully redacted text and the list of detected entities with categories and confidence scores.</li>
+<li>Note the entity offsets — each entity carries a <code>text</code> value and a span into the original document, so you can locate exactly where the PII sits.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>Categories are granular: names, phone numbers, email addresses, credit-card numbers, street addresses, and more are distinguished. Because each entity reports a category, you can choose to keep some categories and redact others — for example, mask phone numbers but keep names.</p>
+</div>
+
+<h2>Step 3: Redact Only Selected Categories</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Filter which categories get redacted</h3>
+<p>Use the <code>categories_filter</code> parameter to redact only the values you choose:</p>
+<pre><code>phone_only = client.recognize_pii_entities(
+    documents=[document],
+    categories_filter=["PhoneNumber", "Email"],
+)
+doc_phone = phone_only[0]
+print("Redacted with phone and email only:")
+print(doc_phone.redacted_text)
+</code></pre>
+<ol>
+<li>Run the script. The name and address should now survive while the phone number and email are masked.</li>
+<li>Change the filter to <code>["CreditCard"]</code> and rerun. Only the card ending in 4412 should be hidden.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>Category filtering is the tool for the "comply with the data-protection rule but keep the useful business context" problem. Many pipelines redact financial identifiers while deliberately preserving names and addresses for customer-service lookup.</p>
+</div>
+
+<h2>Step 4: Redact a Batch of Documents</h2>
+
+<div class="exercise">
+<h3>Exercise 4: Process several documents at once</h3>
+<p>The SDK accepts a list of documents in a single call:</p>
+<pre><code>batch = [
+    "Emergency contact: Sam Rivera, sam.rivera@example.net, 555-0199.",
+    "Policy PR-2233 lapsed on 2026-01-31; renewal due.",
+    "Technician visited unit 7 at 9 Linden Street at 14:30.",
+]
+
+results = client.recognize_pii_entities(documents=batch)
+for i, doc in enumerate(results):
+    if doc.is_error:
+        print(f"Doc {i + 1} failed: {doc.error.message}")
+    else:
+        print(f"Doc {i + 1}: {doc.redacted_text}")</code></pre>
+<ol>
+<li>Run the script and verify each document is redacted independently.</li>
+<li>Add a document with no PII, such as "The quarterly report is due on Friday", and confirm it passes through unchanged with an empty entities list.</li>
+</ol>
+</div>
+
+<div class="warn">
+<p>Sending personal data to the service means that data is processed in Azure. For production use, confirm your compliance requirements and understand the region where your Language resource lives. Where full control is needed, run the service in your approved region and use managed identity authentication instead of keys.</p>
+</div>
+
+<h2>Step 5: Use the Redacted Text Downstream</h2>
+<p>The redacted output is plain text, so it drops naturally into the next stage of a pipeline — for example, as the input to a chat model or a search index. A common pattern is: detect PII, redact the document, then hand the redacted text to your LLM, which never sees the personal data.</p>
+<pre><code>redacted = doc.redacted_text
+print("Send to LLM:", redacted[:80], "...")</code></pre>
+
+<h2>Summary</h2>
+<p>You detected PII in documents with Azure AI Language, inspected the entity categories and confidence scores, redacted only selected categories, processed a batch, and learned how redacted text feeds safely into downstream systems. Next you will use the same client for the simpler job of detecting which language a document is written in.</p>
+<nav>
+<a href="133-azure-ai-language.html">&larr; Previous: Azure AI Language</a><a href="135-lab-language-detection-with-azure-language.html">Next: Lab - Language Detection with Azure Language &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

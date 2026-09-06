@@ -1,0 +1,125 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>4. SIEM Features &amp; Capabilities - SOAR &amp; SIEM Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>4. SIEM Features &amp; Capabilities</h1>
+<p class="tag">Chapter 4</p>
+
+<h2>Search: The Foundation Skill</h2>
+<p>Everything else in a SIEM builds on search. Analysts spend much of their day querying data to confirm or refute hypotheses. Each platform has its own query language — but they share concepts. The most common are:</p>
+<table>
+<tr><th>Language</th><th>Platform</th><th>Example</th></tr>
+<tr><td>SPL (Search Processing Language)</td><td>Splunk</td><td><code>index=wineventlog EventCode=4625 | stats count by User</code></td></tr>
+<tr><td>KQL (Kusto Query Language)</td><td>Microsoft Sentinel / Azure</td><td><code>SecurityEvent | where EventID == 4625 | summarize count() by Account</code></td></tr>
+<tr><td>Lucene</td><td>Elastic</td><td><code>event.code:4625 AND source.ip:10.0.0.0/8</code></td></tr>
+<tr><td>Ariel / AQL</td><td>IBM QRadar</td><td><code>SELECT COUNT(*) FROM events WHERE eventID=4625</code></td></tr>
+<tr><td>SQL-like</td><td>Chronicle, others</td><td><code>SELECT * FROM events WHERE ...</code></td></tr>
+</table>
+
+<pre><code># KQL example: all failed logons from external IPs in the last hour
+SecurityEvent
+| where TimeGenerated > ago(1h)
+| where EventID == 4625
+| where IpAddress !startswith "10." and IpAddress !startswith "192.168."
+| project TimeGenerated, Account, IpAddress, WorkstationName
+| sort by TimeGenerated desc</code></pre>
+
+<p>Good query skills include: knowing the schema, using time ranges correctly, pivoting between entity fields (user, host, IP), and avoiding full-table scans where indexes exist.</p>
+
+<h2>Correlation Rules</h2>
+<p>A correlation rule is the core detection unit: a query or event pattern that, when matched, produces an alert. Rules vary from simple single-event filters to complex multi-stage, stateful correlations that track a sequence over time.</p>
+
+<p>A well-formed correlation rule has several parts:</p>
+<ul>
+<li><strong>Trigger conditions:</strong> which events, fields, and thresholds.</li>
+<li><strong>Time window:</strong> how long events must occur within (e.g., 10 failed logins in 5 minutes).</li>
+<li><strong>Grouping:</strong> key events are correlated by (e.g., same user, same source IP).</li>
+<li><strong>Severity mapping:</strong> informational → critical based on impact.</li>
+<li><strong>Suppression:</strong> avoid alert storms (e.g., one alert per 15 minutes per host).</li>
+<li><strong>Response action:</strong> who is notified, what automation runs, which SOAR playbook fires.</li>
+</ul>
+
+<div class="note">
+<strong>Example rule (concept):</strong> <em>"Brute Force Attempt"</em> — fire when the same user has 10+ failed logins (<code>EventID 4625</code>) from the same IP within 5 minutes, severity Medium, suppress for 15 minutes, escalate to SOAR for IP enrichment.
+</div>
+
+<h2>Alerting and Alert Fatigue</h2>
+<p>Alerts are the SOC's daily currency — and their biggest pain point. <strong>Alert fatigue</strong> is the state where analysts receive so many alerts that they stop taking them seriously or cannot keep up. Statistics commonly cited in the industry: thousands to tens of thousands of alerts per day for a mid-size SOC, with only a small fraction being true positives.</p>
+
+<p>Mitigations for alert fatigue:</p>
+<ul>
+<li><strong>Suppression and deduplication:</strong> collapse repeated identical events.</li>
+<li><strong>Risk-based alerting:</strong> score alerts by asset value + behavior and only surface the top ones.</li>
+<li><strong>Correlation quality:</strong> fewer, better rules beat many noisy rules.</li>
+<li><strong>SOAR pre-processing:</strong> automate triage and enrich before an alert reaches a human.</li>
+<li><strong>Alert feedback loops:</strong> analysts vote on false positives; rules get tuned or retired.</li>
+</ul>
+
+<h2>Dashboards and Visualizations</h2>
+<p>Dashboards give the SOC live visibility and are the primary Tier-1 monitoring surface. Common SOC dashboard panels:</p>
+<ul>
+<li>Alert volume by severity, source, and time.</li>
+<li>Failed logon spikes (often an early ransomware indicator).</li>
+<li>Top attacked hosts, top external IPs, geo-map of login sources.</li>
+<li>Coverage of critical assets (are the Crown Jewels being monitored?).</li>
+<li>Ingestion health: EPS, lag, storage.</li>
+</ul>
+
+<h2>UEBA: User and Entity Behavior Analytics</h2>
+<p><strong>UEBA</strong> uses machine learning to build a baseline of normal behavior for users, devices, and applications, then flags deviations. Examples: a finance user suddenly accessing 10x more documents; a service account logging in at 3 a.m.; an admin using a new geographic location.</p>
+
+<table>
+<tr><th>Aspect</th><th>Rule-based detection</th><th>UEBA</th></tr>
+<tr><td>Approach</td><td>Explicit rules</td><td>Statistical baselines + ML</td></tr>
+<tr><td>Known attacks</td><td>Excellent</td><td>Good</td></tr>
+<tr><td>Novel / insider threats</td><td>Poor</td><td>Good</td></tr>
+<tr><td>False positives</td><td>Predictable, tunable</td><td>Can be noisy initially</td></tr>
+<tr><td>Explainability</td><td>High</td><td>Lower (needs investigation)</td></tr>
+</table>
+
+<p>UEBA is most valuable when layered on top of a well-tuned rule base — not as a replacement for it.</p>
+
+<h2>Reporting and Compliance</h2>
+<p>SIEMs are heavily used for compliance evidence. Frameworks like PCI DSS, HIPAA, SOC 2, GDPR, and ISO 27001 require monitoring and log retention. Reporting capabilities include:</p>
+<ul>
+<li>Scheduled reports (daily, weekly, monthly) for management.</li>
+<li>Compliance-specific report packs.</li>
+<li>Ad-hoc report generation for auditors.</li>
+<li>Retention attestation (you can prove logs were kept X days).</li>
+</ul>
+
+<div class="info">
+<strong>Note:</strong> Compliance is a <em>byproduct</em> of good security operations, not the goal. Designing a SIEM purely around compliance reports typically yields terrible detection quality. Design for detection; export for compliance.
+</div>
+
+<h2>Advanced Capabilities in Modern SIEMs</h2>
+<ul>
+<li><strong>Threat hunting:</strong> open-ended queries and hypotheses over historical data; hunting requires long retention.</li>
+<li><strong>Notebooks / Jupyter integration:</strong> Python-based investigation and ML analysis over SIEM data (Sentinel, Chronicle).</li>
+<li><strong>Fusion / AI:</strong> multi-signal alert fusion, grouping related alerts into incidents, and risk ranking.</li>
+<li><strong>Watchlists:</strong> dynamic lists (VIPs, critical assets, malicious IOCs) that enrich or boost alerts.</li>
+<li><strong>Integrated automation:</strong> native playbook/automation hooks (Sentinel Logic Apps, Splunk SOAR) that blur the SIEM/SOAR boundary.</li>
+<li><strong>Custom enrichment:</strong> user entity graphs, device vulnerability data, CMDB integration.</li>
+</ul>
+
+<h2>Comparing SIEM Capability Matrices</h2>
+<p>When evaluating a SIEM, score these dimensions: ingestion breadth and ease, parse/normalization quality, search performance, correlation and detection features, UEBA quality, automation/integration, reporting, scalability, multi-cloud support, and TCO. Weight the score by your SOC's actual needs — a boutique cloud-native SIEM with great automation may beat a legacy giant with a mature correlation engine for your workload.</p>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Pick any SIEM platform (ideally one you can access — Elastic free tier, Wazuh, or a Sentinel free trial). Write and run three queries: (1) all failed logons in the last 24 hours, (2) the top 10 source IPs by event volume, (3) events for a specific user. Then build a simple dashboard with three panels and schedule one report. Document what you learned about the query language.
+</div>
+
+<nav>
+  <a href="3-siem-architecture.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="5-detection-engineering.html">Next: Detection Engineering for SIEM &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

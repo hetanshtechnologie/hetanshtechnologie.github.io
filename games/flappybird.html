@@ -1,0 +1,293 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flappy Bird</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+<style>
+body { margin: 0; background: #0f172a; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+canvas { display: block; margin: 0 auto; cursor: pointer; }
+</style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen">
+<a href="index.html" class="absolute top-4 left-4 text-blue-400 hover:text-blue-300 text-sm font-semibold z-10">&larr; Back to Games</a>
+<div class="text-center mb-2">
+  <h1 class="text-2xl font-bold text-white">FLAPPY BIRD</h1>
+</div>
+<div class="flex gap-8 mb-2 text-sm">
+  <div class="text-center"><span class="text-gray-400">Score: </span><span id="score" class="text-yellow-400 font-bold text-lg">0</span></div>
+  <div class="text-center"><span class="text-gray-400">Best: </span><span id="best" class="text-green-400 font-bold text-lg">0</span></div>
+</div>
+<canvas id="gameCanvas"></canvas>
+<div id="overlay" class="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-10">
+  <div class="text-center bg-gray-900 p-8 rounded-xl border border-gray-700 shadow-2xl">
+    <h2 id="overlayTitle" class="text-3xl font-bold text-white mb-4">FLAPPY BIRD</h2>
+    <p id="overlayMsg" class="text-gray-300 mb-6">Click or press Space to flap!</p>
+    <button id="startBtn" class="bg-yellow-500 hover:bg-yellow-400 text-gray-900 font-bold py-3 px-8 rounded-lg transition">START</button>
+  </div>
+</div>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const W = 400, H = 600;
+canvas.width = W;
+canvas.height = H;
+
+let state = 'menu';
+let score = 0, best = 0;
+let animId;
+
+const GRAVITY = 0.35;
+const FLAP = -6.5;
+const PIPE_W = 56;
+const PIPE_GAP = 150;
+const PIPE_SPEED = 2.2;
+const PIPE_INTERVAL = 1800;
+
+let bird, pipes, pipeTimer, groundX;
+let lastTime = 0;
+
+function initGame() {
+  bird = { x: 80, y: H / 2, vy: 0, rot: 0 };
+  pipes = [];
+  pipeTimer = 0;
+  groundX = 0;
+  score = 0;
+  document.getElementById('score').textContent = '0';
+}
+
+function flap() {
+  if (state === 'playing') {
+    bird.vy = FLAP;
+  }
+}
+
+function addPipe() {
+  let gapY = 80 + Math.random() * (H - 300);
+  pipes.push({ x: W + 10, gapY: gapY, scored: false });
+}
+
+function drawSky() {
+  let grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#0ea5e9');
+  grad.addColorStop(0.7, '#38bdf8');
+  grad.addColorStop(1, '#7dd3fc');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawGround() {
+  let groundY = H - 40;
+  ctx.fillStyle = '#92400e';
+  ctx.fillRect(0, groundY, W, 40);
+  ctx.fillStyle = '#a16207';
+  ctx.fillRect(0, groundY, W, 8);
+
+  ctx.fillStyle = '#65a30d';
+  for (let i = -1; i < 15; i++) {
+    let gx = ((i * 32 + groundX % 32) + 32) % (15 * 32) - 32;
+    ctx.beginPath();
+    ctx.moveTo(gx, groundY);
+    ctx.lineTo(gx + 16, groundY - 8);
+    ctx.lineTo(gx + 32, groundY);
+    ctx.fill();
+  }
+}
+
+function drawBird() {
+  ctx.save();
+  ctx.translate(bird.x, bird.y);
+  ctx.rotate(bird.rot);
+
+  ctx.fillStyle = '#fbbf24';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 17, 13, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 17, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#fef3c7';
+  ctx.beginPath();
+  ctx.ellipse(10, -2, 12, 10, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#1e293b';
+  ctx.beginPath();
+  ctx.arc(10, -3, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(11, -4, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#f97316';
+  ctx.beginPath();
+  ctx.moveTo(16, 0);
+  ctx.lineTo(24, 1);
+  ctx.lineTo(16, 5);
+  ctx.fill();
+
+  let wingFlap = Math.sin(Date.now() / 80) * 6;
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.ellipse(-2, -4 + wingFlap, 12, 5, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawPipe(p) {
+  let capH = 28;
+  let capW = PIPE_W + 8;
+  let topBottom = p.gapY;
+  let bottomTop = p.gapY + PIPE_GAP;
+
+  let gradTop = ctx.createLinearGradient(p.x, 0, p.x + PIPE_W, 0);
+  gradTop.addColorStop(0, '#16a34a');
+  gradTop.addColorStop(0.3, '#22c55e');
+  gradTop.addColorStop(0.7, '#16a34a');
+  gradTop.addColorStop(1, '#15803d');
+  ctx.fillStyle = gradTop;
+  ctx.fillRect(p.x, 0, PIPE_W, topBottom);
+  ctx.fillStyle = gradTop;
+  ctx.fillRect(p.x, bottomTop, PIPE_W, H - bottomTop);
+
+  ctx.fillStyle = '#4ade80';
+  ctx.fillRect(p.x - 4, topBottom - capH, capW, capH);
+  ctx.fillRect(p.x - 4, bottomTop, capW, capH);
+
+  ctx.strokeStyle = '#15803d';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(p.x - 4, topBottom - capH, capW, capH);
+  ctx.strokeRect(p.x - 4, bottomTop, capW, capH);
+
+  ctx.fillStyle = '#86efac';
+  ctx.fillRect(p.x + 4, 0, 6, topBottom - capH);
+  ctx.fillRect(p.x + 4, bottomTop + capH, 6, H - bottomTop - capH);
+}
+
+function drawScore() {
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 3;
+  ctx.font = 'bold 48px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.strokeText(score, W / 2, 60);
+  ctx.fillText(score, W / 2, 60);
+}
+
+function update(dt) {
+  if (state !== 'playing') return;
+
+  bird.vy += GRAVITY;
+  bird.y += bird.vy;
+  bird.rot = Math.max(-0.5, Math.min(bird.vy / 10, 1.2));
+
+  pipeTimer += dt;
+  if (pipeTimer > PIPE_INTERVAL) {
+    addPipe();
+    pipeTimer = 0;
+  }
+
+  for (let p of pipes) {
+    p.x -= PIPE_SPEED;
+    if (!p.scored && p.x + PIPE_W < bird.x) {
+      p.scored = true;
+      score++;
+      document.getElementById('score').textContent = score;
+    }
+  }
+  pipes = pipes.filter(p => p.x > -PIPE_W - 20);
+
+  if (bird.y + 13 >= H - 40) {
+    gameOver();
+    return;
+  }
+  if (bird.y - 13 <= 0) {
+    bird.y = 13;
+    bird.vy = 0;
+  }
+
+  for (let p of pipes) {
+    if (bird.x + 14 > p.x && bird.x - 14 < p.x + PIPE_W) {
+      if (bird.y - 12 < p.gapY || bird.y + 12 > p.gapY + PIPE_GAP) {
+        gameOver();
+        return;
+      }
+    }
+  }
+
+  groundX -= PIPE_SPEED;
+}
+
+function gameOver() {
+  state = 'over';
+  if (score > best) { best = score; document.getElementById('best').textContent = best; }
+  document.getElementById('overlayTitle').textContent = 'GAME OVER';
+  document.getElementById('overlayMsg').textContent = 'Score: ' + score + ' | Best: ' + best;
+  document.getElementById('startBtn').textContent = 'RESTART';
+  document.getElementById('overlay').classList.remove('hidden');
+}
+
+function draw() {
+  drawSky();
+  for (let p of pipes) drawPipe(p);
+  drawGround();
+  drawBird();
+  drawScore();
+}
+
+function gameLoop(timestamp) {
+  let dt = timestamp - lastTime;
+  lastTime = timestamp;
+  if (dt > 100) dt = 16;
+  update(dt);
+  draw();
+  animId = requestAnimationFrame(gameLoop);
+}
+
+canvas.addEventListener('click', () => {
+  if (state === 'playing') flap();
+});
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (state === 'playing') flap();
+});
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); if (state === 'playing') flap(); }
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('overlay').classList.add('hidden');
+  initGame();
+  state = 'playing';
+  lastTime = performance.now();
+  if (animId) cancelAnimationFrame(animId);
+  animId = requestAnimationFrame(gameLoop);
+});
+
+initGame();
+draw();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapter 6: Database Select and Join - Supabase Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+
+    <span class="tag">Chapter 6</span>
+    <h1>Database: Select and Join</h1>
+
+    <h2>Basic Select Queries</h2>
+    <p>Reading data is the most common database operation you will perform. Supabase's <code>.select()</code> method maps directly to SQL's SELECT statement. The simplest form fetches every column from a table:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .select('*');</code></pre>
+    <p>This returns an array of all rows the user is allowed to see (RLS filters are applied automatically). For real applications you should always specify the columns you actually need instead of using <code>*</code>. This reduces payload size and makes your intent clear:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .select('id, title, created_at');</code></pre>
+    <p>If you expect a single row — for example, fetching a post by its ID — use <code>.single()</code> at the end:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .select('*')
+  .eq('id', 42)
+  .single();</code></pre>
+    <p>Without <code>.single()</code>, you always get an array, even for one result. With it, you get the row object directly, and an error if zero or multiple rows match.</p>
+
+    <h2>Filtering</h2>
+    <p>Supabase provides a rich set of filter methods that chain onto your query. The most common ones are:</p>
+    <ul>
+      <li><code>.eq(column, value)</code> — exact match</li>
+      <li><code>.neq(column, value)</code> — not equal</li>
+      <li><code>.gt(column, value)</code> — greater than</li>
+      <li><code>.lt(column, value)</code> — less than</li>
+      <li><code>.gte(column, value)</code> — greater than or equal</li>
+      <li><code>.lte(column, value)</code> — less than or equal</li>
+      <li><code>.like(column, pattern)</code> — SQL LIKE (case-sensitive)</li>
+      <li><code>.ilike(column, pattern)</code> — case-insensitive LIKE</li>
+      <li><code>.in(column, values)</code> — matches any value in an array</li>
+      <li><code>.or(filter1, filter2)</code> — OR condition</li>
+      <li><code>.contains(column, value)</code> — for JSON/array columns</li>
+    </ul>
+    <p>Filters can be chained arbitrarily. For example, finding recent posts with a specific word in the title:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .select('id, title, created_at')
+  .ilike('title', '%supabase%')
+  .gte('created_at', '2025-01-01')
+  .order('created_at', { ascending: false });</code></pre>
+
+    <h2>Ordering and Limiting</h2>
+    <p>Use <code>.order()</code> to sort results and <code>.limit()</code> to cap the number returned:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .select('id, title')
+  .order('created_at', { ascending: false })
+  .limit(10);</code></pre>
+    <p>For pagination, <code>.range(start, end)</code> is the go-to tool. It maps to SQL's OFFSET and LIMIT, returning rows from <code>start</code> to <code>end</code> (inclusive, zero-indexed):</p>
+    <pre><code>const page = 2;
+const pageSize = 20;
+const { data, error } = await supabase
+  .from('posts')
+  .select('id, title')
+  .order('created_at', { ascending: false })
+  .range(page * pageSize, (page + 1) * pageSize - 1);</code></pre>
+
+    <h2>Joins</h2>
+    <p>One of Supabase's most powerful features is automatic join resolution. When you define a foreign key relationship — like <code>user_id</code> referencing <code>auth.users(id)</code> — Supabase knows about it through its schema cache and lets you pull in related data with a simple syntax.</p>
+    <p>To include the author's email alongside each post, use the <code>!inner</code> or plain relation syntax:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .select('id, title, content, user_id ( email )');</code></pre>
+    <p>This fetches every post and, for each one, resolves the <code>user_id</code> foreign key and returns the user's email. The result looks like:</p>
+    <pre><code>[
+  { id: 1, title: 'Hello', content: '...', user_id: { email: 'alice@example.com' } },
+  { id: 2, title: 'World', content: '...', user_id: { email: 'bob@example.com' } }
+]</code></pre>
+    <p>If you need an inner join (exclude posts whose user no longer exists), use the <code>!inner</code> hint:</p>
+    <pre><code>.select('id, title, user_id!inner ( email )')</code></pre>
+    <p>You can also traverse multiple levels: <code>comments ( user_id ( email ) )</code> would pull the comment author's email for each comment on a post.</p>
+
+    <div class="info">
+      <strong>Schema Cache:</strong> Supabase periodically refreshes its schema cache to discover foreign key relationships. If you just created a table and joins are not working, wait a few seconds or go to the SQL Editor and run <code>SELECT supabase_rebuild_schema_cache();</code> to force a refresh.
+    </div>
+
+    <h2>Aggregations</h2>
+    <p>To get a row count without fetching the actual rows, pass <code>count</code> and <code>head</code> options:</p>
+    <pre><code>const { count, error } = await supabase
+  .from('posts')
+  .select('*', { count: 'exact', head: true });</code></pre>
+    <p>The <code>head: true</code> tells Supabase not to return rows — just the count. This is efficient for pagination displays ("Showing 1–20 of 342 posts").</p>
+
+    <h2>Performance Tips</h2>
+    <ul>
+      <li>Always select only the columns you need. <code>.select('*')</code> is convenient but wasteful.</li>
+      <li>Add database indexes on columns you filter or sort by frequently (created_at, user_id, status). Without an index, Postgres does a sequential scan, which gets slow as your table grows.</li>
+      <li>Use <code>.limit()</code> and <code>.range()</code> on every list query to prevent accidentally returning millions of rows.</li>
+      <li>When joining, avoid fetching nested data you do not use. Each join adds cost.</li>
+    </ul>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Write a query that fetches all posts created in the last 30 days, includes the author's email and display name, orders by creation date descending, and implements pagination with 10 items per page. Display the total count so you can build a page indicator.
+    </div>
+
+    <nav>
+      <a href="../index.html">Back to Index</a>
+      <a href="5-database-inserts-rls.html">&laquo; Previous: Database Inserts and RLS</a>
+      <a href="7-database-realtime.html">Next: Database Realtime &raquo;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

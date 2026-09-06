@@ -1,0 +1,100 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>12. Debugging model deployments - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 12</span>
+<h1>Debugging model deployments</h1>
+<p>Sooner or later, every developer stares at a model endpoint that is not behaving. This chapter gives you a systematic way to debug model deployments: how to read the failure, where to look for the cause, and how to fix the common problems. Most issues fall into a small number of recognizable categories, so a little structure saves a lot of guessing.</p>
+
+<h2>The Most Common Failure Modes</h2>
+<p>Almost every deployment problem belongs to one of these families. When something breaks, start by classifying it:</p>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Quick check</th></tr>
+<tr><td>401 / 403</td><td>Wrong or expired key, or missing permissions</td><td>Compare your key with the one in the portal</td></tr>
+<tr><td>404</td><td>Wrong URL, deployment name, or API version</td><td>Copy the exact endpoint from the deployment page</td></tr>
+<tr><td>429</td><td>Rate limit or quota exhausted</td><td>Check the monitoring dashboard for usage</td></tr>
+<tr><td>Timeout / slow</td><td>Long prompts, high max_tokens, or low capacity</td><td>Reduce the request size or raise capacity</td></tr>
+<tr><td>Empty or odd response</td><td>Prompt or settings issue, content filter</td><td>Test the same prompt in the playground</td></tr>
+<tr><td>Deployment stuck provisioning</td><td>Regional availability or quota problem</td><td>Check the deployment status and region</td></tr>
+</table>
+
+<h2>Work Through HTTP Status Codes First</h2>
+<p>The HTTP status code is the first diagnostic signal. Do not skip it:</p>
+<ul>
+<li><strong>4xx errors</strong> mean your request is the problem — a bad key, a wrong URL, a malformed body. The fix is in your code or configuration.</li>
+<li><strong>5xx errors</strong> mean the service or endpoint has a problem. Retry with backoff, check service status, and verify the deployment is in a <strong>Ready</strong> state.</li>
+</ul>
+
+<div class="tip">
+<p>Read the entire error message, not just the status code. The JSON body returned by the endpoint usually names the exact problem — an invalid deployment name, an unsupported parameter, or a quota limit. Paste that body into a search engine and you will often find the fix directly.</p>
+</div>
+
+<h2>Verify the Obvious Things in Order</h2>
+<p>When a request fails, walk this checklist before changing anything clever:</p>
+<ol>
+<li><strong>Deployment name:</strong> Is it spelled exactly as shown on the deployment page? Names are case-sensitive.</li>
+<li><strong>Endpoint URL:</strong> Does it match the value shown in the portal, including the <code>https://</code> prefix?</li>
+<li><strong>API version:</strong> Is the version string valid and supported? The portal shows a working example you can copy.</li>
+<li><strong>Key:</strong> Is the key current, correct, and not accidentally truncated when copied?</li>
+<li><strong>Request body:</strong> Is the JSON valid, with the right field names for the model's API?</li>
+<li><strong>Deployment status:</strong> Is the deployment actually in a <strong>Ready</strong> state?</li>
+</ol>
+<p>In practice, the vast majority of 4xx errors are a mistyped deployment name or a stale key.</p>
+
+<h2>Debugging with curl</h2>
+<p>Your code adds layers — SDKs, config files, environment variables — that can hide the real problem. Strip them away and hit the endpoint directly with <code>curl</code>. If the raw request works, the bug is in your code; if it fails, the bug is in your configuration. Start from the working example the portal provides:</p>
+
+<pre><code>curl.exe https://YOUR_ENDPOINT/openai/deployments/YOUR_DEPLOYMENT_NAME/chat/completions?api-version=2024-06-01 `
+  -H "api-key: YOUR_KEY" `
+  -H "Content-Type: application/json" `
+  -d '{"messages":[{"role":"user","content":"Hello"}]}'</code></pre>
+
+<div class="note">
+<p>The portal's deployment page usually offers a "Show code" or "Sample code" view that contains a complete, working request. Use it as your ground truth: if the sample works and your application does not, compare them line by line — the difference is your bug.</p>
+</div>
+
+<h2>Debugging Response Quality</h2>
+<p>Sometimes the endpoint works but the answer is wrong, empty, or unexpected. That is a quality problem, not a connection problem, and it has a different checklist:</p>
+<ul>
+<li><strong>Empty content with a content-filter reason:</strong> The request or response tripped a safety filter. Rephrase the prompt, or check the filter severity in the response metadata.</li>
+<li><strong>Short or cut-off answers:</strong> Raise <code>max_tokens</code> or ask the model to be more detailed in the prompt.</li>
+<li><strong>Repetitive output:</strong> Adjust sampling settings such as temperature and penalties.</li>
+<li><strong>Inconsistent format:</strong> Add explicit output-format instructions or use structured-output features.</li>
+<li><strong>Wrong facts:</strong> The model is hallucinating; ground it with retrieved data or add sources to the prompt.</li>
+</ul>
+
+<div class="warn">
+<p>Do not chase quality problems with deployment changes. Retrying, changing capacity, or redeploying will not fix a hallucination or a bad tone. Quality fixes belong in the prompt, the settings, or the data pipeline — not in the deployment configuration.</p>
+</div>
+
+<h2>Deployment Not Appearing or Not Ready</h2>
+<p>If a new deployment never reaches <strong>Ready</strong> status, the usual culprits are regional model availability, exhausted quota, or a provisioning delay. Check the deployment's error message, confirm the model is offered in the chosen region, and either request a quota increase or redeploy in a different region. If the deployment shows in Foundry but not in the Azure portal, refresh both — they occasionally lag each other by a minute.</p>
+
+<h2>Systematic Logging as a Debugging Tool</h2>
+<p>The best debugging tool is a good log. Make your application log the essentials for every request — the deployment used, the response status, the finish reason, and the token usage. When a problem appears later in production, these logs tell you exactly what happened instead of forcing a reconstruction:</p>
+
+<pre><code>print(f"deployment={deployment} status={status} "
+      f"finish={finish_reason} tokens={usage}")</code></pre>
+
+<h2>Summary</h2>
+<p>Debugging a model deployment starts with classifying the failure, then working through the obvious checks — deployment name, endpoint, API version, key, body, and status. Connection problems are fixed in configuration; quality problems are fixed in prompts, settings, and data. The playground, curl, and good logging are the tools that make the diagnosis fast. In the next chapter you will set up Python development against your deployed models.</p>
+<nav>
+<a href="11-review-on-model-deployment.html">&larr; Previous: Review on model deployment</a><a href="13-getting-started-python-development-with-microsoft-foundry.html">Next: Getting Started Python Development with Microsoft Foundry &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

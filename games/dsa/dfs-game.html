@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DFS Traversal Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:950px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.3rem}
+.graph-area{position:relative;height:400px;background:#1e293b;border-radius:12px;margin-bottom:20px;overflow:hidden}
+.graph-area svg{width:100%;height:100%}
+.edge{stroke:#475569;stroke-width:2}
+.edge.active{stroke:#38bdf8;stroke-width:3}
+.edge.done{stroke:#22c55e;stroke-width:3}
+.node-circle{fill:#334155;stroke:#64748b;stroke-width:3;transition:all .3s}
+.node-circle.on-stack{fill:#1e3a5f;stroke:#facc15;stroke-width:3}
+.node-circle.visited{fill:#14532d;stroke:#22c55e;stroke-width:3}
+.node-circle.current{fill:#38bdf8;stroke:#f1f5f9;stroke-width:3;filter:drop-shadow(0 0 10px #38bdf8)}
+.node-text{fill:#e2e8f0;font-size:18px;font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.stack-display{display:flex;flex-direction:column-reverse;gap:4px;background:#1e293b;border-radius:12px;padding:16px;margin-bottom:20px;min-height:60px;max-height:200px;overflow-y:auto}
+.stack-label{color:#94a3b8;font-weight:600;margin-bottom:8px}
+.stack-item{padding:8px 16px;border-radius:6px;background:#334155;font-weight:600;border-left:4px solid #475569;text-align:center}
+.stack-item.top{border-left-color:#facc15;background:#422006}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.choice-btn{display:block;width:100%;padding:12px 20px;margin-bottom:8px;background:#334155;color:#e2e8f0;border:2px solid #475569;border-radius:8px;font-size:1rem;cursor:pointer;text-align:left;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.choice-btn.correct{border-color:#22c55e;background:#14532d}
+.choice-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:12px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&#8592; Home</a><h1>DFS Traversal Game</h1></div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Round: <span class="score-val" id="round">1</span></span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="graph-area" id="graphArea"><svg id="graphSvg"></svg></div>
+  <div class="stack-display"><span class="stack-label">Stack (top at top):</span><span id="stackList"></span></div>
+  <div class="instructions"><h2>How to Play</h2><p>DFS goes deep first using a stack. Predict whether to push a neighbor, backtrack (pop), or identify the next node in DFS order!</p></div>
+  <div id="messageArea"></div>
+  <div id="choicesArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startRound()">Start Round</button>
+    <button class="btn btn-secondary" id="resetBtn" onclick="resetAll()" style="display:none">New Graph</button>
+  </div>
+</div>
+<script>
+let nodes=[],edges=[],visited=new Set(),stack=[],score=0,round=1,streak=0;
+
+function genGraph(){
+  const n=7;nodes=[];edges=[];
+  const names='ABCDEFG';
+  for(let i=0;i<n;i++){
+    const angle=(i/n)*Math.PI*2-Math.PI/2;
+    nodes.push({id:i,name:names[i],x:300+140*Math.cos(angle),y:190+140*Math.sin(angle),adj:[]});
+  }
+  for(let i=1;i<n;i++){
+    const p=Math.floor(Math.random()*i);
+    edges.push([p,i]);nodes[p].adj.push(i);nodes[i].adj.push(p);
+  }
+  for(let i=0;i<n-3;i++){
+    let a=Math.floor(Math.random()*n),b=Math.floor(Math.random()*n);
+    if(a!==b&&!edges.some(e=>(e[0]===a&&e[1]===b)||(e[0]===b&&e[1]===a))){
+      edges.push([a,b]);nodes[a].adj.push(b);nodes[b].adj.push(a);
+    }
+  }
+}
+
+function renderGraph(){
+  const svg=document.getElementById('graphSvg');svg.innerHTML='';
+  edges.forEach(([a,b])=>{
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1',nodes[a].x);l.setAttribute('y1',nodes[a].y);
+    l.setAttribute('x2',nodes[b].x);l.setAttribute('y2',nodes[b].y);
+    l.classList.add('edge');
+    if(visited.has(a)&&visited.has(b))l.classList.add('done');
+    svg.appendChild(l);
+  });
+  nodes.forEach(n=>{
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',n.x);c.setAttribute('cy',n.y);c.setAttribute('r',28);
+    c.classList.add('node-circle');
+    if(stack.length>0&&stack[stack.length-1]===n.id)c.classList.add('current');
+    else if(visited.has(n.id))c.classList.add('visited');
+    else if(stack.includes(n.id))c.classList.add('on-stack');
+    g.appendChild(c);
+    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',n.x);t.setAttribute('y',n.y);t.classList.add('node-text');t.textContent=n.name;
+    g.appendChild(t);svg.appendChild(g);
+  });
+}
+
+function renderStack(){
+  const el=document.getElementById('stackList');
+  el.innerHTML=stack.map((id,i)=>`<div class="stack-item ${i===stack.length-1?'top':''}">${nodes[id].name}</div>`).join('');
+}
+
+function updateScore(ok){if(ok){score+=10+streak*5;streak++}else{streak=0}document.getElementById('score').textContent=score;document.getElementById('streak').textContent=streak}
+
+function startRound(){
+  genGraph();visited=new Set();stack=[];
+  const start=Math.floor(Math.random()*nodes.length);
+  stack.push(start);visited.add(start);
+  renderGraph();renderStack();showQ();
+  document.getElementById('startBtn').style.display='none';
+  document.getElementById('resetBtn').style.display='';
+  document.getElementById('round').textContent=round;
+  document.getElementById('messageArea').innerHTML='';
+}
+
+function showQ(){
+  if(stack.length===0){
+    document.getElementById('messageArea').innerHTML='<div class="message correct">DFS complete!</div>';
+    document.getElementById('choicesArea').innerHTML='';
+    round++;document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Next Round';
+    document.getElementById('resetBtn').style.display='none';
+    return;
+  }
+  const top=stack[stack.length-1];
+  const unvisitedNeighbors=nodes[top].adj.filter(n=>!visited.has(n));
+  let choices=[];
+  if(unvisitedNeighbors.length>0){
+    choices=unvisitedNeighbors.map(n=>({text:`Visit ${nodes[n].name} (neighbor of ${nodes[top].name})`,correct:true,node:n}));
+    choices.push({text:`Backtrack — pop ${nodes[top].name} from stack`,correct:false});
+  }else{
+    choices=[{text:`Backtrack — pop ${nodes[top].name} (no unvisited neighbors)`,correct:true}];
+    if(stack.length>1){
+      choices.push({text:`Visit ${nodes[stack[stack.length-2]].name} again`,correct:false});
+      choices.push({text:`Visit a random unvisited node`,correct:false});
+    }
+  }
+  // Add some wrong distractors
+  const other=nodes.filter(n=>!visited.has(n.id)&&!unvisitedNeighbors.includes(n.id)&&!stack.includes(n.id));
+  other.slice(0,2).forEach(n=>choices.push({text:`Jump to ${n.name}`,correct:false}));
+  choices.sort(()=>Math.random()-.5);
+  let html=`<p style="margin-bottom:8px;color:#94a3b8">Current: ${nodes[top].name}. Stack depth: ${stack.length}</p>`;
+  choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answer(${c.correct},${c.node||(-1)},this)">${c.text}</button>`});
+  document.getElementById('choicesArea').innerHTML=html;
+}
+
+function answer(ok,nodeId,el){
+  document.querySelectorAll('.choice-btn').forEach(b=>b.disabled=true);
+  el.classList.add(ok?'correct':'wrong');
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Correct! +'+(10+streak*5)+' points':'Wrong!'}</div>`;
+  updateScore(ok);
+  setTimeout(()=>{
+    if(ok&&nodeId>=0){
+      stack.push(nodeId);visited.add(nodeId);
+    }else{
+      // Backtrack or wrong
+      if(stack.length>0)stack.pop();
+    }
+    renderGraph();renderStack();showQ();
+  },700);
+}
+
+function resetAll(){
+  document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Start Round';
+  document.getElementById('resetBtn').style.display='none';
+  document.getElementById('choicesArea').innerHTML='';document.getElementById('messageArea').innerHTML='';
+  document.getElementById('graphSvg').innerHTML='';document.getElementById('stackList').innerHTML='';
+}
+</script>
+</body>
+</html>

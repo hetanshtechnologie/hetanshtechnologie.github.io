@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Reports</span>
+    </div>
+    <div>
+      <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+    </div>
+  </nav>
+  <div class="max-w-6xl mx-auto p-6">
+    <h1 class="text-2xl font-bold mb-6">Reports</h1>
+    <div id="alert"></div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="font-bold text-lg mb-4">Sales Report</h2>
+        <div id="sales-report" class="text-gray-500 text-sm">Loading...</div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="font-bold text-lg mb-4">Invoice Summary</h2>
+        <div id="invoice-summary" class="text-gray-500 text-sm">Loading...</div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="font-bold text-lg mb-4">Party Summary</h2>
+        <div id="party-summary" class="text-gray-500 text-sm">Loading...</div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div class="bg-white rounded-xl shadow-sm border p-6 col-span-2">
+        <h2 class="font-bold text-lg mb-4">Recent Invoices</h2>
+        <div id="recent-invoices" class="text-sm overflow-x-auto"></div>
+      </div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin();
+      if (!user) return;
+      await loadReports();
+    });
+
+    async function loadReports() {
+      const orgId = await getOrgId();
+      if (!orgId) return;
+
+      const { data: invs } = await erp.from('invoices').select('*, parties(name)').eq('org_id', orgId).order('created_at', { ascending: false }).limit(50);
+
+      if (!invs) return;
+
+      const totalSales = invs.filter(i => i.status === 'paid').reduce((s, i) => s + Number(i.total || 0), 0);
+      const pendingAmt = invs.filter(i => i.status === 'sent' || i.status === 'overdue').reduce((s, i) => s + Number(i.total || 0), 0);
+      const paidCount = invs.filter(i => i.status === 'paid').length;
+      const pendingCount = invs.filter(i => i.status === 'sent' || i.status === 'overdue').length;
+
+      document.getElementById('sales-report').innerHTML = `
+        <div class="text-2xl font-bold">${formatCurrency(totalSales)}</div>
+        <div class="text-xs text-gray-500">Total collected</div>
+        <div class="mt-2 text-sm text-orange-600">${formatCurrency(pendingAmt)} pending (${pendingCount} invoices)</div>
+        <div class="mt-1 text-sm">${paidCount} paid invoices</div>
+      `;
+
+      document.getElementById('invoice-summary').innerHTML = `
+        <div class="text-2xl font-bold">${invs.length}</div>
+        <div class="text-xs text-gray-500">Total invoices</div>
+        <div class="mt-2 text-sm"><span class="text-green-600">${paidCount} paid</span> &middot; <span class="text-blue-600">${invs.filter(i => i.status === 'sent').length} sent</span> &middot; <span class="text-red-600">${invs.filter(i => i.status === 'overdue').length} overdue</span> &middot; ${invs.filter(i => i.status === 'draft').length} draft</div>
+      `;
+
+      const { data: parties } = await erp.from('parties').select('id, type').eq('org_id', orgId).eq('is_active', true);
+      const custCount = (parties || []).filter(p => p.type === 'customer' || p.type === 'both').length;
+      const suppCount = (parties || []).filter(p => p.type === 'supplier' || p.type === 'both').length;
+      document.getElementById('party-summary').innerHTML = `
+        <div class="text-2xl font-bold">${(parties || []).length}</div>
+        <div class="text-xs text-gray-500">Total active parties</div>
+        <div class="mt-2 text-sm">${custCount} customers &middot; ${suppCount} suppliers</div>
+      `;
+
+      const recDiv = document.getElementById('recent-invoices');
+      if (!invs.length) { recDiv.innerHTML = '<div class="text-gray-500">No invoices yet.</div>'; return; }
+      recDiv.innerHTML = `<table class="w-full"><thead><tr class="bg-gray-50 border-b text-left"><th class="p-2 font-semibold">Invoice</th><th class="p-2 font-semibold">Customer</th><th class="p-2 font-semibold">Date</th><th class="p-2 font-semibold">Amount</th><th class="p-2 font-semibold">Status</th></tr></thead><tbody>${invs.slice(0, 20).map(i => `<tr class="border-b"><td class="p-2 font-mono text-xs">${escapeHtml(i.invoice_no)}</td><td class="p-2">${escapeHtml(i.parties?.name || '-')}</td><td class="p-2 text-xs">${formatDate(i.invoice_date)}</td><td class="p-2 font-medium">${formatCurrency(i.total)}</td><td class="p-2 text-xs">${i.status}</td></tr>`).join('')}</tbody></table>`;
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

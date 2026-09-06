@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quick Sort Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:900px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.3rem}
+.array-container{display:flex;gap:6px;justify-content:center;align-items:flex-end;height:320px;padding:20px;background:#1e293b;border-radius:12px;margin-bottom:20px;position:relative}
+.bar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;border-radius:6px 6px 0 0;transition:all .4s}
+.bar-inner{width:52px;border-radius:6px 6px 0 0;transition:all .4s}
+.bar-label{font-size:14px;font-weight:700;margin-bottom:6px}
+.bar-index{font-size:11px;color:#94a3b8;margin-top:4px}
+.bar.pivot .bar-inner{box-shadow:0 0 20px #f59e0b;background:#f59e0b!important}
+.bar.left .bar-inner{box-shadow:0 0 14px #22c55e}
+.bar.right .bar-inner{box-shadow:0 0 14px #ef4444}
+.bar.placed .bar-inner{box-shadow:0 0 16px #a855f7;background:#a855f7!important}
+.bar.pointer-i .bar-inner{box-shadow:0 0 12px #06b6d4}
+.bar.pointer-j .bar-inner{box-shadow:0 0 12px #ec4899}
+.pivot-marker{position:absolute;top:4px;font-size:12px;color:#f59e0b;font-weight:700}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.btn-success{background:#22c55e;color:#fff}
+.choice-btn{display:block;width:100%;padding:12px 20px;margin-bottom:8px;background:#334155;color:#e2e8f0;border:2px solid #475569;border-radius:8px;font-size:1rem;cursor:pointer;text-align:left;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.choice-btn.correct{border-color:#22c55e;background:#14532d}
+.choice-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:12px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+.info-row{display:flex;gap:16px;justify-content:center;margin-bottom:12px;flex-wrap:wrap}
+.info-chip{background:#1e293b;padding:6px 14px;border-radius:20px;font-size:.85rem;border:1px solid #334155}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&#8592; Home</a><h1>Quick Sort Game</h1></div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Round: <span class="score-val" id="round">1</span></span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="array-container" id="arrayContainer"></div>
+  <div class="info-row" id="infoRow"></div>
+  <div class="instructions"><h2>How to Play</h2><p>Quick sort picks a pivot and partitions elements around it. Select the correct pivot, predict partition behavior, or identify swaps!</p></div>
+  <div id="messageArea"></div>
+  <div id="choicesArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startRound()">Start Round</button>
+    <button class="btn btn-secondary" id="stepBtn" onclick="doStep()" style="display:none">Step</button>
+    <button class="btn btn-secondary" id="resetBtn" onclick="resetAll()" style="display:none">New Array</button>
+  </div>
+</div>
+<script>
+let arr=[],origArr=[],score=0,round=1,streak=0,stack=[],pivotIdx=0,leftIdx=0,rightIdx=0,phase='pick_pivot',lo=0,hi=0,autoTimer=null;
+
+function gen(n=7){let a=[];while(a.length<n){let v=Math.floor(Math.random()*50)+5;if(!a.includes(v))a.push(v)}return a}
+
+function render(hl={}){
+  const c=document.getElementById('arrayContainer');c.innerHTML='';const mx=Math.max(...arr);
+  arr.forEach((v,i)=>{
+    const b=document.createElement('div');b.className='bar';
+    if(hl.pivot===i)b.classList.add('pivot');
+    if(hl.left===i)b.classList.add('left');
+    if(hl.right===i)b.classList.add('right');
+    if(hl.pointerI===i)b.classList.add('pointer-i');
+    if(hl.pointerJ===i)b.classList.add('pointer-j');
+    if(hl.placed&&hl.placed.includes(i))b.classList.add('placed');
+    if(i<lo||i>hi)b.classList.add('placed');
+    const h=(v/mx)*250;
+    b.innerHTML=`<span class="bar-label">${v}</span><div class="bar-inner" style="height:${h}px;background:hsl(${200+i*18},60%,48%)"></div><span class="bar-index">[${i}]</span>`;
+    c.appendChild(b);
+  });
+  const ir=document.getElementById('infoRow');
+  ir.innerHTML=`<div class="info-chip">Range: [${lo}..${hi}]</div><div class="info-chip">Pivot: ${hl.pivot!==undefined?arr[hl.pivot]:'?'}</div><div class="info-chip">Stack: ${stack.length} frames</div>`;
+}
+
+function updateScore(ok){if(ok){score+=10+streak*5;streak++}else{streak=0}document.getElementById('score').textContent=score;document.getElementById('streak').textContent=streak}
+
+function startRound(){
+  arr=gen(7);lo=0;hi=arr.length-1;stack=[];phase='pick_pivot';
+  pushFrame(0,arr.length-1);
+  render();showQ();
+  document.getElementById('startBtn').style.display='none';
+  ['stepBtn','resetBtn'].forEach(id=>document.getElementById(id).style.display='');
+  document.getElementById('round').textContent=round;
+  document.getElementById('messageArea').innerHTML='';
+}
+
+function pushFrame(l,h){stack.push({lo:l,hi:h})}
+function popFrame(){return stack.pop()}
+
+function partition(a,l,h){
+  const pv=a[h];let i=l-1;
+  for(let j=l;j<h;j++){if(a[j]<pv){i++;[a[i],a[j]]=[a[j],a[i]]}}
+  [a[i+1],a[h]]=[a[h],a[i+1]];return i+1;
+}
+
+function showQ(){
+  if(stack.length===0){
+    render({placed:Array.from({length:arr.length},(_,i)=>i)});
+    document.getElementById('messageArea').innerHTML='<div class="message correct">Array sorted!</div>';
+    document.getElementById('choicesArea').innerHTML='';
+    round++;document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Next Round';
+    ['stepBtn','resetBtn'].forEach(id=>document.getElementById(id).style.display='none');
+    return;
+  }
+  const frame=stack[stack.length-1];lo=frame.lo;hi=frame.hi;
+  render({pivot:hi});
+
+  if(phase==='pick_pivot'){
+    const choices=[
+      {text:`Use last element arr[${hi}]=${arr[hi]} as pivot (Lomuto)`,correct:true},
+      {text:`Use first element arr[${lo}]=${arr[lo]} as pivot`,correct:false},
+      {text:`Use middle element arr[${Math.floor((lo+hi)/2)}]=${arr[Math.floor((lo+hi)/2)]} as pivot`,correct:false},
+      {text:`Use random element`,correct:false}
+    ].sort(()=>Math.random()-.5);
+    let html=`<p style="margin-bottom:8px;color:#94a3b8">Subarray [${lo}..${hi}]: [${arr.slice(lo,hi+1)}]. Choose pivot strategy:</p>`;
+    choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answer(${c.correct},this)">${c.text}</button>`});
+    document.getElementById('choicesArea').innerHTML=html;
+  }else if(phase==='partition'){
+    const pv=arr[hi];
+    let smaller=[],greater=[];
+    for(let i=lo;i<hi;i++){if(arr[i]<pv)smaller.push(arr[i]);else greater.push(arr[i])}
+    const choices=[
+      {text:`[${smaller}] | ${pv} | [${greater}]`,correct:true},
+      {text:`[${greater}] | ${pv} | [${smaller}]`,correct:false},
+      {text:`[${arr.slice(lo,hi).sort((a,b)=>a-b)}] | ${pv} | []`,correct:false},
+      {text:`[] | ${pv} | [${arr.slice(lo,hi).sort((a,b)=>b-a)}]`,correct:false}
+    ].sort(()=>Math.random()-.5);
+    let html=`<p style="margin-bottom:8px;color:#94a3b8">Pivot=${pv}. After partition, what's the arrangement?</p>`;
+    choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answer(${c.correct},this)">${c.text}</button>`});
+    document.getElementById('choicesArea').innerHTML=html;
+  }else if(phase==='recursion'){
+    const pivotPos=partition(arr,lo,hi);
+    const leftLen=pivotPos-1-lo;const rightLen=hi-pivotPos-1;
+    const choices=[
+      {text:`Recurse left [${lo}..${pivotPos-1}] and right [${pivotPos+1}..${hi}]`,correct:leftLen>=0&&rightLen>=0},
+      {text:`Recurse only left [${lo}..${pivotPos-1}]`,correct:leftLen>=0&&rightLen<0},
+      {text:`Recurse only right [${pivotPos+1}..${hi}]`,correct:leftLen<0&&rightLen>=0},
+      {text:`Done — array is sorted`,correct:false}
+    ].sort(()=>Math.random()-.5);
+    let html=`<p style="margin-bottom:8px;color:#94a3b8">Pivot ${arr[pivotPos]} placed at index ${pivotPos}. What next?</p>`;
+    choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answer(${c.correct},this)">${c.text}</button>`});
+    document.getElementById('choicesArea').innerHTML=html;
+  }
+}
+
+function answer(ok,el){
+  document.querySelectorAll('.choice-btn').forEach(b=>b.disabled=true);
+  el.classList.add(ok?'correct':'wrong');
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Correct! +'+(10+streak*5)+' points':'Wrong!'}</div>`;
+  updateScore(ok);
+  if(!ok)document.querySelectorAll('.choice-btn').forEach(b=>{if(!b.classList.contains('wrong')){const t=b.textContent;if(phase==='pick_pivot'&&t.includes('last element'))b.classList.add('correct')}});
+  setTimeout(()=>doStep(),800);
+}
+
+function doStep(){
+  document.getElementById('messageArea').innerHTML='';
+  if(stack.length===0)return showQ();
+  if(phase==='pick_pivot'){phase='partition'}
+  else if(phase==='partition'){
+    const frame=stack.pop();
+    lo=frame.lo;hi=frame.hi;
+    const pivotPos=partition(arr,lo,hi);
+    if(pivotPos-1>lo)pushFrame(lo,pivotPos-1);
+    if(pivotPos+1<hi)pushFrame(pivotPos+1,hi);
+    phase='pick_pivot';
+  }
+  render();showQ();
+}
+
+function resetAll(){
+  document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Start Round';
+  ['stepBtn','resetBtn'].forEach(id=>document.getElementById(id).style.display='none');
+  document.getElementById('choicesArea').innerHTML='';document.getElementById('messageArea').innerHTML='';
+  document.getElementById('arrayContainer').innerHTML='';document.getElementById('infoRow').innerHTML='';
+}
+</script>
+</body>
+</html>

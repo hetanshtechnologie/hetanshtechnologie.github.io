@@ -1,0 +1,126 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>253. Azure AI Content Safety - BlockList - Quick note - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 253</span>
+<h1>Azure AI Content Safety - BlockList - Quick note</h1>
+<p>Azure AI Content Safety gives you several layers of protection, and the blocklist feature is one of the most direct. While the built-in severity classifiers judge how harmful a piece of text is based on trained models, a blocklist lets you define your own exact list of words, phrases, or terms that should always be flagged. This chapter is a quick reference for what blocklists are, how they behave, and how you manage them through code.</p>
+
+<h2>What Is a BlockList</h2>
+<p>A blocklist is a curated collection of terms that you want the moderation service to detect, regardless of how the built-in severity models would score them. Every entry is a short string — typically a word or a short phrase — that your organization considers unacceptable.</p>
+<p>Blocklists are useful for domain-specific concerns that a general-purpose classifier cannot know about:</p>
+<ul>
+<li>Internal product names or competitor names you do not want mentioned.</li>
+<li>Slang or local terms that carry a harmful meaning in your community.</li>
+<li>Legal or compliance terms that must never appear in public output.</li>
+<li>Known abuse patterns specific to your application.</li>
+</ul>
+<p>Each blocklist is a named object that belongs to a Content Safety resource. You can create several blocklists on the same resource, and a moderation request can reference one or more of them.</p>
+
+<h2>How BlockLists Work</h2>
+<p>When you submit text for analysis, the service evaluates the content against the configured blocklists in addition to the machine-learned severity categories. A match against a blocklist term is reported separately from the severity result, so you can tell exactly which rule fired.</p>
+<p>The important behaviors to remember:</p>
+<ul>
+<li>Matching is applied to the text as submitted. The service looks for occurrences of each blocklist term inside the supplied text.</li>
+<li>A hit is reported with the matched term and where it was found, so your application can decide how to respond.</li>
+<li>Blocklist results come back in a dedicated <code>blocklistsMatch</code> array that is easy to inspect in your code.</li>
+<li>Blocklist detection runs independently of the severity analysis, so even very mild content can be blocked if it contains a forbidden term.</li>
+</ul>
+
+<div class="note">
+<p>Think of severity scores and blocklists as two separate gates. The severity model answers "how harmful is this by general standards?" while a blocklist answers "does this contain something we specifically banned?" Your policy can treat a blocklist hit as a hard rejection and a high severity score as a risk that needs review.</p>
+</div>
+
+<h2>Managing BlockLists with the SDK</h2>
+<p>Blocklists are managed through the Content Safety administrative API. The SDKs expose a client that you use to list, create, update, and delete blocklists, and to add or remove the terms inside them.</p>
+<p>The standard sequence is:</p>
+<ol>
+<li>Create a <code>BlocklistClient</code> using your endpoint and key.</li>
+<li>Create or retrieve a blocklist by name.</li>
+<li>Add terms to the blocklist, either one at a time or in a batch.</li>
+<li>Reference the blocklist name in moderation calls so its terms are applied.</li>
+<li>Delete terms (or the whole blocklist) when they are no longer needed.</li>
+</ol>
+<p>A conceptual code outline:</p>
+<pre><code>from azure.ai.contentsafety import BlocklistClient
+from azure.core.credentials import AzureKeyCredential
+
+client = BlocklistClient(
+    endpoint="YOUR_ENDPOINT",
+    credential=AzureKeyCredential("YOUR_KEY"),
+)
+
+blocklist_name = "MyBlocklist"
+
+client.create_or_update_text_blocklist(
+    blocklist_name=blocklist_name,
+    options={"description": "Terms banned for our app"},
+)
+
+client.add_or_update_blocklist_items(
+    blocklist_name=blocklist_name,
+    blocklist_items=[
+        {"text": "forbidden-phrase-one"},
+        {"text": "forbidden-phrase-two"},
+    ],
+)</code></pre>
+
+<h2>Using a BlockList in a Moderation Call</h2>
+<p>Once the blocklist exists, you pass its name to the text analysis call. The moderation response then contains both the severity results and any blocklist matches.</p>
+<pre><code>from azure.ai.contentsafety import ContentSafetyClient
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.contentsafety.models import AnalyzeTextOptions
+
+client = ContentSafetyClient(
+    endpoint="YOUR_ENDPOINT",
+    credential=AzureKeyCredential("YOUR_KEY"),
+)
+
+result = client.analyze_text(
+    options=AnalyzeTextOptions(
+        text="Your sample text goes here.",
+        blocklist_names=["MyBlocklist"],
+    )
+)
+
+if result.blocklists_match:
+    for match in result.blocklists_match:
+        print("Blocked term:", match.blocklist_item_text)
+else:
+    print("No blocklist matches found.")</code></pre>
+<p>The <code>blocklists_match</code> collection is empty when nothing matched. Each entry tells you which term matched and the blocklist it came from, which is handy for logging and audit trails.</p>
+
+<h2>Practical Notes and Limits</h2>
+<ul>
+<li>Terms are case-insensitive matches in the moderation call; entering "BADWORD" also catches "badword".</li>
+<li>There are limits on the number of blocklists per resource and the number of items per blocklist — check the current service documentation for the exact quotas.</li>
+<li>Blocklists take effect shortly after you update them; give the change a moment to propagate before load testing.</li>
+<li>Blocklists complement, but do not replace, the severity classifiers. Use both for defense in depth.</li>
+</ul>
+
+<div class="tip">
+<p>Use blocklists for terms that must <em>always</em> be rejected with a deterministic rule. Use the severity classifiers for the gray areas where judgment, thresholds, and human review are more appropriate.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Blocklists give you precise, deterministic control over content filtering: you define the terms, the service finds them, and your code reacts. They are managed through a dedicated SDK client and referenced by name in moderation requests. Together with the severity classifiers, blocklists form a practical, layered approach to keeping AI-generated content safe.</p>
+<nav>
+<a href="252-lab-azure-ai-content-safety-adding-a-content-filer.html">&larr; Previous: Lab - Azure AI Content Safety - Adding a content filer</a><a href="254-lab-creating-an-azure-ai-content-safety-resource.html">Next: Lab - Creating an Azure AI Content Safety resource &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

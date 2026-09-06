@@ -1,0 +1,129 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>273. Lab - Computer Vision - Python - Image Tagging - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 273</span>
+<h1>Lab - Computer Vision - Python - Image Tagging</h1>
+<p>In this lab you move from the browser to Python. You will send an image file to your Computer Vision resource using the <code>requests</code> library, request the <code>tags</code> feature, and print every detected tag with its confidence score. This is the pattern you will reuse in every remaining vision lab, with only the feature name and the response parsing changing.</p>
+
+<h2>What You Need</h2>
+<ul>
+<li>Your Computer Vision endpoint and key from the resource lab.</li>
+<li>Python 3 with the <code>requests</code> package installed.</li>
+<li>A local test image, for example <code>test.jpg</code> in the same folder as your script.</li>
+</ul>
+
+<h2>Set Up the Script</h2>
+<p>Create a file <code>vision_tags.py</code>. Store the endpoint and key in environment variables so they never sit in the source file:</p>
+
+<pre><code>set COMPUTER_VISION_ENDPOINT=https://YOURNAME.cognitiveservices.azure.com/
+set COMPUTER_VISION_KEY=YOUR_KEY</code></pre>
+
+<div class="tip">
+<p>The endpoint is the base URL without a trailing path — for example <code>https://cv-ai103-demo.cognitiveservices.azure.com/</code>. The script appends the image analysis path itself.</p>
+</div>
+
+<h2>Write the Tagging Code</h2>
+
+<pre><code>import os
+import requests
+
+ENDPOINT = os.environ["COMPUTER_VISION_ENDPOINT"]
+KEY = os.environ["COMPUTER_VISION_KEY"]
+
+ANALYZE_URL = ENDPOINT.rstrip("/") + "/computervision/imageanalysis:analyze"
+params = {
+    "api-version": "2024-02-01",
+    "features": "tags",
+}
+
+with open("test.jpg", "rb") as f:
+    image_data = f.read()
+
+headers = {
+    "Content-Type": "application/octet-stream",
+    "Ocp-Apim-Subscription-Key": KEY,
+}
+
+response = requests.post(ANALYZE_URL, params=params, headers=headers, data=image_data)
+response.raise_for_status()
+
+result = response.json()
+for tag in result["tagsResult"]["values"]:
+    print(f"{tag['name']:<20} {tag['confidence']:.2f}")</code></pre>
+
+<h2>Run and Observe</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Tag a local image</h3>
+<ol>
+<li>Save the script above as <code>vision_tags.py</code>.</li>
+<li>Place your test image next to the script and name it <code>test.jpg</code>, or change the filename in the script.</li>
+<li>Open a terminal, set the two environment variables, and run <code>python vision_tags.py</code>.</li>
+<li>Read the printed output. Each line shows a tag and its confidence. The most confident tags should describe the main subject of the image.</li>
+<li>Repeat with a second, different image and compare the tag lists.</li>
+</ol>
+</div>
+
+<h2>How the Code Works</h2>
+<ul>
+<li><strong>Request body:</strong> The raw image bytes are sent as the request body with a <code>Content-Type</code> of <code>application/octet-stream</code>. You can also send a public image URL as JSON instead — the service accepts both.</li>
+<li><strong>Query parameters:</strong> <code>features=tags</code> tells the service to run only tagging, which keeps the response small and the call cheap.</li>
+<li><strong>Authentication:</strong> The <code>Ocp-Apim-Subscription-Key</code> header carries your key. Azure validates it before processing the image.</li>
+<li><strong>Response shape:</strong> Tags live under <code>tagsResult.values</code>, each with <code>name</code> and <code>confidence</code>.</li>
+</ul>
+
+<h2>Sending an Image URL Instead</h2>
+<p>If your image is already hosted on the web, you can skip reading the file and send a URL in JSON:</p>
+
+<pre><code>import os
+import requests
+
+ENDPOINT = os.environ["COMPUTER_VISION_ENDPOINT"]
+KEY = os.environ["COMPUTER_VISION_KEY"]
+
+ANALYZE_URL = ENDPOINT.rstrip("/") + "/computervision/imageanalysis:analyze"
+headers = {"Content-Type": "application/json", "Ocp-Apim-Subscription-Key": KEY}
+params = {"api-version": "2024-02-01", "features": "tags"}
+body = {"url": "https://example.com/photos/sample.jpg"}
+
+response = requests.post(ANALYZE_URL, params=params, headers=headers, json=body)
+response.raise_for_status()
+
+for tag in response.json()["tagsResult"]["values"]:
+    print(f"{tag['name']:<20} {tag['confidence']:.2f}")</code></pre>
+
+<div class="warn">
+<p>When you send an image by URL, make sure the host allows Azure to fetch it. Some sites block automated downloads or require authentication, which shows up as an error in the response.</p>
+</div>
+
+<h2>Common Issues</h2>
+<ul>
+<li><strong>401 Unauthorized:</strong> the key is wrong or contains a stray space. Re-copy it from the Keys and Endpoint page.</li>
+<li><strong>404 Not Found:</strong> the endpoint is malformed or the API version is unsupported. Check the exact URL your script builds.</li>
+<li><strong>429 Too Many Requests:</strong> you hit the resource rate limit, usually on the free tier. Wait a minute and retry.</li>
+<li><strong>KeyError: 'tagsResult':</strong> the response did not contain tags. Confirm the <code>features</code> parameter value is exactly <code>tags</code>.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>You built a complete Python tagging pipeline: read an image, POST it to the Image Analysis endpoint with the <code>tags</code> feature, and print each tag with its confidence. This endpoint, feature list, and parsing pattern carry over directly into the caption, object detection, OCR, and brand detection labs that follow.</p>
+<nav>
+<a href="272-lab-computer-vision-image-tagging.html">&larr; Previous: Lab - Computer Vision - Image Tagging</a><a href="274-lab-computer-vision-python-generate-caption.html">Next: Lab - Computer Vision - Python - Generate caption &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

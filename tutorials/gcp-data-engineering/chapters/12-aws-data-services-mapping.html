@@ -1,0 +1,111 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>12. AWS Data Services &amp; GCP Mapping - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>12. AWS Data Services &amp; GCP Mapping</h1>
+<p class="tag">Chapter 12</p>
+
+<h2>Why Map AWS to GCP?</h2>
+<p>Many teams run data platforms on AWS and need to migrate to GCP — or simply want to understand both clouds. The concepts are nearly identical; the services and APIs differ. This chapter maps the AWS data services you are most likely to meet — <strong>S3, Glue, Redshift, EMR, Kinesis</strong> — to their GCP counterparts, with the differences that actually matter when migrating.</p>
+
+<h2>The Service Mapping Table</h2>
+<table>
+<tr><th>AWS Service</th><th>What It Does</th><th>GCP Equivalent</th></tr>
+<tr><td>S3</td><td>Object storage</td><td>Cloud Storage (GCS)</td></tr>
+<tr><td>Redshift</td><td>Data warehouse</td><td>BigQuery</td></tr>
+<tr><td>EMR</td><td>Managed Hadoop/Spark</td><td>Dataproc</td></tr>
+<tr><td>Glue</td><td>ETL service + Data Catalog + crawlers</td><td>Dataflow (ETL), Dataproc, Dataplex/Data Catalog</td></tr>
+<tr><td>Kinesis (Data/Streams)</td><td>Streaming ingestion</td><td>Pub/Sub (+ Dataflow for processing)</td></tr>
+<tr><td>Data Pipeline</td><td>Workflow orchestration</td><td>Cloud Composer (Airflow)</td></tr>
+<tr><td>Athena</td><td>Query files in S3 (serverless SQL)</td><td>BigQuery external tables / BigLake</td></tr>
+<tr><td>DynamoDB</td><td>NoSQL key-value</td><td>Bigtable (or Firestore for simpler cases)</td></tr>
+<tr><td>RDS / Aurora</td><td>Managed relational DB</td><td>Cloud SQL (MySQL/Postgres/SQL Server)</td></tr>
+<tr><td>Lake Formation</td><td>Lake governance</td><td>Dataplex</td></tr>
+<tr><td>Glue DataBrew</td><td>Visual data prep</td><td>Dataplex data quality / Dataflow templates</td></tr>
+<tr><td>Managed Airflow (MWAA)</td><td>Managed Airflow</td><td>Cloud Composer</td></tr>
+</table>
+
+<h2>S3 → Cloud Storage (GCS)</h2>
+<p>S3 and GCS are both object stores with buckets, objects, prefixes, versioning, and lifecycle policies. The differences that matter:</p>
+<ul>
+<li><strong>Naming and access:</strong> <code>s3://bucket/key</code> → <code>gs://bucket/object</code>. AWS IAM roles → GCP IAM + service accounts; S3 ACLs/bucket policies → IAM and object-level ACLs; signed URLs → GCS signed URLs.</li>
+<li><strong>Consistency:</strong> both are strong-consistency object stores now.</li>
+<li><strong>Storage classes:</strong> Standard/IA/Glacier → Standard/Nearline/Coldline/Archive.</li>
+<li><strong>Tools:</strong> aws s3 cli → gsutil; boto3 → google-cloud-storage.</li>
+</ul>
+
+<h2>Redshift → BigQuery</h2>
+<p>Redshift is a massively parallel (MPP) warehouse; BigQuery is a serverless warehouse. Both speak SQL, so this is the most mechanical migration — but the mental models differ:</p>
+<table>
+<tr><th>Aspect</th><th>Redshift</th><th>BigQuery</th></tr>
+<tr><td>Infrastructure</td><td>Clusters you size and scale (nodes, slices)</td><td>Serverless; pay per query + storage</td></tr>
+<tr><td>Scaling</td><td>Add/remove nodes; distribution keys matter</td><td>Automatic; optimize partitions/clustering instead</td></tr>
+<tr><td>Sort/dist keys</td><td>DISTKEY + SORTKEY</td><td>Partitioning + clustering</td></tr>
+<tr><td>SQL dialect</td><td>Postgres-flavored</td><td>GoogleSQL (ANSI + extensions)</td></tr>
+<tr><td>Compression</td><td>Compression encodings per column</td><td>Automatic (columnar, Capacitor)</td></tr>
+<tr><td>Streaming</td><td>COPY + STL system tables</td><td>Streaming API / Storage Write API</td></tr>
+</table>
+
+<p>Unload from Redshift (UNLOAD to S3 as Parquet/CSV) then load into BigQuery via <code>bq load</code> or the Transfer Service. Rewrite DISTKEY/SORTKEY-heavy SQL as partitioning/clustering and let BigQuery's optimizer handle the rest.</p>
+
+<h2>EMR → Dataproc</h2>
+<p>EMR and Dataproc both run Spark/Hadoop clusters on cloud VMs. Migration is mostly the same open-source stack in a new management plane:</p>
+<ul>
+<li><strong>Cluster config:</strong> EMR instance types/spot → Dataproc machine types + preemptible workers.</li>
+<li><strong>Filesystems:</strong> <code>s3://</code> → <code>gs://</code> (Dataproc reads GCS natively).</li>
+<li><strong>Jobs:</strong> spark-submit stays the same; gcloud/API replace aws CLI.</li>
+<li><strong>Bootstrap:</strong> EMR bootstrap actions → Dataproc initialization actions.</li>
+<li><strong>Metastore:</strong> EMR Hive metastore → Dataproc Metastore (managed Hive metastore) or external.</li>
+<li><strong>Best practice:</strong> Dataproc ephemeral clusters (create per job, delete after) — a pattern EMR supports but teams rarely adopt as aggressively.</li>
+</ul>
+
+<h2>Glue → GCP</h2>
+<p>Glue is AWS's ETL service with three distinct parts, each mapping differently:</p>
+<ul>
+<li><strong>Glue Jobs (Spark ETL):</strong> a managed Spark environment. On GCP, run the same Spark ETL on <strong>Dataproc</strong> (more control) or <strong>Dataflow</strong> (if you rewrite to Beam). Glue's PySpark code ports to Dataproc PySpark with small changes (filesystems, session bootstrap).</li>
+<li><strong>Glue Data Catalog + Crawlers:</strong> schema discovery and metadata. GCP equivalent is <strong>Data Catalog</strong> plus <strong>Dataplex</strong> for governance; schema discovery can be scripted or done via Dataproc/BigQuery auto-detect.</li>
+<li><strong>Glue Data Quality:</strong> automated quality rules → Dataplex data quality / dbt tests.</li>
+</ul>
+
+<h2>Kinesis → Pub/Sub</h2>
+<ul>
+<li><strong>Kinesis Data Streams</strong> (retained, replayable stream) → <strong>Pub/Sub</strong> (with message retention and replay) — both are pull/push event buses.</li>
+<li><strong>Kinesis Data Firehose</strong> (load streams into S3/Redshift) → <strong>Dataflow</strong> streaming to GCS/BigQuery, or Pub/Sub subscriptions writing to BigQuery.</li>
+<li><strong>Kinesis Analytics</strong> (SQL on streams) → Dataflow SQL / Dataflow with Beam SQL.</li>
+</ul>
+
+<h2>Athena → BigQuery External / BigLake</h2>
+<p>Athena queries files in S3 directly. On GCP, the equivalent is querying files in GCS via BigQuery <strong>external tables</strong> and <strong>BigLake</strong> — same idea (schema-on-read, serverless SQL over object storage), stronger warehouse integration.</p>
+
+<h2>MWAA (Managed Airflow) → Cloud Composer</h2>
+<p>Both are managed Airflow. If you use MWAA today, your DAGs port to Composer with minimal change — update provider packages (boto3/aws operators → google provider operators), adjust connections/secrets handling, and redeploy the same DAGs to the Composer bucket.</p>
+
+<h2>Conceptual Differences That Trip People Up</h2>
+<ul>
+<li><strong>IAM vs IAM:</strong> AWS policies on resources (JSON) vs GCP roles bound to principals. Mindset shift, not a hard change.</li>
+<li><strong>Regions/AZs vs regions/zones:</strong> similar; data residency rules differ per cloud.</li>
+<li><strong>Billing:</strong> AWS and GCP both consumption-based, but warehouse pricing differs sharply (Redshift = reserved cluster compute; BigQuery = per-byte-scanned analysis + storage). Migration changes the cost shape and requires query redesign to stay cheap.</li>
+<li><strong>Networking:</strong> VPC + security groups → VPC + firewall rules; PrivateLink → Private Service Connect.</li>
+</ul>
+
+<h2>Dual-Cloud Patterns</h2>
+<p>Not every migration is "rip out AWS." Many teams run dual-cloud: data lives in both (via replication), or GCP is used for analytics while AWS remains the operational source. Tools like BigQuery Omni and GCS's S3/Azure interop make reading AWS S3 data from BigQuery possible without copying. Decide your pattern — full migration, parallel run, or dual-cloud — before touching infrastructure.</p>
+
+<div class="exercise">
+<strong>Practice Task:</strong> For a company running Redshift + Glue (Spark) + S3 on AWS, produce a service-by-service mapping table to GCP. For each service, note: (1) the GCP counterpart, (2) what code/config must change, (3) what can be reused as-is, and (4) one specific migration risk (data residency, SQL dialect, cost shape, IAM model). Share the table and identify which migration is hardest and why.
+</div>
+
+<nav>
+  <a href="11-dbt.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="13-aws-to-gcp-migration.html">Next: AWS to GCP Migration in Practice &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

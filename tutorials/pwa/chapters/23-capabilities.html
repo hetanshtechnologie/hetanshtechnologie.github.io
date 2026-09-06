@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Capabilities - PWA Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 23</span>
+    <h1>Capabilities</h1>
+
+    <h2>Push Notifications</h2>
+    <p>Push notifications allow your PWA to send messages to users even when the browser is not open. They require two steps: subscribing to push notifications and displaying them.</p>
+
+    <h3>Subscribing to Push</h3>
+    <pre><code>// Convert VAPID public key to Uint8Array
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const output = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    output[i] = rawData.charCodeAt(i);
+  }
+  return output;
+}
+
+// Subscribe to push
+async function subscribeToPush() {
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(
+      'YOUR_VAPID_PUBLIC_KEY'
+    )
+  });
+
+  // Send subscription to your server
+  await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(subscription)
+  });
+
+  return subscription;
+}
+
+// Check and request permission
+async function enableNotifications() {
+  if (!('Notification' in window)) {
+    console.log('Notifications not supported');
+    return false;
+  }
+
+  const permission = await Notification.requestPermission();
+  return permission === 'granted';
+}</code></pre>
+
+    <h3>Service Worker - Display Notification</h3>
+    <pre><code>// sw.js - Handle push events
+self.addEventListener('push', (event) => {
+  let data = { title: 'New Message', body: 'You have a new notification', icon: '/icon-192.png' };
+
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch {
+      data.body = event.data.text();
+    }
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: data.icon,
+      badge: '/badge-72.png',
+      vibrate: [200, 100, 200],
+      data: data,
+      actions: [
+        { action: 'open', title: 'Open' },
+        { action: 'dismiss', title: 'Dismiss' }
+      ]
+    })
+  );
+});
+
+// Handle notification clicks
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  if (event.action === 'dismiss') return;
+
+  const urlToOpen = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window' }).then(clients => {
+      for (const client of clients) {
+        if (client.url === urlToOpen && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(urlToOpen);
+    })
+  );
+});</code></pre>
+
+    <h2>Background Sync</h2>
+    <pre><code>// Register sync for pending data
+async function queueAction(actionData) {
+  await saveToIndexedDB('pending-actions', actionData);
+
+  const registration = await navigator.serviceWorker.ready;
+  await registration.sync.register('sync-actions');
+}
+
+// In Service Worker
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sync-actions') {
+    event.waitUntil(processPendingActions());
+  }
+});
+
+async function processPendingActions() {
+  const actions = await getAllFromIndexedDB('pending-actions');
+  for (const action of actions) {
+    try {
+      await fetch(action.url, {
+        method: action.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(action.data)
+      });
+      await deleteFromIndexedDB('pending-actions', action.id);
+    } catch (err) {
+      console.error('Sync failed for action', action.id, err);
+    }
+  }
+}</code></pre>
+
+    <h2>Advanced APIs</h2>
+
+    <h3>Badging API</h3>
+    <pre><code>// Set app badge
+async function setBadge(count) {
+  if (navigator.setAppBadge) {
+    await navigator.setAppBadge(count);
+  } else if (navigator.setExperimentalAppBadge) {
+    await navigator.setExperimentalAppBadge(count);
+  }
+}
+
+// Clear badge
+async function clearBadge() {
+  if (navigator.clearAppBadge) {
+    await navigator.clearAppBadge();
+  }
+}
+
+// Update badge when unread count changes
+function updateBadge(unreadCount) {
+  if (unreadCount > 0) {
+    setBadge(unreadCount);
+  } else {
+    clearBadge();
+  }
+}</code></pre>
+
+    <h3>Media Capabilities</h3>
+    <pre><code>// Check media decoding capabilities
+async function checkMediaSupport() {
+  const config = {
+    type: 'file',
+    video: {
+      contentType: 'video/webm; codecs="vp9"',
+      width: 1920,
+      height: 1080,
+      bitrate: 5000000,
+      framerate: 30
+    }
+  };
+
+  const support = await navigator.mediaCapabilities.decodingInfo(config);
+  console.log('Supported:', support.supported);
+  console.log('Smooth:', support.smooth);
+  console.log('Power efficient:', support.powerEfficient);
+}</code></pre>
+
+    <h3>Payment Request API</h3>
+    <pre><code>async function processPayment(items) {
+  if (!window.PaymentRequest) {
+    showFallbackPayment();
+    return;
+  }
+
+  const methodData = [
+    { supportedMethods: 'basic-card' },
+    { supportedMethods: 'https://google.com/pay' }
+  ];
+
+  const details = {
+    total: {
+      label: 'Total',
+      amount: { currency: 'USD', value: items.reduce((sum, i) => sum + i.price, 0).toFixed(2) }
+    },
+    displayItems: items.map(item => ({
+      label: item.name,
+      amount: { currency: 'USD', value: item.price.toFixed(2) }
+    }))
+  };
+
+  try {
+    const request = new PaymentRequest(methodData, details);
+    const response = await request.show();
+    await response.complete('success');
+    return response.details;
+  } catch (err) {
+    console.error('Payment failed:', err);
+    return null;
+  }
+}</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Build a PWA that sends push notifications when new content is available. Implement a "subscribe" button that requests notification permission, subscribes to push (mock the server side), and displays a notification when triggered. Also add a badge showing the count of unread items.
+    </div>
+
+    <nav>
+      <a href="22-complexity.html">&larr; Previous: Complexity Management</a>
+      <a href="../">Back to Index</a>
+      <a href="24-conclusion.html">Next: Conclusion &amp; Resources &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

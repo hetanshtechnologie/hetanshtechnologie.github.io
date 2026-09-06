@@ -1,0 +1,223 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Word Chain - Brain Games</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.word-card { background: #1e293b; border-radius: 12px; padding: 12px 20px; margin: 4px; display: inline-block; font-weight: bold; font-size: 1.1rem; animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.input-box { background: #1e293b; border: 2px solid #475569; border-radius: 8px; padding: 10px 16px; color: white; font-size: 1.2rem; font-weight: bold; outline: none; transition: border-color 0.2s; width: 200px; text-align: center; text-transform: uppercase; }
+.input-box:focus { border-color: #3b82f6; }
+.timer-bar { height: 6px; background: #374151; border-radius: 3px; overflow: hidden; }
+.timer-fill { height: 100%; background: #22c55e; transition: width 1s linear; }
+.timer-fill.warn { background: #f59e0b; }
+.timer-fill.danger { background: #ef4444; }
+</style>
+</head>
+<body class="min-h-screen text-white font-sans">
+<div class="container mx-auto px-4 py-6 max-w-xl">
+  <div class="flex items-center justify-between mb-6">
+    <a href="index.html" class="text-blue-400 hover:text-blue-300 text-sm">&larr; Back to Games</a>
+    <h1 class="text-2xl font-bold text-blue-400">Word Chain</h1>
+    <button onclick="startGame()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold">Restart</button>
+  </div>
+
+  <div class="text-center mb-4">
+    <div class="timer-bar mb-2">
+      <div id="timerFill" class="timer-fill" style="width:100%"></div>
+    </div>
+    <span class="text-2xl font-bold" id="timer">60</span><span class="text-gray-500">s</span>
+  </div>
+
+  <div class="text-center mb-6">
+    <div class="text-sm text-gray-400 mb-2">Score</div>
+    <div class="text-4xl font-bold text-yellow-400" id="score">0</div>
+  </div>
+
+  <div class="text-center mb-2 text-sm text-gray-400">Last letter of your word becomes the start of the next</div>
+
+  <div id="wordChain" class="text-center mb-6 flex flex-wrap justify-center"></div>
+
+  <div class="text-center mb-6">
+    <div class="text-sm text-gray-400 mb-1">Start with:</div>
+    <div id="currentLetter" class="text-3xl font-bold text-blue-400"></div>
+  </div>
+
+  <div class="text-center mb-6">
+    <input type="text" id="wordInput" class="input-box" maxlength="5" placeholder="Type word..." autocomplete="off" autofocus>
+    <div id="feedback" class="mt-2 text-sm h-6"></div>
+  </div>
+
+  <div id="gameOver" class="hidden text-center mt-6">
+    <p class="text-red-400 text-xl font-bold">⏰ Time's Up!</p>
+    <p class="text-gray-400 mt-2">Final Score: <span id="finalScore">0</span> words</p>
+    <p class="text-gray-500 mt-1">Longest chain: <span id="longestChain">0</span></p>
+  </div>
+
+  <div id="startScreen" class="text-center mt-8">
+    <p class="text-gray-400 mb-4">Type words that start with the last letter of the previous word. No repeats!</p>
+    <button onclick="startGame()" class="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg text-lg font-bold">Start Game</button>
+  </div>
+</div>
+
+<script>
+const WORD_LIST = [
+  "ace","act","add","age","ago","aid","aim","air","all","and","ant","any","ape","arc","are","ark","arm","art","ash","ask","ate",
+  "axe","bad","bag","ban","bar","bat","bay","bed","bee","bet","big","bin","bit","bog","bow","box","boy","bud","bug","bus","but","buy",
+  "cab","can","cap","car","cat","cow","cry","cub","cup","cut","dab","dad","dam","day","den","dew","did","dig","dim","dip","dog","dot","dry","dub","dud","due","dug","dye",
+  "ear","eat","egg","ego","elm","end","era","eve","ewe","eye",
+  "fad","fan","far","fat","fax","fed","fee","few","fig","fin","fir","fit","fix","fly","fog","for","fox","fry","fun","fur",
+  "gag","gap","gas","gel","gem","get","gig","gin","gnu","god","got","gum","gun","gut","guy","gym",
+  "had","ham","has","hat","hay","hen","her","hew","hid","him","hip","his","hit","hog","hop","hot","how","hub","hue","hug","hum","hut",
+  "ice","icy","ill","imp","ink","inn","ion","ire","irk","ivy",
+  "jab","jag","jam","jar","jaw","jay","jet","jig","job","jog","jot","joy","jug","jut",
+  "keg","key","kid","kin","kit",
+  "lab","lad","lag","lap","law","lay","lea","led","leg","let","lid","lie","lip","lit","log","lot","low","lug",
+  "mad","man","map","mar","mat","max","may","men","met","mid","mix","mob","mod","mop","mow","mud","mug","mum",
+  "nab","nag","nap","net","new","nil","nip","nit","nod","nor","not","now","nun","nut",
+  "oak","oar","oat","odd","ode","off","oft","ohm","oil","old","one","opt","orb","ore","our","out","owe","owl","own",
+  "pad","pal","pan","pap","par","pat","paw","pay","pea","peg","pen","pep","per","pet","pie","pig","pin","pit","ply","pod","pop","pot","pow","pro","pry","pub","pug","pun","pup","pus","put",
+  "rag","ram","ran","rap","rat","raw","ray","red","ref","rev","rib","rid","rig","rim","rip","rob","rod","rot","row","rub","rug","rum","run","rut","rye",
+  "sac","sad","sag","sap","sat","saw","say","sea","set","sew","she","shy","sin","sip","sir","sis","sit","six","ski","sky","sly","sob","sod","son","sop","sot","sow","soy","spa","spy","sty","sub","sue","sum","sun","sup",
+  "tab","tad","tag","tan","tap","tar","tat","tax","tea","ten","the","tie","tin","tip","toe","ton","too","top","tot","tow","toy","try","tub","tug","tun",
+  "urn","use",
+  "van","vat","vet","vex","via","vie","vim","vow",
+  "wad","wag","war","was","wax","way","web","wed","wet","who","why","wig","win","wit","woe","wok","won","woo","wow",
+  "yak","yam","yap","yaw","yea","yes","yet","yew","yin","you","yow",
+  "zap","zed","zen","zig","zip","zoo"
+];
+
+let usedWords, score, timerInterval, timeLeft, gameActive, currentWord, longestChain, currentChainLen;
+
+function startGame() {
+  usedWords = new Set();
+  score = 0;
+  timeLeft = 60;
+  gameActive = true;
+  longestChain = 0;
+  currentChainLen = 0;
+  document.getElementById('score').textContent = '0';
+  document.getElementById('timer').textContent = '60';
+  document.getElementById('timerFill').style.width = '100%';
+  document.getElementById('timerFill').className = 'timer-fill';
+  document.getElementById('wordChain').innerHTML = '';
+  document.getElementById('feedback').textContent = '';
+  document.getElementById('gameOver').classList.add('hidden');
+  document.getElementById('startScreen').classList.add('hidden');
+  document.getElementById('wordInput').value = '';
+  document.getElementById('wordInput').disabled = false;
+  document.getElementById('wordInput').focus();
+
+  const startIdx = Math.floor(Math.random() * WORD_LIST.length);
+  currentWord = WORD_LIST[startIdx];
+  usedWords.add(currentWord);
+  addWordToChain(currentWord);
+  updateNextLetter();
+  score = 1;
+  document.getElementById('score').textContent = score;
+  currentChainLen = 1;
+
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    timeLeft--;
+    document.getElementById('timer').textContent = timeLeft;
+    const pct = (timeLeft / 60) * 100;
+    document.getElementById('timerFill').style.width = pct + '%';
+    if (timeLeft <= 10) document.getElementById('timerFill').className = 'timer-fill danger';
+    else if (timeLeft <= 20) document.getElementById('timerFill').className = 'timer-fill warn';
+    if (timeLeft <= 0) endGame();
+  }, 1000);
+}
+
+function addWordToChain(word) {
+  const chain = document.getElementById('wordChain');
+  const div = document.createElement('div');
+  div.className = 'word-card';
+  div.style.color = '#e2e8f0';
+  div.textContent = word.toUpperCase();
+  chain.appendChild(div);
+}
+
+function updateNextLetter() {
+  const lastLetter = currentWord[currentWord.length - 1];
+  document.getElementById('currentLetter').textContent = lastLetter.toUpperCase();
+}
+
+document.getElementById('wordInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitWord();
+});
+
+function submitWord() {
+  if (!gameActive) return;
+  const input = document.getElementById('wordInput');
+  const word = input.value.trim().toLowerCase();
+  const fb = document.getElementById('feedback');
+
+  if (!word) return;
+
+  const lastLetter = currentWord[currentWord.length - 1];
+  if (word[0] !== lastLetter) {
+    fb.textContent = '❌ Must start with "' + lastLetter.toUpperCase() + '"';
+    fb.className = 'mt-2 text-sm h-6 text-red-400';
+    input.value = '';
+    return;
+  }
+
+  if (usedWords.has(word)) {
+    fb.textContent = '❌ Word already used!';
+    fb.className = 'mt-2 text-sm h-6 text-red-400';
+    input.value = '';
+    return;
+  }
+
+  if (!WORD_LIST.includes(word)) {
+    fb.textContent = '❌ Word not in list!';
+    fb.className = 'mt-2 text-sm h-6 text-red-400';
+    input.value = '';
+    return;
+  }
+
+  usedWords.add(word);
+  currentWord = word;
+  addWordToChain(word);
+  updateNextLetter();
+  score++;
+  currentChainLen++;
+  if (currentChainLen > longestChain) longestChain = currentChainLen;
+  document.getElementById('score').textContent = score;
+  fb.textContent = '✓ +' + score;
+  fb.className = 'mt-2 text-sm h-6 text-green-400';
+  input.value = '';
+  input.focus();
+}
+
+function endGame() {
+  gameActive = false;
+  clearInterval(timerInterval);
+  document.getElementById('wordInput').disabled = true;
+  document.getElementById('gameOver').classList.remove('hidden');
+  document.getElementById('finalScore').textContent = score;
+  document.getElementById('longestChain').textContent = longestChain;
+}
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

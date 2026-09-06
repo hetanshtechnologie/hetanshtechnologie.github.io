@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Expense Tracker Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    .stat-card { background: white; border-radius: 12px; padding: 16px; border: 1px solid #e5e7eb; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: #1e293b; }
+    .stat-label { font-size: .8rem; color: #64748b; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-gray-50 p-6">
+  <div class="max-w-6xl mx-auto">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">⚙️ Expense Tracker - Admin</h1>
+      <a href="index.html" class="text-blue-600 hover:underline text-sm">&larr; Back to App</a>
+    </div>
+
+    <div id="admin-login" class="max-w-md mx-auto mt-20 bg-white p-6 rounded-xl shadow-lg">
+      <h2 class="text-xl font-bold mb-4">Admin Login</h2>
+      <button onclick="handleGoogleLogin()" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-weight:500;font-size:.9rem;margin-bottom:16px;">
+        <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.54 28.59A14.5 14.5 0 0 1 9.5 24c0-1.59.28-3.14.76-4.59l-7.98-6.19A23.99 23.99 0 0 0 0 24c0 3.77.87 7.35 2.56 10.56l7.98-5.97z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 5.97C6.51 42.62 14.62 48 24 48z"/></svg>
+        Sign in with Google
+      </button>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+        <hr style="flex:1;border:none;border-top:1px solid #e5e7eb;">
+        <span style="color:#9ca3af;font-size:.85rem;">or email</span>
+        <hr style="flex:1;border:none;border-top:1px solid #e5e7eb;">
+      </div>
+
+      <input id="admin-email" type="email" placeholder="Email" class="w-full p-3 border rounded-lg mb-3">
+      <input id="admin-password" type="password" placeholder="Password" class="w-full p-3 border rounded-lg mb-3">
+      <button onclick="adminLogin()" class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold">Sign In</button>
+      <div id="admin-error" class="text-red-600 text-sm mt-3 hidden"></div>
+    </div>
+
+    <div id="admin-dashboard" class="hidden">
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+        <div class="stat-card"><div class="stat-label">Total Users</div><div class="stat-value" id="admin-total-users">-</div></div>
+        <div class="stat-card"><div class="stat-label">Active Subscriptions</div><div class="stat-value" id="admin-active-subs">-</div></div>
+        <div class="stat-card"><div class="stat-label">Revenue (₹)</div><div class="stat-value" id="admin-revenue">-</div></div>
+        <div class="stat-card"><div class="stat-label">Free Users</div><div class="stat-value" id="admin-free-users">-</div></div>
+      </div>
+
+      <div class="bg-white rounded-xl p-4 border">
+        <h3 class="font-bold mb-4">Users</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="bg-gray-50 border-b"><th class="p-3 text-left">Email</th><th class="p-3 text-left">Plan</th><th class="p-3 text-right">Expenses</th><th class="p-3 text-center">Status</th><th class="p-3 text-center">Actions</th></tr></thead>
+            <tbody id="admin-users-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    if (location.hash === '#') history.replaceState(null, '', location.pathname + location.search);
+    const SUPABASE_URL = 'https://vgipghqejzbcoighktij.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnaXBnaHFlanpiY29pZ2hrdGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MjQ2MjIsImV4cCI6MjA5NTMwMDYyMn0.KoDwAZarGWOLwKXOwycA8wuIiIrksvZy7dyaO0-ehUo';
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    document.addEventListener('DOMContentLoaded', async function() {
+      const { data: { user } } = await sb.auth.getUser();
+      if (user && user.email === 'hetanshtechnologie@gmail.com') {
+        document.getElementById('admin-login').classList.add('hidden');
+        document.getElementById('admin-dashboard').classList.remove('hidden');
+        loadAdminData();
+      }
+    });
+
+    async function handleGoogleLogin() {
+      const btn = event.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Redirecting...';
+      try {
+        const { error } = await sb.auth.signInWithOAuth({
+          provider: 'google',
+          options: { redirectTo: window.location.origin + window.location.pathname + window.location.search }
+        });
+        if (error) throw error;
+      } catch (err) {
+        document.getElementById('admin-error').textContent = err.message;
+        document.getElementById('admin-error').classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = 'Sign in with Google';
+      }
+    }
+
+    async function adminLogin() {
+      const email = document.getElementById('admin-email').value;
+      const password = document.getElementById('admin-password').value;
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error || data?.user?.email !== 'hetanshtechnologie@gmail.com') {
+        if (data?.user?.email !== 'hetanshtechnologie@gmail.com' && data?.user) await sb.auth.signOut();
+        document.getElementById('admin-error').textContent = 'Unauthorized';
+        document.getElementById('admin-error').classList.remove('hidden');
+        return;
+      }
+      document.getElementById('admin-login').classList.add('hidden');
+      document.getElementById('admin-dashboard').classList.remove('hidden');
+      loadAdminData();
+    }
+
+    async function loadAdminData() {
+      const token = (await sb.auth.getSession()).data?.session?.access_token;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/et-admin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
+      });
+      if (!res.ok) return;
+      const d = await res.json();
+      document.getElementById('admin-total-users').textContent = d.totalUsers || 0;
+      document.getElementById('admin-active-subs').textContent = d.activeSubs || 0;
+      document.getElementById('admin-revenue').textContent = (d.revenue || 0).toLocaleString();
+      document.getElementById('admin-free-users').textContent = d.freeUsers || 0;
+
+      const tbody = document.getElementById('admin-users-body');
+      tbody.innerHTML = (d.users || []).map(u => `
+        <tr class="border-b hover:bg-gray-50">
+          <td class="p-3">${escHtml(u.email)}</td>
+          <td class="p-3">${escHtml(u.plan || 'Free')}</td>
+          <td class="p-3 text-right">${u.expenseCount || 0}</td>
+          <td class="p-3 text-center">${u.blocked ? '<span class="text-red-600">Blocked</span>' : '<span class="text-green-600">Active</span>'}</td>
+          <td class="p-3 text-center">
+            ${u.blocked
+              ? `<button onclick="toggleBlock('${u.id}',false)" class="text-green-600 hover:underline text-xs">Unblock</button>`
+              : `<button onclick="toggleBlock('${u.id}',true)" class="text-red-600 hover:underline text-xs">Block</button>`
+            }
+            <button onclick="upgradeUser('${u.id}')" class="text-blue-600 hover:underline text-xs ml-2">Upgrade</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function toggleBlock(userId, block) {
+      const token = (await sb.auth.getSession()).data?.session?.access_token;
+      await fetch(`${SUPABASE_URL}/functions/v1/et-admin`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ action: 'toggleBlock', userId, block })
+      });
+      loadAdminData();
+    }
+
+    async function upgradeUser(userId) {
+      const planId = prompt('Enter plan ID (2=Pro, 3=Admin):', '2');
+      if (!planId) return;
+      const token = (await sb.auth.getSession()).data?.session?.access_token;
+      await fetch(`${SUPABASE_URL}/functions/v1/et-admin`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ action: 'upgradeUser', userId, planId: parseInt(planId) })
+      });
+      loadAdminData();
+    }
+
+    function escHtml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  </script>
+</body>
+</html>

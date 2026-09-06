@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Reading Progress - HetanshTechnologie</title>
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-1RVMWL4SDK');
+  </script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f8fafc; color: #1e293b; line-height: 1.6; }
+    .container { max-width: 860px; margin: 0 auto; padding: 32px 20px 80px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 24px; }
+    .topbar a { color: #3b82f6; text-decoration: none; font-size: .9rem; font-weight: 500; }
+    .topbar a:hover { text-decoration: underline; }
+    h1 { font-size: 1.8rem; color: #0f172a; margin-bottom: 6px; }
+    .subtitle { color: #64748b; font-size: .95rem; margin-bottom: 28px; }
+    #stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 28px; }
+    .stat { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; text-align: center; }
+    .stat .num { font-size: 1.6rem; font-weight: 700; color: #16a34a; }
+    .stat .lbl { font-size: .8rem; color: #64748b; margin-top: 2px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+    .card .head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .card h3 { font-size: 1.05rem; color: #0f172a; }
+    .card .pct { color: #16a34a; font-weight: 600; font-size: .9rem; white-space: nowrap; }
+    .bar { height: 10px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-bottom: 14px; }
+    .bar > div { height: 100%; background: #16a34a; border-radius: 6px; }
+    .card .meta { font-size: .85rem; color: #64748b; margin-bottom: 14px; }
+    .card .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn { display: inline-block; padding: 8px 18px; border-radius: 6px; font-size: .9rem; font-weight: 600; text-decoration: none; }
+    .btn-primary { background: #16a34a; color: #fff; }
+    .btn-primary:hover { background: #15803d; }
+    .btn-ghost { background: #f1f5f9; color: #334155; }
+    .btn-ghost:hover { background: #e2e8f0; }
+    .empty { background: #fff; border: 1px dashed #cbd5e1; border-radius: 12px; padding: 48px 24px; text-align: center; color: #64748b; }
+    .empty .big { font-size: 2.4rem; margin-bottom: 10px; }
+    .empty h2 { font-size: 1.2rem; color: #0f172a; margin-bottom: 8px; }
+    .empty p { font-size: .9rem; margin-bottom: 20px; }
+    #loading { text-align: center; color: #64748b; padding: 60px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <a href="../index.html">&larr; Home</a>
+      <a href="../ecommerce/index.html">Browse Tutorials &rarr;</a>
+    </div>
+
+    <h1>My Reading Progress</h1>
+    <p class="subtitle">Track how far you've read in every tutorial. Sign in to sync your progress across devices.</p>
+
+    <div id="stats" style="display:none;"></div>
+    <div id="progress-list"></div>
+    <div id="loading">Loading your progress...</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    (function() {
+      var SUPABASE_URL = 'https://vgipghqejzbcoighktij.supabase.co';
+      var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnaXBnaHFlanpiY29pZ2hrdGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MjQ2MjIsImV4cCI6MjA5NTMwMDYyMn0.KoDwAZarGWOLwKXOwycA8wuIiIrksvZy7dyaO0-ehUo';
+
+      if (!window.supabase) { renderError('Supabase failed to load.'); return; }
+      var client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      var listEl = document.getElementById('progress-list');
+      var statsEl = document.getElementById('stats');
+      var loadingEl = document.getElementById('loading');
+
+      client.auth.getUser().then(function(resp) {
+        var user = resp.data && resp.data.user;
+        if (!user) { renderNotLoggedIn(); return; }
+        return client.from('tutorial_progress')
+          .select('tutorial_slug, current_chapter, completed_chapters, updated_at')
+          .order('updated_at', { ascending: false })
+          .then(function(r) {
+            if (r.error) throw r.error;
+            if (!r.data || !r.data.length) { renderEmpty(); return; }
+            renderList(r.data);
+          });
+      }).catch(function() { renderError(); });
+
+      function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      function renderNotLoggedIn() {
+        loadingEl.style.display = 'none';
+        listEl.innerHTML =
+          '<div class="empty"><div class="big">&#128214;</div>' +
+          '<h2>Sign in to see your progress</h2>' +
+          '<p>Your reading progress is saved to your account so you can pick up where you left off.</p>' +
+          '<a class="btn btn-primary" href="../ecommerce/index.html">Sign In / Register</a></div>';
+      }
+
+      function renderEmpty() {
+        loadingEl.style.display = 'none';
+        listEl.innerHTML =
+          '<div class="empty"><div class="big">&#128218;</div>' +
+          '<h2>You haven\'t started any tutorials yet</h2>' +
+          '<p>Open a tutorial and read a chapter — your progress will appear here automatically.</p>' +
+          '<a class="btn btn-primary" href="../ecommerce/index.html">Browse Tutorials</a></div>';
+      }
+
+      function renderError() {
+        loadingEl.style.display = 'none';
+        listEl.innerHTML =
+          '<div class="empty"><div class="big">&#9888;&#65039;</div>' +
+          '<h2>Could not load your progress</h2>' +
+          '<p>Please try again in a moment.</p></div>';
+      }
+
+      function parseIndex(html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var links = Array.prototype.slice.call(doc.querySelectorAll('a[href*="chapters/"]'));
+        var chapterLinks = [];
+        for (var i = 0; i < links.length; i++) {
+          var href = links[i].getAttribute('href') || '';
+          var num = parseInt(href.split('/').pop(), 10);
+          if (!isNaN(num)) chapterLinks.push({ num: num, href: href });
+        }
+        var nums = [];
+        var seen = {};
+        for (var j = 0; j < chapterLinks.length; j++) {
+          if (!seen[chapterLinks[j].num]) { seen[chapterLinks[j].num] = true; nums.push(chapterLinks[j].num); }
+        }
+        nums.sort(function(a, b) { return a - b; });
+        var h1 = doc.querySelector('h1');
+        var title = (h1 && h1.textContent.trim()) || doc.title || '';
+        return { title: title, chapterLinks: chapterLinks, unique: nums };
+      }
+
+      function renderList(rows) {
+        var results = [];
+        var pending = rows.length;
+        rows.forEach(function(row) {
+          var slug = row.tutorial_slug;
+          fetch(encodeURIComponent(slug) + '/index.html')
+            .then(function(res) { return res.text(); })
+            .then(function(html) { results.push({ row: row, slug: slug, info: parseIndex(html), ok: true }); })
+            .catch(function() { results.push({ row: row, slug: slug, info: null, ok: false }); })
+            .then(function() {
+              pending--;
+              if (pending === 0) finish(results);
+            });
+        });
+      }
+
+      function finish(results) {
+        loadingEl.style.display = 'none';
+        var cards = '';
+        var totalDone = 0, totalCh = 0, started = results.length;
+        results.sort(function(a, b) {
+          var ta = a.row.updated_at ? new Date(a.row.updated_at).getTime() : 0;
+          var tb = b.row.updated_at ? new Date(b.row.updated_at).getTime() : 0;
+          return tb - ta;
+        });
+        for (var i = 0; i < results.length; i++) {
+          var r = results[i];
+          var completed = Array.isArray(r.row.completed_chapters) ? r.row.completed_chapters : [];
+          var unique = r.info ? r.info.unique : [];
+          var total = unique.length;
+          if (!total) {
+            var max = 0;
+            for (var k = 0; k < completed.length; k++) { if (completed[k] > max) max = completed[k]; }
+            if (r.row.current_chapter > max) max = r.row.current_chapter;
+            total = max;
+          }
+          var done = 0;
+          for (var m = 0; m < unique.length; m++) { if (completed.indexOf(unique[m]) !== -1) done++; }
+          var pct = total ? Math.round((done / total) * 100) : 0;
+          totalDone += done; totalCh += total;
+
+          var nextNum = null;
+          for (var n = 0; n < unique.length; n++) { if (completed.indexOf(unique[n]) === -1) { nextNum = unique[n]; break; } }
+          var continueHref = '';
+          if (nextNum !== null && r.info) {
+            for (var c = 0; c < r.info.chapterLinks.length; c++) {
+              if (r.info.chapterLinks[c].num === nextNum) { continueHref = encodeURIComponent(r.slug) + '/' + r.info.chapterLinks[c].href; break; }
+            }
+          }
+          var title = r.info && r.info.title ? r.info.title : r.slug;
+          var updated = new Date(r.row.updated_at);
+          var updatedLabel = isNaN(updated.getTime()) ? '' : 'Updated ' + updated.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
+          cards += '<div class="card">' +
+            '<div class="head"><h3>' + escapeHtml(title) + '</h3><span class="pct">' + pct + '% &middot; ' + done + '/' + total + ' chapters</span></div>' +
+            '<div class="bar"><div style="width:' + pct + '%;"></div></div>' +
+            '<div class="meta">Last read: Chapter ' + r.row.current_chapter + (updatedLabel ? ' &middot; ' + updatedLabel : '') + '</div>' +
+            '<div class="actions">' +
+              (continueHref ? '<a class="btn btn-primary" href="' + escapeHtml(continueHref) + '">Continue &rarr;</a>' : '') +
+              '<a class="btn btn-ghost" href="' + encodeURIComponent(r.slug) + '/">View Tutorial</a>' +
+            '</div>' +
+          '</div>';
+        }
+
+        statsEl.style.display = 'grid';
+        statsEl.innerHTML =
+          '<div class="stat"><div class="num">' + started + '</div><div class="lbl">Tutorials started</div></div>' +
+          '<div class="stat"><div class="num">' + totalDone + '</div><div class="lbl">Chapters read</div></div>' +
+          '<div class="stat"><div class="num">' + (totalCh ? Math.round((totalDone / totalCh) * 100) : 0) + '%</div><div class="lbl">Overall progress</div></div>';
+        listEl.innerHTML = cards;
+      }
+    })();
+  </script>
+  <script src="../js/analytics-tracker.js" defer></script>
+</body>
+</html>

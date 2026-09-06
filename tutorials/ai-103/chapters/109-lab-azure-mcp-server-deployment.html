@@ -1,0 +1,152 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>109. Lab - Azure MCP Server deployment - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 109</span>
+<h1>Lab - Azure MCP Server deployment</h1>
+<p>In this lab you will deploy an Azure MCP server — the server that wraps Azure Language, Speech, and Vision services — to Azure Container Apps. The result is a hosted endpoint your agents can connect to from anywhere. This lab focuses on getting the server running and reachable; the next lab shows you how to talk to it.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>An Azure subscription with the ability to create resources.</li>
+<li>The Azure CLI (<code>az</code>) installed and signed in. Verify with <code>az account show</code>.</li>
+<li>Docker installed and running if you build images locally; alternatively, use the prebuilt container image supplied with the server project.</li>
+<li>The <code>azd</code> tool (Azure Developer CLI) if you follow the simplified one-command deployment path.</li>
+</ul>
+
+<div class="warn">
+<p>Deploying a containerized server to Azure Container Apps incurs small costs while it runs. The per-second billing adds up slowly, but remember to delete the container app when you finish the labs, as shown in the cleanup step.</p>
+</div>
+
+<h2>Step 1: Get the Server Project</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Clone the Azure MCP server repository</h3>
+<ol>
+<li>Clone the Microsoft Azure MCP servers repository to your machine:</li>
+</ol>
+
+<pre><code>git clone https://github.com/Azure/azure-mcp-servers.git
+cd azure-mcp-servers</code></pre>
+
+<ol start="2">
+<li>Confirm you are in the project folder and that the language/speech/vision server source is present. The repository contains several servers; this lab uses the language server subfolder.</li>
+</ol>
+
+<div class="tip">
+<p>If cloning is not an option on your machine, download the repository ZIP from the same URL and extract it. The deployment steps that follow do not care how you obtained the files.</p>
+</div>
+</div>
+
+<h2>Step 2: Deploy the Container</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Deploy with the Azure CLI</h3>
+<p>The fastest reliable path is to push a container image and run it in Container Apps. First, create a resource group and a Container Registry, then build and push the image:</p>
+
+<pre><code>az group create --name rg-ai103-mcp --location eastus
+
+az acr create --resource-group rg-ai103-mcp \
+  --name ai103mcpacr --sku Basic --admin-enabled true
+
+az acr login --name ai103mcpacr
+
+docker build -t ai103mcpacr.azurecr.io/azure-language-mcp:latest ./path/to/server
+docker push ai103mcpacr.azurecr.io/azure-language-mcp:latest</code></pre>
+
+<p>Next, create a Container Apps environment and the app itself:</p>
+
+<pre><code>az containerapp env create \
+  --name cae-ai103 --resource-group rg-ai103-mcp --location eastus
+
+az containerapp create \
+  --name mcp-language-server \
+  --resource-group rg-ai103-mcp \
+  --environment cae-ai103 \
+  --image ai103mcpacr.azurecr.io/azure-language-mcp:latest \
+  --ingress external \
+  --target-port 80 \
+  --min-replicas 1 --max-replicas 1 \
+  --registry-server ai103mcpacr.azurecr.io \
+  --registry-username ai103mcpacr \
+  --registry-password YOUR_ACR_PASSWORD</code></pre>
+
+<p>Replace <code>YOUR_ACR_PASSWORD</code> with the registry password from <code>az acr credential show</code>. Container Apps builds and starts the container, which typically takes a few minutes.</p>
+</div>
+
+<div class="note">
+<p>Container Apps can also build directly from source with <code>az containerapp up</code>, which skips the manual registry steps entirely. The two-step path above is shown because it makes every stage visible — you will reuse the same image for redeployments.</p>
+</div>
+
+<h2>Step 3: Configure the Server</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Set environment variables and an access key</h3>
+<ol>
+<li>The server needs to know which Azure service to call and how to authenticate. Set an environment variable on the container app with the endpoint of your Azure AI Language resource:</li>
+</ol>
+
+<pre><code>az containerapp update \
+  --name mcp-language-server \
+  --resource-group rg-ai103-mcp \
+  --set-env-vars \
+    AZURE_AI_LANGUAGE_ENDPOINT=https://YOUR_LANGUAGE_ENDPOINT \
+    MCP_ACCESS_KEY=YOUR_GENERATED_KEY</code></pre>
+
+<ol start="2">
+<li>Generate a strong random value for <code>YOUR_GENERATED_KEY</code> — this is the key your clients will present. A quick way on Windows is <code>openssl rand -base64 32</code>, or on Linux <code>head -c 32 /dev/urandom | base64</code>.</li>
+<li>Get the public URL of your server:</li>
+</ol>
+
+<pre><code>az containerapp show \
+  --name mcp-language-server \
+  --resource-group rg-ai103-mcp \
+  --query "properties.configuration.ingress.fqdn" -o tsv</code></pre>
+
+<p>Write down the returned URL. Your MCP endpoint will be this URL with <code>/sse</code> appended — that is what clients connect to.</p>
+</div>
+
+<div class="warn">
+<p>Never use a weak or reused value for <code>MCP_ACCESS_KEY</code>. Anyone with this key can call your server and, through it, your Azure services. Treat it as a credential: store it in a secret store in production and rotate it periodically.</p>
+</div>
+
+<h2>Step 4: Verify the Server Is Alive</h2>
+<p>A simple health check confirms the container started before you build a client:</p>
+
+<pre><code>curl -s "http://YOUR_SERVER_FQDN/sse" -H "Authorization: Bearer YOUR_GENERATED_KEY" --max-time 10</code></pre>
+
+<p>An SSE endpoint holds the connection open, so do not expect a prompt to return — a response at all (or the connection staying open rather than instantly failing) means the server process is running. A connection refusal or an HTTP 401/403 points to a startup problem or a bad access key.</p>
+
+<div class="tip">
+<p>If the health check fails, look at the container's logs first: <code>az containerapp logs show --name mcp-language-server --resource-group rg-ai103-mcp</code>. Startup crashes usually leave an exception trace that names the missing variable or bad config.</p>
+</div>
+
+<h2>Step 5: Clean Up</h2>
+<p>When you finish the MCP labs, remove the deployment to stop its running costs:</p>
+
+<pre><code>az group delete --name rg-ai103-mcp --yes --no-wait</code></pre>
+
+<p>This deletes the container app, the environment, and the registry in one operation.</p>
+
+<h2>Summary</h2>
+<p>You deployed an Azure MCP server to Azure Container Apps from source, configured its environment variables and access key, retrieved its public endpoint, and verified the process is running. You now hold two pieces of information that the next lab needs: the server URL and the access key. Next you will connect a real MCP client to this server and call its tools.</p>
+<nav>
+<a href="108-calling-an-azure-mcp-server-primer.html">&larr; Previous: Calling an Azure MCP Server - Primer</a><a href="110-lab-talking-to-the-azure-mcp-server.html">Next: Lab - Talking to the Azure MCP Server &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

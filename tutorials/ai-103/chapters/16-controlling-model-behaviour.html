@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16. Controlling Model Behaviour - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 16</span>
+<h1>Controlling Model Behaviour</h1>
+<p>In the previous lab you made a raw API call and got a plain answer. That is only the beginning. A deployed model is not a single fixed behaviour; it is a general-purpose engine that can behave like a customer agent, a translator, a JSON generator, or a strict factual assistant depending on how you configure each request. This chapter explains the levers that control model behaviour: the system prompt, sampling parameters, output formatting, and few-shot examples.</p>
+
+<h2>Behaviour Is Configured, Not Hard-Coded</h2>
+<p>Once a model is trained, its weights are frozen. When you change its behaviour, you are not retraining it. Instead you are changing the context and settings of each inference call. This is a crucial idea: all of the steering happens at request time through the parameters you pass to the API. That is what makes one deployment reusable for many different jobs.</p>
+
+<h2>The System Prompt: Setting the Role and the Rules</h2>
+<p>The most powerful behavioural control is the system prompt. It is a message with <code>role: "system"</code> that describes who the model is, what rules it must follow, and how it should respond. It stays in effect for the whole conversation, unlike a user message which applies to a single turn.</p>
+<p>A good system prompt covers:</p>
+<ul>
+<li><strong>Identity:</strong> who the assistant is and who it serves.</li>
+<li><strong>Tone and style:</strong> formal, friendly, technical, brief, and so on.</li>
+<li><strong>Rules:</strong> what to do and what to refuse.</li>
+<li><strong>Format:</strong> plain text, bullet points, tables, JSON.</li>
+<li><strong>Limits:</strong> length, topics, fallback behaviour when information is missing.</li>
+</ul>
+<p>Compare these two system prompts:</p>
+<pre><code>{"role": "system", "content": "You are a helpful assistant."}
+
+{"role": "system", "content": "You are a support agent for a software company. Answer in two sentences or fewer, use plain language, and if you do not know the answer, say you will escalate the question."}
+</code></pre>
+
+<div class="tip">
+<p>Write the system prompt as if you were briefing a new employee. The clearer and more specific the briefing, the more consistent the responses.</p>
+</div>
+
+<h2>Sampling Parameters: Creativity vs Determinism</h2>
+<p>Every time the model produces a token, it assigns probabilities to a set of candidate tokens and picks one. Sampling parameters control how that pick is made.</p>
+
+<table>
+<tr><th>Parameter</th><th>What it controls</th><th>Lower value</th><th>Higher value</th></tr>
+<tr><td><code>temperature</code></td><td>How much the model favours likely over unlikely tokens.</td><td>More focused, predictable</td><td>More varied, creative</td></tr>
+<tr><td><code>top_p</code></td><td>The cumulative probability mass considered when picking.</td><td>Narrow, conservative</td><td>Broad, exploratory</td></tr>
+<tr><td><code>max_tokens</code></td><td>Hard limit on the length of the generated answer.</td><td>Shorter answers</td><td>Longer answers</td></tr>
+<tr><td><code>frequency_penalty</code></td><td>Discourages repeating tokens that already appeared.</td><td>More repetition</td><td>Less repetition</td></tr>
+<tr><td><code>presence_penalty</code></td><td>Encourages talking about new topics.</td><td>Stays on topic</td><td>Shifts topics more</td></tr>
+<tr><td><code>seed</code></td><td>Sets a starting state to make sampling more reproducible.</td><td colspan="2">Same seed tends to give similar output</td></tr>
+</table>
+
+<div class="note">
+<p><code>temperature</code> and <code>top_p</code> both influence randomness and interact with each other. It is best practice to adjust one at a time and leave the other at its default instead of pushing both aggressively.</p>
+</div>
+
+<p>In practice, code and factual tasks work well with <code>temperature</code> near zero, while brainstorming, naming, and creative writing benefit from values around <code>0.7</code> or higher.</p>
+
+<h2>Requesting Structured Output</h2>
+<p>Raw prose is hard to parse in an application. Many workloads need JSON. You can instruct the model to emit JSON and, on recent models, you can enforce it with the <code>response_format</code> parameter:</p>
+<pre><code>response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    response_format={"type": "json_object"},
+    messages=[
+        {"role": "system", "content": "Return a JSON object with keys: name and summary."},
+        {"role": "user", "content": "Summarise the book Moby Dick."},
+    ],
+)
+</code></pre>
+
+<div class="tip">
+<p>When you enforce a JSON format, also describe the schema in the prompt. The model then knows exactly which keys to produce, and your code can parse the result with <code>json.loads</code> without error handling gymnastics.</p>
+</div>
+
+<h2>Few-Shot Examples</h2>
+<p>Sometimes rules are easier to show than to describe. Few-shot prompting adds one or more example input-output pairs to the conversation so the model can imitate the pattern. This is especially effective for classification, extraction, and reformatting tasks.</p>
+<pre><code>messages = [
+    {"role": "system", "content": "Classify each email as urgent or normal."},
+    {"role": "user", "content": "Server is down, please help now."},
+    {"role": "assistant", "content": "urgent"},
+    {"role": "user", "content": "Reminder: review next week's report."},
+    {"role": "assistant", "content": "normal"},
+    {"role": "user", "content": "The invoice from last month is missing."},
+]
+</code></pre>
+
+<h2>Content Filtering: The Platform Guardrail</h2>
+<p>On top of your configuration, the platform applies its own content safety checks. Inputs and outputs pass through content filters that block harmful categories such as hate, violence, sexual content, and self-harm. You cannot switch these filters off; they are a baseline, and applications that need stricter policy add their own guardrail layer.</p>
+
+<h2>A Practical Configuration Recipe</h2>
+<p>Combine the levers in this order for predictable behaviour:</p>
+<ol>
+<li>Write a precise <strong>system prompt</strong> with role, tone, rules, and format.</li>
+<li>Set <strong>sampling parameters</strong> for the task, usually a low temperature for factual work.</li>
+<li>Use <strong>structured output</strong> when your code must parse the answer.</li>
+<li>Add <strong>few-shot examples</strong> for tasks with a strong format or style component.</li>
+<li>Validate the output in your own code; never trust the model blindly.</li>
+</ol>
+
+<h2>Summary</h2>
+<p>Model behaviour is controlled at request time through the system prompt, sampling parameters, output formatting, and examples. The system prompt sets the role and rules, sampling parameters tune determinism and creativity, structured output makes answers parseable, and few-shot examples demonstrate desired patterns. In the next lab you will experiment with each of these levers against your own deployment.</p>
+<nav>
+<a href="15-lab-first-api-call-to-a-foundry-deployed-model.html">&larr; Previous: Lab - First API Call to a Foundry-Deployed Model</a><a href="17-lab-controlling-model-behaviour.html">Next: Lab - Controlling Model Behaviour &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

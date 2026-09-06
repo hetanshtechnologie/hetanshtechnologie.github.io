@@ -1,0 +1,134 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>116. Lab - Using python and models to generate images - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 116</span>
+<h1>Lab - Using python and models to generate images</h1>
+<p>In this lab you will write your first programmatic image generation script. You will call the image endpoint of a model deployed in Microsoft Foundry, receive a newly created picture, and save it to disk. By the end you will have a reusable script that turns any text prompt into an image file, with parameters you can tune for size, quality, and style.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li><strong>Python 3.9 or newer</strong> and VS Code.</li>
+<li><strong>An image generation model deployed</strong> in Microsoft Foundry, such as <code>gpt-image-1</code> or <code>dall-e-3</code>.</li>
+<li>Your <strong>endpoint URL</strong> and <strong>API key</strong>, stored as environment variables.</li>
+<li>The <code>openai</code> package and the <code>requests</code> package installed.</li>
+</ul>
+
+<h2>Installing the Required Packages</h2>
+<p>You already know the OpenAI SDK from earlier labs. For downloading the generated image you will also use the small <code>requests</code> library. Install both in one command:</p>
+
+<pre><code>pip install openai requests
+</code></pre>
+
+<h2>Find Your Image Deployment</h2>
+<p>Open your Foundry project and check the <em>Models</em> or <em>Deployments</em> page for an image model. Copy the deployment name exactly as it appears — this is what your code passes as the <code>model</code> argument, and it is not necessarily the same as the underlying model name.</p>
+
+<div class="note">
+<p>Image deployments are separate from chat deployments. Even if you have <code>gpt-4o</code> deployed for chat, you still need a dedicated deployment of an image model before the code in this lab will run.</p>
+</div>
+
+<h2>Generate Your First Image</h2>
+<div class="exercise">
+<h3>Step 1 - Create the project folder</h3>
+<p>Create a folder named <code>ai103-lab116</code> and open it in VS Code. Inside it, create a file called <code>generate_image.py</code>.</p>
+
+<h3>Step 2 - Set your environment variables</h3>
+<pre><code>$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+
+<h3>Step 3 - Paste the script</h3>
+<p>Paste the following code and replace <code>YOUR_IMAGE_DEPLOYMENT_NAME</code> with the name of your image deployment:</p>
+<pre><code>from openai import AzureOpenAI
+import os
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+result = client.images.generate(
+    model="YOUR_IMAGE_DEPLOYMENT_NAME",
+    prompt="A cozy reading nook by a rainy window, watercolor style",
+    size="1024x1024",
+    quality="standard",
+    n=1,
+)
+
+image_url = result.data[0].url
+print("Generated image URL:", image_url)
+</code></pre>
+
+<h3>Step 4 - Run the script</h3>
+<pre><code>python generate_image.py
+</code></pre>
+<p>The script prints a URL pointing to your freshly generated image. Open it in a browser to see the result.</p>
+</div>
+
+<h2>Saving the Image to Disk</h2>
+<p>A URL is handy for a one-off check, but applications usually need the image as a file. Download the bytes from the URL and write them to disk with <code>requests</code>. Add this to your script:</p>
+<pre><code>import requests
+
+image_url = result.data[0].url
+image_bytes = requests.get(image_url).content
+
+with open("cozy_nook.png", "wb") as image_file:
+    image_file.write(image_bytes)
+
+print("Saved to cozy_nook.png")
+</code></pre>
+<p>Some image deployments return the image directly as a base64 string instead of a URL. To handle both cases, check whether <code>result.data[0].b64_json</code> is present and decode it:</p>
+<pre><code>import base64
+
+b64 = result.data[0].b64_json
+if b64:
+    image_bytes = base64.b64decode(b64)
+else:
+    image_bytes = requests.get(result.data[0].url).content
+</code></pre>
+
+<h2>Tuning the Output</h2>
+<p>Experiment with the parameters to see how they change the result:</p>
+<ul>
+<li>Change <code>prompt</code> to a completely different scene and rerun the script.</li>
+<li>Set <code>quality="hd"</code> and compare the detail and the generation time.</li>
+<li>Try other <code>size</code> values such as <code>1792x1024</code> for a wide landscape.</li>
+<li>Where the model supports it, add a <code>style</code> such as <code>"vivid"</code> for more dramatic colors.</li>
+</ul>
+
+<div class="tip">
+<p>Write the prompt into a variable at the top of the script. It makes the script easier to read, and you can later build prompts dynamically from user input or from data in your application.</p>
+</div>
+
+<h2>Troubleshooting Common Errors</h2>
+<table>
+<tr><th>Error you may see</th><th>Most likely cause</th><th>Fix</th></tr>
+<tr><td><code>404</code> deployment not found</td><td>The <code>model</code> argument names a chat deployment, not an image deployment.</td><td>Use the exact name of your image model deployment.</td></tr>
+<tr><td><code>400 Invalid size</code></td><td>The requested size is not supported by the model.</td><td>Use a size documented for your model, such as <code>1024x1024</code>.</td></tr>
+<tr><td><code>Content filtered</code></td><td>The prompt tripped a content filter.</td><td>Reword the prompt and follow responsible use guidelines.</td></tr>
+<tr><td><code>NameError: requests</code></td><td>The <code>requests</code> package is not installed.</td><td>Run <code>pip install requests</code> and try again.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You have generated an image from a text prompt with Python, downloaded it to disk, and learned how to handle both URL-based and base64-based responses. You also saw how the <code>size</code> and <code>quality</code> parameters shape the output. In the next chapter you will go one step further and modify images that already exist, rather than starting from a blank canvas.</p>
+<nav>
+<a href="115-using-models-to-generate-images.html">&larr; Previous: Using models to generate images</a><a href="117-image-editing-with-generative-models.html">Next: Image editing with generative models &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,315 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Space Invaders</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+<style>
+canvas { display: block; image-rendering: pixelated; border: 2px solid #374151; border-radius: 8px; background: #000; }
+</style>
+</head>
+<body class="bg-gray-900 min-h-screen flex flex-col items-center select-none">
+<a href="index.html" class="absolute top-4 left-4 text-green-400 hover:text-green-300 font-semibold text-lg">&larr; Back to Games</a>
+<h1 class="text-3xl font-bold text-green-400 mt-6 mb-2">Space Invaders</h1>
+<div class="flex gap-6 mb-2 text-lg">
+  <div class="text-white">Score: <span id="score" class="font-bold text-yellow-300">0</span></div>
+  <div class="text-white">Lives: <span id="lives" class="font-bold text-red-400">3</span></div>
+  <div class="text-white">Wave: <span id="wave" class="font-bold text-blue-300">1</span></div>
+</div>
+<canvas id="gameCanvas" width="480" height="560"></canvas>
+<div id="message" class="text-white text-lg mt-3 h-8"></div>
+<button id="startBtn" class="px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-full text-xl shadow-lg transition mt-2">Start Game</button>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const waveEl = document.getElementById('wave');
+const messageEl = document.getElementById('message');
+const startBtn = document.getElementById('startBtn');
+
+const W = canvas.width, H = canvas.height;
+let score, lives, wave, gameActive, animFrame;
+let player, bullets, aliens, alienBullets, keys, alienDir, alienMoveTimer, alienDropNext;
+let lastShot, difficulty;
+
+function init() {
+  score = 0; lives = 3; wave = 1; gameActive = true;
+  scoreEl.textContent = '0'; livesEl.textContent = '3'; waveEl.textContent = '1';
+  messageEl.textContent = '';
+  startBtn.textContent = 'Restart';
+  player = { x: W / 2 - 18, y: H - 50, w: 36, h: 24, speed: 4, alive: true, respawnTimer: 0 };
+  bullets = []; alienBullets = [];
+  keys = {};
+  alienDir = 1;
+  alienMoveTimer = 0;
+  alienDropNext = false;
+  lastShot = 0;
+  difficulty = 0;
+  spawnAliens();
+  if (animFrame) cancelAnimationFrame(animFrame);
+  animFrame = requestAnimationFrame(gameLoop);
+}
+
+function spawnAliens() {
+  aliens = [];
+  const rows = Math.min(4 + Math.floor(wave / 2), 6);
+  const cols = Math.min(8 + Math.floor(wave / 3), 10);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      aliens.push({ x: 40 + c * 40, y: 40 + r * 36, w: 30, h: 24, alive: true, row: r });
+    }
+  }
+  difficulty = Math.min(wave * 0.15, 1.5);
+}
+
+function alienShoot() {
+  if (aliens.filter(a => a.alive).length === 0) return;
+  if (Math.random() > 0.02 + difficulty * 0.01) return;
+  const alive = aliens.filter(a => a.alive);
+  if (alive.length === 0) return;
+  const a = alive[Math.floor(Math.random() * alive.length)];
+  alienBullets.push({ x: a.x + a.w / 2 - 2, y: a.y + a.h, w: 4, h: 10, speed: 3 + difficulty });
+}
+
+function update(dt) {
+  if (!gameActive) return;
+
+  if (!player.alive) {
+    player.respawnTimer -= dt;
+    if (player.respawnTimer <= 0) {
+      if (lives > 0) {
+        player.alive = true;
+        player.x = W / 2 - 18;
+      } else {
+        gameActive = false;
+        messageEl.innerHTML = '<span class="text-red-400 text-xl">GAME OVER — Score: ' + score + '</span>';
+        return;
+      }
+    }
+    return;
+  }
+
+  // Player movement
+  if (keys['ArrowLeft'] || keys['a']) player.x = Math.max(0, player.x - player.speed);
+  if (keys['ArrowRight'] || keys['d']) player.x = Math.min(W - player.w, player.x + player.speed);
+
+  // Player shooting
+  if (keys[' '] || keys['ArrowUp']) {
+    const now = Date.now();
+    if (now - lastShot > 250) {
+      bullets.push({ x: player.x + player.w / 2 - 2, y: player.y - 8, w: 4, h: 12, speed: 7 });
+      lastShot = now;
+    }
+  }
+
+  // Move bullets
+  bullets.forEach(b => b.y -= b.speed);
+  bullets = bullets.filter(b => b.y > -20);
+
+  // Alien bullets
+  alienShoot();
+  alienBullets.forEach(b => b.y += b.speed);
+  alienBullets = alienBullets.filter(b => b.y < H + 20);
+
+  // Move aliens
+  alienMoveTimer += dt;
+  const moveInterval = Math.max(0.15, 0.6 - difficulty * 0.08);
+  if (alienMoveTimer >= moveInterval) {
+    alienMoveTimer = 0;
+    let hitEdge = false;
+    for (const a of aliens) {
+      if (!a.alive) continue;
+      a.x += alienDir * 16;
+      if (a.x <= 5 || a.x + a.w >= W - 5) hitEdge = true;
+    }
+    if (hitEdge) {
+      alienDir *= -1;
+      for (const a of aliens) { if (a.alive) a.y += 18; }
+    }
+    // Check if aliens reached bottom
+    for (const a of aliens) {
+      if (a.alive && a.y + a.h >= player.y) {
+        gameActive = false;
+        messageEl.innerHTML = '<span class="text-red-400 text-xl">GAME OVER — Aliens reached bottom! Score: ' + score + '</span>';
+        return;
+      }
+    }
+  }
+
+  // Bullet-alien collision
+  for (const b of bullets) {
+    for (const a of aliens) {
+      if (!a.alive) continue;
+      if (b.x < a.x + a.w && b.x + b.w > a.x && b.y < a.y + a.h && b.y + b.h > a.y) {
+        a.alive = false;
+        b.y = -100;
+        score += (6 - a.row) * 10;
+        scoreEl.textContent = score;
+      }
+    }
+  }
+
+  // Alien bullet-player collision
+  for (const b of alienBullets) {
+    if (b.x < player.x + player.w && b.x + b.w > player.x && b.y < player.y + player.h && b.y + b.h > player.y) {
+      b.y = H + 100;
+      playerHit();
+    }
+  }
+
+  // Wave cleared
+  if (aliens.every(a => !a.alive)) {
+    wave++;
+    waveEl.textContent = wave;
+    spawnAliens();
+    alienBullets = [];
+    bullets = [];
+  }
+}
+
+function playerHit() {
+  lives--;
+  livesEl.textContent = lives;
+  if (lives <= 0) {
+    player.alive = false;
+    messageEl.innerHTML = '<span class="text-red-400 text-xl">GAME OVER — Score: ' + score + '</span>';
+    gameActive = false;
+  } else {
+    player.alive = false;
+    player.respawnTimer = 1.5;
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  // Stars
+  if (!draw.stars) {
+    draw.stars = [];
+    for (let i = 0; i < 60; i++) draw.stars.push({ x: Math.random()*W, y: Math.random()*H, s: Math.random()*2+0.5 });
+  }
+  ctx.fillStyle = '#fff';
+  draw.stars.forEach(st => { ctx.globalAlpha = 0.3 + Math.sin(Date.now()*0.001+st.x)*0.2; ctx.fillRect(st.x, st.y, st.s, st.s); });
+  ctx.globalAlpha = 1;
+
+  // Player
+  if (player.alive) {
+    ctx.fillStyle = '#22c55e';
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+    ctx.fillStyle = '#86efac';
+    ctx.fillRect(player.x + player.w/2 - 4, player.y - 10, 8, 12);
+    // Nose cone
+    ctx.beginPath();
+    ctx.moveTo(player.x + player.w/2, player.y - 16);
+    ctx.lineTo(player.x + player.w/2 - 8, player.y - 4);
+    ctx.lineTo(player.x + player.w/2 + 8, player.y - 4);
+    ctx.fill();
+  }
+
+  // Player bullets
+  ctx.fillStyle = '#fbbf24';
+  bullets.forEach(b => {
+    ctx.shadowColor = '#fbbf24';
+    ctx.shadowBlur = 8;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+  });
+  ctx.shadowBlur = 0;
+
+  // Aliens
+  const alienEmojis = ['👾', '🛸', '👽', '🛸', '👾', '👽'];
+  aliens.forEach(a => {
+    if (!a.alive) return;
+    const pulse = Math.sin(Date.now() * 0.003 + a.x * 0.1) * 2;
+    ctx.font = (24 + pulse) + 'px serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(alienEmojis[a.row % 3], a.x + a.w/2, a.y + a.h - 4);
+  });
+
+  // Alien bullets
+  ctx.fillStyle = '#ef4444';
+  ctx.shadowColor = '#ef4444';
+  ctx.shadowBlur = 6;
+  alienBullets.forEach(b => { ctx.fillRect(b.x, b.y, b.w, b.h); });
+  ctx.shadowBlur = 0;
+
+  // Lives display
+  ctx.font = '20px serif';
+  ctx.textAlign = 'left';
+  for (let i = 0; i < lives; i++) ctx.fillText('❤️', W - 110 + i * 28, 24);
+}
+
+let lastTime = 0;
+function gameLoop(timestamp) {
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+  lastTime = timestamp;
+  update(dt);
+  draw();
+  if (gameActive) animFrame = requestAnimationFrame(gameLoop);
+}
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// Touch controls
+let touchStartX = null;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  touchStartX = touch.clientX - rect.left;
+  // Tap to shoot
+  if (player.alive) {
+    const now = Date.now();
+    if (now - lastShot > 250) {
+      bullets.push({ x: player.x + player.w/2 - 2, y: player.y - 8, w: 4, h: 12, speed: 7 });
+      lastShot = now;
+    }
+  }
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!player.alive) return;
+  const touch = e.touches[0];
+  const rect = canvas.getBoundingClientRect();
+  const tx = touch.clientX - rect.left;
+  const dx = tx - touchStartX;
+  player.x = Math.max(0, Math.min(W - player.w, player.x + dx * 1.5));
+  touchStartX = tx;
+});
+canvas.addEventListener('touchend', () => { touchStartX = null; });
+
+// Click on canvas as alternative tap-to-shoot for desktop
+canvas.addEventListener('click', () => {
+  if (!player.alive || !gameActive) return;
+  const now = Date.now();
+  if (now - lastShot > 250) {
+    bullets.push({ x: player.x + player.w/2 - 2, y: player.y - 8, w: 4, h: 12, speed: 7 });
+    lastShot = now;
+  }
+});
+
+startBtn.addEventListener('click', init);
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

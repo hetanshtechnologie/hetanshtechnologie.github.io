@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connection Pool Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:900px;margin:24px auto;padding:0 16px}
+.pool-visual{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.pool-visual h3{margin-bottom:16px;font-size:14px}
+.pool-frame{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;max-width:500px;margin:0 auto}
+.conn-slot{width:40px;height:40px;border-radius:8px;border:2px solid #475569;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;transition:all .3s}
+.conn-slot.idle{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.conn-slot.active{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.conn-slot.waiting{border-color:#fbbf24;background:rgba(251,191,36,.1);color:#fbbf24}
+.pool-stats{display:flex;justify-content:center;gap:24px;margin:12px 0;font-size:12px;color:#94a3b8}
+.pool-bar{display:flex;align-items:center;justify-content:center;gap:4px;margin:12px 0}
+.pool-bar-label{font-size:11px;color:#94a3b8;width:60px;text-align:right}
+.pool-bar-track{flex:1;height:12px;background:#334155;border-radius:6px;overflow:hidden;max-width:300px}
+.pool-bar-fill{height:100%;border-radius:6px;transition:width .3s}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">Back</a><h1>Connection Pool Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/12</div>
+<div class="hud-item"><span id="util">0%</span>Utilization</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="pool-visual">
+<h3>Connection Pool (Max: <span id="max-conns">10</span>)</h3>
+<div class="pool-frame" id="pool-frame"></div>
+<div class="pool-stats">
+<span>Active: <b id="active">0</b></span>
+<span>Idle: <b id="idle">0</b></span>
+<span>Waiting: <b id="waiting">0</b></span>
+</div>
+<div class="pool-bar"><div class="pool-bar-label">Active</div><div class="pool-bar-track"><div class="pool-bar-fill" id="active-bar" style="width:0%;background:#f87171"></div></div></div>
+<div class="pool-bar"><div class="pool-bar-label">Idle</div><div class="pool-bar-track"><div class="pool-bar-fill" id="idle-bar" style="width:0%;background:#4ade80"></div></div></div>
+</div>
+<div class="scenario-card">
+<h3 id="scenario-title">Connection Pool Decision</h3>
+<p id="scenario-desc"></p>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Pool Optimizer!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+var score=0,round=0,maxRounds=12,answered=false;
+var maxConns=10,activeConns=3,idleConns=5,waitingConns=0;
+var scenarios=[
+{desc:"10 concurrent requests, pool size 5. All waiting. What to do?",active:5,idle:0,waiting:5,correct:"Increase pool size to 10",reason:"Pool exhausted. Increase max connections to handle load."},
+{desc:"Pool size 20, only 2 connections ever used. Waste of resources.",active:2,idle:18,waiting:0,correct:"Reduce pool size to 5",reason:"Over-provisioned pool wastes memory. Right-size based on actual usage."},
+{desc:"Connections taking 30s each. Pool fills up quickly.",active:8,idle:0,waiting:3,correct:"Add connection timeout of 5s",reason:"Long-held connections exhaust pool. Timeout forces release."},
+{desc:"New app instance starts. Needs its own connection pool.",active:0,idle:10,waiting:0,correct:"Each instance gets its own pool",reason:"Connection pools are per-process. Share DB connections via pooling."},
+{desc:"Pool exhausted during peak. Requests queuing.",active:10,idle:0,waiting:8,correct:"Enable connection pooling with queue",reason:"Queuing with timeout is better than rejecting immediately."},
+{desc:"Idle connections causing DB server to run out of connections.",active:2,idle:8,waiting:0,correct:"Set min-idle and max-age for connections",reason:"Stale connections should be recycled. Set max lifetime."},
+{desc:"Connection leak detected - connections never returned.",active:10,idle:0,waiting:0,correct:"Add leak detection with stack traces",reason:"Leak detection helps identify where connections are not closed."},
+{desc:"Read replica available. How to handle connections?",active:5,idle:3,waiting:0,correct:"Separate read and write pools",reason:"Separate pools allow independent sizing and failover."},
+{desc:"Connection pool 80% full, traffic increasing.",active:8,idle:2,waiting:0,correct:"Pre-grow pool proactively",reason:"Proactive scaling prevents pool exhaustion."},
+{desc:"Database switched to connection-limiting mode.",active:5,idle:5,waiting:0,correct:"Respect server connection limits",reason:"Don't exceed DB max_connections. Coordinate pool sizes."},
+{desc:"High-throughput batch job consuming all connections.",active:10,idle:0,waiting:5,correct:"Use separate pool for batch jobs",reason:"Batch jobs should use their own pool to avoid starving API."},
+{desc:"Pool metrics show avg wait time 200ms.",active:9,idle:1,waiting:2,correct:"Increase pool size or optimize queries",reason:"Wait times indicate pool is undersized for workload."}
+];
+function renderPool(){
+var el=document.getElementById("pool-frame");
+var slots=[];
+for(var i=0;i<maxConns;i++){
+var cls="idle",label="idle";
+if(i<activeConns){cls="active";label="A";}
+else if(i<activeConns+idleConns){cls="idle";label="I";}
+else{cls="waiting";label="W";}
+slots.push("<div class='conn-slot "+cls+"'>"+label+"</div>");
+}
+el.innerHTML=slots.join("");
+document.getElementById("active").textContent=activeConns;
+document.getElementById("idle").textContent=idleConns;
+document.getElementById("waiting").textContent=waitingConns;
+document.getElementById("max-conns").textContent=maxConns;
+var aPct=Math.round(activeConns/maxConns*100);
+var iPct=Math.round(idleConns/maxConns*100);
+document.getElementById("active-bar").style.width=aPct+"%";
+document.getElementById("idle-bar").style.width=iPct+"%";
+document.getElementById("util").textContent=aPct+"%";
+}
+function startRound(){
+answered=false;
+var s=scenarios[round%scenarios.length];
+activeConns=s.active;idleConns=s.idle;waitingConns=s.waiting;
+renderPool();
+document.getElementById("scenario-title").textContent="Decision "+(round+1);
+document.getElementById("scenario-desc").textContent=s.desc;
+document.getElementById("feedback").className="feedback";
+document.getElementById("next-btn").style.display="none";
+document.getElementById("choices").innerHTML=[
+"Increase pool size",
+"Reduce pool size",
+"Add connection timeout",
+"Separate read/write pools"
+].map(function(c){return "<button class='choice-btn' onclick=\"answer('"+c+"','"+s.correct+"','"+s.reason.replace(/'/g,"\\'")+"')\">"+c+"</button>";}).join("");
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+var isCorrect=chosen===correct;
+if(isCorrect)score+=10;else score=Math.max(0,score-3);
+document.querySelectorAll(".choice-btn").forEach(function(b){
+if(b.textContent===correct)b.classList.add("correct");
+else if(b.textContent===chosen&&!isCorrect)b.classList.add("wrong");
+b.style.pointerEvents="none";
+});
+var fb=document.getElementById("feedback");
+fb.className="feedback show "+(isCorrect?"correct-fb":"wrong-fb");
+fb.style.borderColor=isCorrect?"#4ade80":"#f87171";
+document.getElementById("fb-title").textContent=isCorrect?"Correct!":"Wrong";
+document.getElementById("fb-text").textContent=reason;
+document.getElementById("score").textContent=score;
+activeConns=Math.min(maxConns,Math.floor(Math.random()*maxConns));
+idleConns=Math.max(0,maxConns-activeConns);
+renderPool();
+document.getElementById("next-btn").style.display="block";
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById("game-content").style.display="none";
+document.getElementById("game-over").style.display="block";
+document.getElementById("final-score").textContent=score;return;
+}
+document.getElementById("round").textContent=round+1;
+startRound();
+}
+function restart(){
+score=0;round=0;activeConns=3;idleConns=5;waitingConns=0;
+document.getElementById("game-content").style.display="block";
+document.getElementById("game-over").style.display="none";
+document.getElementById("round").textContent=1;
+document.getElementById("score").textContent=0;
+startRound();
+}
+startRound();
+</script>
+</body>
+</html>

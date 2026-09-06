@@ -1,0 +1,62 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>7. Training Architecture — ML System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>7. Training Architecture</h1>
+<img src="../images/training-parallelism.svg" alt="Training parallelism: data parallelism and model parallelism comparison">
+<h2>Training Paradigms</h2>
+<table>
+<tr><th>Paradigm</th><th>Description</th><th>When to Use</th></tr>
+<tr><td>Single-node</td><td>One machine, one GPU</td><td>Small models, prototyping, datasets fit in memory</td></tr>
+<tr><td>Multi-node</td><td>Multiple machines, each with GPUs</td><td>Large models, large datasets, faster convergence</td></tr>
+</table>
+<h2>Data Parallelism</h2>
+<p>Each GPU holds a complete copy of the model. Training data is split across GPUs. After each forward/backward pass, gradients are averaged via all-reduce.</p>
+<pre><code># Data Parallelism with PyTorch DDP
+model = MyModel().to(device)
+ddp_model = DDP(model, device_ids=[local_rank])
+optimizer = torch.optim.Adam(ddp_model.parameters())
+
+for batch in dataloader:  # each GPU sees different data
+    loss = ddp_model(batch)
+    loss.backward()
+    optimizer.step()  # DDP synchronizes gradients internally</code></pre>
+<p><strong>Scaling efficiency:</strong> ~90% with 16 GPUs, ~75% with 128 GPUs (communication overhead grows).</p>
+<h2>Model Parallelism</h2>
+<p>For models too large to fit on one GPU (e.g., 70B+ parameter LLMs). The model is split across GPUs, with each GPU holding a subset of layers.</p>
+<ul>
+<li><strong>Pipeline parallelism:</strong> Layer 1—10 on GPU0, 11—20 on GPU1, etc. Micro-batching keeps all GPUs busy.</li>
+<li><strong>Tensor parallelism:</strong> Split individual transformer layers across GPUs. Higher communication but lower memory per GPU.</li>
+</ul>
+<h2>Parameter Server</h2>
+<p>An older architecture where workers compute gradients and send them to parameter servers, which update and store model parameters. Workers pull updated parameters periodically.</p>
+<h2>FSDP (Fully Sharded Data Parallelism)</h2>
+<p>Hybrid approach: shards model parameters, gradients, and optimizer states across GPUs (like model parallelism) while each GPU processes different data (like data parallelism). Unshards parameters on-demand for forward/backward.</p>
+<h2>Checkpointing</h2>
+<p>Save model state periodically during training. Crucial for long-running training jobs.</p>
+<pre><code># Checkpoint strategy
+- Save every N steps (e.g., every 1000 steps)
+- Save on validation metric improvement (best model)
+- Save optimizer state for resume capability
+- Store checkpoints in durable storage (S3, NFS)
+- Async checkpointing: save in background thread, don't block training</code></pre>
+<div class="exercise"><strong>Exercise:</strong> You need to train a 13B parameter LLM on 200GB of text data. You have 4 nodes, each with 8 A100 GPUs (total 32 GPUs). Design the training architecture: data or model parallelism? What about FSDP? Calculate how the 200GB is split across GPUs, estimate training time, and describe your checkpointing strategy.</div>
+<nav><a href="6-batch-vs-realtime.html">&larr; Previous</a><a href="../index.html">Index</a><a href="8-serving-architecture.html">Next: Serving Architecture &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

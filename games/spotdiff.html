@@ -1,0 +1,233 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spot the Difference</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.diff-cell {
+  width: 56px; height: 56px; border: 2px solid #334155;
+  cursor: pointer; transition: all 0.2s; position: relative;
+}
+.diff-cell:hover { outline: 3px solid #60a5fa; outline-offset: -3px; z-index: 1; }
+.diff-cell.found { outline: 3px solid #22c55e; outline-offset: -3px; }
+.diff-cell.wrong-click {
+  animation: shake 0.4s;
+  outline: 3px solid #ef4444; outline-offset: -3px;
+}
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+.grid-label {
+  text-align: center; margin-bottom: 8px; font-weight: bold; color: #94a3b8;
+}
+</style>
+</head>
+<body class="min-h-screen text-white">
+<div class="max-w-4xl mx-auto px-4 py-6">
+  <div class="flex items-center justify-between mb-6">
+    <a href="index.html" class="text-blue-400 hover:text-blue-300 text-sm flex items-center">
+      <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Back to Games
+    </a>
+    <h1 class="text-2xl font-bold">Spot the Difference</h1>
+    <div></div>
+  </div>
+
+  <div class="flex flex-wrap gap-4 mb-4 justify-center items-center">
+    <div class="bg-gray-800 px-4 py-2 rounded text-sm">Time: <span id="timer" class="font-mono text-yellow-400">00:00</span></div>
+    <div class="bg-gray-800 px-4 py-2 rounded text-sm">Found: <span id="found-count" class="font-mono text-green-400">0</span>/<span id="total-diffs" class="font-mono text-gray-400">5</span></div>
+    <div class="bg-gray-800 px-4 py-2 rounded text-sm">Score: <span id="score" class="font-mono text-blue-400">0</span></div>
+    <button onclick="newPuzzle()" class="px-4 py-1 rounded bg-blue-600 hover:bg-blue-500 text-sm">New Puzzle</button>
+  </div>
+
+  <div id="status-msg" class="text-center mb-4">
+    <span class="text-lg text-gray-300">Find all differences between the two grids!</span>
+  </div>
+
+  <div class="flex flex-wrap justify-center gap-8">
+    <div>
+      <div class="grid-label">Grid A</div>
+      <div id="grid-a" style="display: grid; grid-template-columns: repeat(5, 56px); gap: 2px;"></div>
+    </div>
+    <div>
+      <div class="grid-label">Grid B</div>
+      <div id="grid-b" style="display: grid; grid-template-columns: repeat(5, 56px); gap: 2px;"></div>
+    </div>
+  </div>
+
+  <div class="text-center mt-6 text-gray-400 text-xs">
+    <p>Click on the colored squares that differ between Grid A and Grid B. Find all 5 differences!</p>
+  </div>
+</div>
+
+<script>
+const COLORS = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4',
+  '#3b82f6', '#8b5cf6', '#ec4899', '#f43f5e', '#14b8a6',
+  '#84cc16', '#a855f7', '#6366f1', '#0ea5e9', '#10b981',
+  '#f59e0b', '#d946ef', '#fb923c', '#38bdf8', '#4ade80'
+];
+
+let puzzle, timerInterval, seconds, score, foundDiffs;
+
+function generateGrid() {
+  const grid = [];
+  for (let r=0; r<5; r++) {
+    grid[r] = [];
+    for (let c=0; c<5; c++) {
+      grid[r][c] = COLORS[Math.floor(Math.random()*COLORS.length)];
+    }
+  }
+  return grid;
+}
+
+function newPuzzle() {
+  clearInterval(timerInterval);
+  seconds = 0;
+  score = score || 0;
+  foundDiffs = 0;
+  document.getElementById('timer').textContent = '00:00';
+  document.getElementById('found-count').textContent = '0';
+  document.getElementById('score').textContent = score;
+
+  timerInterval = setInterval(() => {
+    seconds++;
+    const m = String(Math.floor(seconds/60)).padStart(2,'0');
+    const s = String(seconds%60).padStart(2,'0');
+    document.getElementById('timer').textContent = m+':'+s;
+  }, 1000);
+
+  const gridA = generateGrid();
+  const gridB = gridA.map(r => [...r]);
+
+  const numDiffs = 5;
+  const diffPositions = [];
+  while (diffPositions.length < numDiffs) {
+    const r = Math.floor(Math.random()*5);
+    const c = Math.floor(Math.random()*5);
+    const key = r+','+c;
+    if (!diffPositions.includes(key)) {
+      diffPositions.push(key);
+      let newColor;
+      do {
+        newColor = COLORS[Math.floor(Math.random()*COLORS.length)];
+      } while (newColor === gridA[r][c]);
+      gridB[r][c] = newColor;
+    }
+  }
+
+  puzzle = {
+    gridA, gridB, diffPositions, numDiffs
+  };
+
+  document.getElementById('total-diffs').textContent = numDiffs;
+  setStatus('Find all differences between the two grids!', 'text-gray-300');
+  render();
+}
+
+function setStatus(msg, colorClass) {
+  document.getElementById('status-msg').innerHTML = `<span class="text-lg ${colorClass}">${msg}</span>`;
+}
+
+function render() {
+  const gridADiv = document.getElementById('grid-a');
+  const gridBDiv = document.getElementById('grid-b');
+  gridADiv.innerHTML = '';
+  gridBDiv.innerHTML = '';
+
+  for (let r=0; r<5; r++) {
+    for (let c=0; c<5; c++) {
+      const cellA = document.createElement('div');
+      cellA.className = 'diff-cell';
+      cellA.style.backgroundColor = puzzle.gridA[r][c];
+      const key = r+','+c;
+      if (puzzle.foundDiffs && puzzle.foundDiffs.includes(key)) {
+        cellA.classList.add('found');
+      }
+      const rowA = r, colA = c;
+      cellA.onclick = () => handleClick(rowA, colA, 'a');
+      gridADiv.appendChild(cellA);
+
+      const cellB = document.createElement('div');
+      cellB.className = 'diff-cell';
+      cellB.style.backgroundColor = puzzle.gridB[r][c];
+      if (puzzle.foundDiffs && puzzle.foundDiffs.includes(key)) {
+        cellB.classList.add('found');
+      }
+      const rowB = r, colB = c;
+      cellB.onclick = () => handleClick(rowB, colB, 'b');
+      gridBDiv.appendChild(cellB);
+    }
+  }
+}
+
+function handleClick(r, c, grid) {
+  const key = r+','+c;
+  if (!puzzle.foundDiffs) puzzle.foundDiffs = [];
+  if (puzzle.foundDiffs.includes(key)) return;
+
+  if (puzzle.diffPositions.includes(key)) {
+    puzzle.foundDiffs.push(key);
+    foundDiffs++;
+    document.getElementById('found-count').textContent = foundDiffs;
+    
+    if (foundDiffs === puzzle.numDiffs) {
+      clearInterval(timerInterval);
+      score++;
+      document.getElementById('score').textContent = score;
+      setStatus(`All found! Time: ${formatTime(seconds)}. Click "New Puzzle" for another round!`, 'text-green-400');
+      revealAll();
+    } else {
+      setStatus(`Found ${foundDiffs}/${puzzle.numDiffs} differences!`, 'text-green-400');
+    }
+    render();
+  } else {
+    const cellDivs = grid==='a' ? document.querySelectorAll('#grid-a .diff-cell') : document.querySelectorAll('#grid-b .diff-cell');
+    const idx = r * 5 + c;
+    const cell = cellDivs[idx];
+    cell.classList.add('wrong-click');
+    setTimeout(() => cell.classList.remove('wrong-click'), 500);
+  }
+}
+
+function revealAll() {
+  puzzle.diffPositions.forEach(key => {
+    if (!puzzle.foundDiffs.includes(key)) {
+      puzzle.foundDiffs.push(key);
+    }
+  });
+  render();
+}
+
+function formatTime(s) {
+  const m = String(Math.floor(s/60)).padStart(2,'0');
+  const sec = String(s%60).padStart(2,'0');
+  return m+':'+sec;
+}
+
+score = 0;
+newPuzzle();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

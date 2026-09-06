@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 35: Neural Network Projects &amp; Tuning | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 35</span>
+    <h1>Neural Network Projects &amp; Tuning</h1>
+
+    <p>Reading about neurons, loss functions, and optimizers is only half the story. This chapter takes a real classification problem from a blank VS Code window all the way to a deployed Streamlit web app, then does the same for a regression problem. Along the way you will learn how to transform features for an ANN, how to structure a training loop, and how to choose the number of hidden layers and neurons.</p>
+
+    <h2>A Classification Problem Statement and Setting Up VS Code</h2>
+    <p>Our project: the bank wants a model that predicts whether a customer will churn — leave the bank within the next quarter — given age, balance, number of products, and a few more features. It is a binary classification task with mixed numeric and categorical columns, which makes it a realistic test of the whole pipeline.</p>
+    <ol>
+        <li>Create a folder named <code>churn-app</code> and open it in VS Code.</li>
+        <li>Create a virtual environment and install <code>tensorflow</code>, <code>scikit-learn</code>, <code>pandas</code>, <code>numpy</code>, and <code>streamlit</code>.</li>
+        <li>Add <code>churn.csv</code> inside the project and verify it loads with <code>pd.read_csv</code>.</li>
+    </ol>
+    <div class="note">
+        <strong>GPU note:</strong> for these small problems a CPU trains in seconds. GPU support is nice to have but not required for any project in this chapter.
+    </div>
+
+    <h2>Feature Transformation Using sklearn with ANN</h2>
+    <p>Neural networks need numeric inputs of comparable scale, and categorical labels need encoding. scikit-learn provides transformers that you can fit on the training split only — never on the test split — to avoid leaking information.</p>
+    <pre><code>from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
+
+X = df.drop("Exited", axis=1)
+y = df["Exited"]
+
+pre = ColumnTransformer([
+    ("num", StandardScaler(), ["Age", "Balance", "NumOfProducts"]),
+    ("cat", OneHotEncoder(), ["Geography", "Gender"]),
+])
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42)
+X_train = pre.fit_transform(X_train)
+X_test = pre.transform(X_test)</code></pre>
+    <p>Standardizing keeps the gradients well behaved, and one-hot encoding turns categorical choices into columns the network can multiply by weights.</p>
+
+    <h2>Step-by-Step Training with an ANN Using Optimizers and Loss Functions</h2>
+    <ol>
+        <li>Build a <code>Sequential</code> model with an input layer matching the transformed column count, one or two ReLU hidden layers, and a single sigmoid output.</li>
+        <li>Compile with <code>binary_crossentropy</code>, the Adam optimizer, and accuracy as a metric.</li>
+        <li>Fit for 30 epochs with a batch size of 32 and a validation split.</li>
+    </ol>
+    <pre><code>model = keras.Sequential([
+    keras.layers.Input(shape=(X_train.shape[1],)),
+    keras.layers.Dense(16, activation="relu"),
+    keras.layers.Dense(8, activation="relu"),
+    keras.layers.Dense(1, activation="sigmoid"),
+])
+model.compile(optimizer="adam", loss="binary_crossentropy",
+              metrics=["accuracy"])
+history = model.fit(X_train, y_train, epochs=30, batch_size=32,
+                    validation_split=0.2)</code></pre>
+    <div class="info">
+        <strong>Watch the curves:</strong> plot training loss and validation loss together. When validation loss rises while training loss keeps falling, the model is memorizing the training set — add dropout or stop earlier.
+    </div>
+
+    <h2>Predictions with a Trained ANN Model</h2>
+    <p>The sigmoid output is a probability. Convert it to a class with a threshold (usually 0.5), then evaluate with accuracy, precision, recall, and the confusion matrix. Compare your ANN against a logistic regression baseline — the ANN should match or beat it on this dataset.</p>
+    <pre><code>import numpy as np
+probs = model.predict(X_test)[:, 0]
+preds = (probs &gt;= 0.5).astype(int)
+acc = (preds == y_test).mean()</code></pre>
+
+    <h2>Integrating the ANN Model with a Streamlit Web App</h2>
+    <p>Save the model and the fitted transformer with <code>model.save</code> and <code>joblib.dump</code>, then build a small Streamlit app that loads them and makes a prediction from user inputs.</p>
+    <pre><code>import streamlit as st
+import numpy as np, joblib
+from tensorflow import keras
+
+model = keras.models.load_model("model.h5")
+pre = joblib.load("pre.joblib")
+
+st.title("Customer Churn Predictor")
+age = st.slider("Age", 18, 95, 40)
+balance = st.number_input("Balance", 0.0, 250000.0, 50000.0)
+geo = st.selectbox("Geography", ["France", "Spain", "Germany"])
+
+if st.button("Predict"):
+    row = pre.transform([[age, balance, 1, geo, "Male"]])
+    p = float(model.predict(row)[0, 0])
+    st.success(f"Churn probability: {p:.1%}")
+    st.warning("High risk") if p &gt; 0.5 else st.info("Low risk")</code></pre>
+
+    <h2>Deploying the Streamlit Web App with the ANN Model</h2>
+    <p>To put the app online: create <code>requirements.txt</code> listing <code>streamlit</code>, <code>tensorflow</code>, <code>joblib</code>, <code>pandas</code>, and <code>scikit-learn</code>; push the folder to a GitHub repository; then connect the repository to Streamlit Community Cloud and set the main entry file to <code>app.py</code>. Every push to the repo redeploys automatically.</p>
+
+    <h2>ANN Regression Practical Implementation</h2>
+    <p>The same recipe works for regression with three changes: no activation on the output neuron, <code>mean_squared_error</code> as the loss, and metrics like MAE instead of accuracy. Here we predict house prices from square footage, number of bedrooms, and location:</p>
+    <pre><code>model = keras.Sequential([
+    keras.layers.Input(shape=(X_train.shape[1],)),
+    keras.layers.Dense(32, activation="relu"),
+    keras.layers.Dense(16, activation="relu"),
+    keras.layers.Dense(1),            # no activation: raw number
+])
+model.compile(optimizer="adam", loss="mse", metrics=["mae"])</code></pre>
+    <p>Scale the target too (or use <code>log1p</code>) when prices span several orders of magnitude, and always compare predictions against the scale of the original data.</p>
+
+    <h2>Finding Optimal Hidden Layers and Hidden Neurons</h2>
+    <p>There is no formula that returns "the best architecture", but a pragmatic search works well:</p>
+    <ul>
+        <li>Start small — one hidden layer often suffices for tabular data; add a second if the first underfits.</li>
+        <li>Grow neurons until validation accuracy stops improving, then stop. Common starting points: between the input size and twice the input size.</li>
+        <li>Treat model creation as a function and sweep it with <code>for</code> loops over layer counts and neuron counts, recording validation scores.</li>
+        <li>Add dropout and early stopping last; they trade a little training accuracy for better generalization.</li>
+    </ul>
+    <pre><code>def build_model(n_layers, n_neurons):
+    model = keras.Sequential()
+    model.add(keras.layers.Input(shape=(X_train.shape[1],)))
+    for _ in range(n_layers):
+        model.add(keras.layers.Dense(n_neurons, activation="relu"))
+    model.add(keras.layers.Dense(1, activation="sigmoid"))
+    model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+    return model</code></pre>
+    <div class="exercise">
+        <strong>Exercise:</strong> Run the churn project end to end. Sweep one, two, and three hidden layers with 8, 16, and 32 neurons and record validation accuracy for each combination. Pick the best architecture, retrain on the full training split, save the model, and deploy it to Streamlit Community Cloud with your own live URL.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="34-cnn.html">Prev: Convolutional Neural Networks</a>
+        <a href="36-rnn.html">Next: Recurrent Neural Networks</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

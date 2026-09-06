@@ -1,0 +1,341 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Futoshiki Puzzle</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.futo-cell {
+  width: 52px; height: 52px;
+  display: flex; align-items: center; justify-content: center;
+  background: #1e293b; border: 1px solid #475569;
+  font-size: 1.25rem; font-weight: bold; cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+.futo-cell:hover { background: #334155; }
+.futo-cell.selected { outline: 3px solid #3b82f6; outline-offset: -3px; }
+.futo-cell.given { color: #94a3b8; cursor: default; }
+.futo-cell.user { color: #60a5fa; }
+.futo-cell.error { outline: 3px solid #ef4444; outline-offset: -3px; color: #f87171; }
+.futo-cell.hint { background: #1e3a5f; }
+.h-sign {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 52px; color: #fbbf24; font-size: 1rem; font-weight: bold;
+}
+.v-sign {
+  display: flex; align-items: center; justify-content: center;
+  width: 52px; height: 20px; color: #fbbf24; font-size: 1rem; font-weight: bold;
+}
+</style>
+</head>
+<body class="min-h-screen text-white">
+<div class="max-w-3xl mx-auto px-4 py-6">
+  <div class="flex items-center justify-between mb-6">
+    <a href="index.html" class="text-blue-400 hover:text-blue-300 text-sm flex items-center">
+      <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Back to Games
+    </a>
+    <h1 class="text-2xl font-bold">Futoshiki</h1>
+    <div></div>
+  </div>
+
+  <div class="flex flex-wrap gap-4 mb-4 justify-center items-center">
+    <div class="bg-gray-800 px-4 py-2 rounded text-sm">Time: <span id="timer" class="font-mono text-yellow-400">00:00</span></div>
+    <button onclick="getHint()" class="px-4 py-1 rounded bg-yellow-600 hover:bg-yellow-500 text-sm">Hint (<span id="hints-left">3</span>)</button>
+    <button onclick="newPuzzle()" class="px-4 py-1 rounded bg-blue-600 hover:bg-blue-500 text-sm">New Puzzle</button>
+  </div>
+
+  <div class="flex justify-center mb-4 overflow-x-auto">
+    <div id="board"></div>
+  </div>
+
+  <div class="flex justify-center">
+    <div id="numpad" class="flex gap-2 justify-center">
+      <button onclick="enterNum(1)" class="w-12 h-12 rounded-lg bg-gray-700 hover:bg-gray-600 font-bold text-lg">1</button>
+      <button onclick="enterNum(2)" class="w-12 h-12 rounded-lg bg-gray-700 hover:bg-gray-600 font-bold text-lg">2</button>
+      <button onclick="enterNum(3)" class="w-12 h-12 rounded-lg bg-gray-700 hover:bg-gray-600 font-bold text-lg">3</button>
+      <button onclick="enterNum(4)" class="w-12 h-12 rounded-lg bg-gray-700 hover:bg-gray-600 font-bold text-lg">4</button>
+      <button onclick="enterNum(5)" class="w-12 h-12 rounded-lg bg-gray-700 hover:bg-gray-600 font-bold text-lg">5</button>
+      <button onclick="enterNum(0)" class="w-12 h-12 rounded-lg bg-red-700 hover:bg-red-600 font-bold text-lg text-sm">CLR</button>
+    </div>
+  </div>
+
+  <div class="text-center mt-4 text-gray-400 text-xs">
+    <p>Fill each row and column with 1-5. No repeats. &lt; and &gt; show inequality constraints.</p>
+  </div>
+</div>
+
+<script>
+const PUZZLES = [
+  {
+    size: 5,
+    given: [[0,0,3,0,0],[0,0,0,0,1],[0,0,0,0,0],[5,0,0,0,0],[0,0,0,4,0]],
+    solution: [[1,5,3,2,4],[4,2,5,3,1],[3,4,1,5,2],[5,1,2,4,3],[2,3,4,1,5]],
+    inequalities: [
+      {r:0,c:0,dir:'right',op:'>'},
+      {r:0,c:2,dir:'right',op:'<'},
+      {r:1,c:1,dir:'right',op:'<'},
+      {r:1,c:3,dir:'right',op:'>'},
+      {r:2,c:0,dir:'right',op:'<'},
+      {r:2,c:2,dir:'right',op:'>'},
+      {r:3,c:1,dir:'right',op:'>'},
+      {r:3,c:3,dir:'right',op:'<'},
+      {r:0,c:0,dir:'down',op:'<'},
+      {r:0,c:2,dir:'down',op:'>'},
+      {r:1,c:0,dir:'down',op:'>'},
+      {r:1,c:3,dir:'down',op:'<'},
+      {r:2,c:1,dir:'down',op:'>'},
+      {r:3,c:2,dir:'down',op:'>'},
+      {r:3,c:4,dir:'down',op:'<'}
+    ]
+  },
+  {
+    size: 5,
+    given: [[0,0,0,0,4],[0,3,0,0,0],[0,0,0,2,0],[0,0,4,0,0],[0,0,0,0,0]],
+    solution: [[3,2,5,1,4],[1,3,2,4,5],[4,5,3,2,1],[2,1,4,5,3],[5,4,1,3,2]],
+    inequalities: [
+      {r:0,c:1,dir:'right',op:'<'},
+      {r:0,c:3,dir:'right',op:'<'},
+      {r:1,c:0,dir:'right',op:'<'},
+      {r:1,c:2,dir:'right',op:'<'},
+      {r:2,c:0,dir:'right',op:'>'},
+      {r:2,c:2,dir:'right',op:'>'},
+      {r:3,c:1,dir:'right',op:'>'},
+      {r:3,c:3,dir:'right',op:'<'},
+      {r:4,c:0,dir:'right',op:'<'},
+      {r:4,c:2,dir:'right',op:'>'},
+      {r:0,c:0,dir:'down',op:'<'},
+      {r:0,c:1,dir:'down',op:'>'},
+      {r:0,c:4,dir:'down',op:'<'},
+      {r:1,c:2,dir:'down',op:'>'},
+      {r:2,c:3,dir:'down',op:'>'},
+      {r:3,c:1,dir:'down',op:'<'}
+    ]
+  },
+  {
+    size: 5,
+    given: [[0,4,0,0,0],[0,0,0,0,3],[0,0,0,0,0],[0,0,5,0,0],[2,0,0,0,0]],
+    solution: [[3,4,2,5,1],[1,2,4,5,3],[4,3,1,2,5],[5,1,5,3,4],[2,5,3,4,1]],
+    inequalities: [
+      {r:0,c:0,dir:'right',op:'>'},
+      {r:0,c:2,dir:'right',op:'<'},  
+      {r:1,c:0,dir:'right',op:'<'},  
+      {r:1,c:3,dir:'right',op:'<'},
+      {r:2,c:0,dir:'right',op:'>'},  
+      {r:2,c:1,dir:'right',op:'>'},  
+      {r:3,c:0,dir:'right',op:'<'},
+      {r:3,c:3,dir:'right',op:'>'},
+      {r:4,c:1,dir:'right',op:'<'},  
+      {r:4,c:3,dir:'right',op:'<'},  
+      {r:0,c:0,dir:'down',op:'<'},
+      {r:0,c:2,dir:'down',op:'<'},  
+      {r:1,c:1,dir:'down',op:'>'},
+      {r:1,c:3,dir:'down',op:'>'},
+      {r:2,c:2,dir:'down',op:'<'},
+      {r:3,c:0,dir:'down',op:'>'}
+    ]
+  },
+  {
+    size: 5,
+    given: [[0,0,0,5,0],[0,0,0,0,0],[0,0,0,0,2],[0,3,0,0,0],[4,0,0,0,0]],
+    solution: [[1,2,4,5,3],[5,1,2,3,4],[3,4,5,1,2],[2,3,1,4,5],[4,5,3,2,1]],
+    inequalities: [
+      {r:0,c:0,dir:'right',op:'<'},
+      {r:0,c:1,dir:'right',op:'>'},
+      {r:1,c:0,dir:'right',op:'>'},
+      {r:1,c:2,dir:'right',op:'>'},
+      {r:2,c:0,dir:'right',op:'<'},
+      {r:2,c:2,dir:'right',op:'<'},
+      {r:3,c:1,dir:'right',op:'>'},
+      {r:4,c:1,dir:'right',op:'>'},
+      {r:4,c:3,dir:'right',op:'>'},
+      {r:0,c:0,dir:'down',op:'>'},
+      {r:0,c:1,dir:'down',op:'<'},
+      {r:0,c:3,dir:'down',op:'>'},
+      {r:1,c:1,dir:'down',op:'>'},
+      {r:1,c:4,dir:'down',op:'<'},
+      {r:2,c:0,dir:'down',op:'<'},
+      {r:3,c:0,dir:'down',op:'>'}
+    ]
+  },
+  {
+    size: 5,
+    given: [[0,0,0,0,0],[4,0,0,0,0],[0,0,0,0,5],[0,0,2,0,0],[0,0,0,0,3]],
+    solution: [[3,5,4,2,1],[4,2,1,5,3],[1,3,4,2,5],[5,4,2,3,4],[2,1,5,4,3]],
+    inequalities: [
+      {r:0,c:1,dir:'right',op:'<'},  
+      {r:0,c:3,dir:'right',op:'>'},
+      {r:1,c:1,dir:'right',op:'<'},  
+      {r:1,c:3,dir:'right',op:'<'},  
+      {r:2,c:0,dir:'right',op:'>'},  
+      {r:2,c:1,dir:'right',op:'<'},
+      {r:3,c:1,dir:'right',op:'<'},  
+      {r:3,c:3,dir:'right',op:'<'},
+      {r:4,c:0,dir:'right',op:'<'},  
+      {r:4,c:1,dir:'right',op:'>'},  
+      {r:0,c:0,dir:'down',op:'<'},
+      {r:0,c:2,dir:'down',op:'>'},  
+      {r:0,c:4,dir:'down',op:'<'},
+      {r:1,c:0,dir:'down',op:'<'},  
+      {r:2,c:1,dir:'down',op:'<'},  
+      {r:3,c:2,dir:'down',op:'<'}
+    ]
+  }
+];
+
+let puzzle, userGrid, selectedCell, timerInterval, seconds, hintsLeft;
+
+function newPuzzle() {
+  clearInterval(timerInterval);
+  seconds = 0;
+  hintsLeft = 3;
+  document.getElementById('hints-left').textContent = hintsLeft;
+  document.getElementById('timer').textContent = '00:00';
+  timerInterval = setInterval(() => {
+    seconds++;
+    const m = String(Math.floor(seconds/60)).padStart(2,'0');
+    const s = String(seconds%60).padStart(2,'0');
+    document.getElementById('timer').textContent = m+':'+s;
+  }, 1000);
+
+  puzzle = PUZZLES[Math.floor(Math.random()*PUZZLES.length)];
+  userGrid = [];
+  for (let r=0; r<5; r++) {
+    userGrid[r] = [];
+    for (let c=0; c<5; c++) {
+      userGrid[r][c] = puzzle.given[r][c];
+    }
+  }
+  selectedCell = null;
+  render();
+}
+
+function render() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  
+  for (let r=0; r<5; r++) {
+    const rowDiv = document.createElement('div');
+    rowDiv.style.display = 'flex';
+    rowDiv.style.flexDirection = 'row';
+    rowDiv.style.alignItems = 'center';
+    
+    for (let c=0; c<5; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'futo-cell';
+      if (puzzle.given[r][c] > 0) {
+        cell.textContent = puzzle.given[r][c];
+        cell.classList.add('given');
+      } else if (userGrid[r][c] > 0) {
+        cell.textContent = userGrid[r][c];
+        cell.classList.add('user');
+        if (userGrid[r][c] !== puzzle.solution[r][c]) {
+          cell.classList.add('error');
+        }
+      }
+      if (selectedCell && selectedCell[0]===r && selectedCell[1]===c) {
+        cell.classList.add('selected');
+      }
+      const row = r, col = c;
+      cell.onclick = () => {
+        if (puzzle.given[row][col] === 0) {
+          selectedCell = [row, col];
+          render();
+        }
+      };
+      rowDiv.appendChild(cell);
+      
+      if (c < 4) {
+        const hSign = document.createElement('div');
+        hSign.className = 'h-sign';
+        const ineq = puzzle.inequalities.find(i => i.r===r && i.c===c && i.dir==='right');
+        if (ineq) hSign.textContent = ineq.op;
+        rowDiv.appendChild(hSign);
+      }
+    }
+    board.appendChild(rowDiv);
+    
+    if (r < 4) {
+      const vRow = document.createElement('div');
+      vRow.style.display = 'flex';
+      vRow.style.flexDirection = 'row';
+      for (let c=0; c<5; c++) {
+        const vSign = document.createElement('div');
+        vSign.className = 'v-sign';
+        const ineq = puzzle.inequalities.find(i => i.r===r && i.c===c && i.dir==='down');
+        if (ineq) vSign.textContent = ineq.op;
+        vRow.appendChild(vSign);
+        if (c < 4) {
+          const spacer = document.createElement('div');
+          spacer.style.width = '20px';
+          spacer.style.height = '20px';
+          vRow.appendChild(spacer);
+        }
+      }
+      board.appendChild(vRow);
+    }
+  }
+}
+
+function enterNum(n) {
+  if (!selectedCell) return;
+  const [r,c] = selectedCell;
+  userGrid[r][c] = n;
+  render();
+  checkWin();
+}
+
+function getHint() {
+  if (hintsLeft <= 0) return;
+  for (let r=0; r<5; r++) {
+    for (let c=0; c<5; c++) {
+      if (puzzle.given[r][c] === 0 && userGrid[r][c] !== puzzle.solution[r][c]) {
+        userGrid[r][c] = puzzle.solution[r][c];
+        hintsLeft--;
+        document.getElementById('hints-left').textContent = hintsLeft;
+        render();
+        checkWin();
+        return;
+      }
+    }
+  }
+}
+
+function checkWin() {
+  for (let r=0; r<5; r++) {
+    for (let c=0; c<5; c++) {
+      if (userGrid[r][c] !== puzzle.solution[r][c]) return;
+    }
+  }
+  clearInterval(timerInterval);
+  setTimeout(() => alert('Congratulations! Solved in '+document.getElementById('timer').textContent+'!'), 100);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key >= '1' && e.key <= '5') enterNum(parseInt(e.key));
+  if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') enterNum(0);
+});
+
+newPuzzle();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

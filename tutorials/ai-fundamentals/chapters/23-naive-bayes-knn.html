@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 23: Naive Bayes &amp; K-Nearest Neighbors | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 23</span>
+    <h1>Naive Bayes &amp; K-Nearest Neighbors</h1>
+
+    <p>This chapter covers two models at opposite ends of the spectrum. Naive Bayes is model-based, tiny, and probabilistic — it learns a handful of numbers from the data. K-Nearest Neighbors is instance-based (Chapter 18): it stores the data and defers all "learning" to prediction time. Both are simple, fast, and surprisingly strong on the right problems.</p>
+
+    <h2>Understanding Bayes' Theorem</h2>
+    <p>You met Bayes' theorem in Chapter 15; here it becomes a classifier. Bayes' rule updates a prior belief with evidence:</p>
+    <p><code>P(A | B) = P(B | A) * P(A) / P(B)</code></p>
+    <ul>
+        <li><code>P(A)</code> — the <em>prior</em>: how likely class A is before seeing any features.</li>
+        <li><code>P(B | A)</code> — the <em>likelihood</em>: how likely the evidence B is, assuming class A.</li>
+        <li><code>P(A | B)</code> — the <em>posterior</em>: the updated belief after seeing the evidence.</li>
+        <li><code>P(B)</code> — a normalizing constant that makes probabilities sum to one.</li>
+    </ul>
+    <p>To classify a new point with features <code>x1, x2, ..., xd</code>, we compute the posterior for every class and pick the most probable one. The denominator is the same for all classes, so it can be ignored during the comparison.</p>
+
+    <h2>Variants of Naive Bayes</h2>
+    <p>The word <em>naive</em> is the catch: the model assumes all features are <em>conditionally independent</em> given the class. That is almost never literally true (word "free" and "prize" co-occur in spam), yet the simplification makes the math tractable and the model still performs well. The joint likelihood factors into a product:</p>
+    <p><code>P(x1, x2, ..., xd | C) = P(x1|C) * P(x2|C) * ... * P(xd|C)</code></p>
+    <p>The three variants differ in how each individual <code>P(xj | C)</code> is modeled:</p>
+
+    <h3>Gaussian Naive Bayes</h3>
+    <p>For continuous features, each class is described by a normal distribution per feature, captured by a mean and a variance. <code>P(xj | C)</code> is the height of that Gaussian at <code>xj</code>. This is the natural choice for numeric data like heights, measurements, or pixel intensities.</p>
+
+    <h3>Multinomial Naive Bayes</h3>
+    <p>For <em>counts</em> — word frequencies in a document, say — each class holds a distribution over feature counts. It is the classic engine of text classification: spam detection and sentiment analysis are built on it, often boosted by TF-IDF features.</p>
+
+    <h3>Bernoulli Naive Bayes</h3>
+    <p>For binary features — a word is present or absent — each class holds a single probability per feature: the chance that feature <code>j</code> is turned on. It models presence/absence rather than frequency.</p>
+
+    <h2>Naive Bayes Practical Implementation</h2>
+    <pre><code>from sklearn.naive_bayes import GaussianNB
+from sklearn.model_selection import train_test_split
+from sklearn.datasets import load_iris
+
+data = load_iris()
+X_train, X_test, y_train, y_test = train_test_split(
+    data.data, data.target, test_size=0.2, random_state=42)
+
+gnb = GaussianNB()
+gnb.fit(X_train, y_train)
+print(gnb.score(X_test, y_test))</code></pre>
+    <p>Training is nearly instantaneous: the model merely computes priors and per-class means and variances. For text, swap in <code>MultinomialNB</code> with a <code>CountVectorizer</code>; for binary feature vectors, use <code>BernoulliNB</code>. Despite its crude assumption, Naive Bayes often wins when features are weak but numerous — exactly the situation in spam filtering.</p>
+
+    <div class="note">
+        <strong>Why it survives the naive assumption:</strong> if the features are not truly independent, the model's probability <em>values</em> are miscalibrated, but its class <em>ranking</em> is often still correct. A ranking is all we need to pick the most probable class.
+    </div>
+
+    <h2>KNN Classification and Regression In-Depth Intuition</h2>
+    <p>K-Nearest Neighbors embodies the "birds of a feather" idea: a new point is classified by asking its <code>k</code> nearest stored neighbors and following their lead.</p>
+
+    <h3>KNN Classification</h3>
+    <p>For a new point, compute its distance (usually Euclidean) to every stored training point, take the <code>k</code> closest ones, and predict the majority class among them. The vote can be weighted by distance so that nearer neighbors count more.</p>
+
+    <h3>KNN Regression</h3>
+    <p>For regression, the same <code>k</code> neighbors vote numerically: the prediction is the average of their target values, again optionally weighted by distance. If your three nearest houses sold for 1.2M, 1.4M, and 1.1M, you predict roughly 1.23M.</p>
+    <p>The choice of <code>k</code> is the heart of the model:</p>
+    <ul>
+        <li><code>k = 1</code>: extreme sensitivity — every prediction copies its single closest point; boundaries are jagged and noise is memorized (overfitting).</li>
+        <li>Large <code>k</code>: smoother boundaries, more resistance to noise, but the model becomes bland and may drown real structure under faraway points (underfitting).</li>
+        <li>A good <code>k</code> is found by cross-validation, and an odd <code>k</code> avoids tie votes in two-class problems.</li>
+    </ul>
+    <p>KNN has no training phase at all in the classical sense — prediction cost grows linearly with the number of stored points, which is why the data structures below matter.</p>
+
+    <h2>Optimization of KNN: KD-Trees and Ball Trees</h2>
+    <p>Naively finding <code>k</code> nearest neighbors requires comparing a query against every training point — too slow for large datasets. Two index structures speed up the search:</p>
+
+    <h3>KD-Trees</h3>
+    <p>A k-dimensional tree splits the feature space recursively, alternating the axis at each level (split on feature 1, then feature 2, then feature 1 again...). Searching descends the tree, and — crucially — whole branches whose bounding region is farther than the current best candidate can be pruned without inspecting the points inside them. KD-trees work beautifully in low dimensions (a handful of features) but degrade as dimensionality climbs, because the boxes spread out and pruning stops paying off.</p>
+
+    <h3>Ball Trees</h3>
+    <p>A ball tree instead partitions space into nested hyperspheres, each with a center and radius. The same pruning logic applies — if a query point is closer to the current <code>k</code>-th best neighbor than a candidate ball's edge, the whole ball is skipped. Ball trees tolerate higher dimensions better than KD-trees because the spherical geometry remains useful longer.</p>
+    <p>Scikit-learn exposes both through <code>algorithm="kd_tree"</code> and <code>algorithm="ball_tree"</code>; the default <code>auto</code> picks a reasonable choice for your data. For very high dimensions, even these structures struggle and exact nearest neighbor search is better replaced by approximate methods.</p>
+
+    <h2>KNN Classifier and Regressor Implementation</h2>
+    <pre><code>from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+X_train_s = scaler.fit_transform(X_train)
+X_test_s = scaler.transform(X_test)
+
+knn = KNeighborsClassifier(n_neighbors=5, weights="distance")
+knn.fit(X_train_s, y_train)
+print(knn.score(X_test_s, y_test))</code></pre>
+    <pre><code>from sklearn.neighbors import KNeighborsRegressor
+
+knn_r = KNeighborsRegressor(n_neighbors=7, weights="uniform")
+knn_r.fit(X_train_s, y_train)
+print(knn_r.predict(X_test_s))</code></pre>
+    <p>Two practical points stand out:</p>
+    <ul>
+        <li>Distance-based models are only as meaningful as the scale of their axes. A feature in rupees will silently dominate one measured in years, so standardization is mandatory.</li>
+        <li>Tune <code>k</code> with cross-validation — one neighbor is usually too jumpy, and half the dataset is too smooth. The elbow where error flattens is your <code>k</code>.</li>
+    </ul>
+
+    <div class="info">
+        <strong>Trade-offs at a glance:</strong> Naive Bayes trains in milliseconds, needs a small model, and shines on sparse text data — but its independence assumption can hurt on strongly correlated features. KNN makes no distributional assumptions and adapts to any shape — but pays with slow predictions and huge storage on large datasets.
+    </div>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> Load the Iris dataset, standardize it, and run a KNeighborsClassifier for every odd <code>k</code> from 1 to 29 under 5-fold cross-validation. Plot <code>k</code> against mean accuracy. Then repeat the same experiment on the Wine dataset and explain, in your own words, why the optimal <code>k</code> can differ between datasets.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="22-svm.html">Prev: Support Vector Machines</a>
+        <a href="24-decision-trees.html">Next: Decision Trees</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Services - Android Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 10</span>
+    <h1>Services &amp; Background Tasks</h1>
+
+    <h2>Started Services</h2>
+    <p>A Started Service runs in the background indefinitely, even if the activity that started it is destroyed.</p>
+
+    <pre><code>class DownloadService : Service() {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val url = intent?.getStringExtra("URL") ?: return START_NOT_STICKY
+
+        thread {
+            downloadFile(url)
+            stopSelf()
+        }
+
+        return START_STICKY // Restart if killed
+    }
+
+    private fun downloadFile(url: String) {
+        // Download logic
+        sendBroadcast(Intent("DOWNLOAD_COMPLETE"))
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}
+
+// Start service
+startService(Intent(this, DownloadService::class.java).apply {
+    putExtra("URL", "https://example.com/file.zip")
+})</code></pre>
+
+    <h2>Bound Services</h2>
+    <pre><code>class MusicService : Service() {
+    private val binder = LocalBinder()
+    private var mediaPlayer: MediaPlayer? = null
+
+    inner class LocalBinder : Binder() {
+        fun getService(): MusicService = this@MusicService
+    }
+
+    override fun onBind(intent: Intent?): IBinder = binder
+
+    fun playMusic(song: Int) {
+        mediaPlayer = MediaPlayer.create(this, song)
+        mediaPlayer?.start()
+    }
+
+    fun stopMusic() {
+        mediaPlayer?.stop()
+        mediaPlayer?.release()
+        mediaPlayer = null
+    }
+}
+
+// Activity binding
+class MainActivity : AppCompatActivity() {
+    private var musicService: MusicService? = null
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            musicService = (service as MusicService.LocalBinder).getService()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            musicService = null
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        bindService(Intent(this, MusicService::class.java), connection, Context.BIND_AUTO_CREATE)
+    }
+}</code></pre>
+
+    <h2>Foreground Services</h2>
+    <pre><code>class ForegroundLocationService : Service() {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val notification = NotificationCompat.Builder(this, "location")
+            .setContentTitle("Location Tracking")
+            .setContentText("Tracking your location in background")
+            .setSmallIcon(R.drawable.ic_location)
+            .setOngoing(true)
+            .build()
+
+        startForeground(1002, notification)
+        // Start location updates
+        return START_STICKY
+    }
+}
+
+// AndroidManifest.xml
+&lt;uses-permission android:name="android.permission.FOREGROUND_SERVICE" /&gt;
+&lt;service android:name=".ForegroundLocationService"
+    android:foregroundServiceType="location" /&gt;</code></pre>
+
+    <h2>WorkManager</h2>
+    <p>WorkManager is the recommended solution for deferrable background work that needs guaranteed execution.</p>
+
+    <pre><code>// Define worker
+class SyncWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
+    override fun doWork(): Result {
+        return try {
+            // Sync data to server
+            syncData()
+            Result.success()
+        } catch (e: Exception) {
+            Result.retry()
+        }
+    }
+}
+
+// Schedule one-time work
+val syncRequest = OneTimeWorkRequestBuilder&lt;SyncWorker&gt;()
+    .setConstraints(Constraints.Builder()
+        .setRequiredNetworkType(NetworkType.CONNECTED)
+        .setRequiresBatteryNotLow(true)
+        .build())
+    .setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.SECONDS)
+    .build()
+
+WorkManager.getInstance(this).enqueue(syncRequest)
+
+// Observe work status
+WorkManager.getInstance(this).getWorkInfoByIdLiveData(syncRequest.id)
+    .observe(this) { info ->
+        when (info?.state) {
+            WorkInfo.State.SUCCEEDED -> println("Sync successful")
+            WorkInfo.State.FAILED -> println("Sync failed")
+        }
+    }
+
+// Periodic work
+val periodicSync = PeriodicWorkRequestBuilder&lt;SyncWorker&gt;(15, TimeUnit.MINUTES)
+    .build()
+WorkManager.getInstance(this).enqueue(periodicSync)</code></pre>
+
+    <h2>JobScheduler</h2>
+    <pre><code>val jobScheduler = getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
+
+val job = JobInfo.Builder(123, ComponentName(this, MyJobService::class.java))
+    .setMinimumLatency(1000) // 1 second delay
+    .setOverrideDeadline(5000) // Must run within 5 seconds
+    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+    .setRequiresCharging(false)
+    .build()
+
+jobScheduler.schedule(job)</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create a podcast app that uses a Foreground Service to play audio even when the app is in the background. Show a persistent notification with play/pause and stop controls. Use WorkManager to periodically check for new episodes every hour when the device is connected to Wi-Fi.
+    </div>
+
+    <nav>
+      <a href="9-advanced.html">&larr; Previous: Advanced Concepts</a>
+      <a href="../">Back to Index</a>
+      <a href="11-storage.html">Next: Storage &amp; Data Persistence &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

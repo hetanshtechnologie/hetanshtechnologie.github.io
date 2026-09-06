@@ -1,0 +1,291 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azure AI Search: Indexing and Queries - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 16</span>
+<h1>Azure AI Search: Indexing and Queries</h1>
+
+<h2>Azure AI Search Overview</h2>
+<p>Azure AI Search (formerly Azure Cognitive Search) is a cloud-based search-as-a-service solution that delivers full-text search, faceted navigation, and AI-powered enrichment over your content. It acts as a search index that sits on top of your data stores — you push content into it or pull it from supported data sources, and it returns ranked search results with millisecond latency. The service is designed for building search experiences over heterogeneous content, including documents, databases, and blob storage.</p>
+<p>Azure AI Search is a key topic in the AI-102 exam under the "Knowledge Mining" domain. You will be tested on index design, data source connections, indexer configuration, query syntax, and how to apply relevance tuning. The service competes with Elasticsearch and Algolia in the broader search market, but its deep integration with Azure data services and its AI enrichment pipeline give it a unique position in the Azure ecosystem.</p>
+<p>The service is organized around four core components: search indexes (the schema that defines what fields can be searched, filtered, or sorted), data sources (connections to your content stores), indexers (automatic data import pipelines), and queries (the requests that retrieve and rank results). Understanding how these components interact is essential for both the exam and real-world knowledge mining solutions.</p>
+
+<h2>Provisioning a Search Resource</h2>
+<p>You create an Azure AI Search resource through the Azure portal, CLI, or ARM templates. During provisioning you select a pricing tier that determines storage limits, index count, query throughput, and available features. The <strong>Free (F)</strong> tier is limited to 50 MB of storage, 3 indexes, and 15,000 documents. It is suitable for prototyping and small demos but not for production workloads. The <strong>Basic (B)</strong> tier offers 2 GB of storage, 15 indexes, and supports higher query volumes with a shared replica. The <strong>Standard (S1, S2, S3)</strong> tiers scale from 25 GB up to 1.4 TB per partition, with support for multiple replicas and partitions for high availability and throughput. The <strong>Storage Optimized (L1, L2)</strong> tiers prioritize large document volumes over query throughput, offering up to 24 TB per partition.</p>
+
+<table>
+<tr><th>Tier</th><th>Storage</th><th>Max Indexes</th><th>Replicas</th><th>Use Case</th></tr>
+<tr><td>Free (F)</td><td>50 MB</td><td>3</td><td>1 (shared)</td><td>Prototyping and demos</td></tr>
+<tr><td>Basic (B)</td><td>2 GB</td><td>15</td><td>3</td><td>Small production workloads</td></tr>
+<tr><td>Standard S1</td><td>25 GB</td><td>50</td><td>12</td><td>General purpose production</td></tr>
+<tr><td>Standard S2</td><td>100 GB</td><td>50</td><td>12</td><td>Large-scale production</td></tr>
+<tr><td>Standard S3</td><td>1.4 TB</td><td>50</td><td>12</td><td>Massive scale workloads</td></tr>
+<tr><td>Storage Opt L1</td><td>1 TB</td><td>10</td><td>6</td><td>Document-heavy workloads</td></tr>
+<tr><td>Storage Opt L2</td><td>24 TB</td><td>10</td><td>6</td><td>Extreme document volumes</td></tr>
+</table>
+
+<p>Scalability is managed through replicas and partitions. Replicas are copies of the search service that handle query load — adding replicas improves query throughput and provides high availability. Partitions divide the index across multiple storage units, allowing larger indexes and faster indexing throughput. For production, Microsoft recommends at least two replicas for SLA coverage (99.9% for Standard tiers) and two partitions for indexes larger than 50 GB.</p>
+
+<h2>Data Sources</h2>
+<p>A data source tells Azure AI Search where your content lives and how to connect to it. The supported data source types include Azure SQL Database, Azure Cosmos DB (SQL, MongoDB, and Gremlin APIs), Azure Blob Storage, Azure Table Storage, Azure Files, and Azure Data Lake Storage Gen2. Each data source is configured with a connection string, authentication credentials (key-based, managed identity, or SQL authentication), and optional container or query parameters. For Cosmos DB, you specify a collection and optionally a query that filters or projects the documents to index. For Blob Storage, you specify a container and optionally a file extension filter to limit which blobs are indexed.</p>
+
+<pre><code>// Creating a data source via REST API
+POST https://{search-service}.search.windows.net/datasources?api-version=2024-07-01
+Content-Type: application/json
+api-key: {admin-key}
+
+{
+  "name": "azure-sql-products",
+  "type": "azuresql",
+  "credentials": {
+    "connectionString": "Server=tcp:myserver.database.windows.net;Database=myproductsdb;User ID=myuser;Password=mypass;Trusted_Connection=False;Encrypt=True;"
+  },
+  "container": {
+    "name": "dbo.Products"
+  }
+}</code></pre>
+
+<p>When using managed identity authentication, you enable a system-assigned or user-assigned managed identity on the search service and grant it read access to the data source. This avoids embedding connection strings in the data source configuration and is the recommended approach for production. You can create a data source through the Azure portal, REST API, Azure SDK, or the Azure CLI.</p>
+
+<h2>Search Indexes: Fields and Attributes</h2>
+<p>A search index is the core schema that defines the structure of your searchable content. Each field in the index has a name, a data type (Edm.String, Edm.Int32, Edm.Double, Edm.Boolean, Edm.DateTimeOffset, Edm.GeographyPoint, or Collection types), and a set of attributes that control how the field participates in search queries. The five key attributes are <strong>searchable</strong>, <strong>filterable</strong>, <strong>sortable</strong>, <strong>facetable</strong>, and <strong>retrievable</strong>.</p>
+
+<table>
+<tr><th>Attribute</th><th>Description</th><th>Used In</th></tr>
+<tr><td>searchable</td><td>Full-text searchable via Lucene analysis</td><td>Keyword and phrase searches</td></tr>
+<tr><td>filterable</td><td>Can be referenced in $filter expressions</td><td>Exact match filtering</td></tr>
+<tr><td>sortable</td><td>Can be used as a sort criterion</td><td>Ordering results by field</td></tr>
+<tr><td>facetable</td><td>Can be used in faceted navigation</td><td>Category drill-down UI</td></tr>
+<tr><td>retrievable</td><td>Returned in search results</td><td>Field selection in responses</td></tr>
+</table>
+
+<p>Fields that are searchable are analyzed through a Lucene analyzer that tokenizes the text, applies stemming and stop-word removal, and builds an inverted index for fast lookups. Non-searchable fields are stored as-is and can only be used for filtering, sorting, or faceting. Every index must have exactly one key field of type Edm.String that uniquely identifies each document. Complex types allow nested data structures, such as an "address" object containing street, city, and postalCode subfields.</p>
+
+<pre><code>{
+  "name": "product-index",
+  "fields": [
+    { "name": "id", "type": "Edm.String", "key": true, "retrievable": true },
+    { "name": "name", "type": "Edm.String", "searchable": true, "sortable": true, "retrievable": true },
+    { "name": "description", "type": "Edm.String", "searchable": true, "retrievable": false },
+    { "name": "category", "type": "Edm.String", "filterable": true, "facetable": true, "retrievable": true },
+    { "name": "price", "type": "Edm.Double", "filterable": true, "sortable": true, "facetable": true, "retrievable": true },
+    { "name": "rating", "type": "Edm.Double", "sortable": true, "filterable": true, "retrievable": true },
+    { "name": "tags", "type": "Collection(Edm.String)", "filterable": true, "facetable": true, "retrievable": true },
+    { "name": "lastUpdated", "type": "Edm.DateTimeOffset", "sortable": true, "filterable": true, "retrievable": true }
+  ]
+}</code></pre>
+
+<h2>Creating an Index via Portal, REST, and SDK</h2>
+<p>You can create an index through the Azure portal by navigating to your search service and selecting "Add index" from the Overview blade. The portal provides a form-driven interface where you define field names, types, and attributes. For programmatic access, the REST API offers full control over index definition, as shown in the following Python example using the Azure SDK for Python:</p>
+
+<pre><code>from azure.core.credentials import AzureKeyCredential
+from azure.search.documents.indexes import SearchIndexClient
+from azure.search.documents.indexes.models import (
+    SearchIndex, SearchField, SearchFieldDataType,
+    SimpleField, SearchableField
+)
+
+endpoint = "https://mysearch.search.windows.net"
+admin_key = "YOUR_ADMIN_KEY"
+
+client = SearchIndexClient(endpoint, AzureKeyCredential(admin_key))
+
+fields = [
+    SimpleField(name="id", type=SearchFieldDataType.String, key=True),
+    SearchableField(name="name", type=SearchFieldDataType.String, sortable=True),
+    SearchableField(name="description", type=SearchFieldDataType.String),
+    SimpleField(name="category", type=SearchFieldDataType.String,
+                filterable=True, facetable=True),
+    SimpleField(name="price", type=SearchFieldDataType.Double,
+                filterable=True, sortable=True, facetable=True),
+    SimpleField(name="rating", type=SearchFieldDataType.Double,
+                filterable=True, sortable=True),
+]
+
+index = SearchIndex(name="product-index", fields=fields)
+result = client.create_index(index)
+print(f"Index '{result.name}' created successfully")</pre></code>
+
+<pre><code>// C# - creating an index with Azure SDK for .NET
+using Azure;
+using Azure.Search.Documents.Indexes;
+using Azure.Search.Documents.Indexes.Models;
+
+var endpoint = "https://mysearch.search.windows.net";
+var credential = new AzureKeyCredential("YOUR_ADMIN_KEY");
+
+var client = new SearchIndexClient(new Uri(endpoint), credential);
+
+var index = new SearchIndex("product-index")
+{
+    Fields =
+    {
+        new SimpleField("id", SearchFieldDataType.String) { IsKey = true },
+        new SearchableField("name") { IsSortable = true },
+        new SearchableField("description"),
+        new SimpleField("category", SearchFieldDataType.String)
+            { IsFilterable = true, IsFacetable = true },
+        new SimpleField("price", SearchFieldDataType.Double)
+            { IsFilterable = true, IsSortable = true, IsFacetable = true },
+        new SimpleField("rating", SearchFieldDataType.Double)
+            { IsFilterable = true, IsSortable = true }
+    }
+};
+
+client.CreateIndex(index);
+Console.WriteLine("Index created successfully");</pre></code>
+
+<div class="note">
+<p>When creating indexes, you cannot add new searchable fields or change field attributes after the index is populated. To modify the schema of an existing index with data, you must either create a new index and rebuild it, or add new fields with the "allowIndexingOnNewFields" flag set on the index. Plan your schema carefully before indexing production data.</p>
+</div>
+
+<h2>Indexers: Automated Data Import</h2>
+<p>An indexer connects a data source to an index and automates the document ingestion process. It handles field mapping (mapping source fields to index fields), scheduled refresh (incremental indexing), and error handling. When you create an indexer, you specify the data source name, target index name, optional field mappings, a schedule interval (such as "every 5 hours"), and how to handle errors. Indexers support two execution modes: on-demand (run once) and scheduled (recurring).</p>
+<p>Change tracking is critical for incremental indexing. Azure SQL Database and Cosmos DB support change detection through the built-in change tracking features (SQL's integrated change tracking or Cosmos DB's change feed). Blob Storage uses last-modified timestamps to detect new or updated blobs. When change tracking is not available, the indexer falls back to full re-indexing, which can be expensive for large datasets. For Azure SQL, you must enable change tracking on both the database and the table before the indexer can use it.</p>
+
+<pre><code>// Creating an indexer via REST API
+POST https://{search-service}.search.windows.net/indexers?api-version=2024-07-01
+Content-Type: application/json
+api-key: {admin-key}
+
+{
+  "name": "products-indexer",
+  "dataSourceName": "azure-sql-products",
+  "targetIndexName": "product-index",
+  "schedule": {
+    "interval": "PT2H"
+  },
+  "fieldMappings": [
+    { "sourceFieldName": "ProductID", "targetFieldName": "id" },
+    { "sourceFieldName": "ProductName", "targetFieldName": "name" },
+    { "sourceFieldName": "Description", "targetFieldName": "description" }
+  ],
+  "parameters": {
+    "batchSize": 100,
+    "maxFailedItems": 10,
+    "maxFailedItemsPerBatch": 5
+  }
+}</code></pre>
+
+<h2>Query Syntax: Simple vs. Full Lucene</h2>
+<p>Azure AI Search supports two query parser modes: <strong>simple</strong> (default) and <strong>full Lucene</strong>. The simple syntax supports basic query operators — <code>AND</code>, <code>OR</code>, <code>NOT</code>, <code>+</code> (required), <code>-</code> (excluded), and quoted phrases for exact matching. A simple query like <code>"wireless mouse" +Bluetooth -wired</code> searches for documents containing the phrase "wireless mouse," that must include "Bluetooth," and must not include "wired."</p>
+<p>The full Lucene syntax adds advanced operators — <code>~</code> for fuzzy search (e.g., <code>bluetooth~</code> matches "bluetooth," "bluetoot," "bluetch"), <code>^</code> for field boosting (e.g., <code>title:laptop^3</code> boosts matches in the title field by 3x), <code>*</code> and <code>?</code> for wildcard search (e.g., <code>comput*</code> matches "computer," "computing," "computation"), <code>~n</code> for proximity search (e.g., <code>"laptop battery"~5</code> matches documents where the words are within 5 terms of each other), and regular expressions enclosed in <code>/</code>. To use full Lucene syntax, set the <code>queryType</code> parameter to <code>full</code>.</p>
+
+<div class="exam-tip">
+<h3>Exam Tip: Simple vs. Full Lucene</h3>
+<p>The AI-102 exam tests when to use each query type. Use simple syntax for standard keyword searches and metadata filtering — it is faster and sufficient for most e-commerce and content search scenarios. Use full Lucene when you need fuzzy matching for typo-tolerant search, proximity search for phrase matching with word gaps, regex for pattern matching, or field boosting for custom relevance ranking. Remember that full Lucene queries are more resource-intensive and slower, so only use them when the query complexity is justified by the search experience requirements.</p>
+</div>
+
+<h2>Filtering, Sorting, Faceting, and Wildcard Queries</h2>
+<p>Filters are expressed using the OData <code>$filter</code> parameter with standard comparison operators (<code>eq</code>, <code>ne</code>, <code>gt</code>, <code>lt</code>, <code>ge</code>, <code>le</code>), logical operators (<code>and</code>, <code>or</code>, <code>not</code>), and collection operators (<code>in</code>, <code>any</code>, <code>all</code>). A filter narrows the search space before scoring, which makes it very efficient. For example, <code>$filter=category eq 'Electronics' and price le 1000</code> restricts results to electronics under $1,000. Sorting is done with <code>$orderby</code> — <code>$orderby=rating desc, price asc</code> sorts by rating descending then price ascending. Facets provide aggregated counts for drill-down navigation. A faceted query returns the count of documents in each category — <code>facet=category,count:100</code> returns up to 100 category values with their document counts. Wildcard queries use <code>*</code> for multi-character and <code>?</code> for single-character matching, and require the full Lucene query parser.</p>
+
+<pre><code># Python - full query with filtering, faceting, and sorting
+from azure.search.documents import SearchClient
+from azure.core.credentials import AzureKeyCredential
+
+client = SearchClient(
+    endpoint="https://mysearch.search.windows.net",
+    index_name="product-index",
+    credential=AzureKeyCredential("YOUR_QUERY_KEY")
+)
+
+results = client.search(
+    search_text="laptop",
+    filter="category eq 'Electronics' and price le 2000",
+    order_by=["rating desc", "price asc"],
+    facets=["category", "brand"],
+    select=["name", "price", "rating", "category"],
+    top=10,
+    query_type="simple"
+)
+
+print(f"Total results: {results.get_count()}")
+print("Facets:")
+for facet_name, facet_values in results.get_facets().items():
+    for value in facet_values:
+        print(f"  {value['value']}: {value['count']}")
+
+for doc in results:
+    print(f"{doc['name']} - ${doc['price']} - Rating: {doc['rating']}")</pre></code>
+
+<h2>Scoring Profiles for Relevance Tuning</h2>
+<p>Scoring profiles allow you to customize the relevance ranking of search results. By default, Azure AI Search computes a score for each matching document based on term frequency-inverse document frequency (TF-IDF) and the Okapi BM25 algorithm. A scoring profile lets you override this by adding weighted field boosts, magnitude-based functions (boost by recency or numeric value), freshness functions (boost newer documents), tag boosting (boost documents matching specific tags), and distance functions (boost by geographic proximity).</p>
+<p>For example, a product search might use a scoring profile that boosts the title field by 5x, boosts recently updated products, and boosts products in the "Featured" category by 2x. Scoring profiles are defined in the index schema and referenced by name in queries. If no scoring profile is specified, the default BM25 scoring is used. You can also override scoring parameters at query time using the <code>scoringParameter</code> option to pass tag values or parameter values to the scoring function.</p>
+
+<pre><code>{
+  "name": "product-scoring",
+  "text": {
+    "weights": {
+      "name": 5,
+      "description": 2,
+      "tags": 3
+    }
+  },
+  "functions": [
+    {
+      "type": "freshness",
+      "fieldName": "lastUpdated",
+      "boost": 2,
+      "interpolation": "linear",
+      "freshness": {
+        "boostingDuration": "P30D"
+      }
+    },
+    {
+      "type": "magnitude",
+      "fieldName": "rating",
+      "boost": 1.5,
+      "interpolation": "constant",
+      "magnitude": {
+        "boostingRangeStart": 3,
+        "boostingRangeEnd": 5
+      }
+    }
+  ]
+}</code></pre>
+
+<h2>Exercise: Build a Product Search Index</h2>
+<p>In this exercise you will provision an Azure AI Search service, create an index, index sample product data, and run queries with filtering and faceting.</p>
+<ol>
+<li>Create an Azure AI Search resource at the Basic tier in the Azure portal.</li>
+<li>Write a Python script that creates an index named "products" with fields for id, name, description, category, price, rating, tags, and lastUpdated. Set appropriate attributes: searchable on name and description, filterable and facetable on category and tags, sortable on price and rating.</li>
+<li>Index at least 20 sample product documents spanning 3-4 categories (Electronics, Home, Clothing, Sports). Use the <code>SearchClient.upload_documents()</code> method.</li>
+<li>Run the following queries and print the results:
+<ul>
+<li>Search for "wireless" in Electronics under $150, sorted by rating descending</li>
+<li>Same query with a facet on category to see counts per category</li>
+<li>Use a filter to show only products with rating >= 4</li>
+<li>Use full Lucene syntax with a fuzzy search term (e.g., "laptopp~")</li>
+</ul>
+</li>
+<li>Define a scoring profile that boosts the name field by 3x and applies a freshness boost for items updated within the last 30 days. Compare the result ordering with and without the scoring profile.</li>
+</ol>
+
+<div class="exam-tip">
+<h3>Exam Tips: Index Design and Query Performance</h3>
+<p>Several index design strategies appear frequently on the exam. Use <strong>searchable</strong> attributes only on fields that genuinely need full-text search — each searchable field adds to the index size and query latency. Make fields <strong>filterable</strong> instead of searchable when you only need exact matches. Use <strong>facets</strong> for categorical drill-down rather than boolean filters because facets provide user-facing navigation counts. When performance is critical, limit the number of searchable fields and use the <code>$select</code> parameter to return only the fields the client needs. Use the <strong>query key</strong> (read-only key) for client-side queries and reserve the admin key for index management operations. For large datasets, prefer push-based indexing (direct document upload) over pull-based indexing (indexers) when you need real-time freshness, because indexers have a minimum scheduling interval of 5 minutes and each run incurs overhead.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Azure AI Search provides a managed search service with configurable indexes, automated indexers for popular Azure data sources, and flexible query syntax supporting simple and full Lucene modes. Index schema design determines what queries are possible — field attributes control searchability, filterability, sortability, and faceting. Indexers automate data import and support incremental refresh through change tracking. Scoring profiles fine-tune relevance ranking beyond the default BM25 algorithm. Queries support filtering (OData), sorting, faceted navigation, and advanced Lucene features like fuzzy, proximity, and wildcard search. On the AI-102 exam, focus on index design best practices, choosing between simple and full query syntax, and understanding when filters are more efficient than facets. The next chapter extends these concepts with AI enrichment, where cognitive skills transform and enrich content during the indexing process.</p>
+
+<nav>
+<a href="../index.html">&larr; Back to Index</a>
+<a href="17-ai-search-enrichment.html">Next: AI Search: Skillsets and Enrichment &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

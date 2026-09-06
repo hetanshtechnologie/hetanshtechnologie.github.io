@@ -1,0 +1,130 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>168. Lab - Azure AI Search - Data sources - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 168</span>
+<h1>Lab - Azure AI Search - Data sources</h1>
+<p>In the previous lab you staged documents in blob storage and created a search service. Now you will teach the search service where those documents live by defining a data source. This is the first component of the indexing pipeline, and it establishes the connection the indexer will use in later labs.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>The <strong>storage account</strong> and its connection string from the previous lab.</li>
+<li>The <strong>Azure AI Search</strong> service name and its <strong>admin key</strong> from the previous lab.</li>
+<li>The Azure CLI, signed in, and your resource group variable still set.</li>
+<li>The <strong>search extension</strong> for the Azure CLI, installed with <code>az extension add --name azure-search</code>.</li>
+</ul>
+
+<h2>Step 1 - Set Connection Variables</h2>
+<p>Set the variables the commands will use. Replace the placeholders with your resource names and the admin key from the last lab:</p>
+<pre><code>$rg = "rg-ai103"
+$searchName = "srch-ai103-&lt;yourname&gt;"
+$adminKey = "YOUR_ADMIN_KEY"
+
+$conn = az storage account show-connection-string `
+  --name "saai103&lt;yourname&gt;" `
+  --resource-group $rg `
+  --query connectionString -o tsv
+</code></pre>
+
+<h2>Step 2 - Understand What a Data Source Defines</h2>
+<p>A data source is a JSON object with three key parts:</p>
+<ul>
+<li><strong>name</strong> — how you will refer to the data source when creating the indexer.</li>
+<li><strong>type</strong> — the connector, in this case <code>azureblob</code>.</li>
+<li><strong>credentials</strong> — how the service authenticates to the storage account (here, the connection string).</li>
+<li><strong>container</strong> — which container (and optional path) to read from.</li>
+</ul>
+<p>Save the following as <code>datasource.json</code>:</p>
+<pre><code>{
+  "name": "docs-datasource",
+  "type": "azureblob",
+  "credentials": {
+    "connectionString": "YOUR_CONNECTION_STRING"
+  },
+  "container": {
+    "name": "docs"
+  }
+}
+</code></pre>
+
+<div class="warn">
+<p>The connection string in the JSON file is a secret. Never commit <code>datasource.json</code> to a repository. In a real deployment you would use a managed identity instead of a shared key; the labs use the connection string for simplicity.</p>
+</div>
+
+<h2>Step 3 - Create the Data Source</h2>
+<p>Before calling the API, replace the connection string placeholder in the file. In PowerShell, inject the value directly:</p>
+<pre><code>$json = Get-Content -Raw datasource.json
+$json = $json.Replace("YOUR_CONNECTION_STRING", $conn)
+$json | Set-Content datasource.local.json
+
+az search datasource create `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-datasource `
+  --type azureblob `
+  --connection-string $conn `
+  --container-name docs
+</code></pre>
+<p>A successful call prints the data source definition, including the assigned <code>@odata.etag</code>. The data source now points at the <code>docs</code> container.</p>
+
+<div class="note">
+<p>If the <code>az search datasource</code> command is not recognized, install the extension first:</p>
+<pre><code>az extension add --name azure-search
+</code></pre>
+</div>
+
+<h2>Step 4 - List and Inspect Data Sources</h2>
+<p>Verify the data source exists on the service:</p>
+<pre><code>az search datasource list `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey -o table
+</code></pre>
+<p>You can also list data sources through the REST API to see the full definition:</p>
+<pre><code>az rest --method get `
+  --uri "https://$searchName.search.windows.net/datasources?api-version=2023-11-01" `
+  --headers "api-key=$adminKey"
+</code></pre>
+
+<h2>Step 5 - Test the Connection Before Indexing</h2>
+<p>Creating a data source does not read any files, so it cannot fail from a bad container name at creation time. To confirm the connection actually works, list blobs from the storage side and compare with what the container name expects:</p>
+<pre><code>az storage blob list --container-name docs --connection-string $conn --query "length(@)" -o tsv
+</code></pre>
+<p>You should see a number greater than zero. If the container were empty or the connection string wrong, the indexer in the next lab would produce an empty index — checking now isolates the problem early.</p>
+
+<div class="tip">
+<p>A common mistake is pointing the data source at a container that does not exist. Azure Blob data sources accept the container name exactly as it appears in the storage account — case-sensitive, no leading slash.</p>
+</div>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>403</code> on create</td><td>Wrong or missing admin key</td><td>Re-fetch the admin key and pass it with <code>--admin-key</code>.</td></tr>
+<tr><td><code>Invalid connection string</code></td><td>Connection string malformed or stale</td><td>Regenerate via <code>az storage account show-connection-string</code>.</td></tr>
+<tr><td>Command not found</td><td>azure-search extension missing</td><td>Run <code>az extension add --name azure-search</code>.</td></tr>
+<tr><td>Indexer later reports zero documents</td><td>Container name mismatch or empty container</td><td>List blobs and confirm the container name matches exactly.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You defined a blob-storage data source on your search service, verified it through both the CLI and the REST API, and confirmed the underlying container holds documents. The search service now knows where its content lives. With the data source in place, the next labs add the index schema and the indexer that turns those blobs into searchable documents.</p>
+<nav>
+<a href="167-lab-ingesting-documents-from-azure-blob-storage.html">&larr; Previous: Lab - Ingesting documents from Azure Blob Storage</a><a href="169-lab-azure-ai-search-creating-the-index.html">Next: Lab - Azure AI Search - Creating the index &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,164 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>236. Lab - GPT 5 - REST API - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 236</span>
+<h1>Lab - GPT 5 - REST API</h1>
+<p>Every model deployment in Azure AI Foundry exposes a REST API — a plain HTTP endpoint that any programming language can call. Before you write Python, this lab calls that endpoint directly with <code>curl</code>, so you see the request and response in raw form. Understanding the wire protocol first makes the SDK code in the next labs much easier to read.</p>
+
+<h2>What You Will Need</h2>
+<ul>
+<li>A deployed chat model (your <code>ai103-chat-deploy</code> deployment from the earlier lab).</li>
+<li>The deployment's <strong>Endpoint</strong> URL and <strong>Key</strong>, from the Foundry project's Deployments or Keys page.</li>
+<li>A terminal — PowerShell on Windows, or any shell on macOS/Linux. Windows users must use <code>curl.exe</code>, not the <code>curl</code> alias.</li>
+</ul>
+
+<div class="warn">
+<p>Never paste your key into chat messages, emails, or files you share. If you think a key leaked, regenerate it in the portal and update the places that use it.</p>
+</div>
+
+<h2>The Request Shape</h2>
+<p>The chat-completions REST call is a single <code>POST</code> to your endpoint with three pieces of information:</p>
+<ul>
+<li><strong>URL:</strong> your endpoint path plus the deployment name and an API version.</li>
+<li><strong>Header:</strong> your key sent as <code>api-key</code>.</li>
+<li><strong>Body:</strong> a JSON document containing the <code>messages</code> array and parameters.</li>
+</ul>
+
+<pre><code>POST /openai/deployments/YOUR_DEPLOYMENT_NAME/chat/completions?api-version=2024-06-01
+Headers:
+  api-key: YOUR_KEY
+  Content-Type: application/json
+Body:
+{
+  "messages": [
+    {"role": "system", "content": "You are a concise assistant."},
+    {"role": "user", "content": "Say hello in five words."}
+  ],
+  "max_tokens": 50
+}</code></pre>
+
+<div class="note">
+<p>The deployment name in the URL is the name you chose when you deployed the model — not the model family name. A 404 error almost always means this name (or the API version) is wrong, not that the model is broken.</p>
+</div>
+
+<h2>Step 1: Call with curl</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Send your first REST request</h3>
+<ol>
+<li>Open a terminal.</li>
+<li>Save the request body to a file named <code>request-body.json</code> to avoid shell-quoting problems on Windows.</li>
+<li>Run the curl command below with your values substituted.</li>
+</ol>
+</div>
+
+<pre><code>{
+  "messages": [
+    {"role": "system", "content": "You are a concise study assistant."},
+    {"role": "user", "content": "List three benefits of calling a model via REST API."}
+  ],
+  "temperature": 0.5,
+  "max_tokens": 150
+}</code></pre>
+
+<pre><code># Windows PowerShell (note: curl.exe)
+curl.exe "https://YOUR_ENDPOINT/openai/deployments/YOUR_DEPLOYMENT_NAME/chat/completions?api-version=2024-06-01" `
+  -H "api-key: YOUR_KEY" `
+  -H "Content-Type: application/json" `
+  -d "@request-body.json"</code></pre>
+
+<pre><code># macOS / Linux
+curl "https://YOUR_ENDPOINT/openai/deployments/YOUR_DEPLOYMENT_NAME/chat/completions?api-version=2024-06-01" \
+  -H "api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d @request-body.json</code></pre>
+
+<div class="tip">
+<p>Keep the JSON in a file whenever a command line grows this long. It survives copy-paste cleanly, avoids quoting bugs, and lets you edit the request without rewriting the shell command.</p>
+</div>
+
+<h2>Step 2: Read the Response</h2>
+<p>A successful call returns a JSON document with three important blocks:</p>
+
+<pre><code>{
+  "id": "chatcmpl-...",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "1. Language-agnostic ... 2. Callable from any tool ... 3. Simple to test."
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 33,
+    "completion_tokens": 27,
+    "total_tokens": 60
+  }
+}</code></pre>
+
+<ul>
+<li><code>choices[0].message.content</code> — the text you actually want.</li>
+<li><code>choices[0].finish_reason</code> — why generation stopped: <code>stop</code> naturally, <code>length</code> when the token cap hit, or <code>content_filter</code>.</li>
+<li><code>usage</code> — the token counts that determine your bill.</li>
+</ul>
+
+<div class="note">
+<p>Notice the response wraps the text in the same <code>role</code>/<code>content</code> structure the request used. In a multi-turn app you append this assistant message to the array and send it back — that is how the model remembers the conversation.</p>
+</div>
+
+<h2>Step 3: Interpret Common Errors</h2>
+<table>
+<tr><th>HTTP status</th><th>Meaning</th><th>Fix</th></tr>
+<tr><td>401</td><td>Key rejected</td><td>Check the key; regenerate if it changed</td></tr>
+<tr><td>404</td><td>Deployment or API version not found</td><td>Verify deployment name and <code>api-version</code></td></tr>
+<tr><td>429</td><td>Rate limit or quota</td><td>Wait, or request a higher quota</td></tr>
+<tr><td>400</td><td>Malformed body</td><td>Validate JSON; check parameter names</td></tr>
+<tr><td>500/503</td><td>Service issue</td><td>Retry; if persistent, check Azure status</td></tr>
+</table>
+
+<div class="tip">
+<p>Add <code>-i</code> to curl to print the response headers. The <code>x-ms-ratelimit-*</code> headers reveal how close you are to the rate limit — useful when your app starts hitting 429s in production.</p>
+</div>
+
+<h2>Step 4: Try a Multi-Turn Request</h2>
+<p>Extend the JSON file with a short conversation history so the model answers in context:</p>
+
+<pre><code>{
+  "messages": [
+    {"role": "system", "content": "You are a helpful cooking assistant."},
+    {"role": "user", "content": "I am making pancakes. What is the first step?"},
+    {"role": "assistant", "content": "Mix flour, eggs, and milk until smooth."},
+    {"role": "user", "content": "Now what do I do with the pan?"}
+  ],
+  "max_tokens": 100
+}</code></pre>
+
+<p>Resend the request. The model answers the latest question while using the earlier turns for context — the same mechanism the playground used, exposed over plain HTTP.</p>
+
+<h2>Summary</h2>
+<p>You called your GPT deployment over raw HTTP with curl, read the JSON response, learned the three blocks every response contains, mapped common error codes to fixes, and carried a conversation across turns. This wire-level understanding carries directly into the Python SDK, which wraps this exact protocol. Next you will reproduce this call in Python.</p>
+<nav>
+<a href="235-lab-running-a-simple-python-program.html">&larr; Previous: Lab - Running a simple Python program</a><a href="237-lab-python-gpt-5-chat-completion-api.html">Next: Lab - Python - GPT 5 - Chat Completion API &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

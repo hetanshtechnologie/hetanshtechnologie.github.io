@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rate Limiter Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:900px;margin:24px auto;padding:0 16px}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.token-bucket{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0}
+.token-bucket h3{font-size:14px;margin-bottom:16px;text-align:center}
+.bucket-visual{display:flex;justify-content:center;align-items:flex-end;gap:4px;height:120px;margin:0 auto;max-width:300px}
+.token{background:#38bdf8;border-radius:4px;width:24px;transition:all .3s;animation:dropIn .3s}
+@keyframes dropIn{from{opacity:0;transform:translateY(-20px)}to{opacity:1;transform:translateY(0)}}
+.bucket-frame{border:2px solid #475569;border-top:none;border-radius:0 0 8px 8px;height:100px;width:260px;position:relative;display:flex;align-items:flex-end;justify-content:center;padding:4px;flex-wrap:wrap;gap:2px;align-content:flex-end}
+.bucket-info{text-align:center;margin-top:8px;font-size:12px;color:#94a3b8}
+.bucket-info b{color:#38bdf8}
+.request-stream{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0}
+.request-stream h3{font-size:14px;margin-bottom:12px}
+.req-items{display:flex;gap:6px;flex-wrap:wrap}
+.req-item{background:#334155;border-radius:6px;padding:6px 10px;font-size:11px;display:flex;align-items:center;gap:4px;border-left:3px solid}
+.req-item.allowed{border-color:#4ade80}
+.req-item.denied{border-color:#f87171;text-decoration:line-through;opacity:.6}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.window-slots{display:flex;gap:4px;justify-content:center;margin:12px 0}
+.window-slot{width:30px;height:30px;background:#334155;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;border:1px solid #475569}
+.window-slot.active{border-color:#38bdf8;background:rgba(56,189,248,.1)}
+.window-slot.full{border-color:#f87171;background:rgba(248,113,113,.1)}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>Rate Limiter Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/15</div>
+<div class="hud-item"><span id="blocked">0</span>Blocked</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="scenario-card">
+<h3 id="scenario-title">Rate Limiting Challenge</h3>
+<p id="scenario-desc">Decide whether to allow or deny requests based on the rate limiting strategy.</p>
+</div>
+<div class="token-bucket" id="bucket-section">
+<h3 id="bucket-title">Token Bucket (10 tokens, refill 2/sec)</h3>
+<div class="bucket-visual">
+<div class="bucket-frame" id="bucket-frame"></div>
+</div>
+<div class="bucket-info">Tokens: <b id="tokens">10</b>/10 · Refill: <b>2/sec</b></div>
+</div>
+<div class="window-slots" id="window-slots"></div>
+<div class="request-stream">
+<h3>Request Stream</h3>
+<div class="req-items" id="req-items"></div>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Rate Limiting Expert!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=15,blocked=0,answered=false;
+let tokens=10,maxTokens=10;
+const scenarios=[
+{title:"Token Bucket",desc:"User makes 3 rapid API calls. Bucket has 5 tokens. Allow or deny?",tokens:5,maxTokens:10,refill:2,requests:3,method:"Token Bucket",correct:"Allow all 3",reason:"3 requests < 5 available tokens. All allowed."},
+{title:"Sliding Window",desc:"User made 8 requests in last 60s. Limit is 10/min. 2 more incoming.",tokens:2,method:"Sliding Window",correct:"Allow 2",reason:"8+2=10 which equals the limit. Allow up to threshold."},
+{title:"Leaky Bucket",desc:"Bucket has 3 empty slots. 5 requests in queue. Process or reject?",method:"Leaky Bucket",correct:"Process 3, queue 2",reason:"Leaky bucket processes at fixed rate, queues overflow."},
+{title:"Fixed Window",desc:"Window resets in 5 seconds. 9/10 requests used. 2 new requests.",method:"Fixed Window",correct:"Allow 1, deny 1",reason:"Only 1 slot remaining in current window."},
+{title:"Token Bucket",desc:"Bucket is empty (0 tokens). A burst of 5 requests arrives.",tokens:0,maxTokens:10,refill:2,requests:5,method:"Token Bucket",correct:"Deny all 5",reason:"No tokens available. All requests denied until refill."},
+{title:"Sliding Window",desc:"User: 15 requests in last minute. Limit: 10/min. New request.",method:"Sliding Window",correct:"Deny",reason:"User already at/over limit. New request must be denied."},
+{title:"Token Bucket",desc:"Bucket has 8 tokens. Burst of 4 requests arrives simultaneously.",tokens:8,maxTokens:10,refill:2,requests:4,method:"Token Bucket",correct:"Allow all 4",reason:"4 ≤ 8 available tokens. All requests allowed."},
+{title:"Fixed Window",desc:"New window just started. 0/10 used. Burst of 15 requests.",method:"Fixed Window",correct:"Allow 10, deny 5",reason:"First 10 allowed, remaining 5 exceed window limit."},
+{title:"Leaky Bucket",desc:"Bucket full with 5 requests. 3 more arrive. Queue size: 5.",method:"Leaky Bucket",correct:"Reject 3",reason:"Queue is full. New requests are rejected."},
+{title:"Sliding Window",desc:"API key used 98/100 requests. Critical health check arrives.",method:"Sliding Window",correct:"Allow (priority bypass)",reason:"Health checks should bypass rate limits for system monitoring."},
+{title:"Token Bucket",desc:"Bucket refilled to 7 tokens. 3 users send 3 requests each (9 total).",tokens:7,maxTokens:10,refill:2,requests:9,method:"Token Bucket",correct:"Allow 7, deny 2",reason:"Only 7 tokens for 9 requests."},
+{title:"Fixed Window",desc:"50% of window elapsed. 6/10 requests used. 4 new requests.",method:"Fixed Window",correct:"Allow 4",reason:"6+4=10 exactly at limit. All allowed."},
+{title:"Leaky Bucket",desc:"Bucket processing at 2 req/sec. 6 requests arrive in 1 second.",method:"Leaky Bucket",correct:"Process 2, queue 4",reason:"Only 2 can process per interval, rest queued."},
+{title:"Token Bucket",desc:"API has priority levels. Normal request with 2 tokens. VIP request waiting.",tokens:2,method:"Token Bucket",correct:"Allow VIP, queue normal",reason:"VIP requests should get priority when tokens are low."},
+{title:"Sliding Window",desc:"User is at exactly 10/10 limit. Legitimate retry after timeout.",method:"Sliding Window",correct:"Allow with retry-after header",reason:"Retries after server timeout should be allowed gracefully."}
+];
+let reqCount=0;
+function init(){score=0;round=0;blocked=0;tokens=10;reqCount=0;startRound();}
+function updateBucket(){
+const el=document.getElementById('bucket-frame');
+const h=Math.min(100,(tokens/maxTokens)*100);
+el.innerHTML=Array.from({length:Math.round(tokens)},(_,i)=>`<div class="token" style="height:8px"></div>`).join('');
+document.getElementById('tokens').textContent=Math.round(tokens);
+}
+function startRound(){
+answered=false;reqCount=0;
+const s=scenarios[round%scenarios.length];
+tokens=s.tokens||tokens;maxTokens=s.maxTokens||10;
+document.getElementById('scenario-title').textContent=s.title;
+document.getElementById('scenario-desc').textContent=s.desc;
+document.getElementById('bucket-title').textContent=`${s.method} (${maxTokens} capacity${s.refill?', refill '+s.refill+'/sec':''})`;
+document.getElementById('req-items').innerHTML='';
+document.getElementById('window-slots').innerHTML=Array.from({length:10},(_,i)=>`<div class="window-slot">${i<tokens?'●':''}</div>`).join('');
+updateBucket();
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+document.getElementById('choices').innerHTML=['Allow all','Deny all','Allow partially','Queue for later'].map(c=>`<button class="choice-btn" onclick="answer('${c}','${s.correct.replace(/'/g,"\\'")}','${s.reason}')">${c}</button>`).join('');
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect)score+=10;else score=Math.max(0,score-3);
+if(chosen.includes('Deny'))blocked++;
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const s=scenarios[round%scenarios.length];
+const reqs=s.requests||1;
+const items=document.getElementById('req-items');
+for(let i=0;i<Math.min(reqs,5);i++){
+const allowed=chosen.includes('Allow')||chosen.includes('Queue');
+items.innerHTML+=`<div class="req-item ${allowed?'allowed':'denied'}">Req ${reqCount++} ${allowed?'✓':'✗'}</div>`;
+}
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+document.getElementById('blocked').textContent=blocked;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;document.getElementById('blocked').textContent=0;
+}
+init();
+</script>
+</body>
+</html>

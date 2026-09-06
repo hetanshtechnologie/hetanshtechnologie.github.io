@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Networking - Android Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 12</span>
+    <h1>Networking &amp; APIs</h1>
+
+    <h2>HTTP Clients</h2>
+
+    <h3>Retrofit (Recommended)</h3>
+    <pre><code>// build.gradle.kts
+// implementation("com.squareup.retrofit2:retrofit:2.9.0")
+// implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+// implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+data class Post(
+    val userId: Int,
+    val id: Int,
+    val title: String,
+    val body: String
+)
+
+interface ApiService {
+    @GET("posts")
+    suspend fun getPosts(): List&lt;Post&gt;
+
+    @GET("posts/{id}")
+    suspend fun getPost(@Path("id") id: Int): Post
+
+    @POST("posts")
+    suspend fun createPost(@Body post: Post): Post
+
+    @PUT("posts/{id}")
+    suspend fun updatePost(@Path("id") id: Int, @Body post: Post): Post
+
+    @DELETE("posts/{id}")
+    suspend fun deletePost(@Path("id") id: Int)
+}
+
+// Retrofit instance
+val logging = HttpLoggingInterceptor().apply {
+    level = HttpLoggingInterceptor.Level.BODY
+}
+
+val client = OkHttpClient.Builder()
+    .addInterceptor(logging)
+    .connectTimeout(30, TimeUnit.SECONDS)
+    .readTimeout(30, TimeUnit.SECONDS)
+    .build()
+
+val retrofit = Retrofit.Builder()
+    .baseUrl("https://jsonplaceholder.typicode.com/")
+    .client(client)
+    .addConverterFactory(GsonConverterFactory.create())
+    .build()
+
+val api = retrofit.create(ApiService::class.java)
+
+// Usage in ViewModel
+viewModelScope.launch {
+    try {
+        val posts = api.getPosts()
+        _posts.value = posts
+    } catch (e: Exception) {
+        _error.value = "Network error: ${e.message}"
+    }
+}</code></pre>
+
+    <h3>OkHttp (Lower Level)</h3>
+    <pre><code>val client = OkHttpClient()
+
+val request = Request.Builder()
+    .url("https://api.example.com/users")
+    .get()
+    .addHeader("Authorization", "Bearer $token")
+    .build()
+
+viewModelScope.launch(Dispatchers.IO) {
+    val response = client.newCall(request).execute()
+    if (response.isSuccessful) {
+        val body = response.body?.string()
+        // Parse JSON
+    }
+}</code></pre>
+
+    <h2>WebSocket</h2>
+    <pre><code>val client = OkHttpClient()
+val ws = client.newWebSocket(
+    Request.Builder().url("wss://echo.websocket.org").build(),
+    object : WebSocketListener() {
+        override fun onOpen(ws: WebSocket, response: Response) {
+            ws.send("Hello from Android!")
+        }
+
+        override fun onMessage(ws: WebSocket, text: String) {
+            println("Received: $text")
+        }
+
+        override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+            println("Error: ${t.message}")
+        }
+    }
+)</code></pre>
+
+    <h2>Image Loading</h2>
+    <pre><code>// build.gradle.kts
+// implementation("com.github.bumptech.glide:glide:4.16.0")
+
+// Load image into ImageView
+Glide.with(this)
+    .load("https://example.com/image.jpg")
+    .placeholder(R.drawable.placeholder)
+    .error(R.drawable.error)
+    .circleCrop()
+    .into(imageView)
+
+// Coil (Kotlin coroutines-based alternative)
+// implementation("io.coil-kt:coil:2.5.0")
+
+imageView.load("https://example.com/image.jpg") {
+    crossfade(true)
+    placeholder(R.drawable.placeholder)
+    error(R.drawable.error)
+}</code></pre>
+
+    <h2>Firebase Realtime Database</h2>
+    <pre><code>// build.gradle.kts
+// implementation("com.google.firebase:firebase-database")
+
+val database = FirebaseDatabase.getInstance()
+val usersRef = database.getReference("users")
+
+// Write
+usersRef.child("alice").setValue(User("Alice", 30))
+
+// Read (one-time)
+usersRef.child("alice").get().addOnSuccessListener { snapshot ->
+    val user = snapshot.getValue(User::class.java)
+}
+
+// Read (realtime)
+usersRef.child("alice").addValueEventListener(object : ValueEventListener {
+    override fun onDataChange(snapshot: DataSnapshot) {
+        val user = snapshot.getValue(User::class.java)
+        // Update UI
+    }
+
+    override fun onCancelled(error: DatabaseError) {
+        println("Database error: ${error.message}")
+    }
+})</code></pre>
+
+    <h2>Connectivity Monitoring</h2>
+    <pre><code>val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+// Check current state
+val network = connectivityManager.activeNetwork
+val capabilities = connectivityManager.getNetworkCapabilities(network)
+val isOnline = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+
+// Observe changes
+val networkCallback = object : ConnectivityManager.NetworkCallback() {
+    override fun onAvailable(network: Network) {
+        println("Network available")
+    }
+    override fun onLost(network: Network) {
+        println("Network lost")
+    }
+}
+connectivityManager.registerDefaultNetworkCallback(networkCallback)</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create an app that fetches and displays a list of posts from JSONPlaceholder API using Retrofit. Each item shows the post title. Tapping an item shows the full post in a detail screen. Add pull-to-refresh, error handling with retry, and offline caching using Room as a cache layer.
+    </div>
+
+    <nav>
+      <a href="11-storage.html">&larr; Previous: Storage &amp; Data Persistence</a>
+      <a href="../">Back to Index</a>
+      <a href="13-multimedia.html">Next: Multimedia &amp; Graphics &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>80. Managing Quotas, Scaling, Rate Limits, and Cost - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 80</span>
+<h1>Managing Quotas, Scaling, Rate Limits, and Cost</h1>
+<p>Building an agent or a workflow is only half the job; running it reliably and affordably is the other half. Every model deployment operates under limits — how much you are allowed to send, how fast, and at what price. In this chapter you will learn the vocabulary of capacity management for generative AI on Microsoft Foundry: quotas, rate limits, scaling models, and the cost levers that keep your bill under control.</p>
+
+<h2>Quotas and Rate Limits</h2>
+<p>Two related but distinct limits govern how much work a deployment can do:</p>
+<ul>
+<li><strong>Quota:</strong> A per-model, per-region entitlement that defines how much throughput your subscription is approved to use. Quota is the ceiling you purchase or are granted.</li>
+<li><strong>Rate limits:</strong> The operational caps enforced on a live deployment — how many tokens per minute (<em>TPM</em>) and how many requests per minute (<em>RPM</em>) it will serve.</li>
+</ul>
+<p>When a request would exceed the deployment's limits, the service returns an HTTP <code>429</code> (too many requests) error. Rate limits are applied per deployment, and quota is shared across deployments of the same model in the same region.</p>
+
+<div class="note">
+<p>Think of quota as the size of the water tank and rate limits as the diameter of the pipe. Quota says how much capacity your subscription owns; the rate limits say how quickly a single deployment can draw from it. Raising one without the other does not increase throughput.</p>
+</div>
+
+<h2>Deployment SKUs and Their Trade-Offs</h2>
+<p>How you deploy a model determines its capacity model, pricing, and behavior. The main choices are:</p>
+
+<table>
+<tr><th>SKU type</th><th>How capacity works</th><th>Best for</th></tr>
+<tr><td>Global Standard</td><td>Routed across multiple regions with per-deployment rate limits</td><td>Variable workloads and rapid onboarding</td></tr>
+<tr><td>Standard</td><td>Region-specific deployment with per-deployment rate limits</td><td>Workloads with a defined regional home</td></tr>
+<tr><td>Provisioned</td><td>Dedicated, guaranteed throughput units purchased up front</td><td>Stable high-volume production traffic</td></tr>
+</table>
+
+<p><em>Global Standard</em> deployments are the most convenient for development: they scale quickly and bill per token. <em>Provisioned</em> deployments buy reserved throughput, which costs more before you use it but prices each token much lower and protects you from neighbors' traffic. Most courses and prototypes never need provisioned capacity.</p>
+
+<h2>Handling 429 Errors Gracefully</h2>
+<p>Exceeding a rate limit is a normal event in production, not a bug. The correct response is to retry with <em>backoff</em>: wait a moment and try again, increasing the wait on each attempt. SDKs such as the OpenAI client already do this for you.</p>
+
+<pre><code>import time
+from openai import RateLimitError
+
+def call_with_retry(call_fn, max_attempts=4):
+    delay = 1
+    for attempt in range(max_attempts):
+        try:
+            return call_fn()
+        except RateLimitError:
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2  # exponential backoff
+</code></pre>
+
+<div class="tip">
+<p>Also honor the <code>Retry-After</code> header if your client exposes it — it tells you exactly how long to wait. On top of retries, throttle your own request rate: spreading the same volume over more time avoids hammering the limit in bursts.</p>
+</div>
+
+<h2>Scaling Your Deployment</h2>
+<p>When steady usage approaches the deployment's limits, the answer is more capacity, not more retries. Scaling options include:</p>
+<ul>
+<li><strong>Increase rate limits:</strong> Raise TPM and RPM on the deployment, within your quota.</li>
+<li><strong>Increase quota:</strong> Request a higher quota from your subscription administrator or via a support request, so you have more headroom to raise limits.</li>
+<li><strong>Split traffic across deployments:</strong> Route requests to multiple deployments of the same model in different regions, distributing the load.</li>
+<li><strong>Move to provisioned capacity:</strong> For sustained, predictable load, buy dedicated throughput so you no longer compete for shared capacity.</li>
+</ul>
+<p>You should also look at <em>reducing</em> demand before buying more: are you caching repeated questions? Are you sending the entire history when the answer only needs the last turn? Demand reduction is almost always the cheapest first step.</p>
+
+<h2>Understanding and Controlling Cost</h2>
+<p>Generative AI billing is measured by tokens: you pay for every input token you send and every output token the model returns, at a per-model rate. Cost therefore has two levers — the price per token and the number of tokens. You control the second one directly:</p>
+<ul>
+<li>Use smaller or cheaper models where quality allows. A <code>-mini</code> model may be plenty for classification.</li>
+<li>Trim system prompts to what is necessary — every instruction is billed on every call.</li>
+<li>Summarize long conversation history instead of replaying it in full.</li>
+<li>Retrieve only the top few relevant documents in a RAG pipeline rather than dumping the whole index.</li>
+<li>Cache model output for identical or near-identical requests where appropriate.</li>
+</ul>
+
+<div class="warn">
+<p>Tokens are the only meter, but they accumulate silently. An agent that loops over several tool calls can consume five times the tokens of a single-shot call without you noticing. Before enabling aggressive agent loops or long histories, estimate the per-conversation token cost and multiply it by your expected traffic.</p>
+</div>
+
+<h2>Budgeting and Monitoring Spend</h2>
+<p>Put guardrails on spending from the start:</p>
+<ul>
+<li>Set up <strong>budget alerts</strong> on your Azure subscription so you are notified as costs accrue.</li>
+<li>Track <strong>token usage per deployment</strong> in the Foundry monitoring views or via Application Insights metrics.</li>
+<li>Review per-model price sheets before choosing a model for a workload.</li>
+<li>Run cost forecasting based on actual usage once the workload stabilizes.</li>
+</ul>
+
+<div class="tip">
+<p>Foundry reports token usage for each deployment, so you can compute your effective spend without guessing. A simple habit: every Friday, check which deployment consumed the most tokens and ask whether that workload really needs that model at that volume.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Quota is your subscription's approved capacity; rate limits are the per-deployment caps expressed as tokens and requests per minute. Exceeding them produces 429 errors, which you handle with backoff and retries. To scale, raise limits within quota, spread load, or buy provisioned capacity. To control cost, manage the token count on every call, choose models deliberately, and alert on spend. The next chapter gives you a quick look at where these settings live in the portal.</p>
+<nav>
+<a href="79-lab-adding-conditions-to-the-workflow.html">&larr; Previous: Lab - Adding conditions to the workflow</a><a href="81-quick-look-at-managing-quotas-and-limits.html">Next: Quick look at Managing Quotas and limits &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

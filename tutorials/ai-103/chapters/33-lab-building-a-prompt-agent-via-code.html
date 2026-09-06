@@ -1,0 +1,137 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>33. Lab - Building a prompt agent via code - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 33</span>
+<h1>Lab - Building a prompt agent via code</h1>
+<p>The portal is a great way to explore, but teams manage their agents as code. Defining an agent in code means the agent can be versioned in source control, reviewed in a pull request, and rebuilt reproducibly. In this lab you will build a prompt agent with the Azure AI Projects SDK, registering the same kind of agent you created in the portal — but this time from a Python script.</p>
+
+<h2>Objectives</h2>
+<ul>
+<li>Install the Azure AI Projects SDK and prepare the connection to your Foundry project.</li>
+<li>Define an agent with model, name, and instructions entirely in code.</li>
+<li>Verify the agent appears in your Foundry project after the script runs.</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<p>You need the same project access as the previous lab, plus Python installed. You will also need the project's connection string, which you can copy from the Foundry portal under your project's settings.</p>
+
+<div class="warn">
+<p>The connection string contains a secret used to reach your project. Treat it like a key: store it in a <code>.env</code> file, never in source control, and never print it to the console.</p>
+</div>
+
+<h2>Step 1: Install the SDK and prepare credentials</h2>
+<p>Create a project folder, install the required packages, and store the connection string in a <code>.env</code> file.</p>
+
+<div class="exercise">
+<h3>Set up the environment</h3>
+<pre><code>mkdir agent-from-code
+cd agent-from-code
+python -m venv .venv
+.venv\Scripts\activate
+pip install azure-ai-projects azure-identity python-dotenv
+</code></pre>
+<p>Create a <code>.env</code> file with your project's connection string:</p>
+<pre><code>PROJECT_CONNECTION_STRING=YOUR_PROJECT_CONNECTION_STRING
+</code></pre>
+</div>
+
+<h2>Step 2: Write the agent definition script</h2>
+<p>The SDK connects to your Foundry project using your Azure credentials, then registers the agent through the project's agent operations. Keep the instructions in the script so the whole definition lives in one place.</p>
+
+<div class="exercise">
+<h3>Create <code>create_agent.py</code></h3>
+<pre><code>import os
+from dotenv import load_dotenv
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+
+load_dotenv()
+
+project_client = AIProjectClient.from_connection_string(
+    credential=DefaultAzureCredential(),
+    conn_str=os.getenv("PROJECT_CONNECTION_STRING"),
+)
+
+agent = project_client.agents.create_agent(
+    model="YOUR_DEPLOYMENT_NAME",
+    name="trip-planner",
+    description="Helps customers plan day-by-day travel itineraries.",
+    instructions=(
+        "You are a travel planning assistant for a small agency. "
+        "Before recommending anything, ask for the destination, budget, "
+        "number of travelers, and preferred dates. Keep answers under "
+        "150 words and end with one clarifying question. Never invent "
+        "specific hotel or flight prices."
+    ),
+    temperature=0.5,
+)
+
+print(f"Agent created: {agent.id}")
+print(f"Agent name: {agent.name}")
+</code></pre>
+</div>
+
+<div class="tip">
+<p>Use <code>DefaultAzureCredential</code> when possible. It tries several sign-in methods in order — your Azure CLI login, Visual Studio, and others — which means the same script works in a developer machine and in a CI pipeline with only configuration changes.</p>
+</div>
+
+<h2>Step 3: Run the script and verify</h2>
+<p>Run the script from the terminal:</p>
+
+<pre><code>python create_agent.py
+</code></pre>
+
+<p>Then verify the result in two places:</p>
+<ul>
+<li>The console prints the agent ID and name.</li>
+<li>In the Foundry portal, open <strong>Agents</strong> in your project and confirm <code>trip-planner</code> is listed.</li>
+</ul>
+
+<div class="exercise">
+<h3>Confirm the agent is registered</h3>
+<ol>
+<li>Open the Microsoft Foundry portal and navigate to your project.</li>
+<li>Select <strong>Agents</strong> in the left navigation.</li>
+<li>Find the agent named <code>trip-planner</code>. You may need to refresh the list.</li>
+<li>Open it and confirm the instructions you wrote in code appear in the portal editor.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>An agent created through code is the same object as one created in the portal. Because everything is stored in the Foundry project, you can switch seamlessly between the portal editor and your codebase — the source of truth is whatever you edit last.</p>
+</div>
+
+<h2>Step 4: Make the definition reproducible</h2>
+<p>A single script is fine for learning, but a team wants the definition tracked. Save the instruction prompt in a separate plain-text file, for example <code>agent_instructions.txt</code>, and read it into the script. Now the prompt can be reviewed and diffed like any other file.</p>
+
+<pre><code>with open("agent_instructions.txt", encoding="utf-8") as handle:
+    instructions = handle.read()
+</code></pre>
+
+<div class="warn">
+<p>Every time you run this script it creates another agent with the same name. For a lab that is harmless, but in a shared project you will soon end up with duplicate agents. Later in this section you will see how to make registration idempotent by reusing an existing agent or cleaning up after yourself.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You registered a prompt agent programmatically using the Azure AI Projects SDK: connection first, agent definition second, verification third. The pattern scales — the same script shape works when agents gain tools, file search, or custom functions. In the next chapter you will face the duplication problem directly and make your registration flow safe to run again.</p>
+<nav>
+<a href="32-publishing-routines-and-distributing-your-foundry-agent.html">&larr; Previous: Publishing, Routines, and Distributing Your Foundry Agent</a><a href="34-let-s-try-to-register-our-agent-again.html">Next: Let's try to register our agent again &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

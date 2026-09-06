@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Decision Making Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;border-bottom:1px solid #334155}
+.topbar a{color:#60a5fa;text-decoration:none;font-size:14px}
+.topbar a:hover{text-decoration:underline}
+.topbar h1{margin-left:16px;font-size:18px;color:#e2e8f0}
+.container{max-width:760px;margin:0 auto;padding:24px}
+.stats{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.stat{background:#1e293b;padding:12px 20px;border-radius:10px;flex:1;min-width:100px;text-align:center}
+.stat .label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px}
+.stat .value{font-size:24px;font-weight:700;color:#60a5fa;margin-top:4px}
+.card{background:#1e293b;border-radius:12px;padding:28px;margin-bottom:20px;border:1px solid #334155}
+.card h2{font-size:16px;color:#94a3b8;margin-bottom:8px;font-weight:500}
+.scenario{font-size:17px;line-height:1.7;margin-bottom:20px;color:#e2e8f0}
+.options{display:flex;flex-direction:column;gap:10px}
+.option{background:#0f172a;border:2px solid #334155;border-radius:10px;padding:14px 18px;cursor:pointer;transition:all .2s;font-size:15px;text-align:left;color:#e2e8f0}
+.option:hover{border-color:#60a5fa;background:#1a2744}
+.option.correct{border-color:#22c55e;background:#052e16;color:#86efac}
+.option.wrong{border-color:#ef4444;background:#450a0a;color:#fca5a5}
+.option.disabled{pointer-events:none}
+.explanation{margin-top:16px;padding:16px;background:#0f172a;border-radius:8px;border-left:4px solid #60a5fa;font-size:14px;line-height:1.6;color:#cbd5e1;display:none}
+.explanation.show{display:block}
+.btn{background:#3b82f6;color:#fff;border:none;padding:12px 28px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;transition:background .2s}
+.btn:hover{background:#2563eb}
+.btn:disabled{background:#334155;cursor:not-allowed}
+.btn-row{margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.game-over{text-align:center;padding:40px 20px}
+.game-over h2{font-size:28px;margin-bottom:12px;color:#60a5fa}
+.game-over p{font-size:16px;color:#94a3b8;margin-bottom:24px}
+.progress-bar{width:100%;height:6px;background:#334155;border-radius:3px;margin-bottom:24px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:3px;transition:width .3s}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="topbar">
+<a href="../index.html">&larr; Back to Games</a>
+<h1>Decision Making Under Uncertainty</h1>
+</div>
+<div class="container">
+<div class="stats">
+<div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
+<div class="stat"><div class="label">Level</div><div class="value" id="level">1</div></div>
+<div class="stat"><div class="label">Streak</div><div class="value" id="streak">0</div></div>
+<div class="stat"><div class="label">Question</div><div class="value" id="qnum">1/10</div></div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+<div id="game-area"></div>
+</div>
+<script>
+const qs=[
+{q:"You can choose $500 guaranteed or a 50% chance of $1,200. The rational choice considering expected value is?",options:["$500 guaranteed (risk-averse)","$1,200 coin flip (higher EV)","Both have same expected value","Neither — walk away"],answer:1,explanation:"The EV of the coin flip is $600 vs $500 guaranteed. Risk-neutral or mildly risk-averse individuals should take the flip. This is the 'Allais Paradox' setup."},
+{q:"A surgeon says a procedure has a 90% survival rate vs telling Patient A '10% mortality' and Patient B '90% survival'. How do they typically react differently?",options:["No difference — same information","A fears more than B feels reassured","B fears more than A feels reassured","Both feel equally optimistic"],answer:1,explanation:"Framing Effect: The 10% mortality frame triggers loss aversion more strongly than the 90% survival frame provides comfort, despite identical information."},
+{q:"You bought a concert ticket for $200. On show day, a blizzard hits. Driving is dangerous and stressful. What should you consider?",options:["Must go — already paid $200","Sunk cost is irrelevant; compare future costs vs benefits of going vs staying","Go because others expect you","The weather will probably clear up"],answer:1,explanation:"Rational decision-making ignores sunk costs. Only future costs (danger, stress) and benefits (enjoyment) should factor into the decision."},
+{q:"You're offered a job in a new city. You make a pro/con list but keep adding minor pros to justify your gut feeling. This is an example of:",options:["Confirmation bias in decision-making","Rational analysis","Risk assessment","Due diligence"],answer:0,explanation:"Confirmation bias leads us to seek information supporting our preferred decision. The pro/con list became a tool for justification rather than genuine evaluation."},
+{q:"During a negotiation, the other party offers $5,000 as their 'final offer'. Later they accept $4,500 happily. The initial $5,000 served as:",options:["A decoy effect","An anchoring reference point","A commitment device","A loss leader"],answer:1,explanation:"Anchoring: The initial $5,000 made $4,500 seem like a reasonable compromise, even though the real value may be much lower. Anchors distort our judgment of fairness."},
+{q:"A startup founder keeps investing personal savings into a failing business because she 'can't quit now'. Best rational response:",options:["Invest more to recover losses","Seek objective outside assessment and consider exit","Keep going — persistence pays off","Borrow more money to extend runway"],answer:1,explanation:"Sunk cost fallacy plus escalation of commitment. Objective outside perspectives help break the emotional attachment to past investments."},
+{q:"You have 3 insurance options. A basic plan at $200, premium at $800, and premium+ at $850. Most people choose premium+ because it seems like a small upgrade. This is:",options:["Price anchoring","Decoy effect","Loss aversion","Status quo bias"],answer:1,explanation:"Decoy Effect: The $850 premium+ makes the $800 premium look like a deal by comparison. The decoy was designed to make the target option more attractive."},
+{q:"You must decide on a $10M project investment. Your team presents only optimistic projections. What decision-making trap is this?",options:["Groupthink — suppressing dissenting views","Overconfidence bias","Anchoring on optimistic data","All of the above"],answer:3,explanation:"Multiple biases compound: groupthink suppresses criticism, overconfidence inflates projections, and anchoring on optimistic numbers skews all estimates."},
+{q:"After narrowly avoiding a car accident, you feel invincible and speed up. This is:",options:["Hindsight bias","Optimism bias / illusion of control","Negativity bias","Risk homeostasis"],answer:1,explanation:"Optimism bias makes people believe they're less likely to experience negative events. The near-miss creates an illusion of invulnerability, leading to riskier behavior."},
+{q:"A manager always chooses the first viable option rather than evaluating all alternatives. This decision-making strategy is called:",options:["Maximax strategy","Maximin strategy","Satisficing","Optimizing"],answer:2,explanation:"Satisficing: Choosing the first option that meets minimum criteria rather than searching for the optimal solution. Named by Herbert Simon, it's common under time pressure."},
+{q:"You overhear a 'limited time offer' and feel compelled to buy immediately. What biases are at play?",options:["Scarcity bias + urgency framing + loss aversion","Only scarcity bias","Rational response to real opportunity","Social proof"],answer:0,explanation:"Multiple biases combine: scarcity makes items seem more valuable, urgency framing triggers time pressure, and loss aversion makes us fear missing out."},
+{q:"After making a difficult decision, you feel less satisfied when you learn about other good options you didn't consider. This is:",options:["Sunk cost effect","Opportunity cost awareness","Counterfactual thinking","Decision fatigue"],answer:2,explanation:"Counterfactual thinking: mentally simulating alternative outcomes. 'What if I had chosen differently?' creates regret even when the chosen option was good."},
+{q:"Your team must pick between two product launches. Everyone feels uncertain so they choose the safer, incremental update. This is:",options:["Loss aversion driving risk-averse decisions","Optimism bias","Status quo bias","Groupthink"],answer:0,explanation:"Loss aversion makes the potential losses from the risky option loom larger than the potential gains, driving the team toward the safer choice."},
+{q:"A real estate agent shows you a terrible house first, then a mediocre one. You rate the mediocre one much higher than you would alone. This is:",options:["Contrast effect","Anchoring","Halo effect","Primacy effect"],answer:0,explanation:"Contrast effect: The terrible first house made the mediocre one look good by comparison. Context dramatically shifts our evaluation of options."},
+{q:"You're deciding whether to continue a project. You ask only people who support it. The best corrective action:",options:["Ask more supporters","Actively seek disconfirming evidence and opposing views","Trust your intuition","Delay the decision"],answer:1,explanation:"Actively seeking disconfirming evidence counters confirmation bias. Steelmanning opposing arguments improves decision quality significantly."},
+{q:"During an emergency, a leader makes a quick decision without consulting anyone. Under what conditions is this appropriate?",options:["Never — always consult the team","When time pressure is extreme and leader has relevant expertise","When the leader is most senior","When the team is small"],answer:1,explanation:"Under extreme time pressure with expert knowledge, quick decisions can be optimal. However, this should be the exception, not the rule."},
+{q:"A company rewards employees who took risks that succeeded but doesn't penalize those who took risks that failed. This creates:",options:["Risk-averse culture","Asymmetric risk-taking culture","Balanced decision-making","Innovation-friendly environment"],answer:1,explanation:"Asymmetric reward structures encourage employees to take big risks (upside is rewarded, downside isn't), potentially leading to reckless gambling behavior."},
+{q:"You're choosing between saving 200 people for certain or a 1/3 chance of saving 600. Most choose the certain option. This demonstrates:",options:["Risk aversion in gains","Risk seeking in losses","Anchoring","Framing effect"],answer:0,explanation:"Prospect Theory: People are risk-averse when facing gains (certain 200) but risk-seeking when facing losses. The 'sure thing' feels psychologically safer."},
+{q:"A CEO asks her team to evaluate a merger. She secretly supports it. Team members detect this and adjust recommendations. This is:",options:["Anchoring","Authority bias influencing group decisions","Confirmation bias","Groupthink"],answer:1,explanation:"Authority bias: Team members defer to the leader's apparent preference rather than providing honest, independent assessment. This undermines decision quality."},
+{q:"After a bad investment, you make increasingly risky bets to 'win back' your losses. This pattern is called:",options:["Escalation of commitment","Loss aversion spiral","Gambler's fallacy","Endowment effect"],answer:0,explanation:"Escalation of commitment: Continuing or increasing investment in a failing course of action to justify past decisions. Common in gambling and business failures."}
+];
+let state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:[]};
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function getQ(){return shuffle([...qs]).slice(0,10)}
+function updateStats(){
+document.getElementById('score').textContent=state.score;
+document.getElementById('level').textContent=state.level;
+document.getElementById('streak').textContent=state.streak;
+document.getElementById('qnum').textContent=`${state.q+1}/${state.questions.length}`;
+document.getElementById('progress').style.width=`${((state.q)/state.questions.length)*100}%`;
+}
+function renderQ(){
+if(state.q>=state.questions.length){renderOver();return}
+const q=state.questions[state.q];
+state.answered=false;
+const area=document.getElementById('game-area');
+area.innerHTML=`<div class="card"><h2>Decision Scenario</h2><div class="scenario">${q.q}</div><div class="options" id="options"></div><div class="explanation" id="explanation"></div><div class="btn-row"><button class="btn hidden" id="nextBtn" onclick="nextQ()">Next →</button></div></div>`;
+const opts=document.getElementById('options');
+q.options.forEach((o,i)=>{
+const btn=document.createElement('button');
+btn.className='option';
+btn.textContent=o;
+btn.onclick=()=>pick(i,btn);
+opts.appendChild(btn);
+});
+updateStats();
+}
+function pick(i,btn){
+if(state.answered)return;
+state.answered=true;
+const q=state.questions[state.q];
+document.querySelectorAll('.option').forEach(b=>b.classList.add('disabled'));
+if(i===q.answer){btn.classList.add('correct');state.score+=10+state.streak*5;state.streak++;if(state.streak>state.maxStreak)state.maxStreak=state.streak;if(state.streak>=3)state.level=Math.floor(state.streak/3)+1}
+else{btn.classList.add('wrong');document.querySelectorAll('.option')[q.answer].classList.add('correct');state.streak=0}
+document.getElementById('explanation').textContent=q.explanation;
+document.getElementById('explanation').classList.add('show');
+document.getElementById('nextBtn').classList.remove('hidden');
+updateStats();
+}
+function nextQ(){state.q++;renderQ()}
+function renderOver(){
+document.getElementById('game-area').innerHTML=`<div class="card game-over"><h2>Decision Making Complete!</h2><p>Score: <strong>${state.score}</strong> | Max Streak: <strong>${state.maxStreak}</strong></p><p style="font-size:20px;color:#60a5fa;margin-bottom:24px">${state.maxStreak>=8?'Excellent Decision Maker!':state.maxStreak>=5?'Good Critical Thinker':state.maxStreak>=3?'Developing Awareness':'Keep Practicing!'}</p><div class="btn-row"><button class="btn" onclick="resetGame()">Play Again</button></div></div>`;
+document.getElementById('progress').style.width='100%';
+}
+function resetGame(){state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:getQ()};renderQ()}
+state.questions=getQ();
+renderQ();
+</script>
+</body>
+</html>

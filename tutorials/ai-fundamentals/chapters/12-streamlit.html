@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 12: Interactive Apps with Streamlit | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 12</span>
+    <h1>Interactive Apps with Streamlit</h1>
+
+    <p>Flask gives you total control but requires you to write HTML. Streamlit inverts that: you write plain Python, and Streamlit turns your script into a live web app with buttons, sliders, and charts automatically. It is the fastest way to let people interact with your models and data.</p>
+
+    <h2>Building Web Apps with Streamlit</h2>
+    <p>Install Streamlit, then run any script with <code>streamlit run</code>. Every time a widget changes, Streamlit re-runs the whole script from top to bottom — so your app is just a normal Python script.</p>
+    <pre><code>pip install streamlit</code></pre>
+
+    <h3>st.write and Basic Widgets</h3>
+    <p><code>st.write</code> is the catch-all that displays text, data, or charts. Widgets like buttons, sliders, text inputs, and select boxes store the user's choice in a variable.</p>
+    <pre><code>import streamlit as st
+
+st.title("My First App")
+name = st.text_input("What is your name?")
+age = st.slider("Select your age", 0, 100, 25)
+likes = st.radio("Favorite color", ["Red", "Blue", "Green"])
+
+if st.button("Say hello"):
+    st.write(f"Hello {name}, age {age}, you chose {likes}.")</code></pre>
+
+    <h3>Layout and Sidebar</h3>
+    <p>Columns arrange content side by side, and <code>st.sidebar</code> moves widgets into a panel that stays visible as users scroll.</p>
+    <pre><code>import streamlit as st
+import pandas as pd
+
+df = pd.DataFrame({"value": [3, 7, 2, 9, 4]})
+
+with st.sidebar:
+    bins = st.slider("Number of bins", 1, 20, 5)
+    color = st.color_picker("Bar color", "#7c3aed")
+
+col1, col2 = st.columns(2)
+with col1:
+    st.metric("Mean", round(df["value"].mean(), 2))
+with col2:
+    st.metric("Max", df["value"].max())
+
+st.bar_chart(df, color=color)
+st.write(f"Chart drawn with {bins} bins of color {color}.")</code></pre>
+
+    <div class="note">
+      <strong>Streamlit re-runs the script on every interaction.</strong> Keep expensive work (loading models, reading files) behind <code>@st.cache_data</code> so it only happens once. The decorator remembers the result for the given inputs, which keeps the app fast as users tweak sliders.
+    </div>
+
+    <h3>Caching Expensive Work</h3>
+    <pre><code>import streamlit as st
+import time
+
+@st.cache_data
+def load_big_file(path):
+    time.sleep(2)          # simulate a slow read
+    return [line.strip() for line in open(path)]
+
+lines = load_big_file("words.txt")
+st.write(f"Loaded {len(lines)} lines. First: {lines[0]}")</code></pre>
+
+    <h2>An Example ML App with Streamlit</h2>
+    <p>The classic pattern: load a trained model, collect inputs with widgets, make a prediction, and display the result. This example uses a simple linear regression from scikit-learn that we train on the fly so the app runs anywhere.</p>
+    <pre><code>import streamlit as st
+import numpy as np
+from sklearn.linear_model import LinearRegression
+
+@st.cache_resource
+def train_model():
+    rng = np.random.default_rng(7)
+    x = rng.uniform(0, 10, 200).reshape(-1, 1)
+    y = 3 * x.ravel() + rng.normal(0, 1, 200)
+    model = LinearRegression()
+    model.fit(x, y)
+    return model
+
+st.title("House Price Estimator (demo)")
+st.write("Enter the key features and get a prediction.")
+
+size = st.number_input("Size (square meters)", min_value=20.0, max_value=400.0, value=80.0)
+rooms = st.slider("Number of rooms", 1, 6, 3)
+year = st.slider("Year built", 1950, 2025, 2005)
+
+features = np.array([size + rooms, rooms, 2025 - year]).reshape(1, -1)
+
+if st.button("Predict price"):
+    model = train_model()
+    # demo model actually uses only one feature; we show the pattern
+    prediction = 1200 * size + 900 * rooms - 500 * (2025 - year)
+    st.success(f"Estimated price: ${prediction:,.0f}")
+
+with st.expander("How it works"):
+    st.markdown("In a real project, `model.predict(features)` replaces the "
+                "formula above. The model was trained on 200 synthetic "
+                "samples and is cached with `@st.cache_resource`.")</code></pre>
+
+    <div class="info">
+      <strong>Train once, serve many:</strong> Loading a model on every rerun is wasteful. <code>@st.cache_resource</code> keeps heavyweight objects (models, database connections) alive across reruns, while <code>@st.cache_data</code> caches plain data like DataFrames. Reserve a <code>st.expander</code> or <code>st.markdown</code> for explanations rather than crowding the UI.
+    </div>
+
+    <h2>Deploying a Streamlit App</h2>
+    <ol>
+      <li>Put your app in a file like <code>app.py</code> and add a <code>requirements.txt</code> listing every import you use.</li>
+      <li>Push the project to a GitHub repository.</li>
+      <li>Sign in to Streamlit Community Cloud (<code>share.streamlit.io</code>) with GitHub, click "New app", pick the repo, branch, and file, and press Deploy.</li>
+      <li>Streamlit builds the environment from <code>requirements.txt</code> and gives you a public URL like <code>https://yourname-project-name.streamlit.app</code>.</li>
+    </ol>
+    <pre><code># requirements.txt
+streamlit
+numpy
+pandas
+scikit-learn</code></pre>
+
+    <div class="note">
+      <strong>Before deploying:</strong> Do not hard-code secrets (API keys, database passwords) in your script. Use <code>st.secrets</code> to read them from the platform's secrets manager, and set <code>PYTHONUNBUFFERED=1</code> in the cloud settings so logs stream properly.
+    </div>
+
+    <h2>Practice Exercise</h2>
+    <p>Build an interactive data-explorer app:</p>
+    <ol>
+      <li>Let the user upload a CSV with <code>st.file_uploader</code>.</li>
+      <li>Show a preview with <code>st.dataframe</code> and basic stats with <code>df.describe()</code>.</li>
+      <li>Let the user pick two numeric columns; plot them with <code>st.scatter_chart</code>.</li>
+      <li>Show the correlation between the chosen columns with <code>st.metric</code>.</li>
+    </ol>
+    <pre><code>import streamlit as st
+import pandas as pd
+
+st.title("CSV Explorer")
+
+uploaded = st.file_uploader("Choose a CSV file", type="csv")
+if uploaded is not None:
+    df = pd.read_csv(uploaded)
+    st.dataframe(df.head(100))
+    st.write(df.describe())
+
+    numeric = df.select_dtypes(include="number").columns.tolist()
+    if numeric:
+        x = st.selectbox("X axis", numeric)
+        y = st.selectbox("Y axis", numeric, index=min(1, len(numeric) - 1))
+        st.scatter_chart(df[[x, y]])
+        st.metric(f"Correlation ({x} vs {y})",
+                  round(df[x].corr(df[y]), 3))
+    else:
+        st.info("No numeric columns found in this file.")</code></pre>
+
+    <div class="exercise">
+      <strong>Stretch goal:</strong> Add a sidebar filter that lets the user restrict the chart to rows where one column exceeds a threshold (use a slider over that column's min and max). Then deploy the finished app to Streamlit Community Cloud and share the public URL with a classmate — you will have shipped a real interactive data tool in one sitting.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="11-flask.html">Prev: Web Development with Flask</a>
+        <a href="13-descriptive-statistics.html">Next: Descriptive Statistics</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

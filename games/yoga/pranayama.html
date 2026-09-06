@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pranayama Breathing Timer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:15px;border-bottom:2px solid #334155}
+.topbar a{color:#60a5fa;text-decoration:none;font-size:18px}.topbar h1{font-size:20px;color:#f8fafc}
+.container{flex:1;display:flex;flex-direction:column;align-items:center;padding:30px 20px;gap:20px}
+.mode-select{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.mode-btn{background:#1e293b;border:2px solid #334155;color:#e2e8f0;padding:12px 20px;border-radius:12px;cursor:pointer;font-size:15px;transition:.2s}
+.mode-btn:hover,.mode-btn.active{border-color:#60a5fa;background:#1e3a5f}
+.info-card{background:#1e293b;border-radius:16px;padding:24px;text-align:center;width:100%;max-width:400px;border:2px solid #334155}
+.timer-circle{width:220px;height:220px;border-radius:50%;border:8px solid #334155;margin:20px auto;display:flex;align-items:center;justify-content:center;font-size:48px;font-weight:bold;transition:transform .3s,border-color .3s;position:relative}
+.timer-circle.inhale{border-color:#60a5fa;transform:scale(1.15)}
+.timer-circle.hold{border-color:#f59e0b;transform:scale(1.15)}
+.timer-circle.exhale{border-color:#10b981;transform:scale(1)}
+.phase-label{font-size:22px;margin:10px 0;font-weight:600}
+.btn{background:#3b82f6;color:#fff;border:none;padding:14px 36px;border-radius:12px;font-size:18px;cursor:pointer;font-weight:600;transition:.2s}
+.btn:hover{background:#2563eb}.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-stop{background:#ef4444}.btn-stop:hover{background:#dc2626}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stat{background:#1e293b;padding:14px 20px;border-radius:12px;text-align:center;border:1px solid #334155}
+.stat .val{font-size:24px;font-weight:bold;color:#60a5fa}.stat .lbl{font-size:12px;color:#94a3b8;margin-top:4px}
+.level-badge{background:linear-gradient(135deg,#3b82f6,#8b5cf6);padding:6px 16px;border-radius:20px;font-size:13px;font-weight:600}
+.progress-bar{width:100%;max-width:400px;height:8px;background:#334155;border-radius:4px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:4px;transition:width .5s}
+.instructions{background:#1e293b;border-radius:12px;padding:16px;max-width:400px;width:100%;border-left:4px solid #60a5fa;font-size:14px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>🫁 Pranayama Breathing Timer</h1></div>
+<div class="container">
+<div class="stats">
+<div class="stat"><div class="val" id="score">0</div><div class="lbl">Cycles</div></div>
+<div class="stat"><div class="val" id="totalTime">0:00</div><div class="lbl">Total Time</div></div>
+<div class="stat"><div class="val" id="levelDisplay">1</div><div class="lbl">Level</div></div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+<div class="level-badge" id="levelBadge">Level 1 — Beginner</div>
+<div class="mode-select">
+<button class="mode-btn active" onclick="selectMode(0)">4-7-8 Calm</button>
+<button class="mode-btn" onclick="selectMode(1)">Box Breathing</button>
+<button class="mode-btn" onclick="selectMode(2)">Alternate Nostril</button>
+<button class="mode-btn" onclick="selectMode(3)">Deep Belly</button>
+</div>
+<div class="info-card">
+<div id="modeTitle" style="font-size:18px;font-weight:600;margin-bottom:8px">4-7-8 Calming Breath</div>
+<div id="modeDesc" class="instructions">Inhale 4s · Hold 7s · Exhale 8s — reduces anxiety, promotes sleep</div>
+<div class="timer-circle" id="timerCircle"><span id="timerNum">0</span></div>
+<div class="phase-label" id="phaseLabel">Select a mode and press Start</div>
+<div style="display:flex;gap:12px;margin-top:16px">
+<button class="btn" id="startBtn" onclick="toggleTimer()">Start</button>
+<button class="btn btn-stop" onclick="resetTimer()">Reset</button>
+</div>
+</div>
+</div>
+<script>
+const modes=[
+{name:'4-7-8 Calming Breath',desc:'Inhale 4s · Hold 7s · Exhale 8s — reduces anxiety, promotes sleep',steps:[{phase:'Inhale',dur:4,color:'#60a5fa'},{phase:'Hold',dur:7,color:'#f59e0b'},{phase:'Exhale',dur:8,color:'#10b981'}],levelGoal:3},
+{name:'Box Breathing (Sama Vritti)',desc:'Inhale 4s · Hold 4s · Exhale 4s · Hold 4s — equal duration, builds focus',steps:[{phase:'Inhale',dur:4,color:'#60a5fa'},{phase:'Hold',dur:4,color:'#f59e0b'},{phase:'Exhale',dur:4,color:'#10b981'},{phase:'Hold',dur:4,color:'#a78bfa'}],levelGoal:4},
+{name:'Alternate Nostril (Nadi Shodhana)',desc:'Inhale Left 4s · Hold 2s · Exhale Right 4s · Inhale Right 4s — balances energy',steps:[{phase:'Inhale L',dur:4,color:'#60a5fa'},{phase:'Hold',dur:2,color:'#f59e0b'},{phase:'Exhale R',dur:4,color:'#10b981'},{phase:'Inhale R',dur:4,color:'#60a5fa'},{phase:'Hold',dur:2,color:'#f59e0b'},{phase:'Exhale L',dur:4,color:'#10b981'}],levelGoal:3},
+{name:'Deep Belly Breathing (Diaphragmatic)',desc:'Inhale 5s · Exhale 5s — activates parasympathetic, lowers cortisol',steps:[{phase:'Inhale',dur:5,color:'#60a5fa'},{phase:'Exhale',dur:5,color:'#10b981'}],levelGoal:5}
+];
+let currentMode=0,running=false,interval=null,phaseIdx=0,remaining=0,cycles=0,totalSec=0,level=1,cyclesForLevel=0;
+const levels=['Beginner','Intermediate','Advanced','Master','Guru'];
+function selectMode(i){currentMode=i;document.querySelectorAll('.mode-btn').forEach((b,j)=>b.classList.toggle('active',j===i));document.getElementById('modeTitle').textContent=modes[i].name;document.getElementById('modeDesc').textContent=modes[i].desc;resetTimer()}
+function toggleTimer(){if(running){stopTimer()}else{startTimer()}}
+function startTimer(){running=true;document.getElementById('startBtn').textContent='Pause';phaseIdx=0;remaining=modes[currentMode].steps[0].dur;runTick()}
+function stopTimer(){running=false;clearTimeout(interval);document.getElementById('startBtn').textContent='Resume'}
+function resetTimer(){running=false;clearTimeout(interval);cycles=0;totalSec=0;level=1;cyclesForLevel=0;phaseIdx=0;remaining=0;updateStats();document.getElementById('startBtn').textContent='Start';document.getElementById('timerNum').textContent='0';document.getElementById('phaseLabel').textContent='Select a mode and press Start';const c=document.getElementById('timerCircle');c.className='timer-circle';c.style.borderColor='#334155'}
+function runTick(){if(!running)return;const m=modes[currentMode];const s=m.steps[phaseIdx];const circle=document.getElementById('timerCircle');circle.className='timer-circle';if(s.phase.includes('Inhale')||s.phase==='Inhale L')circle.classList.add('inhale');else if(s.phase==='Hold')circle.classList.add('hold');else circle.classList.add('exhale');circle.style.borderColor=s.color;document.getElementById('timerNum').textContent=remaining;document.getElementById('phaseLabel').textContent=s.phase;document.getElementById('timerNum').style.color=s.color;if(remaining<=0){phaseIdx++;if(phaseIdx>=m.steps.length){phaseIdx=0;cycles++;cyclesForLevel++;totalSec+=m.steps.reduce((a,b)=>a+b.dur,0);if(cyclesForLevel>=m.levelGoal){cyclesForLevel=0;level=Math.min(level+1,5)}updateStats();progressCheck()}remaining=m.steps[phaseIdx].dur}remaining--;interval=setTimeout(runTick,1000)}
+function updateStats(){document.getElementById('score').textContent=cycles;const m=Math.floor(totalSec/60),s=totalSec%60;document.getElementById('totalTime').textContent=m+':'+String(s).padStart(2,'0');document.getElementById('levelDisplay').textContent=level;document.getElementById('levelBadge').textContent='Level '+level+' — '+levels[level-1]}
+function progressCheck(){const goal=modes[currentMode].levelGoal;const pct=Math.min((cyclesForLevel/goal)*100,100);document.getElementById('progressFill').style.width=pct+'%'}
+updateStats();
+</script>
+</body></html>

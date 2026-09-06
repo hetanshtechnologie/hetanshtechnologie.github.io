@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Patterns - Angular Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 18</span>
+    <h1>Design Patterns in Angular</h1>
+    <p>Design patterns provide reusable solutions to common programming challenges. Angular's architecture naturally implements several classic patterns, and understanding them will help you write cleaner, more maintainable code.</p>
+
+    <h2>Singleton Pattern</h2>
+    <p>The singleton pattern ensures a class has only one instance. Angular's dependency injection system makes this the default behavior for services.</p>
+
+    <pre><code>// A singleton service shared across the entire app
+@Injectable({ providedIn: 'root' })
+export class AppStateService {
+  private state = signal&lt;AppState&gt;({ theme: 'light', sidebar: true });
+
+  getState() { return this.state.asReadonly(); }
+  updateState(partial: Partial&lt;AppState&gt;) {
+    this.state.update(s => ({ ...s, ...partial }));
+  }
+}
+
+// Both components share the same instance
+@Component({ ... })
+export class SidebarComponent {
+  constructor(private state: AppStateService) {}
+}
+
+@Component({ ... })
+export class ThemeToggleComponent {
+  constructor(private state: AppStateService) {}
+}</code></pre>
+
+    <p>When a service is provided at the root level, Angular creates exactly one instance and injects it into every consumer.</p>
+
+    <h2>Observer Pattern</h2>
+    <p>RxJS is built on the observer pattern. A <code>Subject</code> (observable) maintains a list of subscribers (observers) and notifies them of state changes.</p>
+
+    <pre><code>@Injectable({ providedIn: 'root' })
+export class NotificationService {
+  private notifications = new Subject&lt;Notification&gt;();
+  notifications$ = this.notifications.asObservable();
+
+  notify(message: string, type: 'success' | 'error' | 'info') {
+    this.notifications.next({ message, type, timestamp: Date.now() });
+  }
+}
+
+// Component A emits
+this.notificationService.notify('Saved!', 'success');
+
+// Component B listens
+this.notificationService.notifications$.subscribe(n => {
+  this.showToast(n.message, n.type);
+});</code></pre>
+
+    <h2>Factory Pattern</h2>
+    <p>The factory pattern creates objects without specifying the exact class. In Angular, use <code>useFactory</code> in providers or dynamic component creation for this purpose.</p>
+
+    <pre><code>// Dynamic component factory
+@Directive({ selector: '[adHost]' })
+export class AdDirective {
+  constructor(public viewContainerRef: ViewContainerRef) {}
+}
+
+export class AdService {
+  getAds() {
+    return [
+      { component: HeroProfileComponent, data: { name: 'Angular' } },
+      { component: HeroJobComponent, data: { title: 'Framework' } }
+    ];
+  }
+}
+
+// Load components dynamically
+loadComponent(ad: AdItem) {
+  const componentRef = this.adHost.viewContainerRef
+    .createComponent(ad.component);
+  componentRef.instance.data = ad.data;
+}</code></pre>
+
+    <h2>Strategy Pattern</h2>
+    <p>The strategy pattern defines a family of algorithms and makes them interchangeable. Use dependency injection to select strategies at runtime.</p>
+
+    <pre><code>// Strategy interface
+export interface ValidationStrategy {
+  validate(value: any): { valid: boolean; error?: string };
+}
+
+// Concrete strategies
+export class EmailStrategy implements ValidationStrategy {
+  validate(value: string) {
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    return { valid, error: valid ? undefined : 'Invalid email' };
+  }
+}
+
+export class RequiredStrategy implements ValidationStrategy {
+  validate(value: any) {
+    return { valid: !!value, error: value ? undefined : 'Required' };
+  }
+}
+
+// Use via DI
+@Injectable()
+export class ValidatorService {
+  constructor(private strategies: ValidationStrategy[]) {}
+
+  validate(value: any, type: string) {
+    const strategy = this.strategies.find(s => s.constructor.name === type);
+    return strategy?.validate(value);
+  }
+}</code></pre>
+
+    <h2>Dependency Injection Patterns</h2>
+    <p>Angular's DI system supports a hierarchy of injectors. You can control service visibility at different levels:</p>
+
+    <ul>
+      <li><strong>@Injectable({ providedIn: 'root' })</strong> — Application-wide singleton</li>
+      <li><strong>providers: [] on @Component</strong> — New instance per component and its children</li>
+      <li><strong>providers: [] on @NgModule</strong> — Shared across the module (lazy modules get their own injector)</li>
+    </ul>
+
+    <pre><code>@Component({
+  selector: 'app-user-list',
+  providers: [UserService] // New instance for this component tree
+})
+export class UserListComponent { }</code></pre>
+
+    <h2>Facade Pattern</h2>
+    <p>A facade provides a simplified interface to a complex subsystem. In Angular, service facades wrap multiple services to expose a clean API.</p>
+
+    <pre><code>@Injectable({ providedIn: 'root' })
+export class DashboardFacade {
+  constructor(
+    private userService: UserService,
+    private analyticsService: AnalyticsService,
+    private notificationService: NotificationService
+  ) {}
+
+  // Simplified API
+  loadDashboardData(): Observable&lt;DashboardData&gt; {
+    return forkJoin({
+      users: this.userService.getUsers(),
+      stats: this.analyticsService.getStats()
+    }).pipe(
+      tap(() => this.notificationService.notify('Dashboard loaded', 'info'))
+    );
+  }
+}</code></pre>
+
+    <div class="info">Use facades to reduce coupling between your components and the underlying service layer.</div>
+
+    <img src="../images/angular-routing-flow.svg" alt="Angular design patterns">
+
+    <div class="exercise">
+      <strong>Practice Task:</strong> Implement a logger service using the strategy pattern. Create two strategies: <code>ConsoleLogger</code> and <code>FileLogger</code>. Use Angular's DI to inject the correct strategy based on the environment (development vs production).
+    </div>
+
+    <nav>
+      <a href="17-additional.html">&laquo; Previous: Additional Concepts</a>
+      <a href="../index.html">Back to Index</a>
+      <a href="19-practice.html">Next: Practice &raquo;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

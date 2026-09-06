@@ -1,0 +1,149 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>136. Lab - Prebuilt Named Entity Recognition with Azure Language - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 136</span>
+<h1>Lab - Prebuilt Named Entity Recognition with Azure Language</h1>
+<p>Named entity recognition, or NER, extracts the specific things mentioned in a document — people, organizations, locations, dates, and quantities — and tells you their type. Azure AI Language's prebuilt NER model does this out of the box with no training data. In this lab you will extract entities, inspect their categories and spans, and compare the service's deterministic output with the entity extraction you performed earlier by prompting.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>The Azure AI Language resource, endpoint, and key from the earlier labs.</li>
+<li>The text analytics SDK installed in your <code>ai103-language</code> environment.</li>
+</ul>
+
+<h2>Step 1: Set Up the Client</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Create the NER script</h3>
+<p>Create <code>lang_ner.py</code>:</p>
+<pre><code>import os
+
+from azure.ai.textanalytics import TextAnalyticsClient
+from azure.core.credentials import AzureKeyCredential
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = TextAnalyticsClient(
+    endpoint=os.getenv("AZURE_LANGUAGE_ENDPOINT"),
+    credential=AzureKeyCredential(os.getenv("AZURE_LANGUAGE_KEY")),
+)</code></pre>
+<p>Run the file once to confirm the client builds without error.</p>
+</div>
+
+<h2>Step 2: Extract Entities from a Document</h2>
+
+<div class="exercise">
+<h3>Exercise 2: List entities with types and spans</h3>
+<p>Append the extraction call:</p>
+<pre><code>document = (
+    "Acme Robotics shipped its new inspection drone to Frankfurt on "
+    "March 12. CEO Dana Whitfield announced the launch at the plant "
+    "near Berlin, with a retail price of 2,400 euros."
+)
+
+result = client.recognize_entities(documents=[document])[0]
+if result.is_error:
+    print("Error:", result.error.code, result.error.message)
+else:
+    for entity in result.entities:
+        print(
+            f"{entity.text!r:25s} {entity.category:12s} "
+            f"sub={entity.subcategory:12s} confidence={entity.confidence_score:.2f}"
+        )</code></pre>
+<ol>
+<li>Run the script. You should see entries such as <code>Acme Robotics</code> (Organization), <code>Frankfurt</code> and <code>Berlin</code> (Location), <code>March 12</code> (DateTime), <code>Dana Whitfield</code> (Person), and <code>2,400 euros</code> (Quantity).</li>
+<li>Note the <code>category</code> and <code>subcategory</code> fields. The taxonomy is fine-grained — dates are split into subtypes such as date, time, and duration.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>Every entity carries its exact text and the confidence score. Compare this with the prompt-based entity extraction from the earlier lab: the categories here are standardized names, always present, with no prompting required. What you give up is flexibility — the prebuilt model knows its fixed taxonomy, and nothing else.</p>
+</div>
+
+<h2>Step 3: Group Entities by Category</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Summarize the document by category</h3>
+<p>Group the detected entities into a small report:</p>
+<pre><code>from collections import defaultdict
+
+def summarize(doc_text: str) -&gt; dict:
+    res = client.recognize_entities(documents=[doc_text])[0]
+    if res.is_error:
+        return {"error": res.error.message}
+    grouped = defaultdict(list)
+    for entity in res.entities:
+        grouped[entity.category].append(entity.text)
+    return {category: values for category, values in grouped.items()}
+
+
+for category, values in summarize(document).items():
+    print(f"{category}: {', '.join(values)}")</code></pre>
+<ol>
+<li>Run the script. The document collapses into a compact by-category summary — exactly the shape a dashboard or a database ingest would want.</li>
+<li>Try it on a second document, such as a news headline, and confirm the grouping adapts.</li>
+</ol>
+</div>
+
+<h2>Step 4: Process a Batch</h2>
+
+<div class="exercise">
+<h3>Exercise 4: Extract entities from several documents</h3>
+<p>Run NER over a list of documents in one call:</p>
+<pre><code>batch = [
+    "Microsoft announced a partnership with Contoso in Redmond last Tuesday.",
+    "The conference runs from May 4 to May 6 at the Berlin Exhibition Grounds.",
+    "Our supplier increased the unit price to 89 dollars effective July 1.",
+]
+
+results = client.recognize_entities(documents=batch)
+for i, res in enumerate(results, start=1):
+    if res.is_error:
+        print(f"Doc {i}: error {res.error.code}")
+        continue
+    names = ", ".join(e.text for e in res.entities)
+    print(f"Doc {i}: {names}")</code></pre>
+<ol>
+<li>Run the script. Each document's entities are listed in document order.</li>
+<li>Verify the dates and amounts in document three are captured with their own categories.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>NER is ideal for normalizing text into structured fields: extract the location, the date, and the amount from a document, then store them as columns. Combined with the confidence scores, you can push low-confidence entities to a review queue and import the rest automatically.</p>
+</div>
+
+<h2>Step 5: Compare with Prompt-Based Extraction</h2>
+<p>Run the exact same document through the prompt-based extractor from the JSON-output lab, and through this service. The differences you will observe are the point:</p>
+<ul>
+<li><strong>Categories:</strong> the service uses its fixed taxonomy (<code>Organization</code>, <code>Location</code>); the LLM may invent or vary its labels unless you constrain them.</li>
+<li><strong>Spans:</strong> the service returns offsets into the original text; the LLM returns the text it believes is an entity.</li>
+<li><strong>Cost:</strong> the service call is a fixed per-document cost; the LLM call bills for every generated token.</li>
+<li><strong>Explanation:</strong> the LLM can explain why something is an entity; the service cannot.</li>
+</ul>
+<p>Choose the service when the taxonomy fits your data and you need deterministic, high-volume extraction. Choose prompting when you need categories the service does not know, or when the analysis must be explainable.</p>
+
+<h2>Summary</h2>
+<p>You extracted named entities with Azure AI Language's prebuilt model, inspected categories, subcategories, and confidence scores, grouped entities by category, processed batches, and compared the service's deterministic output with prompt-based extraction. The next chapter introduces the MCP server that wraps these very features for agent use.</p>
+<nav>
+<a href="135-lab-language-detection-with-azure-language.html">&larr; Previous: Lab - Language Detection with Azure Language</a><a href="137-the-azure-language-mcp-server.html">Next: The Azure Language MCP Server &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

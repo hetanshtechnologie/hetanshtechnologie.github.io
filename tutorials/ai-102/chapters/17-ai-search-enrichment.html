@@ -1,0 +1,304 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Search: Skillsets and Enrichment - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 17</span>
+<h1>AI Search: Skillsets and Enrichment</h1>
+
+<h2>AI Enrichment in Azure AI Search</h2>
+<p>AI enrichment transforms unstructured content into searchable, structured data during the indexing process. When you connect Azure AI Search to blob storage containing PDFs, images, or Office documents, the raw content is just binary data. AI enrichment applies cognitive skills that extract, infer, and restructure information — turning a scanned PDF into a searchable document with recognized entities, extracted key phrases, detected languages, and translated text. The enrichment pipeline sits between the data source and the search index, executing a skillset that processes each document as it flows through the indexer.</p>
+<p>Enrichment is defined through a <strong>skillset</strong> — a collection of skills that execute sequentially or in parallel. Each skill has inputs (values from the document's in-memory enrichment tree), a context (the node in the enrichment tree where the skill executes), and outputs (values written back to the enrichment tree). The enriched content can flow into a search index, a knowledge store in Azure Storage, or both. On the AI-102 exam, skillsets appear prominently in the "Knowledge Mining" domain. You should understand the built-in skills, how to chain them, how to create custom skills, and how to project enriched data to a knowledge store.</p>
+
+<h2>Built-in Cognitive Skills</h2>
+<p>Azure AI Search provides over a dozen prebuilt skills that cover text analytics, image processing, and document transformation. These skills are backed by Azure AI Services (Vision and Language) and require an attached Azure AI Services multi-service resource in the same region as your search service.</p>
+
+<table>
+<tr><th>Skill</th><th>Category</th><th>What It Extracts</th></tr>
+<tr><td>OCR</td><td>Image</td><td>Printed and handwritten text from images and PDFs</td></tr>
+<tr><td>Image Analysis</td><td>Image</td><td>Tags, captions, objects, brands, and celebrities from images</td></tr>
+<tr><td>Entity Recognition</td><td>Text</td><td>Named entities: people, organizations, locations, dates, quantities</td></tr>
+<tr><td>PII Detection</td><td>Text</td><td>Personally identifiable information: emails, phone numbers, SSNs</td></tr>
+<tr><td>Key Phrase Extraction</td><td>Text</td><td>Key talking points and important phrases</td></tr>
+<tr><td>Language Detection</td><td>Text</td><td>Primary language of the text</td></tr>
+<tr><td>Sentiment Analysis</td><td>Text</td><td>Positive/negative/neutral sentiment scores per document</td></tr>
+<tr><td>Text Translation</td><td>Text</td><td>Translation from detected source language to target language</td></tr>
+<tr><td>Merge</td><td>Utility</td><td>Merges multiple text fields into a single field</td></tr>
+<tr><td>Split</td><td>Utility</td><td>Splits large text into manageable chunks (pages, sections)</td></tr>
+<tr><td>Conditional</td><td>Utility</td><td>Conditionally assigns values based on expressions</td></tr>
+<tr><td>Document Cracking</td><td>Utility</td><td>Extracts text and metadata from PDF, Office, HTML, CSV files</td></tr>
+<tr><td>Shaper</td><td>Utility</td><td>Restructures the enrichment tree into a custom shape</td></tr>
+</table>
+
+<p>Document cracking is the first skill that executes automatically — the indexer extracts text and metadata from source documents before any cognitive skills run. PDFs are cracked into pages, Office documents into their text content and embedded images, and CSV files into rows. Images embedded in documents are extracted and passed to the OCR or Image Analysis skills. The cracking process preserves document structure while making the content available for downstream enrichment.</p>
+
+<h2>Skillset Definition Structure</h2>
+<p>A skillset is defined in JSON and contains an array of skills. Each skill specifies its <code>@odata.type</code> (the skill type identifier), <code>context</code> (the enrichment node path, such as <code>/document</code> or <code>/document/pages/*</code>), <code>inputs</code> (source data from the enrichment tree), and <code>outputs</code> (target names that become new enrichment nodes). Skills can be chained — the output of one skill becomes the input of another. The context path determines whether a skill runs once per document (<code>/document</code>) or once per item in a collection (<code>/document/pages/*</code>).</p>
+<p>The following example shows a skillset that runs OCR on images, then extracts entities and key phrases from the OCR output:</p>
+
+<pre><code>{
+  "name": "document-enrichment-skillset",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Vision.OcrSkill",
+      "context": "/document/normalized_images/*",
+      "defaultLanguageCode": "en",
+      "detectOrientation": true,
+      "inputs": [
+        { "name": "image", "source": "/document/normalized_images/*" }
+      ],
+      "outputs": [
+        { "name": "text", "targetName": "ocrText" }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.MergeSkill",
+      "context": "/document",
+      "inputs": [
+        { "name": "text", "source": "/document/content" },
+        { "name": "itemsToInsert", "source": "/document/normalized_images/*/ocrText" }
+      ],
+      "outputs": [
+        { "name": "mergedText", "targetName": "mergedText" }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.EntityRecognitionSkill",
+      "context": "/document",
+      "categories": ["Person", "Organization", "Location"],
+      "defaultLanguageCode": "en",
+      "inputs": [
+        { "name": "text", "source": "/document/mergedText" }
+      ],
+      "outputs": [
+        { "name": "persons", "targetName": "persons" },
+        { "name": "organizations", "targetName": "organizations" },
+        { "name": "locations", "targetName": "locations" }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.KeyPhraseExtractionSkill",
+      "context": "/document",
+      "defaultLanguageCode": "en",
+      "inputs": [
+        { "name": "text", "source": "/document/mergedText" }
+      ],
+      "outputs": [
+        { "name": "keyPhrases", "targetName": "keyPhrases" }
+      ]
+    }
+  ]
+}</code></pre>
+
+<h2>Custom Skills: Creating Web API Skills</h2>
+<p>When the built-in skills do not meet your needs, you can create custom skills that call your own Web API endpoints. A custom skill is an Azure Function, a Logic App, or any publicly accessible HTTPS endpoint that accepts a JSON request body and returns a JSON response. The request contains the skill's inputs in a standardized format — a <code>values</code> array where each entry has a <code>recordId</code> and <code>data</code> object with the input values. The response must follow the same structure, returning a <code>values</code> array with matching <code>recordId</code> entries and the computed <code>data</code> outputs.</p>
+<p>Custom skills are ideal for domain-specific transformations — classify documents into custom taxonomies, extract custom entities not covered by the built-in entity recognition, validate data against business rules, or call third-party APIs for specialized analysis. The skill runs as part of the enrichment pipeline, with the same failure handling and retry logic as built-in skills.</p>
+
+<pre><code>// C# - custom skill as an Azure Function
+using System.IO;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.WebJobs.Extensions.Http;
+using Microsoft.AspNetCore.Http;
+using Newtonsoft.Json;
+
+public static class CustomEntitySkill
+{
+    [FunctionName("CustomEntitySkill")]
+    public static async Task&lt;IActionResult&gt; Run(
+        [HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequest req)
+    {
+        string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+        var request = JsonConvert.DeserializeObject&lt;SkillRequest&gt;(requestBody);
+
+        var response = new SkillResponse();
+        foreach (var record in request.Values)
+        {
+            var text = record.Data["text"] as string;
+            var entities = ExtractCustomEntities(text);
+
+            response.Values.Add(new SkillResult
+            {
+                RecordId = record.RecordId,
+                Data = new Dictionary&lt;string, object&gt;
+                {
+                    { "entities", entities }
+                }
+            });
+        }
+        return new OkObjectResult(response);
+    }
+
+    private static List&lt;string&gt; ExtractCustomEntities(string text)
+    {
+        // Custom entity extraction logic
+        var entities = new List&lt;string&gt;();
+        var patterns = new Dictionary&lt;string, string&gt;
+        {
+            { @"\bPO-\d{5}\b", "PurchaseOrder" },
+            { @"\bINV-\d{6}\b", "InvoiceNumber" },
+            { @"\b[A-Z]{3}\d{6}\b", "PartNumber" }
+        };
+        foreach (var pattern in patterns)
+        {
+            var matches = System.Text.RegularExpressions.Regex.Matches(text, pattern.Key);
+            foreach (System.Text.RegularExpressions.Match match in matches)
+                entities.Add($"{pattern.Value}: {match.Value}");
+        }
+        return entities;
+    }
+}
+
+public class SkillRequest
+{
+    public List&lt;SkillRecord&gt; Values { get; set; }
+}
+
+public class SkillRecord
+{
+    public string RecordId { get; set; }
+    public Dictionary&lt;string, object&gt; Data { get; set; }
+}
+
+public class SkillResponse
+{
+    public List&lt;SkillResult&gt; Values { get; set; } = new();
+}
+
+public class SkillResult
+{
+    public string RecordId { get; set; }
+    public Dictionary&lt;string, object&gt; Data { get; set; }
+    public List&lt;string&gt; Errors { get; set; }
+    public List&lt;string&gt; Warnings { get; set; }
+}</pre></code>
+
+<pre><code># Python - custom skill as an Azure Function
+import azure.functions as func
+import json
+import re
+
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    body = req.get_json()
+    values = body.get("values", [])
+
+    results = []
+    for record in values:
+        text = record.get("data", {}).get("text", "")
+        entities = extract_custom_entities(text)
+        results.append({
+            "recordId": record["recordId"],
+            "data": {"entities": entities}
+        })
+
+    return func.HttpResponse(
+        json.dumps({"values": results}),
+        mimetype="application/json"
+    )
+
+def extract_custom_entities(text):
+    entities = []
+    patterns = [
+        (r"\bPO-\d{5}\b", "PurchaseOrder"),
+        (r"\bINV-\d{6}\b", "InvoiceNumber"),
+        (r"\b[A-Z]{3}\d{6}\b", "PartNumber")
+    ]
+    for pattern, label in patterns:
+        for match in re.finditer(pattern, text):
+            entities.append(f"{label}: {match.group()}")
+    return entities</pre></code>
+
+<h2>Knowledge Store: Projecting Enriched Data</h2>
+<p>A knowledge store is a destination in Azure Storage where the enriched document tree is projected after the skillset executes. Unlike the search index, which is optimized for full-text search queries, the knowledge store preserves the complete enrichment tree in a structured format that can be analyzed with Power BI, Azure Data Factory, or other data tools. It supports three projection types: <strong>table projections</strong> (relational tables in Azure Table Storage or Azure SQL), <strong>object projections</strong> (structured JSON in Blob Storage), and <strong>file projections</strong> (binary files like extracted images or normalized images).</p>
+<p>Table projections store enriched data in rows and columns, with foreign key references between tables to preserve the document hierarchy. Object projections store the full enrichment tree as a JSON blob, preserving the nested structure. File projections store extracted binary content — such as images extracted from PDFs — in a blob container. You can define multiple projections in a single knowledge store, targeting the same or different storage accounts. The knowledge store is defined within the skillset JSON under the <code>cognitiveServices</code> section.</p>
+
+<pre><code>{
+  "name": "document-enrichment-skillset",
+  "skills": [...],
+  "knowledgeStore": {
+    "storageConnectionString": "DefaultEndpointsProtocol=https;AccountName=mystorage;AccountKey=...;",
+    "projections": [
+      {
+        "tables": [
+          {
+            "tableName": "Documents",
+            "generatedKeyName": "DocumentId",
+            "source": "/document"
+          },
+          {
+            "tableName": "KeyPhrases",
+            "generatedKeyName": "PhraseId",
+            "source": "/document/keyPhrases",
+            "sourceContext": "/document/keyPhrases/*",
+            "inputs": [
+              { "name": "phrase", "source": "/document/keyPhrases/*" }
+            ]
+          }
+        ],
+        "objects": [
+          {
+            "storageContainer": "enriched-json",
+            "source": "/document"
+          }
+        ],
+        "files": [
+          {
+            "storageContainer": "extracted-images",
+            "source": "/document/normalized_images/*"
+          }
+        ]
+      }
+    ]
+  }
+}</code></pre>
+
+<div class="exam-tip">
+<h3>Exam Tip: Knowledge Store vs. Index</h3>
+<p>The AI-102 exam tests your understanding of when to use a knowledge store versus a search index. A <strong>search index</strong> is optimized for millisecond full-text search queries with scoring, faceting, and filtering. A <strong>knowledge store</strong> preserves the complete enrichment tree for downstream analytics, reporting, and data science workloads. Knowledge stores are not searchable through the Azure AI Search query API — they are accessed through Azure Storage tools. Use the index when you need a searchable UI or API. Use the knowledge store when you need to run analytical queries in Power BI, reprocess enriched data with Azure Data Factory, or keep a durable, queryable copy of the enriched content. You can generate both from the same skillset, which is the most common pattern.</p>
+</div>
+
+<h2>Incremental Enrichment</h2>
+<p>Incremental enrichment is a feature that tracks which documents have changed and only re-processes those documents through the skillset, rather than re-enriching the entire corpus on every indexer run. It works by caching the enrichment output for each document in Azure Storage. When a document is updated, the cache for that document is invalidated, and only that document passes through the skillset again. Documents that have not changed retain their cached enrichment output, saving compute time and Azure AI Services costs.</p>
+<p>To enable incremental enrichment, you configure an Azure Storage connection string on the indexer's <code>cache</code> property. When the cache is enabled, the indexer also writes the intermediate enrichment state to blob storage, allowing complex skillset pipelines to resume from the point of failure. This is especially valuable for long-running enrichment pipelines with expensive skills like OCR and translation. Without incremental enrichment, every indexer run re-processes every document, even if the skillset definition has not changed. With the cache, only documents that have changed or documents affected by a skillset change are reprocessed.</p>
+
+<h2>Debugging and Troubleshooting Skillsets</h2>
+<p>Skillset debugging can be challenging because the enrichment pipeline is a complex data flow with multiple processing steps. Start by checking indexer execution history in the Azure portal — the Indexer History tab shows each run, the number of processed documents, and any errors or warnings. Common errors include connection failures to the Azure AI Services resource (check that the resource is in the same region as the search service), skill timeouts (the default timeout for custom skills is 30 seconds), and input field path errors. Use the <strong>enriched document viewer</strong> (available through the Azure portal for indexes with enrichment) to inspect the enrichment tree for a specific document. This viewer shows the full JSON path of every enrichment node, making it easy to verify that skills are producing the expected outputs.</p>
+<p>When a skill fails, the indexer continues processing other documents unless the <code>maxFailedItems</code> threshold is exceeded. Check the <code>errors</code> and <code>warnings</code> arrays in the indexer execution result — warnings indicate non-critical issues (such as a missing field), while errors cause the document to be skipped. For custom skills, enable Application Insights logging on the Azure Function and check the function logs for request/response payloads. Most custom skill issues are caused by incorrect response format — the response must have a <code>values</code> array with <code>recordId</code> matching the request, and each value must have <code>data</code>, <code>errors</code>, and <code>warnings</code> properties.</p>
+
+<h2>Exercise: Build an End-to-End AI Search Pipeline with OCR and NLP Enrichment</h2>
+<p>This exercise brings together all the components — data source, index, indexer, and skillset — to build a complete AI search pipeline that processes scanned PDFs and extracts entities and key phrases.</p>
+<ol>
+<li>Create an Azure AI Search resource and an Azure AI Services multi-service resource in the same region. Create a Storage Account with a container named "documents."</li>
+<li>Upload 3-5 sample scanned PDFs or images containing text (you can find sample invoices or contracts online).</li>
+<li>Create a Blob Storage data source pointing to your container. Use Managed Identity authentication if possible.</li>
+<li>Define a search index with fields for id, content, persons, organizations, locations, keyPhrases, and language. Make the content field searchable and the entity fields filterable and facetable.</li>
+<li>Define a skillset with the following skills in order: OCR (run on normalized_images/*), Text Merge (merge OCR output into document text), Entity Recognition (extract Person, Organization, Location), Key Phrase Extraction, and Language Detection.</li>
+<li>Create an indexer that connects the data source, skillset, and index. Add a field mapping that maps <code>metadata_storage_path</code> to the id field using a base64 encoding function.</li>
+<li>Run the indexer and check the execution history. View a few enriched documents to verify that entities and key phrases were extracted correctly.</li>
+<li>Query the index using facets on the entity fields. Write a query for "documents containing Microsoft" and verify that it returns documents where Microsoft was identified as an organization.</li>
+<li>Add a <code>ShaperSkill</code> at the end of the skillset to restructure the output into a flattened table projection for the knowledge store. Add a knowledge store definition and verify the projected tables in Azure Storage.</li>
+</ol>
+
+<h2>Summary</h2>
+<p>AI enrichment in Azure AI Search applies cognitive skills to transform unstructured content into structured, searchable data during indexing. The built-in skills cover OCR, image analysis, entity recognition, key phrase extraction, language detection, sentiment analysis, translation, and text utility operations. Custom skills extend the pipeline with domain-specific logic through Azure Functions or any HTTPS endpoint. The skillset definition specifies skill dependencies through context paths, inputs, and outputs. Knowledge stores project enriched data to Azure Storage for analytics and reporting. Incremental enrichment caches results to avoid reprocessing unchanged documents. Debugging involves checking indexer execution history, the enriched document viewer, and skill response format validation. On the exam, focus on skillset design, custom skill development, and the knowledge store vs. index distinction. The next chapter covers Azure AI Document Intelligence for extracting structured information from forms and documents.</p>
+
+<nav>
+<a href="../index.html">&larr; Back to Index</a>
+<a href="18-document-intelligence.html">Next: Azure AI Document Intelligence &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

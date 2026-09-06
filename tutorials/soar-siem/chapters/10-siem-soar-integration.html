@@ -1,0 +1,125 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>10. Integrating SIEM &amp; SOAR - SOAR &amp; SIEM Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>10. Integrating SIEM &amp; SOAR</h1>
+<p class="tag">Chapter 10</p>
+
+<h2>The SIEM + SOAR Partnership</h2>
+<p>SIEM and SOAR are designed to work as a team. The SIEM is the <strong>eyes</strong>: it sees everything, normalizes it, and detects anomalies. The SOAR is the <strong>hands</strong>: it takes action, orchestrates other tools, and manages the response. The integration between them is where most of the operational value lives.</p>
+
+<div class="note">
+<strong>The Flow:</strong> SIEM collects → SIEM detects → SOAR orchestrates → SOAR responds → results feed back to SIEM for validation and tuning. This creates a closed loop: detection informs action, and action informs detection.
+</div>
+
+<h2>Data Flow: SIEM to SOAR</h2>
+<ol>
+<li><strong>Alert generation:</strong> a correlation rule fires in the SIEM.</li>
+<li><strong>Alert delivery:</strong> the SIEM pushes the alert to the SOAR via API, webhook, or connector (or the SOAR polls the SIEM).</li>
+<li><strong>Alert normalization:</strong> the SOAR maps SIEM alert fields to its own incident/artifact schema.</li>
+<li><strong>Playbook execution:</strong> the appropriate playbook(s) trigger on the alert type.</li>
+<li><strong>Action execution:</strong> the playbook calls EDR, firewall, intel, ITSM, email tools.</li>
+<li><strong>Results feed-back:</strong> outcomes (verdicts, actions taken, timestamps) are written back to the SIEM or recorded in the case.</li>
+</ol>
+
+<pre><code># Simplified: SIEM webhook payload to SOAR
+{
+  "alert_id": "12345",
+  "rule_name": "Possible brute force",
+  "severity": "medium",
+  "time": "2026-08-06T08:03:00Z",
+  "artifacts": {
+    "source_ip": "203.0.113.9",
+    "user": "j.doe",
+    "host": "WEB-PROD-01"
+  }
+}</code></pre>
+
+<h2>Bidirectional Integration</h2>
+<p>Mature integrations are bidirectional. Not only does the SIEM push alerts, the SOAR can:</p>
+<ul>
+<li><strong>Query the SIEM</strong> during playbooks to gather supporting evidence (raw logs, historical activity).</li>
+<li><strong>Write back annotations</strong> — verdicts, notes, and closure reasons that improve SIEM analytics.</li>
+<li><strong>Suppress or update alerts</strong> once automation has resolved them, preventing analyst double-work.</li>
+<li><strong>Sync severity</strong> between case and alert to keep both systems consistent.</li>
+</ul>
+
+<h2>Integration Patterns</h2>
+<table>
+<tr><th>Pattern</th><th>How it works</th><th>When to use</th></tr>
+<tr><td>API push (webhook)</td><td>SIEM calls SOAR's ingestion API on alert creation</td><td>Real-time, low latency, native</td></tr>
+<tr><td>Polling</td><td>SOAR periodically queries the SIEM for new alerts</td><td>SIEM has no outbound integration</td></tr>
+<tr><td>Middleware / message bus</td><td>Alerts flow through a queue/bus (Kafka, Event Hubs)</td><td>High volume, decoupling, multi-consumer</td></tr>
+<tr><td>Native integration</td><td>Built into the platform (Sentinel + Automation)</td><td>Single-vendor stack</td></tr>
+</table>
+
+<h2>Designing the Alert Schema</h2>
+<p>The interface between SIEM and SOAR is only as good as its schema. Agree on a minimum set of fields every alert must carry:</p>
+<ul>
+<li>alert_id, rule name, rule id, severity, status</li>
+<li>time generated (UTC)</li>
+<li>affected entities: user(s), host(s), source/destination IP, file hashes</li>
+<li>description and raw event reference (URL or query back-link)</li>
+<li>tenant/scope (for multi-tenant SOCs)</li>
+</ul>
+
+<p>Consistent fields let playbooks treat alerts uniformly. Inconsistent schemas force per-alert playbooks and become unmaintainable.</p>
+
+<h2>Avoiding the "Automation Stack Overflow"</h2>
+<p>Integration misconfigurations cause real failures:</p>
+<ul>
+<li><strong>Runaway loops:</strong> SOAR writes to SIEM → SIEM re-fires the rule → SOAR runs again → infinite loop. Add loop detection and idempotency keys.</li>
+<li><strong>Loss of audit trail:</strong> if actions happen in SOAR but the SIEM timeline doesn't reflect them, investigations become confusing. Write actions back.</li>
+<li><strong>Duplicate handling:</strong> if both SIEM and SOAR open cases, analysts see double work. Define a single source of truth (usually the SOAR case, with the SIEM alert linked).</li>
+<li><strong>Alert floods:</strong> a bad rule in the SIEM floods the SOAR, which faithfully automates the flood. Put rate limits and throttles at the ingestion layer.</li>
+</ul>
+
+<h2>Measuring the Integration: MTTA and MTTR</h2>
+<p>SIEM-to-SOAR automation is the main lever on the SOC's most-reported metrics:</p>
+<table>
+<tr><th>Metric</th><th>Before Automation</th><th>With SIEM→SOAR Integration</th></tr>
+<tr><td>MTTA</td><td>Analyst notices alert in queue (10-60 min)</td><td>SOAR acknowledges instantly; case auto-assigned</td></tr>
+<tr><td>Investigation prep</td><td>Manual context gathering (20-40 min)</td><td>Playbook pre-enriches before human arrives (seconds)</td></tr>
+<tr><td>MTTR (automated)</td><td>N/A</td><td>Minutes for covered playbooks</td></tr>
+<tr><td>MTTR (human cases)</td><td>Hours-days</td><td>Reduced by 40-70% via prepopulated context</td></tr>
+</table>
+
+<div class="info">
+<strong>Metric Hygiene:</strong> Define MTTA/MTTR consistently before measuring. Decide whether MTTR means "time to containment", "time to resolution", or "time to case closure" — and state it. Use automation dashboards to segment automated vs human-handled incidents; they behave very differently.
+</div>
+
+<h2>Reference Architecture: A Typical Integrated SOC Stack</h2>
+<ul>
+<li><strong>Visibility:</strong> SIEM (primary) + EDR telemetry + cloud audit logs.</li>
+<li><strong>Action:</strong> SOAR orchestrating EDR, firewall, email gateway, identity provider, ITSM.</li>
+<li><strong>Context:</strong> threat-intel feeds (STIX/TAXII), asset inventory/CMDB, vulnerability data.</li>
+<li><strong>Case flow:</strong> SIEM alert → SOAR incident → analyst queue → ITSM ticket (for cross-team work) → closure → metrics.</li>
+</ul>
+
+<h2>Common Mistakes in SIEM/SOAR Integration</h2>
+<ul>
+<li>Buying both from different vendors and never wiring the connector correctly.</li>
+<li>Pushing every alert (including noise) into SOAR — triage the SIEM first.</li>
+<li>Not testing what happens when the SOAR is down (alerts should queue, not vanish).</li>
+<li>Forgetting to map users/asset criticality, so automation can't assess impact.</li>
+<li>No owner for the integration — configuration drift silently breaks flows.</li>
+</ul>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Draw the SIEM→SOAR data flow for your organization (or a hypothetical one) on paper. Label every step with its latency, owner, and failure behavior. Then write the JSON schema for the "minimum viable alert" your SOAR will accept, and list which three playbooks should trigger on which alert types. Identify one place where the closed loop could cause an infinite loop, and design the safeguard.
+</div>
+
+<nav>
+  <a href="9-security-automation.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="11-threat-intelligence.html">Next: Threat Intelligence Integration &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

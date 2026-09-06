@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Thermodynamics Challenge</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:16px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.scene{width:100%;max-width:600px;height:200px;border:2px solid #334155;border-radius:12px;background:#0f172a;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.card{background:#1e293b;border-radius:16px;padding:24px;max-width:600px;width:100%;text-align:center;border:2px solid #334155}
+.q-text{font-size:1.05rem;margin:16px 0;line-height:1.5}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.opt{background:#0f172a;color:#e2e8f0;border:2px solid #475569;padding:14px;border-radius:10px;font-size:.9rem;cursor:pointer;transition:all .2s}
+.opt:hover{border-color:#38bdf8}
+.opt.correct{border-color:#22c55e;background:rgba(34,197,94,0.15)}
+.opt.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15)}
+.opt.disabled{pointer-events:none;opacity:.7}
+.fb{margin-top:12px;padding:10px;border-radius:8px;font-size:.95rem;min-height:2em}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+.thermo-bar{display:flex;align-items:center;gap:10px;margin:12px 0;justify-content:center}
+.temp-block{width:200px;height:30px;border-radius:6px;position:relative;overflow:hidden;background:#1e293b;border:1px solid #475569}
+.temp-fill{height:100%;border-radius:6px;transition:width .5s}
+.thermo-label{font-size:.85rem;color:#94a3b8}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🌡️ Thermodynamics Challenge</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/8</span>
+<span>🔥 Streak: <b id="streak">0</b></span>
+</div>
+<div class="scene" id="scene"></div>
+<div class="card">
+<div class="q-text" id="qtext"></div>
+<div class="opts" id="opts"></div>
+<div class="fb" id="fb"></div>
+</div>
+<button class="btn" id="next-btn" style="display:none" onclick="nextQ()">Next ➡️</button>
+</div>
+<script>
+let score=0,level=1,qNum=0,streak=0,answered=false;
+const questions=[
+  {scene:'🔥→🍳',q:'Holding a metal spoon in hot soup warms your hand. This is heat transfer by:',opts:['Conduction','Convection','Radiation','Insulation'],ans:0,explain:'Conduction: heat flows through direct contact in a solid.'},
+  {scene:'🫗→♨️',q:'Hot water rising and cold water sinking in a pot is an example of:',opts:['Conduction','Convection','Radiation','Evaporation'],ans:1,explain:'Convection: heat moves through fluid (liquid/gas) circulation.'},
+  {scene:'☀️→🌍',q:'The Sun warming Earth across empty space is heat transfer by:',opts:['Conduction','Convection','Radiation','Insulation'],ans:2,explain:'Radiation: heat transfers via electromagnetic waves, no medium needed.'},
+  {scene:'🧤→✋',q:'Wearing gloves keeps your hands warm by reducing:',opts:['Conduction','Convection','Radiation','All of these'],ans:0,explain:'Gloves are insulators that slow heat conduction from your hands to cold air.'},
+  {scene:'❄️→🧊',q:'Ice forms on the surface of a lake because water is densest at:',opts:['0°C','4°C','100°C','-10°C'],ans:1,explain:'Water is densest at 4°C, so 0°C ice floats, insulating the water below.'},
+  {scene:'♨️→☕',q:'Stirring coffee cools it faster by increasing:',opts:['Conduction','Convection','Radiation','Melting'],ans:1,explain:'Stirring increases convection, moving hot liquid to cooler surfaces.'},
+  {scene:'🔥→🏠',q:'Why are houses painted white in hot climates?',opts:['White reflects radiation','White absorbs heat','White conducts less','White convects more'],ans:0,explain:'White surfaces reflect more solar radiation, keeping buildings cooler.'},
+  {scene:'🧊→💧',q:'When ice melts, the energy absorbed is called:',opts:['Latent heat of fusion','Specific heat','Conduction','Thermal expansion'],ans:0,explain:'Latent heat of fusion: energy needed to change solid to liquid at same temperature.'},
+  {scene:'🌡️→♨️',q:'Aahrenheit and Celsius scales are equal at:',opts:['0°','100°','-40°','32°'],ans:2,explain:'-40° is the point where Fahrenheit and Celsius scales intersect.'},
+  {scene:'🔥→🧣',q:'A thermos bottle keeps drinks hot by reducing all three:',opts:['Conduction, convection, radiation','Only conduction','Only radiation','Only convection'],ans:0,explain:'Vacuum insulation (no conduction/convection) and silver coating (no radiation).'},
+  {scene:'☀️→🏖️',q:'Sand gets hotter than water at the beach because sand has a lower:',opts:['Specific heat capacity','Melting point','Density','Conductivity'],ans:0,explain:'Sand heats up faster because it requires less energy per degree (lower specific heat).'},
+  {scene:'♨️→🫖',q:'Pressure cookers work because increased pressure raises water\'s:',opts:['Boiling point','Melting point','Specific heat','Density'],ans:0,explain:'Higher pressure raises boiling point, cooking food faster at higher temperature.'},
+];
+let shuffled=[...questions].sort(()=>Math.random()-0.5);
+
+function showQ(){
+  if(qNum>=8){showResults();return}
+  answered=false;
+  document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';
+  document.getElementById('next-btn').style.display='none';
+  document.getElementById('qnum').textContent=qNum+1;
+  let q=shuffled[qNum];
+  document.getElementById('scene').innerHTML='<div style="font-size:3rem;letter-spacing:8px">'+q.scene+'</div>';
+  document.getElementById('qtext').textContent=q.q;
+  const opts=document.getElementById('opts');opts.innerHTML='';
+  q.opts.forEach((o,i)=>{
+    const b=document.createElement('button');b.className='opt';b.textContent=o;
+    b.onclick=()=>check(i);opts.appendChild(b);
+  });
+}
+
+function check(i){
+  if(answered)return;answered=true;
+  let q=shuffled[qNum];
+  document.querySelectorAll('.opt').forEach((b,j)=>{b.classList.add('disabled');if(j===q.ans)b.classList.add('correct');if(j===i&&i!==q.ans)b.classList.add('wrong')});
+  let fb=document.getElementById('fb');
+  if(i===q.ans){let pts=10+streak*5+level*3;score+=pts;streak++;fb.innerHTML='✅ '+q.explain+' <b>+'+pts+' pts</b>';fb.style.background='rgba(34,197,94,0.15)'}
+  else{streak=0;fb.innerHTML='❌ '+q.explain;fb.style.background='rgba(239,68,68,0.15)'}
+  document.getElementById('score').textContent=score;document.getElementById('streak').textContent=streak;
+  document.getElementById('next-btn').style.display='inline-block';
+}
+
+function nextQ(){qNum++;showQ()}
+function showResults(){
+  document.getElementById('scene').innerHTML='<div style="font-size:3rem">🏆</div>';
+  document.getElementById('qtext').innerHTML='Level '+level+' Complete! Score: '+score;
+  document.getElementById('opts').innerHTML='<button class="btn" onclick="nextLevel()">Next Level ⬆️</button> <button class="btn sec" onclick="restart()">↺ Restart</button>';
+  document.getElementById('fb').textContent='';document.getElementById('next-btn').style.display='none';
+}
+function nextLevel(){level++;qNum=0;streak=0;shuffled=[...questions].sort(()=>Math.random()-0.5);document.getElementById('level').textContent=level;showQ()}
+function restart(){score=0;level=1;qNum=0;streak=0;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;document.getElementById('streak').textContent=0;shuffled=[...questions].sort(()=>Math.random()-0.5);showQ()}
+showQ();
+</script>
+</body>
+</html>

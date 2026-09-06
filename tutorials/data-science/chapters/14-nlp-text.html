@@ -1,0 +1,120 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>14. NLP &amp; Text Analytics - Data Science Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>14. NLP &amp; Text Analytics</h1>
+<p class="tag">Chapter 14</p>
+
+<h2>Text as Data</h2>
+<p>Reviews, support tickets, emails, social media, and documents are rich sources of signal. <strong>Natural language processing (NLP)</strong> turns unstructured text into numbers a model can use. Typical goals: sentiment, topic discovery, classification, search, and summarization.</p>
+
+<h2>The NLP Pipeline</h2>
+<pre><code>import re
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+docs = df["review_text"].tolist()
+
+# 1. Clean
+def clean(t):
+    t = t.lower()
+    t = re.sub(r"http\S+", "", t)      # remove URLs
+    t = re.sub(r"[^a-z0-9\s]", "", t)  # keep letters and digits
+    return re.sub(r"\s+", " ", t).strip()
+
+df["clean"] = df["review_text"].map(clean)
+
+# 2. Tokenize + count/TF-IDF
+vectorizer = TfidfVectorizer(max_features=2000, stop_words="english")
+X = vectorizer.fit_transform(df["clean"])
+print(X.shape)  # (n_docs, 2000)
+</code></pre>
+
+<h2>TF-IDF in Practice</h2>
+<p><strong>TF-IDF</strong> weights words by how often they appear in a document (term frequency) and how rarely they appear across documents (inverse document frequency). Common words like "the" get near-zero weight; distinctive words carry the signal.</p>
+<pre><code># Which terms are most distinctive overall?
+names = vectorizer.get_feature_names_out()
+top = X.sum(axis=0).A1
+for idx in top.argsort()[-15:]:
+    print(names[idx], round(top[idx], 2))
+</code></pre>
+
+<div class="note">
+<strong>When TF-IDF fails:</strong> for short texts (tweets, chat) and for capturing word order ("not bad" vs "bad"), count/TF-IDF is too weak. Use embeddings (next section) or n-grams (<code>ngram_range=(1,2)</code>) instead.
+</div>
+
+<h2>Modern Embeddings</h2>
+<p><strong>Embeddings</strong> map words or sentences to dense vectors where similar meanings are near each other. Sentence embeddings turn any text into a fixed-size vector, so you can cluster documents, build search, or feed the vector into any ML model.</p>
+<pre><code># pip install sentence-transformers
+from sentence_transformers import SentenceTransformer
+
+model = SentenceTransformer("all-MiniLM-L6-v2")
+vectors = model.encode(df["clean"].tolist())   # shape (n, 384)
+</code></pre>
+
+<h2>Sentiment Analysis</h2>
+<p>Two paths: a <strong>lexicon</strong> (a word → sentiment score dictionary, fast but crude) or a <strong>trained classifier</strong> (accurate but needs labeled data). With no labels, start with a pretrained model:</p>
+<pre><code># pip install transformers
+from transformers import pipeline
+
+sentiment = pipeline("sentiment-analysis")
+results = sentiment(df["clean"].tolist()[:100])
+</code></pre>
+
+<h2>Topic Modeling</h2>
+<p>Topic modeling discovers themes in a corpus without labels. <strong>LDA</strong> is the classic method:</p>
+<pre><code>from sklearn.decomposition import LatentDirichletAllocation
+from sklearn.feature_extraction.text import CountVectorizer
+
+count = CountVectorizer(max_features=3000, stop_words="english")
+Xc = count.fit_transform(df["clean"])
+
+lda = LatentDirichletAllocation(n_components=5, random_state=42)
+lda.fit(Xc)
+
+for topic_idx, topic in enumerate(lda.components_):
+    words = [count.get_feature_names_out()[i] for i in topic.argsort()[-8:]]
+    print(f"Topic {topic_idx}: {', '.join(words)}")
+</code></pre>
+
+<h2>Classification of Text</h2>
+<p>Once text is vectors, supervised learning proceeds exactly as in Chapter 11:</p>
+<pre><code>from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+
+X = vectorizer.fit_transform(df["clean"])
+y = df["category"]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+clf = LogisticRegression(max_iter=1000)
+clf.fit(X_train, y_train)
+print(clf.score(X_test, y_test))
+</code></pre>
+
+<h2>Ethical Care with Text</h2>
+<ul>
+<li>Text data often contains <strong>personal information</strong> — names, emails, locations. Anonymize before sharing or storing.</li>
+<li>Models learn the biases of the text they train on (Chapter 17).</li>
+<li>Sentiment and topic models can be <strong>wrong in high-stakes ways</strong>; never let them make decisions about people without review.</li>
+</ul>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Take a public text dataset (e.g., customer reviews or news headlines). Clean and vectorize it, compute a sentiment score per document, cluster the documents with embeddings, and run topic modeling to name 4-6 themes. Write a summary of the top three themes and how the sentiment varies across them.
+</div>
+
+<nav>
+  <span></span>
+  <a href="../index.html">Back to Index</a>
+  <a href="15-feature-engineering-deployment.html">Next: Feature Engineering &amp; Model Deployment &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

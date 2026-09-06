@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Space Explorer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.planets-display{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:8px 0}
+.planet-slot{width:50px;height:50px;border:2px dashed #475569;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.5rem;transition:all .2s;cursor:pointer}
+.planet-slot.filled{border-style:solid;border-color:#38bdf8}
+.planet-slot.correct{border-color:#22c55e}
+.planet-slot.wrong{border-color:#ef4444;animation:shake .3s}
+.planet-pool{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+.planet-btn{background:#1e293b;border:2px solid #475569;padding:6px 12px;border-radius:20px;cursor:pointer;font-size:.85rem;transition:all .2s;user-select:none}
+.planet-btn:hover{border-color:#38bdf8}
+.planet-btn.selected{border-color:#facc15;background:#1e3a5f}
+.planet-btn.used{opacity:.3;pointer-events:none}
+.card{background:#1e293b;border-radius:16px;padding:20px;max-width:600px;width:100%;text-align:center;border:2px solid #334155}
+.q-text{font-size:1rem;margin:10px 0;line-height:1.4}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.opt{background:#0f172a;color:#e2e8f0;border:2px solid #475569;padding:10px;border-radius:8px;font-size:.85rem;cursor:pointer;transition:all .2s}
+.opt:hover{border-color:#38bdf8}
+.opt.correct{border-color:#22c55e;background:rgba(34,197,94,0.15)}
+.opt.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15)}
+.opt.disabled{pointer-events:none;opacity:.7}
+.fb{margin-top:10px;padding:10px;border-radius:8px;font-size:.9rem;min-height:2em}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.mode-toggle{display:flex;gap:8px;margin:8px 0}
+.mode-btn{padding:8px 16px;border-radius:8px;border:2px solid #475569;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:.85rem}
+.mode-btn.active{border-color:#38bdf8;background:#1e293b}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🚀 Space Explorer</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/8</span>
+</div>
+<div class="mode-toggle">
+<button class="mode-btn active" id="mode-quiz" onclick="setMode('quiz')">❓ Quiz</button>
+<button class="mode-btn" id="mode-order" onclick="setMode('order')">🔢 Order Planets</button>
+</div>
+<div id="mode-content"></div>
+<div class="card" id="card">
+<div class="q-text" id="qtext"></div>
+<div class="opts" id="opts"></div>
+<div class="fb" id="fb"></div>
+</div>
+<button class="btn" id="next-btn" style="display:none" onclick="nextQ()">Next ➡️</button>
+</div>
+<script>
+let score=0,level=1,qNum=0,answered=false,mode='quiz',orderSlot=0,selectedPlanet=null;
+const planets=[
+  {emoji:'☀️',name:'Sun',order:0,facts:['Center of solar system','About 4.6 billion years old','Surface temp ~5500°C']},
+  {emoji:'🪨',name:'Mercury',order:1,facts:['Smallest planet','No atmosphere','Closest to Sun']},
+  {emoji:'🌋',name:'Venus',order:2,facts:['Hottest planet','Rotates backwards','Similar size to Earth']},
+  {emoji:'🌍',name:'Earth',order:3,facts:['Only known life','71% water','One natural satellite']},
+  {emoji:'🔴',name:'Mars',order:4,facts:['Red planet (iron oxide)','Two moons: Phobos & Deimos','Has tallest volcano (Olympus Mons)']},
+  {emoji:'🪐',name:'Jupiter',order:5,facts:['Largest planet','Great Red Spot storm','At least 95 moons']},
+  {emoji:'💍',name:'Saturn',order:6,facts:['Famous ring system','Lowest density','Can float in water!']},
+  {emoji:'🧊',name:'Uranus',order:7,facts:['Rotates on its side','Ice giant','Blue-green color (methane)']},
+  {emoji:'🔵',name:'Neptune',order:8,facts:['Farthest planet','Strongest winds','Dark spot storm']},
+];
+const orderPlanets=['🪨','🌋','🌍','🔴','🪐','💍','🧊','🔵'];
+
+const quizQuestions=[
+  {q:'Which planet is known as the "Red Planet"?',opts:['Mars','Venus','Jupiter','Mercury'],ans:0,explain:'Mars appears red due to iron oxide (rust) on its surface.'},
+  {q:'Which is the largest planet in our solar system?',opts:['Jupiter','Saturn','Neptune','Earth'],ans:0,explain:'Jupiter is so large that all other planets could fit inside it.'},
+  {q:'Which planet has the most prominent ring system?',opts:['Saturn','Jupiter','Uranus','Neptune'],ans:0,explain:'Saturn\'s rings are made of ice and rock particles.'},
+  {q:'How many planets are in our solar system?',opts:['8','9','7','10'],ans:0,explain:'There are 8 planets. Pluto was reclassified as a dwarf planet in 2006.'},
+  {q:'Which planet is closest to the Sun?',opts:['Mercury','Venus','Earth','Mars'],ans:0,explain:'Mercury orbits closest to the Sun at about 58 million km.'},
+  {q:'Which planet is known as Earth\'s "twin" due to similar size?',opts:['Venus','Mars','Mercury','Neptune'],ans:0,explain:'Venus is almost the same size as Earth but has a toxic atmosphere.'},
+  {q:'Which planet rotates on its side?',opts:['Uranus','Neptune','Saturn','Mars'],ans:0,explain:'Uranus has an axial tilt of ~98°, essentially rolling on its side.'},
+  {q:'What is Jupiter\'s Great Red Spot?',opts:['A massive storm','A volcanic crater','A canyon','A shadow'],ans:0,explain:'The Great Red Spot is a storm larger than Earth that has raged for centuries.'},
+  {q:'Which planet has the strongest winds?',opts:['Neptune','Jupiter','Saturn','Uranus'],ans:0,explain:'Neptune has winds up to 2,100 km/h — the fastest in the solar system.'},
+  {q:'Which planet can float in water due to low density?',opts:['Saturn','Jupiter','Uranus','Neptune'],ans:0,explain:'Saturn\'s density is less than water (0.687 g/cm³).'},
+  {q:'Which planet has a blue-green color from methane?',opts:['Uranus','Neptune','Earth','Neptune'],ans:0,explain:'Methane in Uranus\'s atmosphere absorbs red light, giving it a blue-green hue.'},
+  {q:'Which is the smallest planet?',opts:['Mercury','Mars','Pluto','Venus'],ans:0,explain:'Mercury is the smallest planet at 4,879 km diameter.'},
+  {q:'Mars has two small moons named:',opts:['Phobos & Deimos','Io & Europa','Titan & Enceladus','Charon & Nix'],ans:0,explain:'Phobos and Deimos are small, irregularly shaped moons.'},
+  {q:'What causes seasons on Earth?',opts:['Axial tilt','Distance from Sun','Moon\'s gravity','Solar flares'],ans:0,explain:'Earth\'s 23.5° axial tilt causes different parts to receive varying sunlight.'},
+];
+let shuffledQ=[...quizQuestions].sort(()=>Math.random()-0.5);
+
+function setMode(m){
+  mode=m;
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('mode-'+m).classList.add('active');
+  qNum=0;answered=false;
+  document.getElementById('next-btn').style.display='none';
+  document.getElementById('fb').textContent='';
+  if(mode==='quiz')showQuizQ();
+  else showOrderMode();
+}
+
+function showQuizQ(){
+  if(qNum>=8){showResults();return}
+  answered=false;
+  document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';
+  document.getElementById('next-btn').style.display='none';
+  document.getElementById('qnum').textContent=qNum+1;
+  let q=shuffledQ[qNum];
+  document.getElementById('mode-content').innerHTML='';
+  document.getElementById('qtext').textContent=q.q;
+  const opts=document.getElementById('opts');opts.innerHTML='';
+  q.opts.forEach((o,i)=>{const b=document.createElement('button');b.className='opt';b.textContent=o;b.onclick=()=>checkQuiz(i);opts.appendChild(b)});
+}
+
+function checkQuiz(i){
+  if(answered)return;answered=true;
+  let q=shuffledQ[qNum];
+  document.querySelectorAll('.opt').forEach((b,j)=>{if(j===q.ans)b.classList.add('correct');if(j===i&&i!==q.ans)b.classList.add('wrong')});
+  let fb=document.getElementById('fb');
+  if(i===q.ans){let pts=10+level*5;score+=pts;fb.innerHTML='✅ '+q.explain+' <b>+'+pts+' pts</b>';fb.style.background='rgba(34,197,94,0.15)'}
+  else{fb.innerHTML='❌ '+q.explain;fb.style.background='rgba(239,68,68,0.15)'}
+  document.getElementById('score').textContent=score;document.getElementById('next-btn').style.display='inline-block';
+}
+
+function showOrderMode(){
+  let planets=planetsData();
+  let shuffled=[...planets].sort(()=>Math.random()-0.5).slice(0,level+4);
+  orderSlot=0;selectedPlanet=null;
+  let html='<div class="planets-display" id="order-slots">';
+  for(let i=0;i<shuffled.length;i++)html+='<div class="planet-slot" data-idx="'+i+'" onclick="placePlanet('+i+')"><span style="color:#475569">'+(i+1)+'</span></div>';
+  html+='</div><div class="planet-pool" id="planet-pool">';
+  let pool=shuffled.sort(()=>Math.random()-0.5);
+  pool.forEach(p=>{html+='<button class="planet-btn" data-name="'+p.name+'" onclick="selectPlanet(this,\''+p.name+'\')">'+p.emoji+' '+p.name+'</button>'});
+  html+='</div>';
+  document.getElementById('mode-content').innerHTML=html;
+  document.getElementById('qtext').textContent='Arrange the planets in order from the Sun (closest first)!';
+  document.getElementById('opts').innerHTML='';
+  window._orderData={planets:shuffled.map(p=>p.name),correctOrder:shuffled.map(p=>p.name).sort((a,b)=>{
+    let oa=planets.find(x=>x.name===a).order;let ob=planets.find(x=>x.name===b).order;return oa-ob;
+  }),placed:[]};
+}
+
+function planetsData(){return planets.filter(p=>p.order>0)}
+
+function selectPlanet(el,name){
+  if(answered)return;
+  document.querySelectorAll('.planet-btn').forEach(b=>b.classList.remove('selected'));
+  el.classList.add('selected');selectedPlanet=name;
+}
+
+function placePlanet(idx){
+  if(!selectedPlanet||answered)return;
+  let data=window._orderData;
+  let slots=document.querySelectorAll('.planet-slot');
+  if(slots[idx].classList.contains('filled'))return;
+  if(selectedPlanet===data.correctOrder[idx]){
+    slots[idx].classList.add('filled','correct');
+    let p=planets.find(x=>x.name===selectedPlanet);
+    slots[idx].innerHTML=p.emoji;
+    document.querySelector('.planet-btn[data-name="'+selectedPlanet+'"]').classList.add('used');
+    selectedPlanet=null;
+    data.placed[idx]=true;
+    let pts=10+level*3;score+=pts;
+    document.getElementById('fb').innerHTML='✅ Correct position! <b>+'+pts+' pts</b>';
+    document.getElementById('fb').style.background='rgba(34,197,94,0.15)';
+    if(data.placed.filter(Boolean).length===data.correctOrder.length){
+      setTimeout(()=>{document.getElementById('fb').innerHTML='🎉 Perfect order!';document.getElementById('next-btn').style.display='inline-block'},800);
+    }
+  }else{
+    slots[idx].classList.add('wrong');setTimeout(()=>slots[idx].classList.remove('wrong'),400);
+    document.getElementById('fb').innerHTML='❌ Wrong position! Think about distance from the Sun.';
+    document.getElementById('fb').style.background='rgba(239,68,68,0.15)';
+  }
+  document.getElementById('score').textContent=score;
+}
+
+function nextQ(){qNum++;answered=false;showQ()}
+function showQ(){mode==='quiz'?showQuizQ():showOrderMode()}
+function showResults(){
+  document.getElementById('mode-content').innerHTML='';
+  document.getElementById('qtext').innerHTML='🏆 Level '+level+' Complete! Score: '+score;
+  document.getElementById('opts').innerHTML='<button class="btn" onclick="nextLevel()">Next Level ⬆️</button> <button class="btn sec" onclick="restart()">↺ Restart</button>';
+  document.getElementById('fb').textContent='';document.getElementById('next-btn').style.display='none';
+}
+function nextLevel(){level++;qNum=0;shuffledQ=[...quizQuestions].sort(()=>Math.random()-0.5);document.getElementById('level').textContent=level;showQ()}
+function restart(){score=0;level=1;qNum=0;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;shuffledQ=[...quizQuestions].sort(()=>Math.random()-0.5);showQ()}
+showQuizQ();
+</script>
+</body>
+</html>

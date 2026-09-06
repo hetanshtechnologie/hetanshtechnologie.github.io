@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blog - Hetansh Technologie</title>
+  <meta name="description" content="Read articles, tutorials, and insights on software engineering, cloud, AI, and more.">
+  <link rel="stylesheet" href="css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="blog-nav">
+    <div class="container">
+      <a href="../" class="logo">HetanshTechnologie</a>
+      <div class="nav-links">
+        <a href="../">Home</a>
+        <a href="index.html" class="btn">Blog</a>
+        <a href="login.html" id="nav-auth">Login</a>
+      </div>
+    </div>
+  </nav>
+
+  <section class="page-header">
+    <div class="container">
+      <h1>Blog</h1>
+      <p>Articles, tutorials, and insights on software engineering, cloud, AI, and more.</p>
+    </div>
+  </section>
+
+  <main class="container" style="padding:32px 20px;">
+    <div id="alert-container"></div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px;">
+      <h2 style="font-size:1.3rem;">Topics</h2>
+      <div>
+        <a href="create-topic.html" class="btn btn-primary btn-sm" id="create-topic-btn" style="display:none">+ New Topic</a>
+        <a href="create-article.html" class="btn btn-secondary btn-sm">Write Article</a>
+      </div>
+    </div>
+
+    <div id="topics-grid" class="topics-grid"></div>
+
+    <h2 style="font-size:1.3rem;margin-bottom:16px;">Recent Articles</h2>
+    <div id="articles-list"></div>
+  </main>
+
+  <footer style="text-align:center;padding:24px;color:#888;font-size:.85rem;border-top:1px solid #e0e0e0;">
+    &copy; 2026 Hetansh Technologie. All rights reserved. | <span id="site-version"></span>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/blog.js"></script>
+  <script src="../js/version.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async function() {
+      // Auth state
+      const user = await getCurrentUser();
+
+      // App-tag redirect: after a Google OAuth sign-in from one of our apps,
+      // Supabase sends the user back to this blog page with ?app=<tag>.
+      // Establish the session, then hand off to the originating application.
+      const APP_BASE = window.location.pathname.replace(/\/blog\/index\.html.*$/, '');
+      const APP_REDIRECT_TAGS = {
+        projectpro: window.location.origin + APP_BASE + '/Applications/index.html',
+        jobportal: window.location.origin + APP_BASE + '/Applications/jobportal/index.html',
+        'jobportal-admin': window.location.origin + APP_BASE + '/Applications/jobportal/admin.html'
+      };
+      const appTag = new URLSearchParams(window.location.search).get('app');
+      if (appTag && APP_REDIRECT_TAGS[appTag]) {
+        window.location.replace(APP_REDIRECT_TAGS[appTag]);
+        return;
+      }
+      const navAuth = document.getElementById('nav-auth');
+      const createTopicBtn = document.getElementById('create-topic-btn');
+      if (user) {
+        navAuth.textContent = 'Logout';
+        navAuth.href = '#';
+        navAuth.addEventListener('click', async (e) => {
+          e.preventDefault();
+          await signOut();
+          window.location.reload();
+        });
+        createTopicBtn.style.display = 'inline-block';
+      } else {
+        navAuth.textContent = 'Login';
+        navAuth.href = 'login.html';
+      }
+      const isBlogAdmin = user && user.email === ADMIN_EMAIL;
+
+      // Load topics
+      try {
+        const topics = await getTopics();
+        const grid = document.getElementById('topics-grid');
+        if (topics.length === 0) {
+          grid.innerHTML = '<div class="empty-state"><h3>No topics yet</h3><p>Be the first to create a topic!</p></div>';
+        } else {
+          grid.innerHTML = topics.map(t => `
+            <a href="?topic=${t.slug}" class="card topic-card" style="display:block;text-decoration:none;color:inherit;">
+              <h3>${escapeHtml(t.name)}</h3>
+              <p>${escapeHtml(t.description || '')}</p>
+              <div class="count">${t.blog_articles?.[0]?.count || 0} article${(t.blog_articles?.[0]?.count || 0) !== 1 ? 's' : ''}</div>
+              ${isBlogAdmin ? `
+              <div class="admin-actions" style="margin-top:10px;display:flex;gap:6px;justify-content:center;">
+                <button class="btn btn-sm btn-secondary topic-edit-btn" data-id="${t.id}" data-name="${escapeHtml(t.name)}" data-description="${escapeHtml(t.description || '')}" data-slug="${t.slug}" onclick="event.stopPropagation();event.preventDefault();editTopic(this)">Edit</button>
+                <button class="btn btn-sm btn-danger topic-delete-btn" data-id="${t.id}" data-name="${escapeHtml(t.name)}" onclick="event.stopPropagation();event.preventDefault();deleteTopicPrompt(this)">Delete</button>
+              </div>` : ''}
+            </a>
+          `).join('');
+        }
+      } catch (err) {
+        showAlert('alert-container', 'Failed to load topics: ' + err.message, 'error');
+      }
+
+      // Load articles
+      async function loadArticles(topicSlug) {
+        try {
+          const articles = topicSlug ? await getArticlesByTopic(topicSlug) : await getRecentArticles(50);
+          const list = document.getElementById('articles-list');
+          if (articles.length === 0) {
+            list.innerHTML = '<div class="empty-state"><h3>No articles yet</h3><p>Check back soon for new content!</p></div>';
+            return;
+          }
+          list.innerHTML = articles.map(a => {
+            const avatar = a.blog_profiles?.username?.[0]?.toUpperCase() || '?';
+            const contentPreview = a.content.replace(/<[^>]*>/g, '').substring(0, 200);
+            return `
+              <div class="card">
+                <div class="card-meta">
+                  <span class="topic-badge">${escapeHtml(a.blog_topics?.name || 'Uncategorized')}</span>
+                  <span class="user-badge"><span class="avatar">${avatar}</span> ${escapeHtml(a.blog_profiles?.username || 'Anonymous')}</span>
+                  <span>${timeAgo(a.created_at)}</span>
+                </div>
+                <h3 class="card-title"><a href="article.html?slug=${a.slug}">${escapeHtml(a.title)}</a></h3>
+                <div class="card-text">${escapeHtml(contentPreview)}...</div>
+                ${isBlogAdmin ? `
+                <div class="admin-actions" style="margin-top:10px;display:flex;gap:6px;">
+                  <a href="../admin/blog-edit-article.html?id=${a.id}" class="btn btn-sm btn-secondary" onclick="event.stopPropagation()">Edit</a>
+                  <button class="btn btn-sm btn-danger article-delete-btn" data-id="${a.id}" data-title="${escapeHtml(a.title)}" onclick="event.stopPropagation()">Delete</button>
+                </div>` : ''}
+              </div>
+            `;
+          }).join('');
+        } catch (err) {
+          showAlert('alert-container', 'Failed to load articles: ' + err.message, 'error');
+        }
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const topicFilter = urlParams.get('topic');
+      if (topicFilter) {
+        document.querySelector('.page-header p').textContent = 'Browsing articles in topic: ' + topicFilter;
+      }
+      await loadArticles(topicFilter);
+
+      // Wire article delete buttons via event delegation
+      document.getElementById('articles-list').addEventListener('click', async function(e) {
+        const btn = e.target.closest('.article-delete-btn');
+        if (!btn) return;
+        const id = parseInt(btn.dataset.id);
+        const title = btn.dataset.title;
+        if (!confirm(`Delete article "${title}"?\n\nThis cannot be undone.`)) return;
+        btn.disabled = true;
+        btn.textContent = 'Deleting...';
+        try {
+          await deleteArticle(id);
+          btn.closest('.card').remove();
+          showAlert('alert-container', 'Article deleted.', 'success');
+        } catch (err) {
+          showAlert('alert-container', 'Failed to delete: ' + err.message, 'error');
+          btn.disabled = false;
+          btn.textContent = 'Delete';
+        }
+      });
+    });
+
+    window.editTopic = async function(btn) {
+      const id = parseInt(btn.dataset.id);
+      const name = btn.dataset.name;
+      const description = btn.dataset.description;
+      const slug = btn.dataset.slug;
+      const newName = prompt('Topic name:', name);
+      if (!newName) return;
+      const newDesc = prompt('Topic description:', description);
+      if (newDesc === null) return;
+      const newSlug = prompt('Topic slug:', slug);
+      if (!newSlug) return;
+      try {
+        await updateTopic(id, { name: newName, description: newDesc || null, slug: newSlug });
+        window.location.reload();
+      } catch (err) {
+        alert('Failed to update topic: ' + err.message);
+      }
+    };
+
+    window.deleteTopicPrompt = async function(btn) {
+      const id = parseInt(btn.dataset.id);
+      const name = btn.dataset.name;
+      if (!confirm(`Delete topic "${name}"?\n\nThis will also delete all articles in this topic. This cannot be undone.`)) return;
+      btn.disabled = true;
+      btn.textContent = 'Deleting...';
+      try {
+        await deleteTopic(id);
+        btn.closest('.topic-card')?.remove();
+        showAlert('alert-container', 'Topic deleted.', 'success');
+      } catch (err) {
+        showAlert('alert-container', 'Failed to delete: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+      }
+    };
+  </script>
+<script src="../js/analytics-tracker.js" defer></script>
+</body>
+</html>

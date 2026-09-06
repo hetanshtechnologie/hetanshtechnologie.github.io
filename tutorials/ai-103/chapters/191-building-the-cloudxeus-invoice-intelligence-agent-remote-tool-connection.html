@@ -1,0 +1,158 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>191. Building the CloudXeus Invoice Intelligence Agent - Remote Tool connection - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 191</span>
+<h1>Building the CloudXeus Invoice Intelligence Agent - Remote Tool connection</h1>
+<p>An agent that understands invoices needs a way to reach the extraction engine. The cleanest pattern is a <strong>remote tool</strong>: a small HTTP API that wraps Document Intelligence and exposes invoice analysis as a callable function. The agent calls the tool, the tool performs the extraction, and the structured result comes back for the agent to reason over. This chapter builds that connection — designing the tool, exposing it as an endpoint, and registering it with the agent.</p>
+
+<h2>What a Remote Tool Is</h2>
+<p>In agent terms, a tool is a capability the model can invoke on behalf of the user. Foundry agents support several kinds of tools: built-in ones like web search and code interpreter, knowledge base retrieval, and <em>remote tools</em> — functions you host yourself and describe to the agent. A remote tool is really an HTTP API plus a description of what it does, so the agent knows when to call it and what arguments to pass.</p>
+
+<div class="note">
+<p>The agent does not call the extraction service directly. It calls your endpoint, your endpoint handles the Document Intelligence request, and you control everything in between — authentication, retries, logging, and validation. That indirection is the point of a remote tool.</p>
+</div>
+
+<h2>Why Wrap the Extraction Behind an API</h2>
+<p>You could let the agent call Document Intelligence directly, but wrapping it gives you control in five practical ways:</p>
+<ul>
+<li><strong>Authentication:</strong> the extraction service key stays on the server; the agent only ever sees your endpoint.</li>
+<li><strong>Validation:</strong> you reject malformed requests before they cost a model call.</li>
+<li><strong>Rate limiting and cost:</strong> you decide who can call the tool and how often.</li>
+<li><strong>Observability:</strong> every extraction is logged with the caller, the document, and the outcome.</li>
+<li><strong>Independence:</strong> you can swap Document Intelligence for another parser without touching the agent.</li>
+</ul>
+
+<h2>Designing the Tool Contract</h2>
+<p>Define the tool's inputs and outputs before writing any code. For invoice analysis the contract is deliberately small:</p>
+
+<table>
+<tr><th>Aspect</th><th>Value</th></tr>
+<tr><td>Input</td><td>The invoice document — a blob URL, or a file posted directly to the endpoint</td></tr>
+<tr><td>Output</td><td>Structured JSON: vendor, invoice number, issue date, due date, tax, total, plus confidence scores</td></tr>
+<tr><td>Behavior</td><td>If the document is not an invoice, return a clear error message rather than fabricated fields</td></tr>
+</table>
+
+<p>Keep the output flat and typed. The agent will read these fields to answer questions, so names should be obvious — <code>invoice_number</code>, <code>total_amount</code> — and values should be primitives.</p>
+
+<h2>Exposing the Endpoint with Azure Functions</h2>
+<p>An HTTP-triggered Azure Function is a fast way to stand up this tool. Install the Function Core Tools if you have not, then create a project with a single function. The handler reads the posted file, calls Document Intelligence, and returns the fields as JSON:</p>
+
+<pre><code>import json
+
+import azure.functions as func
+from azure.ai.documentintelligence import DocumentIntelligenceClient
+from azure.core.credentials import AzureKeyCredential
+
+app = func.FunctionApp()
+
+@app.route(route="analyze-invoice", methods=["POST"],
+           auth_level=func.AuthLevel.FUNCTION)
+def analyze_invoice(req: func.HttpRequest) -> func.HttpResponse:
+    endpoint = req.headers.get("x-doc-intel-endpoint")
+    key = req.headers.get("x-doc-intel-key")
+    if not endpoint or not key:
+        return func.HttpResponse("Missing extraction credentials", status_code=400)
+
+    client = DocumentIntelligenceClient(
+        endpoint=endpoint, credential=AzureKeyCredential(key))
+
+    try:
+        poller = client.begin_analyze_document(
+            model_id="prebuilt-invoice", analyze_request=req.get_body(),
+            content_type="application/pdf")
+        result = poller.result()
+    except Exception as exc:
+        return func.HttpResponse(json.dumps({"error": str(exc)}),
+                                 status_code=500,
+                                 mimetype="application/json")
+
+    document = result.documents[0] if result.documents else {}
+    fields = document.fields or {}
+    payload = {
+        "vendor": fields.get("VendorName").value_string if fields.get("VendorName") else None,
+        "invoice_number": fields.get("InvoiceId").value_string if fields.get("InvoiceId") else None,
+        "issue_date": str(fields.get("InvoiceDate").value_date) if fields.get("InvoiceDate") else None,
+        "due_date": str(fields.get("DueDate").value_date) if fields.get("DueDate") else None,
+        "total_amount": float(fields.get("InvoiceTotal").value_currency.get("amount"))
+                        if fields.get("InvoiceTotal") else None,
+    }
+    return func.HttpResponse(json.dumps(payload), mimetype="application/json")</code></pre>
+
+<div class="warn">
+<p>The sample above reads credentials from request headers for clarity. In a real deployment, pass credentials through environment variables or a managed identity — never through client-supplied headers.</p>
+</div>
+
+<h2>Registering the Tool with the Agent</h2>
+<p>The agent needs a description of your endpoint before it can use it. In Foundry, remote tools are typically registered through an OpenAPI specification that lists the endpoint, its operation, parameters, and response shape. A minimal spec fragment:</p>
+
+<pre><code>{
+  "openapi": "3.0.0",
+  "info": { "title": "Invoice Intelligence", "version": "1.0.0" },
+  "paths": {
+    "/api/analyze-invoice": {
+      "post": {
+        "summary": "Extract structured fields from an invoice document",
+        "operationId": "analyzeInvoice",
+        "requestBody": {
+          "content": {
+            "application/pdf": {
+              "schema": { "type": "string", "format": "binary" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Extracted invoice fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "vendor": { "type": "string" },
+                    "invoice_number": { "type": "string" },
+                    "total_amount": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+
+<p>The operation summary is what the model reads when deciding whether to call the tool — make it describe the capability in plain language, as in the example above.</p>
+
+<h2>Testing the Connection</h2>
+<p>Before attaching the tool to the agent, verify it in isolation. Send a real invoice to the endpoint with a tool like <code>curl</code> or the PowerShell equivalent and confirm the JSON comes back:</p>
+
+<pre><code>curl.exe -X POST "https://YOUR_FUNCTION_URL/api/analyze-invoice" -H "Content-Type: application/pdf" --data-binary "@invoice.pdf"</code></pre>
+
+<div class="tip">
+<p>Test three inputs: a clean invoice, a scanned invoice, and a document that is not an invoice. The third is the one that exposes whether your error handling works — the agent must be told it cannot answer rather than given fabricated fields.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You designed an invoice-analysis tool with a clean contract, exposed it as an HTTP endpoint wrapping Document Intelligence, wrote an OpenAPI description so the agent understands it, and verified the connection with a real request. The tool is ready. In the next chapter you will create the CloudXeus Invoice Intelligence Agent and attach this tool to it.</p>
+<nav>
+<a href="190-managing-model-updates.html">&larr; Previous: Managing model updates</a><a href="192-building-the-cloudxeus-invoice-intelligence-agent.html">Next: Building the CloudXeus Invoice Intelligence Agent &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

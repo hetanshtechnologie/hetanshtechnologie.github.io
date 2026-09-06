@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 30: MLOps &amp; Cloud Pipelines | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 30</span>
+    <h1>MLOps &amp; Cloud Pipelines</h1>
+
+    <h2>What MLOps Adds to ML</h2>
+    <p>The previous chapter got a single project deployed. <strong>MLOps</strong> is the discipline of doing that repeatedly and reliably: versioning data and models, tracking every experiment, automating tests, and shipping updates through CI/CD like any professional software team. Where a one-off project ends at deployment, MLOps begins there.</p>
+    <div class="info">
+        <strong>Memory hook:</strong> Think of MLOps as "production engineering for machine learning". The model is only a small part of the system; everything around it, data, packaging, tracking, deployment, is the pipeline.
+    </div>
+
+    <h2>Project Structure Setup with an Environment</h2>
+    <p>Every MLOps project starts with a reproducible environment and a clean folder layout. Create a project folder, add a virtual environment, and install the core tooling:</p>
+    <pre><code>python -m venv venv
+venv\Scripts\activate
+pip install numpy pandas scikit-learn pymongo dvc mlflow boto3 dill</code></pre>
+    <p>Adopt a layout where <code>src</code> holds source code, <code>config</code> holds configuration files, <code>data</code> holds inputs and outputs, and <code>artifacts</code> holds trained models. A standard structure keeps every team member able to find any file without asking.</p>
+
+    <h2>GitHub Repository Setup with VS Code</h2>
+    <ol>
+        <li>Create a repository on GitHub and clone it into the project folder.</li>
+        <li>Open the folder in VS Code and set up the Python interpreter to your virtual environment.</li>
+        <li>Add <code>.gitignore</code> entries for <code>venv/</code>, <code>__pycache__/</code>, data files, and environment secrets.</li>
+        <li>Commit the scaffolding with a clear first message so history starts clean.</li>
+    </ol>
+    <p>Use VS Code's integrated source control panel (the branch icon) to stage and commit instead of the terminal if you prefer; the commands underneath are the same <code>git add</code> and <code>git commit</code> from the previous chapter.</p>
+
+    <h2>Packaging the Project with setup.py</h2>
+    <p>A <code>setup.py</code> turns your source folder into a proper Python package, so modules can import each other with plain names like <code>from src.exception import CustomException</code> instead of fragile relative paths.</p>
+    <pre><code>from setuptools import setup, find_packages
+from typing import List
+
+def get_requirements() -&gt; List[str]:
+    with open("requirements.txt") as f:
+        return [r for r in f.read().splitlines() if r and not r.startswith("-e .")]
+
+setup(
+    name="mlops-project",
+    version="0.1.0",
+    packages=find_packages(),
+    install_requires=get_requirements(),
+)</code></pre>
+    <p>Add <code>-e .</code> to <code>requirements.txt</code> if you want the package installed in editable mode, so every change to the source is picked up immediately during development.</p>
+
+    <h2>Logging and Exception Handling Implementation</h2>
+    <p>An MLOps pipeline runs unattended, often at odd hours, so it must leave a clear trail. Centralise logging in one module every other file imports:</p>
+    <pre><code>import logging, os
+os.makedirs("logs", exist_ok=True)
+logging.basicConfig(
+    filename="logs/pipeline.log",
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(module)s: %(message)s",
+)
+def get_logger(name):
+    return logging.getLogger(name)</code></pre>
+    <p>Pair it with a custom exception class that logs the full traceback when raised, and wrap every component call so a failure names the exact stage that broke:</p>
+    <pre><code>class CustomException(Exception):
+    def __init__(self, message):
+        self.message = message
+        super().__init__(message)
+        logger.error(f"{message} | {sys.exc_info()}")</code></pre>
+
+    <h2>ETL Pipelines: An Introduction</h2>
+    <p><strong>ETL</strong> stands for <strong>Extract, Transform, Load</strong>. It is the classic recipe for moving data from where it is produced to where analysis happens:</p>
+    <ul>
+        <li><strong>Extract</strong>: pull raw data from a source such as an API, a CSV, or a database.</li>
+        <li><strong>Transform</strong>: clean, deduplicate, validate, and reshape the data into a consistent format.</li>
+        <li><strong>Load</strong>: write the cleaned data to a destination, such as a data warehouse or a document database.</li>
+    </ul>
+    <p>Many ML projects run a smaller version of this: extract a raw dataset, transform it with preprocessing, and load it into a store the training pipeline reads from.</p>
+
+    <h2>Setting Up MongoDB Atlas</h2>
+    <p><strong>MongoDB Atlas</strong> is a hosted NoSQL document database that stores data as flexible JSON-like documents. It is a convenient destination for ETL output because documents do not need a fixed schema.</p>
+    <ol>
+        <li>Create a free MongoDB Atlas account and build a cluster in the free tier.</li>
+        <li>Create a database user with a password, and add the current IP to the network access list so your machine can connect.</li>
+        <li>Copy the connection string; it looks like <code>mongodb+srv://user:password@cluster.mongodb.net/</code>.</li>
+        <li>Keep the string in an environment variable, never in source code, and connect from Python with the PyMongo driver.</li>
+    </ol>
+
+    <h2>ETL Pipeline Setup with Python</h2>
+    <p>Here is a small ETL script that reads a CSV, cleans a column, and loads the result into MongoDB:</p>
+    <pre><code>import pandas as pd
+from pymongo import MongoClient
+
+def extract(path="data/raw.csv"):
+    return pd.read_csv(path)
+
+def transform(df):
+    df = df.dropna(subset=["scores"])
+    df["scores"] = df["scores"].astype(float)
+    return df
+
+def load(df):
+    client = MongoClient(os.environ["MONGO_URI"])
+    db = client["mlops"]
+    db["students"].insert_many(df.to_dict("records"))
+
+load(transform(extract()))</code></pre>
+    <p>Run the stages in the right order and log the row counts before and after each step, so the pipeline reports how much data actually moved.</p>
+
+    <h2>Data Ingestion Architecture</h2>
+    <p>Data ingestion is the component that loads data from the ETL destination into the training workflow. Architect it in three layers:</p>
+    <ol>
+        <li>A <strong>configuration</strong> layer holding paths and connection strings.</li>
+        <li>A <strong>component</strong> layer that performs the actual work.</li>
+        <li>A <strong>pipeline</strong> layer that calls components in order.</li>
+    </ol>
+    <p>Separating configuration from behaviour means the same code runs against different datasets by only changing configuration, which is exactly what makes pipelines reusable.</p>
+    <h3>Data Ingestion Configuration</h3>
+    <p>Hold the settings in a dataclass so the ingestion component never hardcodes paths:</p>
+    <pre><code>@dataclass
+class DataIngestionConfig:
+    train_path: str = os.path.join("artifacts", "train.csv")
+    test_path: str = os.path.join("artifacts", "test.csv")
+    raw_path: str = os.path.join("artifacts", "data.csv")</code></pre>
+    <h3>Data Ingestion Component</h3>
+    <p>The component reads from MongoDB (or another source), performs a reproducible split, and saves the split files:</p>
+    <pre><code>class DataIngestion:
+    def __init__(self, config: DataIngestionConfig):
+        self.config = config
+
+    def initiate_ingestion(self):
+        df = load_from_mongodb("mlops", "students")
+        train_df = df.sample(frac=0.8, random_state=42)
+        test_df = df.drop(train_df.index)
+        train_df.to_csv(self.config.train_path, index=False)
+        test_df.to_csv(self.config.test_path, index=False)
+        return self.config.train_path, self.config.test_path</code></pre>
+
+    <h2>Data Validation</h2>
+    <p>Models are only as good as the data they see, so the pipeline must verify the data before spending compute on training.</p>
+    <h3>Part 1: Schema and Drift Checks</h3>
+    <p>Validation first checks that expected columns exist, are of the right types, and have acceptable ranges or value sets. A second check is <strong>data drift</strong>: compare the distribution of the new batch against the reference data the model was trained on. Large drift is a warning that the model may be making decisions in a world it never saw.</p>
+    <pre><code>expected = {"scores": "float64", "study_hours": "int64"}
+for col, dtype in expected.items():
+    if col not in df or str(df[col].dtype) != dtype:
+        raise CustomException(f"Validation failed on {col}")</code></pre>
+    <h3>Part 2: Saving the Validated Sets</h3>
+    <p>Only after checks pass do we write validated train and test files to the artifacts folder and log the outcome. Reject the run on failure instead of silently training on bad data.</p>
+
+    <h2>Data Transformation</h2>
+    <p>Transformation converts validated raw data into the numeric feature matrix a model can consume.</p>
+    <h3>Architecture</h3>
+    <p>Use scikit-learn's <code>ColumnTransformer</code> with separate pipelines for numeric and categorical columns, and save the fitted transformer as an artifact. The same object must be reused at prediction time so new data is transformed identically to training data.</p>
+    <h3>Implementation</h3>
+    <pre><code>num_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler()),
+])
+cat_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("onehot", OneHotEncoder(handle_unknown="ignore")),
+])
+preprocessor = ColumnTransformer([
+    ("num", num_pipeline, numeric_features),
+    ("cat", cat_pipeline, categorical_features),
+])</code></pre>
+    <p>Fit on the training split only, transform both splits, and persist the preprocessor with <code>joblib.dump</code>.</p>
+
+    <h2>Model Trainer Implementation (Part 1)</h2>
+    <p>The trainer fits a candidate model on the transformed training data and reports a baseline metric on the held-out set. Part 1 is deliberately simple: one algorithm, fixed settings, one score, all logged:</p>
+    <pre><code>class ModelTrainer:
+    def __init__(self, model_path="artifacts/model.pkl"):
+        self.model_path = model_path
+
+    def train(self, X_train, X_test, y_train, y_test):
+        model = RandomForestRegressor(random_state=42)
+        model.fit(X_train, y_train)
+        r2 = model.score(X_test, y_test)
+        logger.info(f"Baseline R2 = {r2}")
+        return model</code></pre>
+
+    <h2>Trainer, Evaluation and Hyperparameter Tuning</h2>
+    <p>Now evaluate honestly with several metrics and tune the hyperparameters with cross-validated search. Log every metric, not just the headline one:</p>
+    <pre><code>from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.model_selection import RandomizedSearchCV
+
+params = {"n_estimators": [100, 300, 500], "max_depth": [5, 10, None]}
+search = RandomizedSearchCV(RandomForestRegressor(), params,
+                            cv=5, n_iter=10, random_state=42)
+search.fit(X_train, y_train)
+best = search.best_estimator_
+preds = best.predict(X_test)
+logger.info(f"R2={r2_score(y_test, preds):.3f} "
+            f"MAE={mean_absolute_error(y_test, preds):.3f}")</code></pre>
+    <div class="note">
+        <strong>Heads-up:</strong> A tune that improves the training score but not the test score is usually overfitting. Compare both scores before declaring victory.
+    </div>
+
+    <h2>Experiment Tracking with MLflow</h2>
+    <p><strong>MLflow</strong> records experiments so you can compare runs later. Each run logs parameters, metrics, and artifacts to a central store:</p>
+    <pre><code>import mlflow
+
+with mlflow.start_run(run_name="rf-tuned"):
+    mlflow.log_params(search.best_params_)
+    mlflow.log_metric("r2", r2)
+    mlflow.log_metric("mae", mae)
+    mlflow.log_artifact("artifacts/model.pkl")</code></pre>
+    <p>With MLflow you can look back over hundreds of runs and answer the question every ML team eventually asks: "which experiment actually produced the best model, and with what settings?"</p>
+
+    <h2>Remote Tracking with DagsHub</h2>
+    <p>Local MLflow files help one person. A <strong>DagsHub</strong> repository hosts the experiment store in the cloud so a team can share it. DagsHub is a hosting platform for data science projects that integrates Git, DVC, and MLflow together.</p>
+    <ol>
+        <li>Create a repository on DagsHub and copy its MLflow tracking URI.</li>
+        <li>Set the URI in your environment: <code>MLFLOW_TRACKING_URI</code>.</li>
+        <li>Connect from Python: <code>mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])</code>.</li>
+        <li>Now every experiment you run appears in the DagsHub UI, visible to the whole team.</li>
+    </ol>
+
+    <h2>Model Pusher Implementation</h2>
+    <p>Tracking and experimenting produce many candidate models, but only one should reach production. The <strong>model pusher</strong> selects the best registered model and moves it into the production path, a clearly named file the deployment reads:</p>
+    <pre><code>class ModelPusher:
+    def __init__(self, best_model_path, prod_path):
+        self.best_model_path = best_model_path
+        self.prod_path = prod_path
+
+    def push(self):
+        shutil.copy(self.best_model_path, self.prod_path)
+        logger.info(f"Pushed model to {self.prod_path}")
+        return self.prod_path</code></pre>
+    <p>Keeping one production path makes the serving code trivial and lets a rollback be a simple copy of the previous artifact.</p>
+
+    <h2>Training and Batch Prediction Pipelines</h2>
+    <p>The <strong>training pipeline</strong> is a single entry point that calls every component in order: ingestion, validation, transformation, training, tracking, and pushing. The <strong>batch prediction pipeline</strong> reads new data, applies the saved preprocessor, loads the production model, and writes predictions back to a destination such as a CSV or database:</p>
+    <pre><code>def run_batch_predictions(new_data_path, out_path):
+    df = pd.read_csv(new_data_path)
+    features = preprocessor.transform(df)
+    preds = prod_model.predict(features)
+    df["prediction"] = preds
+    df.to_csv(out_path, index=False)</code></pre>
+    <p>Batch prediction suits cases where answers are not needed instantly: nightly scoring of loan applications, churn scores refreshed each morning, and so on.</p>
+
+    <h2>Pushing Artifacts to AWS S3</h2>
+    <p>Models and data should outlive the machine that trained them. <strong>S3</strong> is AWS object storage and the natural home for final artifacts. Upload with the AWS SDK:</p>
+    <pre><code>import boto3
+
+s3 = boto3.client("s3")
+s3.upload_file("artifacts/model.pkl", "my-ml-bucket", "models/model.pkl")
+s3.upload_file("artifacts/preprocessor.pkl", "my-ml-bucket", "models/preprocessor.pkl")</code></pre>
+    <p>Store training data, transformed data, and models under clearly named keys, and version them by date. A new machine can now reconstruct the entire pipeline from S3 alone.</p>
+
+    <h2>Docker Image and GitHub Actions</h2>
+    <p>The deployment pipeline builds a Docker image of the serving app, then runs it in the cloud. <strong>GitHub Actions</strong> automates the whole process: every push to the main branch triggers a workflow that builds the image and ships it. A workflow file lives in <code>.github/workflows/main.yml</code>:</p>
+    <pre><code>name: build-and-deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1</code></pre>
+    <p>Never write real keys in the file; reference them as repository secrets.</p>
+
+    <h2>GitHub Action Pushing to ECR</h2>
+    <p>Continuing the workflow, the job builds the Docker image and pushes it to <strong>Amazon ECR</strong>. The pattern mirrors the manual steps from the previous chapter, automated:</p>
+    <pre><code>- name: Login to Amazon ECR
+  run: |
+    aws ecr get-login-password --region us-east-1 | \
+    docker login --username AWS --password-stdin \
+    ${{ secrets.ECR_REGISTRY }}
+- name: Build and push image
+  run: |
+    docker build -t ${{ secrets.ECR_REGISTRY }}/my-app:latest .
+    docker push ${{ secrets.ECR_REGISTRY }}/my-app:latest</code></pre>
+    <p>After this step completes, a fresh image of your app is sitting in the registry, waiting to be pulled by the server that will host it.</p>
+
+    <h2>Final Deployment to an EC2 Instance</h2>
+    <ol>
+        <li>Launch an EC2 instance with Docker installed, either from a prepared Amazon Machine Image or by installing Docker manually.</li>
+        <li>Install and configure the AWS CLI on the instance so it can pull from ECR.</li>
+        <li>Pull the image and run it, mapping the container port to 8080.</li>
+        <li>Open port 8080 in the security group and test the public URL with a real request.</li>
+    </ol>
+    <pre><code>docker pull 123456789.dkr.ecr.us-east-1.amazonaws.com/my-app:latest
+docker run -d -p 8080:8080 \
+    -e MONGO_URI=... 123456789.dkr.ecr.us-east-1.amazonaws.com/my-app:latest</code></pre>
+    <p>The app is now live, reproducible from the image, and updateable by simply pushing a new image and restarting the container.</p>
+
+    <h2>Getting Started with MLflow and DagsHub</h2>
+    <p>If MLOps feels overwhelming, start small: use MLflow locally on your next single experiment. Log three things per run, parameters, metrics, and the model file, then open the UI with <code>mlflow ui</code>. Once that habit is established, move the tracking server to DagsHub so the whole team sees the same experiments. Incremental adoption beats a big-bang rewrite every time.</p>
+
+    <h2>Data Versioning Control</h2>
+    <p>Models are meaningless if you cannot reproduce the data they trained on. <strong>DVC</strong> (Data Version Control) brings Git-style versioning to datasets and models, which live outside Git because they are too large:</p>
+    <pre><code>dvc init
+dvc remote add -d myremote s3://my-ml-bucket/dvc-store
+dvc add data/train.csv
+git add data/train.csv.dvc .dvc
+git commit -m "track dataset"
+dvc push</code></pre>
+    <p>A tiny pointer file records the data hash in Git, while the real file lives in the remote. Checking out an old commit also restores the exact data version, so every experiment is reproducible.</p>
+
+    <h2>Building Data Science Projects with BentoML</h2>
+    <p><strong>BentoML</strong> is a modern serving framework that packages a trained model into a <em>bento</em>: a self-contained bundle with the model, the Python environment, and an HTTP API. Building a bento is declarative:</p>
+    <pre><code>import bentoml
+from bentoml.io import JSON, NumpyNdarray
+
+runner = bentoml.sklearn.get("my_model:latest").to_runner()
+svc = bentoml.Service("student-predictor", runners=[runner])
+
+@svc.api(input=JSON(), output=JSON())
+def predict(input_data):
+    features = input_data["features"]
+    result = runner.predict.run([features])
+    return {"prediction": float(result[0])}</code></pre>
+    <p>Then build the bento with <code>bentoml build</code> and serve it with <code>bentoml serve</code>. BentoML handles versioning, packaging, and even converting the bento into a Docker image or serverless function, which makes it a strong final piece of the modern MLOps toolbox.</p>
+    <div class="info">
+        <strong>Tip:</strong> BentoML and MLflow work well together: MLflow manages experiments and model registry, while BentoML handles packaging and serving. Many production teams use exactly this pairing.
+    </div>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> Build a minimal MLOps pipeline for any dataset: ETL raw data into MongoDB Atlas, run ingestion, validation, and transformation, train and tune a model while logging three experiments with MLflow, push the winning model to a production path, then containerise the serving app and deploy it to EC2 through ECR with a GitHub Actions workflow. For bonus credit, track the dataset with DVC and serve the model with BentoML instead of Flask.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="29-end-to-end-ml-project.html">Prev: End-to-End ML Projects</a>
+        <a href="31-nlp-text-representation.html">Next: NLP: Text Representation</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>6. PySpark for Data Engineering - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>6. PySpark for Data Engineering</h1>
+<p class="tag">Chapter 6</p>
+
+<h2>What is PySpark?</h2>
+<p><strong>PySpark</strong> is the Python API for <strong>Apache Spark</strong>, the open-source unified engine for large-scale data processing. PySpark lets you write Python code that runs distributed across a cluster, processing data that is too big for a single machine. On GCP, PySpark runs on <strong>Dataproc</strong> (or Dataproc Serverless).</p>
+
+<h2>The Spark Execution Model</h2>
+<p>Understanding Spark's model explains most performance behavior:</p>
+<ul>
+<li><strong>Driver:</strong> runs your main program, builds the execution plan, schedules tasks.</li>
+<li><strong>Executors:</strong> worker processes on cluster nodes that run tasks and store cached data.</li>
+<li><strong>Tasks:</strong> units of work, one per partition; the parallelization unit.</li>
+<li><strong>Stage:</strong> a group of tasks that can run without shuffling data.</li>
+<li><strong>Shuffle:</strong> redistribution of data across partitions (e.g., for group-by or join) — the expensive operation to minimize.</li>
+<li><strong>Lazy evaluation:</strong> transformations build a plan; nothing runs until an action (collect, count, write) forces execution. This lets Spark optimize the plan.</li>
+</ul>
+
+<h2>DataFrames: The Main API</h2>
+<p>For data engineering, you use the <strong>DataFrame</strong> API — a distributed table with named columns, similar in feel to pandas/SQL but distributed.</p>
+
+<pre><code>from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+
+spark = SparkSession.builder.appName("sales_etl").getOrCreate()
+
+# Read Parquet from GCS
+df = spark.read.parquet("gs://my-bucket/sales/*.parquet")
+
+# Transform
+result = (
+    df.filter(F.col("amount") > 0)
+      .withColumn("year_month", F.date_format(F.col("sale_ts"), "yyyy-MM"))
+      .groupBy("year_month", "region")
+      .agg(
+          F.sum("amount").alias("revenue"),
+          F.countDistinct("customer_id").alias("customers")
+      )
+      .orderBy("year_month")
+)
+
+# Show (action) and write (action)
+result.show(10)
+result.write.mode("overwrite").parquet("gs://my-bucket/agg/monthly_sales/")</code></pre>
+
+<h2>RDDs and the Low-Level API</h2>
+<p>Before DataFrames, the API was <strong>RDDs</strong> (Resilient Distributed Datasets). DataFrames are the modern default (optimized via the Catalyst optimizer and Tungsten execution). RDDs are still useful for low-level control and custom operations, but prefer DataFrames/SQL for data engineering:</p>
+
+<pre><code># RDD example (rarely needed, but good to recognize)
+rdd = spark.sparkContext.textFile("gs://my-bucket/logs/*.log")
+counts = rdd.flatMap(lambda line: line.split(" ")) \
+            .map(lambda word: (word, 1)) \
+            .reduceByKey(lambda a, b: a + b)
+for w, c in counts.take(10):
+    print(w, c)</code></pre>
+
+<h2>Spark SQL: The Engine's SQL</h2>
+<p>Spark SQL lets you register DataFrames as tables and query them with SQL — the sweet spot when logic is clearer in SQL:</p>
+
+<pre><code>df.createOrReplaceTempView("sales")
+
+result = spark.sql("""
+    SELECT date_format(sale_ts, 'yyyy-MM') AS year_month,
+           region,
+           sum(amount) AS revenue
+    FROM sales
+    WHERE amount > 0
+    GROUP BY year_month, region
+    ORDER BY year_month
+""")
+result.write.mode("overwrite").saveAsTable("analytics.monthly_sales")</code></pre>
+
+<p>DataFrames, Spark SQL, and PySpark code all compile to the same optimized physical plans — pick whichever expresses the logic best.</p>
+
+<h2>Optimization Fundamentals</h2>
+<ul>
+<li><strong>Minimize shuffles:</strong> group/join by aligned partition keys, use <code>coalesce</code> instead of <code>repartition</code> when shrinking.</li>
+<li><strong>Choose file formats well:</strong> Parquet (columnar, compressed) over CSV/JSON for most workloads.</li>
+<li><strong>Bucketing:</strong> pre-bucket tables on join keys so joins become shuffle-free.</li>
+<li><strong>Broadcast small tables:</strong> <code>broadcast(df_small)</code> avoids shuffling a big table in joins.</li>
+<li><strong>Filter early:</strong> push predicates down; Spark pushes filters into file readers (Parquet) automatically.</li>
+<li><strong>Avoid per-row Python UDFs on hot paths</strong> — use native SQL functions; use Pandas UDFs (<code>pandas_udf</code>) for vectorized operations.</li>
+<li><strong>Manage partition counts:</strong> too few partitions under-utilize the cluster; too many create scheduling overhead. ~100-200MB per partition is a good rule of thumb.</li>
+</ul>
+
+<div class="note">
+<strong>Join strategy example:</strong> joining a 1 billion-row fact table with a 1 million-row dimension — broadcasting the dimension avoids a full shuffle. Joining two huge tables requires aligning bucketing or letting Spark choose sort-merge join. Understanding this trade-off is the #1 Spark performance skill.
+</div>
+
+<h2>Reading and Writing with GCP Services</h2>
+<pre><code># GCS (native)
+spark.read.parquet("gs://bucket/path")
+df.write.format("csv").option("header", True).mode("append").save("gs://bucket/out/")
+
+# BigQuery via the Spark BigQuery connector
+df = spark.read.format("bigquery").option("table", "myproj.analytics.orders").load()
+df.write.format("bigquery") \
+  .option("table", "myproj.analytics.orders_clean") \
+  .option("temporaryGcsBucket", "gs://tmp-bucket") \
+  .mode("append").save()
+
+# Reading from a database via JDBC (e.g., Cloud SQL, or external DBs)
+jdbc_df = spark.read \
+  .format("jdbc") \
+  .option("url", "jdbc:postgresql://HOST:5432/db") \
+  .option("dbtable", "public.orders") \
+  .option("user", "svc_user") \
+  .option("password", "<from-secret-manager>") \
+  .load()</code></pre>
+
+<div class="warn">
+<strong>Security:</strong> never hardcode database credentials in Spark code. Pass secrets via Dataproc secret references, Secret Manager, or Dataproc Metastore/Vault integrations.
+</div>
+
+<h2>PySpark Project Structure and Best Practices</h2>
+<pre><code>project/
+├── src/
+│   └── etl/
+│       ├── __init__.py
+│       ├── main.py          # entry point with argparse (date, mode, project)
+│       ├── jobs/
+│       │   ├── sales_agg.py # pure transform functions (testable)
+│       │   └── customer_dim.py
+│       └── utils/
+│           └── io.py        # read/write helpers (bigquery, gcs)
+├── tests/
+│   └── test_sales_agg.py
+└── requirements.txt</code></pre>
+
+<p>Best practices: keep business logic in pure functions that take and return DataFrames (testable without a cluster), separate I/O from transforms, use <code>argparse</code> for parameters, log with the Python logging module, and pin library versions.</p>
+
+<h2>Testing PySpark</h2>
+<p>Test transforms with a local SparkSession on small sample data (pytest + a <code>spark-session</code> fixture). You can test pure functions and even whole jobs locally against a few rows:</p>
+
+<pre><code># conftest.py (pytest fixture)
+import pytest
+from pyspark.sql import SparkSession
+
+@pytest.fixture(scope="session")
+def spark():
+    return SparkSession.builder.master("local[2]").getOrCreate()
+
+# test example
+def test_sales_agg(spark):
+    data = [("2026-01-01", "US", 100.0), ("2026-01-01", "EU", 50.0)]
+    df = spark.createDataFrame(data, ["sale_ts", "region", "amount"])
+    out = agg_revenue(df)          # your pure function
+    assert out.filter("region='US'").select("revenue").collect()[0][0] == 100.0</code></pre>
+
+<h2>Monitoring and Debugging</h2>
+<ul>
+<li>Check the <strong>Spark UI</strong> (via Dataproc component gateway) for stage timing, shuffle size, and executor memory.</li>
+<li>Watch for <strong>data skew</strong> (one partition much larger) and <strong>spilled memory</strong>.</li>
+<li>Enable event logging and review failed task reasons.</li>
+<li>Use Cloud Logging to centralize driver logs; Cloud Monitoring for cluster metrics.</li>
+</ul>
+
+<h2>Common Pitfalls</h2>
+<ul>
+<li><code>collect()</code> on huge DataFrames (pulls everything to the driver — OOM).</li>
+<li>Repeated actions in a loop (each action re-executes the full lineage).</li>
+<li>Using a driver-global <code>SparkSession</code> inside UDFs.</li>
+<li>Shuffling huge data in default configuration without tuning <code>spark.sql.shuffle.partitions</code>.</li>
+<li>Running PySpark on a single machine with big data — use Dataproc and let it scale.</li>
+</ul>
+
+<div class="exercise">
+<strong>Practice Task:</strong> On Dataproc (single-node cluster is fine): (1) load a public CSV from GCS into a DataFrame, (2) clean it (drop nulls, normalize dates), (3) join it with a small broadcast dimension, (4) aggregate and write Parquet + a BigQuery table, (5) write 3 pytest tests for your transform functions and run them locally. Then use the Spark UI to find the stage with the most shuffle and explain why.
+</div>
+
+<nav>
+  <a href="5-dataproc.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="7-python-data-engineering.html">Next: Python for Data Engineering &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 17: EDA Case Studies | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 17</span>
+    <h1>EDA Case Studies</h1>
+
+    <h2>EDA as a Habit</h2>
+    <p>Exploratory Data Analysis (EDA) is the process of getting to know a dataset before modelling it: checking shapes and types, hunting for missing values and outliers, and asking the dataset questions through summary statistics and plots. In this chapter we run three realistic case studies end-to-end so the cleaning and visualization skills from earlier chapters become muscle memory. Treat each one as a recipe you can apply to any new dataset you meet.</p>
+
+    <h2>Case Study 1: Red Wine Dataset EDA</h2>
+    <p>The classic Red Wine Quality dataset contains about 1,600 bottles of red wine, each described by 11 chemical features (fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free and total sulfur dioxide, density, pH, sulphates, alcohol) plus a quality score from 0 to 10.</p>
+    <h3>Univariate Analysis</h3>
+    <p>Start one column at a time. Check each feature&apos;s data type, count of missing values, mean, median, and spread, then plot histograms. Two findings stand out immediately in this dataset: <code>density</code> is nearly constant (its histogram is a razor-thin spike) while <code>residual sugar</code> is heavily right-skewed. No values are missing — the dataset is clean — but the quality score itself is skewed toward 5 and 6, with very few wines scoring below 3 or above 8.</p>
+    <pre><code>import pandas as pd
+
+df = pd.read_csv("winequality-red.csv")
+print(df.info())
+print(df.describe().T)
+df.hist(figsize=(12, 10), bins=30)</code></pre>
+    <h3>Multivariate Analysis</h3>
+    <p>Next, relationships between features. A correlation heatmap reveals that <code>alcohol</code> correlates positively with quality, while <code>volatile acidity</code> and <code>density</code> correlate negatively with it. Sulfur dioxide features correlate strongly with each other (a redundancy to remember for modelling). Pairplots or scatter plots confirm whether these correlations are linear and whether any outliers are driving them.</p>
+    <h3>Quality Analysis</h3>
+    <p>Finally, relate everything to the target. Group the data by quality score and compare the average of each feature; a table of group means quickly shows which chemistry separates good wine from bad. A common modelling trick for this dataset is to convert quality into a binary target (&ldquo;good&rdquo; if score &ge; 7, &ldquo;not good&rdquo; otherwise), which gives a clean classification problem instead of an ordinal regression one.</p>
+    <div class="note">
+        <strong>Takeaway:</strong> always close the loop from &ldquo;what does one column look like&rdquo; to &ldquo;how do columns relate&rdquo; to &ldquo;what drives the target.&rdquo; That three-step rhythm — univariate, multivariate, target-focused — is the skeleton of every EDA.
+    </div>
+
+    <h2>Case Study 2: Flight Price Dataset — EDA and Feature Engineering</h2>
+    <p>Flight-price datasets (with columns like airline, source and destination cities, departure and arrival times, total stops, and price) are dirtier than the wine data: strings, timestamps, and clear interaction effects.</p>
+    <h3>Initial Sweep</h3>
+    <p>Load the data and inspect. The price column is numeric; check its distribution for a long right tail and note that a log transform may help later. Airline, source, and destination are categorical — decide which encoding to use (one-hot for low-cardinality columns).</p>
+    <h3>Feature Engineering</h3>
+    <p>The raw columns hide most of the signal, so we engineer new ones:</p>
+    <ul>
+        <li><strong>Time features:</strong> convert departure and arrival strings to 24-hour integers (e.g., 13:30 &rarr; 13.5) so the model can use them, then derive <em>duration</em> = arrival minus departure (adjusting for overnight flights).</li>
+        <li><strong>Day-of-week features:</strong> map dates to weekday and weekend flags — Friday evening and Sunday return flights are reliably pricier.</li>
+        <li><strong>Month and season:</strong> encode the month and a holiday-season flag (Diwali, New Year) since demand spikes inflate prices.</li>
+        <li><strong>Route grouping:</strong> combine source-destination into a single categorical feature so the model sees the route as one unit instead of two independent columns.</li>
+        <li><strong>Stops:</strong> keep total_stops numeric — direct flights (0 stops) are premium, so test both the raw count and a binary &ldquo;is_direct&rdquo; flag.</li>
+    </ul>
+    <pre><code>def parse_time(t):
+    h, m = t.split(":")
+    return int(h) + int(m) / 60
+
+df["dep_hours"] = df["dep_time"].apply(parse_time)
+df["arr_hours"] = df["arr_time"].apply(parse_time)
+df["duration"] = (df["arr_hours"] - df["dep_hours"]) % 24</code></pre>
+    <h3>Validation Checks</h3>
+    <p>Cross-tabulate price against airline and stops, and box-plot price by day of week. These two visual checks immediately confirm which engineered features carry signal. Check for duplicate rows (identical flights listed twice are common in scraped data) and drop them before modelling.</p>
+    <div class="info">
+        <strong>Takeaway:</strong> domain knowledge is feature engineering. Nothing in a flight dataset changes price more than route, timing, and demand cycles — and those exist only if you build them from raw strings and dates.
+    </div>
+
+    <h2>Case Study 3: Data Cleaning with the Google Play Store Dataset</h2>
+    <p>The Google Play Store Apps dataset is a favourite for practising real-world cleaning because it is messier than the wine data and gets messier in the ways real data does: mixed types, units inside numbers, and a corrupted-looking price column.</p>
+    <h3>Load and Inspect</h3>
+    <p>The dataset holds app name, category, rating, reviews count, size, installs, price, content rating, and genres. The first sweep reveals the traps:</p>
+    <ul>
+        <li><strong>Missing ratings:</strong> a handful of apps have no rating — decide whether to drop them (few rows) or fill the median.</li>
+        <li><strong>Mixed size column:</strong> sizes appear as &ldquo;19M&rdquo; for megabytes, &ldquo;1,024K&rdquo; for kilobytes, and &ldquo;Varies with device&rdquo; for variable-sized apps — three different data stories in one column.</li>
+        <li><strong>Installs as text:</strong> values like &ldquo;1,000,000+&rdquo; and &ldquo;Free&rdquo; (wait — Free belongs to price) — installs are strings with commas, a plus sign, and an unbounded top bucket (&ldquo;10,000,000+&rdquo;).</li>
+        <li><strong>Price column:</strong> values like &ldquo;$0.99&rdquo; hide a number behind a currency symbol, and a stray &ldquo;Everyone&rdquo; (a content-rating value) has been dumped into price in some rows.</li>
+        <li><strong>Duplicates:</strong> several apps appear more than once; decide which copy to keep.</li>
+    </ul>
+    <pre><code>def clean_installs(s):
+    s = str(s).replace("+", "").replace(",", "")
+    if s == "0" or s == "Free":
+        return 0
+    return int(s)
+
+df["installs_clean"] = df["installs"].apply(clean_installs)</code></pre>
+    <h3>Cleaning Steps</h3>
+    <ol>
+        <li>Convert <code>installs</code> to a clean numeric column with the function above; keep the categorical &ldquo;bucket&rdquo; version too if you want both views.</li>
+        <li>Strip the &ldquo;$&rdquo; from price and convert to float; drop or fix the rogue &ldquo;Everyone&rdquo; rows.</li>
+        <li>Parse size into megabytes: extract the number, detect the unit, and divide kilobytes by 1024; assign NaN to &ldquo;Varies with device.&rdquo;</li>
+        <li>Drop duplicate app names, keeping the first occurrence.</li>
+        <li>Verify every column now has the right dtype with <code>df.dtypes</code> and re-check missing-value counts.</li>
+    </ol>
+
+    <h2>Case Study 3 Part 2: EDA on the Cleaned Play Store Data</h2>
+    <p>With clean columns, the analysis can finally happen. Now we answer real questions with plots and tables.</p>
+    <h3>Ratings and Reviews</h3>
+    <p>Most apps sit between 4.0 and 4.5 stars, and the rating distribution has a strong left tail of poorly rated apps. Log-scale the reviews count — a few blockbuster apps dominate, and the skew is dramatic.</p>
+    <h3>Category Breakdown</h3>
+    <p>Count apps per category with a bar chart: FAMILY, GAME, and TOOLS typically dominate, while a long tail of categories each hold a handful of apps. Then explore whether price differs by category — game apps skew free with a few premium outliers, while medical and business categories have more paid apps.</p>
+    <h3>Size, Installs, and Price</h3>
+    <p>Scatter plots of size vs rating and installs vs rating usually show no strong linear trend — quality is only weakly tied to size or popularity. The big insight for any later model is that <code>installs</code> and <code>reviews</code> are heavily skewed, so a log transform will matter more than any single engineered column.</p>
+    <h3>Content Rating and Genres</h3>
+    <p>Cross-tab content rating against average rating, and compare the average installs for &ldquo;Everyone&rdquo; versus &ldquo;Mature 17+&rdquo; apps. Genres overlap categories, so inspect unique genre strings before deciding whether to keep both columns.</p>
+    <pre><code>import seaborn as sns
+
+sns.histplot(df_clean["rating"], bins=30)
+sns.boxplot(data=df_clean, x="category", y="rating")
+sns.scatterplot(data=df_clean, x="size_mb", y="installs_clean", alpha=0.3)</code></pre>
+    <div class="exercise">
+        <strong>Exercise:</strong> Load any public CSV you can find (or reuse the Play Store one) and reproduce the full EDA loop: (1) inspect dtypes and missing values; (2) clean the two messiest columns; (3) engineer at least three new features that encode time, text, or combinations of existing columns; (4) produce one histogram, one box plot, one correlation heatmap, and one pair of grouped means against the target; and (5) write a short paragraph naming the three most important drivers of your target and the strongest warning signs you saw in the data.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="16-data-cleaning-features.html">Prev: Data Cleaning &amp; Feature Engineering</a>
+        <a href="18-ml-foundations.html">Next: Machine Learning Foundations</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

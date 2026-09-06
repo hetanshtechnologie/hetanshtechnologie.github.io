@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Load Balancer Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:900px;margin:24px auto;padding:0 16px}
+.prompt{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin-bottom:20px;text-align:center}
+.prompt h2{color:#f8fafc;margin-bottom:8px}
+.prompt p{color:#94a3b8;font-size:14px}
+.servers{display:flex;justify-content:center;gap:16px;margin:20px 0;flex-wrap:wrap}
+.server{background:#1e293b;border:2px solid #334155;border-radius:12px;padding:16px;width:130px;text-align:center;cursor:pointer;transition:all .2s}
+.server:hover{border-color:#38bdf8;transform:translateY(-2px)}
+.server.selected{border-color:#38bdf8;box-shadow:0 0 20px rgba(56,189,248,.2)}
+.server-name{font-size:13px;color:#f8fafc;font-weight:600;margin-bottom:6px}
+.server-load{height:6px;background:#334155;border-radius:3px;overflow:hidden;margin-bottom:4px}
+.server-load-fill{height:100%;border-radius:3px;transition:width .3s}
+.server-stats{font-size:11px;color:#94a3b8}
+.request-queue{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:20px 0}
+.request-queue h3{font-size:14px;color:#f8fafc;margin-bottom:12px}
+.pending-requests{display:flex;gap:8px;flex-wrap:wrap;min-height:40px}
+.request-tag{background:#334155;border-radius:6px;padding:6px 12px;font-size:12px;color:#e2e8f0;display:flex;align-items:center;gap:6px;animation:slideIn .3s}
+.request-tag.type-get{border-left:3px solid #4ade80}
+.request-tag.type-post{border-left:3px solid #fbbf24}
+.request-tag.type-put{border-left:3px solid #a78bfa}
+.request-tag.type-delete{border-left:3px solid #f87171}
+@keyframes slideIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+.choices{display:flex;gap:12px;justify-content:center;margin:20px 0;flex-wrap:wrap}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:12px 20px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e293b}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none}
+.feedback.show{display:block}
+.feedback.correct-fb{border-color:#4ade80}
+.feedback.wrong-fb{border-color:#f87171}
+.feedback h3{font-size:14px;margin-bottom:6px}
+.feedback p{font-size:13px;color:#94a3b8}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block;transition:all .2s}
+.next-btn:hover{background:#7dd3fc}
+.diagram{display:flex;align-items:center;justify-content:center;gap:8px;margin:16px 0;flex-wrap:wrap}
+.diagram-box{background:#334155;border-radius:8px;padding:8px 14px;font-size:12px;color:#e2e8f0}
+.diagram-arrow{color:#38bdf8;font-size:18px}
+.progress-bar{width:100%;height:4px;background:#334155;border-radius:2px;margin-top:8px}
+.progress-fill{height:100%;background:#38bdf8;border-radius:2px;transition:width .5s}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+.game-over p{color:#94a3b8;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="topbar">
+<a href="../index.html">← Back</a>
+<h1>Load Balancer</h1>
+</div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/15</div>
+<div class="hud-item"><span id="streak">0</span>Streak</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="prompt">
+<h2 id="scenario-title">Incoming Requests</h2>
+<p id="scenario-desc">Route each request to the best server. Consider load, response time, and request type.</p>
+</div>
+<div class="servers" id="servers"></div>
+<div class="request-queue">
+<h3>Request Queue</h3>
+<div class="pending-requests" id="pending-requests"></div>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback">
+<h3 id="feedback-title"></h3>
+<p id="feedback-text"></p>
+</div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next Request →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Game Over!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=15,streak=0,bestStreak=0;
+let servers=[],currentRequest=null,answered=false;
+const types=['GET','POST','PUT','DELETE'];
+const endpoints=['/api/users','/api/orders','/api/products','/api/auth','/api/search','/api/payments','/api/notifications','/api/analytics'];
+const scenarios=[
+{desc:"High traffic GET request to popular endpoint",optimal:"lowest-latency",algo:"Round Robin"},
+{desc:"Heavy POST request for payment processing",optimal:"least-connections",algo:"Least Connections"},
+{desc:"DELETE request with server at max capacity",optimal:"avoid-full",algo:"Weighted Round Robin"},
+{desc:"GET request during peak hours",optimal:"lowest-latency",algo:"IP Hash"},
+{desc:"PUT request requiring session affinity",optimal:"sticky",algo:"Sticky Sessions"},
+{desc:"Batch GET requests from mobile clients",optimal:"lowest-latency",algo:"Least Response Time"},
+{desc:"POST webhook from external service",optimal:"least-connections",algo:"Least Connections"},
+{desc:"GET search query with high CPU usage",optimal:"lowest-latency",algo:"Resource Based"},
+{desc:"POST file upload to CDN server",optimal:"avoid-full",algo:"Weighted Round Robin"},
+{desc:"GET API call requiring cache hit",optimal:"cached",algo:"Consistent Hashing"},
+{desc:"DELETE account request with data cascade",optimal:"least-connections",algo:"Least Connections"},
+{desc:"PUT profile update with image processing",optimal:"avoid-full",algo:"Resource Based"},
+{desc:"GET dashboard with complex aggregation",optimal:"lowest-latency",algo:"Least Response Time"},
+{desc:"POST order during flash sale spike",optimal:"least-connections",algo:"Adaptive Load Balancing"},
+{desc:"GET health check from monitoring",optimal:"any",algo:"Round Robin"}
+];
+function initServers(){
+const configs=[
+{name:"Server A",latency:12,cpu:35,mem:40,conns:5},
+{name:"Server B",latency:8,cpu:72,mem:65,conns:18},
+{name:"Server C",latency:20,cpu:15,mem:25,conns:2},
+{name:"Server D",latency:15,cpu:90,mem:85,conns:30}
+];
+servers=configs.map((c,i)=>({...c,id:i}));
+}
+function renderServers(){
+const el=document.getElementById('servers');
+el.innerHTML=servers.map((s,i)=>{
+const load=Math.min(100,s.cpu);
+const color=load<50?'#4ade80':load<75?'#fbbf24':'#f87171';
+return`<div class="server" onclick="selectServer(${i})" id="srv-${i}">
+<div class="server-name">${s.name}</div>
+<div class="server-load"><div class="server-load-fill" style="width:${load}%;background:${color}"></div></div>
+<div class="server-stats">⚡${s.latency}ms · ${s.cpu}% CPU · ${s.conns} conns</div>
+</div>`;
+}).join('');
+}
+let selectedServer=-1;
+function selectServer(i){
+if(answered)return;
+selectedServer=i;
+document.querySelectorAll('.server').forEach((el,j)=>{
+el.classList.toggle('selected',j===i);
+});
+}
+function generateChoices(){
+const algo=round<scenarios.length?scenarios[round]:scenarios[round%scenarios.length];
+currentRequest={...algo,type:types[Math.floor(Math.random()*types.length)],endpoint:endpoints[Math.floor(Math.random()*endpoints.length)]};
+document.getElementById('scenario-title').textContent=`${currentRequest.type} ${currentRequest.endpoint}`;
+document.getElementById('scenario-desc').textContent=currentRequest.desc;
+const pr=document.getElementById('pending-requests');
+pr.innerHTML=`<div class="request-tag type-${currentRequest.type.toLowerCase()}">${currentRequest.type} ${currentRequest.endpoint}</div>`;
+const choices=document.getElementById('choices');
+const correctIdx=Math.floor(Math.random()*servers.length);
+let opts=servers.map((s,i)=>{
+let correct=i===correctIdx;
+let label=`${s.name} (${s.latency}ms, ${s.cpu}% CPU)`;
+return{label,correct};
+});
+// make sure optimal server is correct
+const bestIdx=servers.reduce((best,s,i)=>s.cpu<50&&s.latency<servers[best].latency?i:best,0);
+opts[bestIdx].correct=true;
+// ensure only one correct
+for(let i=0;i<opts.length;i++){if(i!==bestIdx)opts[i].correct=false;}
+opts=opts.sort(()=>Math.random()-.5);
+choices.innerHTML=opts.map((o,i)=>`<button class="choice-btn" onclick="answer(${i},${o.correct})" data-correct="${o.correct}">${o.label}</button>`).join('');
+}
+function answer(idx,correct){
+if(answered)return;
+answered=true;
+document.querySelectorAll('.choice-btn').forEach((b,i)=>{
+if(i===idx)b.classList.add(correct?'correct':'wrong');
+if(b.dataset.correct==='true')b.classList.add('correct');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(correct?'correct-fb':'wrong-fb');
+if(correct){
+score+=10+streak*2;
+streak++;
+if(streak>bestStreak)bestStreak=streak;
+document.getElementById('feedback-title').textContent='✓ Correct!';
+document.getElementById('feedback-text').textContent=`Algorithm: ${currentRequest.algo} — ${currentRequest.desc}`;
+}else{
+streak=0;
+document.getElementById('feedback-title').textContent='✗ Suboptimal';
+document.getElementById('feedback-text').textContent=`Best: ${currentRequest.algo} — ${currentRequest.desc}`;
+}
+document.getElementById('score').textContent=score;
+document.getElementById('streak').textContent=streak;
+document.getElementById('next-btn').style.display='block';
+// animate load change
+servers.forEach((s,i)=>{
+s.cpu=Math.max(5,Math.min(95,s.cpu+(Math.random()-.3)*20));
+s.conns=Math.max(1,Math.min(35,s.conns+(Math.random()>.5?1:-1)*Math.floor(Math.random()*5)));
+s.latency=Math.max(3,Math.min(30,s.latency+Math.floor((Math.random()-.5)*6)));
+});
+renderServers();
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;
+return;
+}
+document.getElementById('round').textContent=round+1;
+answered=false;
+selectedServer=-1;
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+document.getElementById('choices').innerHTML='';
+generateChoices();
+}
+function restart(){
+score=0;round=0;streak=0;
+document.getElementById('score').textContent=0;
+document.getElementById('round').textContent=1;
+document.getElementById('streak').textContent=0;
+document.getElementById('game-content').style.display='block';
+document.getElementById('game-over').style.display='none';
+initServers();renderServers();nextRound();
+}
+initServers();renderServers();generateChoices();
+</script>
+</body>
+</html>

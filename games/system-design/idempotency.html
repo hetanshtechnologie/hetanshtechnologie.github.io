@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Idempotency Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:900px;margin:24px auto;padding:0 16px}
+.request-flow{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0}
+.request-flow h3{margin-bottom:12px;font-size:14px;text-align:center}
+.flow-visual{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;margin:12px 0}
+.flow-step{background:#334155;border-radius:8px;padding:10px 14px;text-align:center;min-width:80px;font-size:12px;border:2px solid transparent}
+.flow-step.active{border-color:#38bdf8}
+.flow-step.done{border-color:#4ade80}
+.flow-step.error{border-color:#f87171}
+.flow-arrow{color:#475569;font-size:18px}
+.idempotency-key{background:#0f172a;border:2px solid #a78bfa;border-radius:8px;padding:8px 14px;font-family:monospace;font-size:12px;color:#a78bfa;display:inline-block;margin:8px 0}
+.request-log{background:#0f172a;border-radius:8px;padding:12px;margin:12px 0;font-family:monospace;font-size:11px;max-height:150px;overflow-y:auto}
+.log-entry{padding:4px 0;border-bottom:1px solid #334155;color:#94a3b8}
+.log-entry .success{color:#4ade80}
+.log-entry .error{color:#f87171}
+.log-entry .duplicate{color:#fbbf24}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">Back</a><h1>Idempotency Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/12</div>
+<div class="hud-item"><span id="safe">0</span>Safe</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="request-flow">
+<h3>Request Pipeline</h3>
+<div class="flow-visual" id="flow-visual">
+<div class="flow-step active" id="step-client">Client</div>
+<div class="flow-arrow">→</div>
+<div class="flow-step" id="step-gateway">API Gateway</div>
+<div class="flow-arrow">→</div>
+<div class="flow-step" id="step-check">Idempotency Check</div>
+<div class="flow-arrow">→</div>
+<div class="flow-step" id="step-service">Service</div>
+</div>
+<div style="text-align:center;margin:8px 0">
+<div>Idempotency Key:</div>
+<div class="idempotency-key" id="idem-key">req-12345</div>
+</div>
+</div>
+<div class="scenario-card">
+<h3 id="scenario-title">Duplicate Request Handling</h3>
+<p id="scenario-desc"></p>
+</div>
+<div class="request-log" id="request-log"></div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Idempotency Expert!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+var score=0,round=0,maxRounds=12,safe=0,answered=false;
+var keyCount=100;
+var scenarios=[
+{desc:"User double-clicks 'Pay $50'. Two identical requests arrive within 100ms.",action:"payment",correct:"Deduplicate using idempotency key",reason:"Payment must be idempotent. Same key = same result, no double charge."},
+{desc:"Network timeout. Client retries. Original request may have succeeded.",action:"transfer",correct:"Check if already processed, return cached result",reason:"Timeout retries need idempotency check. Original might have completed."},
+{desc:"Webhook delivery. Third-party retries 3 times for same event.",action:"webhook",correct:"Return same response for same event ID",reason:"Webhook receivers must handle duplicate deliveries idempotently."},
+{desc:"GET request for user profile. Called twice rapidly.",action:"read",correct:"GET is naturally idempotent, no special handling",reason:"Read operations don't change state. Multiple calls are safe."},
+{desc:"DELETE request for resource. Network drops response.",action:"delete",correct:"DELETE is idempotent, return 404 on retry if already deleted",reason:"Deleting already-deleted resource should return success or 404."},
+{desc:"Order placement with duplicate detection window of 24h.",action:"order",correct:"Store idempotency key with TTL, reject duplicates",reason:"TTL-based dedup prevents exact duplicate orders."},
+{desc:"Batch insert 1000 records. Request times out at record 500.",action:"batch",correct:"Make batch atomic - all or nothing",reason:"Atomic batches prevent partial inserts on retry."},
+{desc:"Email service receives same send request twice.",action:"email",correct:"Deduplicate before sending queue",reason:"Email dedup prevents sending duplicate messages to users."},
+{desc:"Rate-limited API returns 429. Client retries immediately.",action:"rate-limit",correct:"Honor retry-after header, use same idempotency key",reason:"Retries with same key after rate limit should return cached response."},
+{desc:"Shopping cart update: set quantity to 3. Sent twice.",action:"cart",correct:"Set operation is idempotent, overwrite is fine",reason:"SET operations are naturally idempotent. Setting same value twice is safe."},
+{desc:"File upload interrupted at 90%. Client resumes.",action:"upload",correct:"Resume with byte-range using upload ID",reason:"Chunked uploads use IDs for resumable, idempotent transfers."},
+{desc:"Scheduled job runs twice due to scheduler bug.",action:"cron",correct:"Job must handle duplicate execution gracefully",reason:"Distributed systems must assume at-least-once delivery."}
+];
+var logEntries=[];
+function addLog(text,type){
+logEntries.push({text:text,type:type});
+var el=document.getElementById("request-log");
+el.innerHTML=logEntries.map(function(e){
+var cls=e.type==="success"?"success":e.type==="error"?"error":"duplicate";
+return "<div class='log-entry'><span class='"+cls+"'>"+e.type.toUpperCase()+"</span> "+e.text+"</div>";
+}).join("");
+el.scrollTop=el.scrollHeight;
+}
+function animateFlow(success){
+var steps=["step-client","step-gateway","step-check","step-service"];
+var i=0;
+function next(){
+if(i<steps.length){
+document.querySelectorAll(".flow-step").forEach(function(s){s.className="flow-step";});
+for(var j=0;j<=i;j++)document.getElementById(steps[j]).classList.add(j<i?"done":"active");
+if(i===steps.length-1){
+if(!success)document.getElementById(steps[i]).classList.add("error");
+}
+i++;setTimeout(next,300);
+}
+}
+next();
+}
+function startRound(){
+answered=false;
+var s=scenarios[round%scenarios.length];
+keyCount++;
+document.getElementById("scenario-title").textContent="Scenario "+(round+1);
+document.getElementById("scenario-desc").textContent=s.desc;
+document.getElementById("idem-key").textContent="req-"+keyCount;
+document.getElementById("feedback").className="feedback";
+document.getElementById("next-btn").style.display="none";
+document.getElementById("request-log").innerHTML="";
+logEntries=[];
+addLog("Request received with key: req-"+keyCount,"info");
+animateFlow(true);
+document.getElementById("choices").innerHTML=[
+"Deduplicate using idempotency key",
+"Process as new request",
+"Reject with 409 Conflict",
+"Queue for later processing"
+].map(function(c){return "<button class='choice-btn' onclick=\"answer('"+c+"','"+s.correct+"','"+s.reason.replace(/'/g,"\\'")+"')\">"+c+"</button>";}).join("");
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+var isCorrect=chosen===correct;
+if(isCorrect){score+=10;safe++;}
+else{score=Math.max(0,score-3);}
+document.querySelectorAll(".choice-btn").forEach(function(b){
+if(b.textContent===correct)b.classList.add("correct");
+else if(b.textContent===chosen&&!isCorrect)b.classList.add("wrong");
+b.style.pointerEvents="none";
+});
+var s=scenarios[round%scenarios.length];
+if(isCorrect){
+addLog("Correctly handled with idempotency","success");
+animateFlow(true);
+}else{
+addLog("Improperly handled - potential duplicate processing","error");
+animateFlow(false);
+}
+var fb=document.getElementById("feedback");
+fb.className="feedback show "+(isCorrect?"correct-fb":"wrong-fb");
+fb.style.borderColor=isCorrect?"#4ade80":"#f87171";
+document.getElementById("fb-title").textContent=isCorrect?"Correct!":"Wrong";
+document.getElementById("fb-text").textContent=reason;
+document.getElementById("score").textContent=score;
+document.getElementById("safe").textContent=safe;
+document.getElementById("next-btn").style.display="block";
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById("game-content").style.display="none";
+document.getElementById("game-over").style.display="block";
+document.getElementById("final-score").textContent=score;return;
+}
+document.getElementById("round").textContent=round+1;
+startRound();
+}
+function restart(){
+score=0;round=0;safe=0;
+document.getElementById("game-content").style.display="block";
+document.getElementById("game-over").style.display="none";
+document.getElementById("round").textContent=1;
+document.getElementById("score").textContent=0;
+startRound();
+}
+startRound();
+</script>
+</body>
+</html>

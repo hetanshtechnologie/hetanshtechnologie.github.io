@@ -1,0 +1,144 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>11. Regression &amp; Classification with scikit-learn - Data Science Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>11. Regression &amp; Classification with scikit-learn</h1>
+<p class="tag">Chapter 11</p>
+
+<h2>The scikit-learn Workflow</h2>
+<p>Every supervised model in scikit-learn follows the same pattern:</p>
+<pre><code>from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+
+X = df[["age", "tenure", "support_tickets"]]
+y = df["spend"]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", LinearRegression())
+])
+pipeline.fit(X_train, y_train)
+
+y_pred = pipeline.predict(X_test)
+</code></pre>
+
+<div class="info">
+<strong>Why pipelines:</strong> the pipeline fits the scaler on training data only and reuses it on test data — no leakage (Chapter 10). It also bundles preprocessing and model into one object you can save, cross-validate, and deploy.
+</div>
+
+<h2>Linear Regression</h2>
+<pre><code>from sklearn.metrics import mean_absolute_error, r2_score
+
+mae = mean_absolute_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+print(f"MAE = {mae:.2f}, R² = {r2:.3f}")
+
+# Coefficients tell you direction & strength
+for col, coef in zip(X.columns, pipeline.named_steps["model"].coef_):
+    print(f"{col}: {coef:.2f}")
+</code></pre>
+<div class="warn">
+<strong>Linearity assumptions:</strong> linear regression assumes a roughly linear relationship, independent errors, and no collinear features. Check residual plots; if they show a pattern, consider polynomial features or a non-linear model.
+</div>
+
+<h2>Logistic Regression (Classification)</h2>
+<pre><code>from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+y = df["is_churned"]
+X = df[["spend", "support_tickets", "tenure"]]
+
+pipe = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", LogisticRegression(max_iter=1000, class_weight="balanced"))
+])
+pipe.fit(X_train, y_train)
+
+y_pred = pipe.predict(X_test)
+y_prob = pipe.predict_proba(X_test)[:, 1]   # P(churn)
+
+print(confusion_matrix(y_test, y_pred))
+# [[TN FP]
+#  [FN TP]]
+</code></pre>
+
+<h2>Decision Trees &amp; Random Forests</h2>
+<pre><code>from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.ensemble import GradientBoostingRegressor
+
+rf = RandomForestRegressor(n_estimators=300, random_state=42,
+                           max_depth=10, min_samples_leaf=5)
+rf.fit(X_train, y_train)
+
+# Feature importance (built-in)
+for col, imp in sorted(zip(X.columns, rf.feature_importances_),
+                       key=lambda t: -t[1]):
+    print(f"{col}: {imp:.3f}")
+</code></pre>
+<p>Random forests reduce overfitting by averaging many trees trained on bootstrap samples. Gradient boosting (XGBoost, LightGBM) trains trees sequentially, correcting previous errors — usually the strongest tabular model.</p>
+
+<div class="note">
+<strong>Hyperparameter tuning:</strong> use <code>GridSearchCV</code> or <code>RandomizedSearchCV</code> with cross-validation to find good hyperparameters. Search over a sensible grid, not every combination:
+<pre><code>from sklearn.model_selection import RandomizedSearchCV
+param_grid = {
+    "model__n_estimators": [200, 400],
+    "model__max_depth": [5, 10, None],
+    "model__min_samples_leaf": [2, 5]
+}
+search = RandomizedSearchCV(rf, param_grid, cv=5, n_iter=20,
+                            scoring="neg_mean_absolute_error", random_state=42)
+search.fit(X_train, y_train)
+print(search.best_params_)
+</code></pre>
+</div>
+
+<h2>XGBoost (the extra step)</h2>
+<pre><code># pip install xgboost
+from xgboost import XGBRegressor
+
+xgb = XGBRegressor(n_estimators=500, learning_rate=0.05, max_depth=6,
+                   subsample=0.8, colsample_bytree=0.8, random_state=42)
+xgb.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+</code></pre>
+
+<h2>Model Comparison Discipline</h2>
+<ol>
+<li>Start with a simple baseline (mean prediction, or a linear model).</li>
+<li>Add complexity only when it beats the baseline on <em>validation</em> data.</li>
+<li>Compare models with identical cross-validation folds.</li>
+<li>Report the metric on the untouched test set once, at the end.</li>
+<li>Check residuals and the worst cases — global metrics hide systematic failures.</li>
+</ol>
+
+<h2>Explaining Predictions with SHAP</h2>
+<pre><code># pip install shap
+import shap
+
+explainer = shap.TreeExplainer(xgb)
+shap_values = explainer.shap_values(X_test)
+shap.summary_plot(shap_values, X_test)
+</code></pre>
+<p>SHAP tells you <em>which features pushed each prediction up or down</em> — essential for trusting and defending your model.</p>
+
+<div class="exercise">
+<strong>Practice Task:</strong> On your dataset, train a linear model, a random forest, and an XGBoost model (regression or classification). Compare them with the same 5-fold cross-validation, tune the best one with <code>RandomizedSearchCV</code>, report final metrics on the held-out test set, and produce a SHAP summary plot. Write a short "model card" describing the winner, its metrics, and its top three features.
+</div>
+
+<nav>
+  <span></span>
+  <a href="../index.html">Back to Index</a>
+  <a href="12-clustering-dimensionality.html">Next: Clustering &amp; Dimensionality Reduction &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

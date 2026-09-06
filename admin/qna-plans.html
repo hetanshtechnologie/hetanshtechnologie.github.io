@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QNA Plans - Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #f1f5f9; }
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 50; }
+    .modal-overlay.open { display: flex; }
+    .modal-box { background: #fff; border-radius: 12px; padding: 24px; width: 480px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
+    .modal-box label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 4px; margin-top: 12px; }
+    .modal-box input { width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+    .modal-box input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+  </style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="../" class="text-blue-600 font-bold text-lg">HetanshTechnologie</a>
+      <span class="text-gray-400">|</span>
+      <a href="dashboard.html" class="font-semibold text-gray-700 hover:text-blue-600">Admin</a>
+      <span class="text-gray-400">/</span>
+      <span class="text-gray-500">QNA Plans</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <span id="user-email" class="text-sm text-gray-500"></span>
+      <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+    </div>
+  </nav>
+
+  <div class="max-w-5xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">QNA Subscription Plans</h1>
+      <button onclick="showPlanModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New Plan</button>
+    </div>
+
+    <div id="alert"></div>
+    <div id="loading" class="text-gray-500 mb-4">Loading plans...</div>
+    <div id="plans-section" class="hidden overflow-x-auto bg-white rounded-xl shadow-sm border"></div>
+  </div>
+
+  <!-- Plan Modal -->
+  <div class="modal-overlay" id="plan-modal" onclick="if(event.target===this)closePlanModal()">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="font-bold text-lg" id="plan-modal-title">New Plan</h2>
+        <button onclick="closePlanModal()" class="text-gray-500 hover:text-black text-xl">&times;</button>
+      </div>
+      <label>Plan Name</label>
+      <input id="f-name" placeholder="e.g. Gold">
+      <label>Max Categories</label>
+      <input id="f-categories" type="number" value="5">
+      <label>Max Questions</label>
+      <input id="f-questions" type="number" value="25">
+      <label>Max Tags</label>
+      <input id="f-tags" type="number" value="5">
+      <label>Max Job Applications</label>
+      <input id="f-jobs" type="number" value="3">
+      <label>Price (in paise, 0 = free)</label>
+      <input id="f-price" type="number" value="0">
+      <label><input type="checkbox" id="f-active" checked> Active</label>
+      <div class="flex justify-end gap-2 mt-6">
+        <button onclick="closePlanModal()" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-200">Cancel</button>
+        <button onclick="savePlan()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="js/admin.js"></script>
+  <script>
+    let editId = null;
+
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireAdmin();
+      if (!user) return;
+      document.getElementById('user-email').textContent = user.email;
+      await loadPlans();
+    });
+
+    async function loadPlans() {
+      const { data, error } = await _admin.from('qna_plans').select('*').order('id');
+      document.getElementById('loading').classList.add('hidden');
+      if (error) { document.getElementById('plans-section').innerHTML = '<div class="p-4 text-red-500">Error: ' + error.message + '</div>'; document.getElementById('plans-section').classList.remove('hidden'); return; }
+      const section = document.getElementById('plans-section');
+      if (!data || !data.length) { section.innerHTML = '<div class="p-6 text-gray-500 text-center">No plans defined yet.</div>'; section.classList.remove('hidden'); return; }
+      section.innerHTML = '<table class="w-full text-sm"><thead><tr class="bg-gray-50 text-left"><th class="p-3 font-semibold">ID</th><th class="p-3 font-semibold">Name</th><th class="p-3 font-semibold">Categories</th><th class="p-3 font-semibold">Questions</th><th class="p-3 font-semibold">Tags</th><th class="p-3 font-semibold">Jobs</th><th class="p-3 font-semibold">Price</th><th class="p-3 font-semibold">Active</th><th class="p-3 font-semibold">Actions</th></tr></thead><tbody>' +
+        data.map(p => '<tr class="border-t hover:bg-gray-50"><td class="p-3">' + p.id + '</td><td class="p-3 font-medium">' + escapeHtml(p.name) + '</td><td class="p-3">' + (p.max_categories >= 999999 ? '&#8734;' : p.max_categories) + '</td><td class="p-3">' + (p.max_questions >= 999999 ? '&#8734;' : p.max_questions) + '</td><td class="p-3">' + (p.max_tags >= 999999 ? '&#8734;' : p.max_tags) + '</td><td class="p-3">' + (p.max_jobs >= 999999 ? '&#8734;' : p.max_jobs) + '</td><td class="p-3">' + (p.price === 0 ? 'Free' : '&#8377;' + (p.price / 100).toFixed(2)) + '</td><td class="p-3">' + (p.active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-error">Inactive</span>') + '</td><td class="p-3"><button onclick="editPlan(' + p.id + ')" class="text-blue-600 hover:underline text-xs mr-2">Edit</button><button onclick="deletePlan(' + p.id + ')" class="text-red-500 hover:underline text-xs">Delete</button></td></tr>').join('') +
+        '</tbody></table>';
+      section.classList.remove('hidden');
+    }
+
+    function showPlanModal(plan) {
+      editId = null;
+      document.getElementById('plan-modal-title').textContent = 'New Plan';
+      document.getElementById('f-name').value = '';
+      document.getElementById('f-categories').value = '5';
+      document.getElementById('f-questions').value = '25';
+      document.getElementById('f-tags').value = '5';
+      document.getElementById('f-jobs').value = '3';
+      document.getElementById('f-price').value = '0';
+      document.getElementById('f-active').checked = true;
+      if (plan) {
+        editId = plan.id;
+        document.getElementById('plan-modal-title').textContent = 'Edit Plan';
+        document.getElementById('f-name').value = plan.name;
+        document.getElementById('f-categories').value = plan.max_categories;
+        document.getElementById('f-questions').value = plan.max_questions;
+        document.getElementById('f-tags').value = plan.max_tags;
+        document.getElementById('f-jobs').value = plan.max_jobs;
+        document.getElementById('f-price').value = plan.price;
+        document.getElementById('f-active').checked = plan.active;
+      }
+      document.getElementById('plan-modal').classList.add('open');
+    }
+
+    async function editPlan(id) {
+      const { data } = await _admin.from('qna_plans').select('*').eq('id', id).single();
+      if (data) showPlanModal(data);
+    }
+
+    function closePlanModal() {
+      document.getElementById('plan-modal').classList.remove('open');
+    }
+
+    async function savePlan() {
+      const data = {
+        name: document.getElementById('f-name').value.trim(),
+        max_categories: parseInt(document.getElementById('f-categories').value) || 0,
+        max_questions: parseInt(document.getElementById('f-questions').value) || 0,
+        max_tags: parseInt(document.getElementById('f-tags').value) || 0,
+        max_jobs: parseInt(document.getElementById('f-jobs').value) || 0,
+        price: parseInt(document.getElementById('f-price').value) || 0,
+        active: document.getElementById('f-active').checked,
+        created_at: new Date().toISOString().replace('T', ' ').substring(0, 19)
+      };
+      if (!data.name) return alert('Name is required');
+      if (editId) {
+        const { error } = await _admin.from('qna_plans').update(data).eq('id', editId);
+        if (error) return showAlert('Error: ' + error.message, 'error');
+      } else {
+        const { data: existing } = await _admin.from('qna_plans').select('id').order('id', { ascending: false }).limit(1);
+        const newId = (existing && existing.length) ? existing[0].id + 1 : 1;
+        const { error } = await _admin.from('qna_plans').insert({ ...data, id: newId });
+        if (error) return showAlert('Error: ' + error.message, 'error');
+      }
+      closePlanModal();
+      showAlert('Plan saved successfully', 'success');
+      loadPlans();
+    }
+
+    async function deletePlan(id) {
+      if (!confirm('Delete this plan? Users assigned to this plan cannot be deleted.')) return;
+      const { error } = await _admin.from('qna_plans').delete().eq('id', id);
+      if (error) return showAlert('Error: ' + error.message, 'error');
+      showAlert('Plan deleted', 'success');
+      loadPlans();
+    }
+  </script>
+<script src="../js/analytics-tracker.js" defer></script>
+</body>
+</html>

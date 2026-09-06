@@ -1,0 +1,717 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 6: Modules — Terraform eBook</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+
+<h1>Chapter 6: Modules</h1>
+<p class="intro">Modules are the primary mechanism for organizing, reusing, and encapsulating Terraform configurations. They let you build composable infrastructure components that can be shared across projects, teams, and organizations.</p>
+
+<nav class="chapter-nav" style="margin-bottom:24px;padding:12px 16px;background:#f5f3ff;border-radius:8px;">
+  <strong>Contents</strong>
+  <ol style="margin:8px 0 0 20px;columns:2;column-gap:24px;">
+    <li><a href="#what-are-modules">What Modules Are and Why Use Them</a></li>
+    <li><a href="#module-structure">Module Structure</a></li>
+    <li><a href="#custom-module">Creating Custom Modules</a></li>
+    <li><a href="#calling-modules">Calling Modules</a></li>
+    <li><a href="#module-sources">Module Sources</a></li>
+    <li><a href="#registry">Terraform Registry</a></li>
+    <li><a href="#versioning">Module Versioning</a></li>
+    <li><a href="#composition">Composition Patterns</a></li>
+    <li><a href="#testing">Testing Modules</a></li>
+    <li><a href="#summary">Summary &amp; Checklist</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="what-are-modules">1. What Modules Are and Why to Use Them</h2>
+<p>Every Terraform configuration you write is already a module — the root module. A <em>child module</em> is a separate directory of Terraform files that is invoked by another configuration.</p>
+
+<div class="diagram">
+<pre>
+┌──────────────────────────────────────────────────────┐
+│                   Root Module                        │
+│  main.tf  variables.tf  outputs.tf                  │
+│                                                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+│  │ module   │  │ module   │  │ module           │   │
+│  │ "vnet"   │  │ "aks"    │  │ "monitoring"     │   │
+│  └────┬─────┘  └────┬─────┘  └────┬─────────────┘   │
+└───────┼──────────────┼─────────────┼────────────────┘
+        │              │             │
+   ┌────▼─────┐  ┌─────▼────┐  ┌────▼────────┐
+   │ VNet     │  │ AKS      │  │ Monitoring   │
+   │ Module   │  │ Module   │  │ Module       │
+   │ (local)  │  │ (Reg.)   │  │ (Git)        │
+   └──────────┘  └──────────┘  └──────────────┘
+</pre>
+</div>
+
+<p><strong>Key benefits of modules:</strong></p>
+<ul>
+  <li><strong>Reusability</strong> — Write once, use in many environments.</li>
+  <li><strong>Encapsulation</strong> — Hide implementation details behind clean interfaces.</li>
+  <li><strong>Consistency</strong> — Enforce standards (naming, tags, security) centrally.</li>
+  <li><strong>Testability</strong> — Isolate and test infrastructure components independently.</li>
+  <li><strong>Maintainability</strong> — Fix a bug once, propagate everywhere.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="module-structure">2. Module Structure</h2>
+<p>A well-structured module mirrors the root module convention:</p>
+
+<div class="diagram">
+<pre>
+modules/
+  azure-vnet/
+    main.tf            # Core resource definitions
+    variables.tf       # Input variable declarations
+    outputs.tf         # Output value declarations
+    versions.tf        # Required providers and version constraints
+    README.md          # Usage documentation
+    examples/          # Minimal working examples
+      complete/
+        main.tf
+    tests/             # Automated tests
+      vnet_test.go
+</pre>
+</div>
+
+<h3>variables.tf — Declaring Inputs</h3>
+<pre><code>variable "resource_group_name" {
+  description = "Name of the resource group"
+  type        = string
+
+  validation {
+    condition     = length(var.resource_group_name) > 0 && length(var.resource_group_name) <= 90
+    error_message = "Resource group name must be 1-90 characters."
+  }
+}
+
+variable "address_space" {
+  description = "Address space for the virtual network"
+  type        = list(string)
+  default     = ["10.0.0.0/16"]
+}
+
+variable "subnets" {
+  description = "Map of subnet configurations"
+  type = map(object({
+    address_prefixes  = list(string)
+    service_endpoints = optional(list(string), [])
+    delegation = optional(object({
+      name    = string
+      service = string
+    }))
+  }))
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
+</code></pre>
+
+<h3>main.tf — Core Resources</h3>
+<pre><code>resource "azurerm_resource_group" "this" {
+  name     = var.resource_group_name
+  location = var.location
+  tags     = var.tags
+}
+
+resource "azurerm_virtual_network" "this" {
+  name                = "${var.resource_group_name}-vnet"
+  location            = azurerm_resource_group.this.location
+  resource_group_name = azurerm_resource_group.this.name
+  address_space       = var.address_space
+  tags                = var.tags
+}
+
+resource "azurerm_subnet" "this" {
+  for_each = var.subnets
+
+  name                 = each.key
+  resource_group_name  = azurerm_resource_group.this.name
+  virtual_network_name = azurerm_virtual_network.this.name
+  address_prefixes     = each.value.address_prefixes
+  service_endpoints    = each.value.service_endpoints
+
+  dynamic "delegation" {
+    for_each = each.value.delegation != null ? [each.value.delegation] : []
+    content {
+      name = delegation.value.name
+      service_delegation {
+        name = delegation.value.service
+      }
+    }
+  }
+}
+</code></pre>
+
+<h3>outputs.tf — Exporting Values</h3>
+<pre><code>output "vnet_id" {
+  description = "Resource ID of the virtual network"
+  value       = azurerm_virtual_network.this.id
+}
+
+output "vnet_name" {
+  description = "Name of the virtual network"
+  value       = azurerm_virtual_network.this.name
+}
+
+output "subnet_ids" {
+  description = "Map of subnet name to resource ID"
+  value       = { for k, v in azurerm_subnet.this : k => v.id }
+}
+</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="custom-module">3. Creating a Custom Module — Azure VNet Example</h2>
+<p>Let's build a production-ready VNet module from scratch. The module will support subnets, peering, NSGs, and flow logs.</p>
+
+<h3>Full Module Layout</h3>
+<div class="diagram">
+<pre>
+modules/
+  azure-vnet/
+    main.tf
+    variables.tf
+    outputs.tf
+    versions.tf
+    nsg.tf
+    flow-log.tf
+    peering.tf
+    README.md
+</pre>
+</div>
+
+<h3>versions.tf</h3>
+<pre><code>terraform {
+  required_version = ">= 1.5"
+
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.80"
+    }
+  }
+}
+</code></pre>
+
+<h3>nsg.tf — Network Security Group</h3>
+<pre><code>resource "azurerm_network_security_group" "this" {
+  count = var.create_nsg ? 1 : 0
+
+  name                = "${azurerm_virtual_network.this.name}-nsg"
+  location            = azurerm_resource_group.this.location
+  resource_group_name = azurerm_resource_group.this.name
+  tags                = var.tags
+}
+
+resource "azurerm_network_security_rule" "rules" {
+  for_each = var.create_nsg ? { for r in var.nsg_rules : r.name => r } : {}
+
+  name                        = each.value.name
+  priority                    = each.value.priority
+  direction                   = each.value.direction
+  access                      = each.value.access
+  protocol                    = each.value.protocol
+  source_port_range           = each.value.source_port_range
+  destination_port_range      = each.value.destination_port_range
+  source_address_prefix       = each.value.source_address_prefix
+  destination_address_prefix  = each.value.destination_address_prefix
+  resource_group_name         = azurerm_resource_group.this.name
+  network_security_group_name = azurerm_network_security_group.this[0].name
+}
+</code></pre>
+
+<h3>flow-log.tf — Network Flow Logs</h3>
+<pre><code>resource "azurerm_network_watcher_flow_log" "this" {
+  count = var.enable_flow_logs ? 1 : 0
+
+  name                      = "${azurerm_virtual_network.this.name}-flowlog"
+  network_watcher_name      = var.network_watcher_name
+  resource_group_name       = var.network_watcher_resource_group
+  network_security_group_id = azurerm_network_security_group.this[0].id
+  storage_account_id        = var.flow_log_storage_account_id
+  enabled                   = true
+  version                   = 2
+
+  retention_policy {
+    enabled = true
+    days    = var.flow_log_retention_days
+  }
+
+  traffic_analytics {
+    enabled               = true
+    workspace_id          = var.log_analytics_workspace_id
+    workspace_region      = var.location
+    workspace_resource_id = var.log_analytics_resource_id
+    interval_in_minutes   = 10
+  }
+}
+</code></pre>
+
+<h3>peering.tf — VNet Peering</h3>
+<pre><code>resource "azurerm_virtual_network_peering" "this" {
+  for_each = var.peerings
+
+  name                      = each.key
+  resource_group_name       = azurerm_resource_group.this.name
+  virtual_network_name      = azurerm_virtual_network.this.name
+  remote_virtual_network_id = each.value.remote_vnet_id
+  allow_forwarded_traffic   = each.value.allow_forwarded_traffic
+  allow_gateway_transit     = each.value.allow_gateway_transit
+  use_remote_gateways       = each.value.use_remote_gateways
+}
+</code></pre>
+
+<h3>Calling the Module</h3>
+<pre><code>module "hub_vnet" {
+  source = "../../modules/azure-vnet"
+
+  resource_group_name = "rg-network-hub"
+  location            = "eastus"
+  address_space       = ["10.0.0.0/16"]
+
+  subnets = {
+    "firewall" = {
+      address_prefixes  = ["10.0.1.0/24"]
+      service_endpoints = []
+    }
+    "management" = {
+      address_prefixes  = ["10.0.2.0/24"]
+      service_endpoints = ["Microsoft.KeyVault"]
+    }
+  }
+
+  create_nsg = true
+  nsg_rules = [
+    {
+      name                       = "AllowHTTPS"
+      priority                   = 100
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = "443"
+      source_address_prefix      = "*"
+      destination_address_prefix = "*"
+    }
+  ]
+
+  tags = {
+    environment = "production"
+    cost-center = "networking"
+  }
+}
+</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="calling-modules">4. Calling Modules</h2>
+<p>Modules are invoked with the <code>module</code> block. The block name is a local identifier unique in the current configuration.</p>
+
+<h3>Basic Call with Source</h3>
+<pre><code>module "vnet" {
+  source = "./modules/azure-vnet"
+
+  resource_group_name = "rg-app-prod"
+  subnets             = local.subnet_config
+}
+</code></pre>
+
+<h3>Using for_each</h3>
+<p>Create multiple instances from a map — ideal for multi-region or multi-environment deployments:</p>
+<pre><code>variable "environments" {
+  type = map(object({
+    location    = string
+    address_space = list(string)
+  }))
+  default = {
+    dev = {
+      location      = "eastus"
+      address_space = ["10.1.0.0/16"]
+    }
+    staging = {
+      location      = "westus2"
+      address_space = ["10.2.0.0/16"]
+    }
+    prod = {
+      location      = "eastus"
+      address_space = ["10.0.0.0/16"]
+    }
+  }
+}
+
+module "vnet" {
+  source   = "./modules/azure-vnet"
+  for_each = var.environments
+
+  resource_group_name = "rg-network-${each.key}"
+  location            = each.value.location
+  address_space       = each.value.address_space
+}
+</code></pre>
+
+<h3>Using count</h3>
+<p>Conditionally create module instances:</p>
+<pre><code>module "logging" {
+  source   = "./modules/logging"
+  count    = var.enable_central_logging ? 1 : 0
+
+  log_analytics_sku  = "PerGB2018"
+  retention_in_days  = 90
+}
+</code></pre>
+
+<h3>Passing Outputs Between Modules</h3>
+<pre><code>module "vnet" {
+  source = "./modules/azure-vnet"
+  # ...
+}
+
+module "aks" {
+  source = "./modules/azure-aks"
+
+  subnet_id = module.vnet.subnet_ids["aks"]
+  vnet_id   = module.vnet.vnet_id
+}
+</code></pre>
+
+<div class="tip" style="background:#ecfdf5;border-left:4px solid #10b981;padding:12px 16px;border-radius:6px;margin:16px 0;">
+  <strong>Tip:</strong> Always reference module outputs with the full path (<code>module.vnet.subnet_ids</code>) — never reference resources inside the module directly.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="module-sources">5. Module Sources</h2>
+<p>Terraform supports several source types for loading modules:</p>
+
+<div class="diagram">
+<pre>
+┌─────────────────┬──────────────────────────────────────────────┐
+│ Source Type      │ Example                                      │
+├─────────────────┼──────────────────────────────────────────────┤
+│ Local path       │ source = "./modules/azure-vnet"              │
+│ Terraform Reg.   │ source = "Azure/aks/azurerm"                 │
+│ GitHub           │ source = "github.com/org/repo//modules/vnet" │
+│ Git              │ source = "git::https://...//modules/vnet"    │
+│ HTTP URL         │ source = "https://example.com/module.zip"    │
+│ S3 Bucket        │ source = "s3::bucket-name/module.zip"        │
+│ GCS Bucket       │ source = "gcs::bucket-name/module.zip"       │
+└─────────────────┴──────────────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>Local Path</h3>
+<pre><code>module "vnet" {
+  source = "./modules/azure-vnet"
+  # ...
+}
+</code></pre>
+
+<h3>GitHub Source</h3>
+<pre><code>module "vnet" {
+  source = "github.com/contoso/terraform-modules//azure-vnet?ref=v2.1.0"
+  # ...
+}
+</code></pre>
+
+<h3>Git Source with Subdirectories</h3>
+<pre><code>module "vnet" {
+  source = "git::https://github.com/contoso/terraform-modules.git?ref=v2.1.0//modules/azure-vnet"
+  # ...
+}
+</code></pre>
+
+<h3>HTTP Source</h3>
+<pre><code>module "vnet" {
+  source = "https://releases.contoso.com/modules/azure-vnet/2.1.0.zip"
+  # ...
+}
+</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="registry">6. Terraform Registry</h2>
+<p>The <a href="https://registry.terraform.io">Terraform Registry</a> is the public catalog of community and official modules.</p>
+
+<h3>Public Registry</h3>
+<pre><code>module "aks" {
+  source  = "Azure/aks/azurerm"
+  version = "~> 8.0"
+  # ...
+}
+</code></pre>
+
+<h3>Private Registry (Terraform Cloud / Enterprise)</h3>
+<pre><code>module "vnet" {
+  source  = "app.terraform.io/my-org/vnet/azure"
+  version = "~> 2.0"
+  # ...
+}
+</code></pre>
+
+<h3>Registering Your Own Module</h3>
+<ol>
+  <li>Create a Git repository with the module source.</li>
+  <li>Tag releases with semantic versions (e.g., <code>v1.0.0</code>).</li>
+  <li>On Terraform Cloud, connect the workspace and add to the module registry.</li>
+  <li>For public publishing, submit to the HashiCorp Terraform Registry via GitHub.</li>
+</ol>
+
+<div class="tip" style="background:#ecfdf5;border-left:4px solid #10b981;padding:12px 16px;border-radius:6px;margin:16px 0;">
+  <strong>Tip:</strong> Official modules from the <code>hashicorp</code> or cloud-provider namespaces are reviewed for quality and security. Prefer them over unknown third-party modules.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="versioning">7. Module Versioning Best Practices</h2>
+<p>Use <a href="https://semver.org">Semantic Versioning</a> for all modules:</p>
+
+<div class="diagram">
+<pre>
+┌────────────┬────────────────────────────────────────────────┐
+│ Version    │ What it means                                  │
+├────────────┼────────────────────────────────────────────────┤
+│ v1.0 → 1.1 │ New feature, backward-compatible              │
+│ v1.1 → 2.0 │ Breaking change (renamed variables, removed   │
+│             │ outputs, changed resource types)              │
+│ v1.1 → 1.2 │ Bug fix, security patch                       │
+└────────────┴────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>Version Constraints</h3>
+<pre><code>module "vnet" {
+  source  = "./modules/azure-vnet"
+  version = "~> 2.1"     # Allows 2.1.0 through 2.x.x, but not 3.0
+}
+
+module "aks" {
+  source  = "Azure/aks/azurerm"
+  version = ">= 8.0, < 9.0"   # Range constraint
+}
+
+module "firewall" {
+  source  = "Azure/firewall/azurerm"
+  version = "~> 5.0"    # Patch-level constraint
+}
+</code></pre>
+
+<h3>Best Practices</h3>
+<ul>
+  <li>Never update module versions in production without running <code>terraform plan</code> first.</li>
+  <li>Pin to a minimum version with <code>~></code> to receive compatible updates.</li>
+  <li>Test new versions in a dev/staging environment before promoting.</li>
+  <li>Maintain a <code>CHANGELOG.md</code> in every module repository.</li>
+  <li>Use <code>terraform init -upgrade</code> to update lock files deliberately.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="composition">8. Module Composition Patterns</h2>
+<p>Modules can be composed in different topologies depending on your architecture.</p>
+
+<h3>Pattern 1: Flat Composition</h3>
+<p>All modules called from the root, no inter-module nesting:</p>
+<div class="diagram">
+<pre>
+root/
+  main.tf calls → module.vnet
+                 module.aks
+                 module.database
+</pre>
+</div>
+
+<h3>Pattern 2: Layered / Nested Composition</h3>
+<p>A higher-level module composes other modules:</p>
+<div class="diagram">
+<pre>
+root/main.tf → module.environment
+                 ├── module.vnet
+                 ├── module.aks
+                 └── module.monitoring
+</pre>
+</div>
+<pre><code># modules/environment/main.tf
+module "vnet" {
+  source = "../azure-vnet"
+  # ...
+}
+
+module "aks" {
+  source = "../azure-aks"
+  subnet_id = module.vnet.subnet_ids["aks"]
+}
+
+module "monitoring" {
+  source = "../azure-monitoring"
+  vnet_id = module.vnet.vnet_id
+}
+</code></pre>
+
+<h3>Pattern 3: Stack-Based Composition</h3>
+<p>Separate root modules per concern (network, compute, data):</p>
+<div class="diagram">
+<pre>
+terraform/
+  stack-network/
+    main.tf → module.vnet
+  stack-compute/
+    main.tf → module.aks, module.vmss
+  stack-data/
+    main.tf → module.cosmosdb, module.redis
+  stack-bootstrap/
+    main.tf → module.resource_groups, module.locks
+</pre>
+</div>
+
+<h3>Pattern 4: Environment Modules</h3>
+<p>Different root configurations per environment, calling shared modules:</p>
+<div class="diagram">
+<pre>
+envs/
+  dev/main.tf       → module "base" { source = "../../modules/base-stack" ... }
+  staging/main.tf   → module "base" { source = "../../modules/base-stack" ... }
+  prod/main.tf      → module "base" { source = "../../modules/base-stack" ... }
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="testing">9. Testing Modules</h2>
+<p>Testing modules ensures correctness before they're consumed by other configurations.</p>
+
+<h3>Using terraform validate and plan</h3>
+<pre><code>cd modules/azure-vnet
+terraform init
+terraform validate
+terraform plan -var-file="examples/complete/terraform.tfvars"
+</code></pre>
+
+<h3>Using Terratest (Go-based Integration Tests)</h3>
+<pre><code>package test
+
+import (
+    "testing"
+    "github.com/gruntwork-io/terratest/modules/terraform"
+    "github.com/stretchr/testify/assert"
+)
+
+func TestAzureVNetModule(t *testing.T) {
+    t.Parallel()
+
+    terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
+        TerraformDir: "../examples/complete",
+        Vars: map[string]interface{}{
+            "resource_group_name": "rg-test-vnet",
+            "address_space":       []string{"10.99.0.0/16"},
+        },
+    })
+
+    defer terraform.Destroy(t, terraformOptions)
+    terraform.InitAndApply(t, terraformOptions)
+
+    vnetId := terraform.Output(t, terraformOptions, "vnet_id")
+    assert.Contains(t, vnetId, "rg-test-vnet")
+
+    subnetIds := terraform.OutputMap(t, terraformOptions, "subnet_ids")
+    assert.Contains(t, subnetIds, "firewall")
+    assert.Contains(t, subnetIds, "management")
+}
+</code></pre>
+
+<h3>Using Terraform Test (Native)</h3>
+<p>Since Terraform 1.6, native testing is built in:</p>
+<pre><code># tests/vnet.tftest.hcl
+variables {
+  resource_group_name = "rg-test"
+  address_space       = ["10.0.0.0/16"]
+  subnets = {
+    "web" = {
+      address_prefixes  = ["10.0.1.0/24"]
+      service_endpoints = []
+    }
+  }
+}
+
+run "vnet_created" {
+  command = apply
+
+  assert {
+    condition     = module.vnet.vnet_name != ""
+    error_message = "VNet name should not be empty"
+  }
+
+  assert {
+    condition     = contains(keys(module.vnet.subnet_ids), "web")
+    error_message = "Web subnet should exist"
+  }
+}
+</code></pre>
+
+<pre><code># Run native tests
+terraform test
+</code></pre>
+
+<div class="tip" style="background:#ecfdf5;border-left:4px solid #10b981;padding:12px 16px;border-radius:6px;margin:16px 0;">
+  <strong>Tip:</strong> Always include an <code>examples/</code> directory in your module. It serves as both documentation and a smoke-test target.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="summary">10. Summary &amp; Checklist</h2>
+
+<h3>Key Takeaways</h3>
+<ul>
+  <li>A module is any directory containing <code>.tf</code> files with inputs, resources, and outputs.</li>
+  <li>Use modules to enforce consistency, enable reuse, and simplify complex configurations.</li>
+  <li>Pin module versions and use semantic versioning.</li>
+  <li>Prefer Terraform Registry modules when available; create private modules for internal patterns.</li>
+  <li>Test modules with examples, native tests, or Terratest before publishing.</li>
+</ul>
+
+<h3>Module Development Checklist</h3>
+<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin:16px 0;">
+  <table style="width:100%;border-collapse:collapse;">
+    <thead>
+      <tr style="border-bottom:2px solid #e2e8f0;text-align:left;">
+        <th style="padding:8px;">Item</th>
+        <th style="padding:8px;">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Create <code>variables.tf</code> with types and descriptions</td><td style="padding:6px;">&#9744;</td></tr>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Create <code>outputs.tf</code> with descriptions</td><td style="padding:6px;">&#9744;</td></tr>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Pin provider versions in <code>versions.tf</code></td><td style="padding:6px;">&#9744;</td></tr>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Add input validation rules</td><td style="padding:6px;">&#9744;</td></tr>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Tag all resources consistently</td><td style="padding:6px;">&#9744;</td></tr>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Write <code>README.md</code> with usage examples</td><td style="padding:6px;">&#9744;</td></tr>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Create <code>examples/</code> directory with a working example</td><td style="padding:6px;">&#9744;</td></tr>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Run <code>terraform validate</code> and <code>terraform fmt -check</code></td><td style="padding:6px;">&#9744;</td></tr>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Write integration tests</td><td style="padding:6px;">&#9744;</td></tr>
+      <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px;">Tag a versioned release before consuming</td><td style="padding:6px;">&#9744;</td></tr>
+      <tr><td style="padding:6px;">Add a CHANGELOG entry</td><td style="padding:6px;">&#9744;</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Common Mistakes to Avoid</h3>
+<ul>
+  <li>Hardcoding values inside modules instead of accepting inputs.</li>
+  <li>Referencing module resources directly from the root module (always use outputs).</li>
+  <li>Not pinning module versions — a breaking change can break all consumers.</li>
+  <li>Overly large modules that do too many things (single responsibility).</li>
+  <li>Ignoring <code>terraform fmt</code> and <code>terraform validate</code> in CI.</li>
+</ul>
+
+<div class="chapter-links" style="margin-top:32px;padding-top:16px;border-top:1px solid #e2e8f0;">
+  <a href="5-state-management.html" style="margin-right:16px;color:#7c3aed;">&larr; Ch 5: State Management</a>
+  <a href="7-workspaces.html" style="color:#7c3aed;">Ch 7: Workspaces &rarr;</a>
+</div>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/feedback.js"></script>
+<script src="../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

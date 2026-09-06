@@ -1,0 +1,115 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>271. Lab - Creating a computer vision resource - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 271</span>
+<h1>Lab - Creating a computer vision resource</h1>
+<p>In this lab you will provision a Computer Vision resource in your Azure subscription — the endpoint and key that every image analysis call in this section will use. A Computer Vision resource is a single Azure service, separate from the AI Services resource you may have created for language or Foundry workloads. By the end of the lab you will have a working resource, know where to find its endpoint and keys, and be able to verify it responds to requests.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>An active Azure subscription. If you have completed earlier sections of this course you already have one.</li>
+<li>Permission to create resources in that subscription.</li>
+<li>The Azure CLI installed, if you want to try the command-line route.</li>
+</ul>
+
+<h2>What the Resource Provides</h2>
+<p>The Computer Vision resource gives you two things your code will depend on:</p>
+<ul>
+<li><strong>An endpoint</strong> — the base URL your requests are sent to, with a form such as <code>https://YOURNAME.cognitiveservices.azure.com/</code>.</li>
+<li><strong>Access keys</strong> — secret values that authenticate your requests. You can have two keys so you can rotate one without downtime.</li>
+</ul>
+
+<div class="tip">
+<p>Keep the endpoint and key together somewhere you can find them later; nearly every remaining lab in this section starts by pasting them into a script or a configuration file.</p>
+</div>
+
+<h2>Step-by-Step: Create the Resource in the Portal</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Create a Computer Vision resource through the Azure portal</h3>
+<ol>
+<li>Open a browser and go to the Azure portal at <code>https://portal.azure.com</code>. Sign in with your Azure account.</li>
+<li>Use the search bar at the top and type <strong>Computer Vision</strong>. Select <strong>Computer vision</strong> from the results.</li>
+<li>Click <strong>Create</strong>. You will land on the "Create Computer vision" blade.</li>
+<li>Choose your subscription, then select or create a resource group. A dedicated group such as <code>rg-ai103-vision</code> keeps this section's resources together.</li>
+<li>Give the resource a globally unique name, for example <code>cv-ai103-&lt;yourname&gt;</code>. Only letters, numbers, and hyphens are allowed.</li>
+<li>Select a region. Pick one that is geographically close to you for lower latency.</li>
+<li>Choose a pricing tier. The free tier <strong>F0</strong> is sufficient for the labs in this course. Note that the free tier has monthly call limits; if you expect to exceed them, use the standard tier.</li>
+<li>Review your settings and click <strong>Review + create</strong>, then <strong>Create</strong>. The deployment takes less than a minute.</li>
+<li>When the deployment completes, click <strong>Go to resource</strong>.</li>
+<li>In the resource menu, open <strong>Keys and Endpoint</strong>. Copy the endpoint URL and one of the two keys — you will use them throughout this section.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>On the free tier, image analysis calls are limited to a small number of transactions per minute and per month. If a lab starts returning HTTP 429 (too many requests) responses, wait a moment and retry, or temporarily switch the resource to a paid tier.</p>
+</div>
+
+<h2>Create the Resource with Azure CLI</h2>
+<p>The Azure CLI achieves the same result and is repeatable across environments. First sign in, then create the resource group and the Computer Vision resource:</p>
+
+<pre><code>az login
+
+az group create --name rg-ai103-vision --location eastus
+
+az cognitiveservices account create --resource-group rg-ai103-vision \
+  --name cv-ai103-demo \
+  --kind ComputerVision \
+  --sku F0 \
+  --location eastus</code></pre>
+
+<p>Note the <code>--kind ComputerVision</code> value: it creates the single-service vision resource rather than the multi-service AI Services account. After the resource exists, fetch its endpoint and keys:</p>
+
+<pre><code># Show the endpoint
+az cognitiveservices account show --resource-group rg-ai103-vision \
+  --name cv-ai103-demo --query "properties.endpoint"
+
+# Show both access keys
+az cognitiveservices account keys list --resource-group rg-ai103-vision \
+  --name cv-ai103-demo --query "[key1, key2]"</code></pre>
+
+<h2>Verify the Resource Responds</h2>
+<p>Confirm the resource works before you start the labs. The quickest check is a minimal request against the endpoint. This call asks for a caption on a public sample image:</p>
+
+<pre><code>curl -X POST \
+  "https://YOUR_ENDPOINT/computervision/imageanalysis:analyze?api-version=2024-02-01&amp;features=caption" \
+  -H "Content-Type: application/json" \
+  -H "Ocp-Apim-Subscription-Key: YOUR_KEY" \
+  -d '{"url": "https://upload.wikimedia.org/wikipedia/commons/1/1e/Cat_and_dog.jpg"}'</code></pre>
+
+<div class="note">
+<p>If you see a JSON response containing a <code>captionResult</code> field, the resource is working. If you get an authentication error, double-check that the key is copied exactly and that there are no extra spaces. If you get a 404, confirm the endpoint value is complete — it must include the scheme and host, for example <code>https://cv-ai103-demo.cognitiveservices.azure.com/</code>.</p>
+</div>
+
+<h2>Clean Up When You Are Done</h2>
+<p>Once you finish this entire section you can remove the resource by deleting its resource group. Everything created inside it goes with it:</p>
+
+<pre><code>az group delete --name rg-ai103-vision --yes --no-wait</code></pre>
+
+<div class="warn">
+<p>Deleting a resource group is permanent and cannot be undone. Wait until you have finished every vision lab in this course before removing it, because all of them depend on this resource.</p>
+</div>
+
+<h2>Summary</h2>
+<p>In this lab you created a Computer Vision resource through the Azure portal and the Azure CLI, retrieved its endpoint and keys, and verified it responds to a caption request. This resource is the backbone of the image analysis labs that follow, which will move from the portal to Python and finally to raw REST calls.</p>
+<nav>
+<a href="270-introduction-to-computer-vision.html">&larr; Previous: Introduction to Computer Vision</a><a href="272-lab-computer-vision-image-tagging.html">Next: Lab - Computer Vision - Image Tagging &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>87. Diagnostic Settings and Resource-Level Monitoring - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 87</span>
+<h1>Diagnostic Settings and Resource-Level Monitoring</h1>
+<p>So far you have seen monitoring through the Foundry portal and through Application Insights attached to your agent. Both views draw from the same raw material: telemetry emitted by Azure resources. This chapter explains diagnostic settings — the configuration that decides where that telemetry flows — and shows how resource-level monitoring gives you the platform health view that complements your application-level view. Understanding this layer lets you keep logs, metrics, and traces for compliance, debugging, and cost analysis even after a resource is gone.</p>
+
+<h2>The Two Levels of Monitoring</h2>
+<p>Azure separates monitoring into two layers that answer different questions:</p>
+<ul>
+<li><strong>Resource-level monitoring</strong> reports on the platform resource itself: requests, errors, latency, tokens consumed, quota, and deployment health. For a model deployment this tells you how the endpoint is performing.</li>
+<li><strong>Application-level monitoring</strong> reports on your code and prompt flows: what the agent did with each request, which tools it called, and what the user experienced. Application Insights is the home of this telemetry.</li>
+</ul>
+
+<table>
+<tr><th>Layer</th><th>Sees</th><th>Typical questions</th></tr>
+<tr><td>Resource level</td><td>Endpoint metrics, logs, quota</td><td>Is the deployment healthy? How many requests? Any throttling?</td></tr>
+<tr><td>Application level</td><td>Traces, prompts, tool calls, sessions</td><td>Why did this answer go wrong? Which tool ran?</td></tr>
+</table>
+
+<p>You need both. Resource metrics tell you the platform is up; application traces tell you whether your agent is doing a good job on top of it.</p>
+
+<h2>What Are Diagnostic Settings</h2>
+<p>A diagnostic setting is a rule attached to a resource that says: <em>send this resource's logs and metrics to these destinations</em>. Every Azure resource that produces telemetry can have one or more diagnostic settings. Without a diagnostic setting, a resource's platform logs are retained only briefly and are hard to query historically; with one, the telemetry flows somewhere durable.</p>
+<p>The destinations you can choose from are:</p>
+<ul>
+<li><strong>Log Analytics workspace</strong> — for querying logs and metrics together with KQL.</li>
+<li><strong>Storage account</strong> — for cheap, long-term archival, often for compliance.</li>
+<li><strong>Event Hub</strong> — for streaming telemetry into another system such as a SIEM or a data pipeline.</li>
+<li><strong>Partner solutions</strong> — third-party monitoring tools that integrate through the Azure Monitor partner program.</li>
+</ul>
+
+<div class="tip">
+<p>You can create several diagnostic settings on the same resource. A common pattern is one that streams to Log Analytics for interactive queries and a second that archives to storage for retention and compliance. The two settings run in parallel and do not interfere.</p>
+</div>
+
+<h2>Metrics vs Logs</h2>
+<p>Diagnostic settings carry two broad kinds of telemetry, and it helps to keep them straight:</p>
+<ul>
+<li><strong>Platform metrics</strong> are numeric measurements collected at regular intervals — requests, latency, error counts, token usage. They are lightweight, always on, and excellent for dashboards and alerts.</li>
+<li><strong>Resource logs</strong> are detailed records of events — audit entries, authentication failures, throttle events. They are verbose, may be disabled by default, and are best for investigations.</li>
+</ul>
+
+<h2>Setting Up a Diagnostic Setting</h2>
+<p>You can create a diagnostic setting in the portal or with the Azure CLI. Either way you choose the resource, the destination, and the log categories to forward. A CLI example that routes metrics and logs to a Log Analytics workspace looks like this:</p>
+
+<pre><code>az monitor diagnostic-settings create \
+  --resource YOUR_RESOURCE_ID \
+  --name "to-loganalytics" \
+  --workspace YOUR_WORKSPACE_ID \
+  --metrics 'category="AllMetrics" enabled=true' \
+  --logs 'category="Audit" enabled=true'
+</code></pre>
+
+<div class="note">
+<p>Replace <code>YOUR_RESOURCE_ID</code> with the full Azure resource ID of the deployment or hub you are monitoring, and <code>YOUR_WORKSPACE_ID</code> with the resource ID of your Log Analytics workspace. You can find both in the Azure portal under the resource's <em>Properties</em> and the workspace's <em>Overview</em>.</p>
+</div>
+
+<p>Once the setting exists, telemetry arrives in the workspace after a short delay. You can then query it directly:</p>
+
+<pre><code>AzureDiagnostics
+| where ResourceProvider == "MICROSOFT.OPENAI"
+| where OperationName == "InferenceRequest"
+| summarize Count = count(), AvgTokens = avg(TokenCount_s) by Resource, bin(TimeGenerated, 5m)
+| render timechart
+</code></pre>
+
+<h2>Resource-Level Views in Foundry</h2>
+<p>In the Foundry portal, the <strong>Monitoring</strong> or <strong>Metrics</strong> tab of a deployment shows the resource-level picture immediately: request counts, error rates, latency, and token throughput, rendered as charts you can set alerts against. These are platform metrics, so they work even before you configure any diagnostics — but to keep history longer than the default retention, or to join them with your agent's traces in one workspace, you route them through a diagnostic setting as shown above.</p>
+
+<div class="warn">
+<p>Diagnostic settings do not capture the content of model prompts and completions unless you explicitly enable request/response logging, and those payload logs can contain personal data. Enable payload capture only when you genuinely need it, protect the workspace with access controls, and be aware of the privacy and compliance implications for your data.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Resource-level monitoring reports on the health of the platform resource, while application-level monitoring reports on your agent's behaviour. Diagnostic settings connect the two by streaming resource metrics and logs to durable destinations such as Log Analytics, storage, or Event Hubs. You configured a diagnostic setting with the CLI, queried the resulting telemetry, and saw where resource metrics appear in Foundry. The next chapter explains the tracing concepts behind the application-level view you met in the Application Insights labs.</p>
+<nav>
+<a href="86-improving-response-completeness.html">&larr; Previous: Improving Response Completeness</a><a href="88-agent-tracing-concepts-and-overview.html">Next: Agent Tracing - Concepts and Overview &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

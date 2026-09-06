@@ -1,0 +1,218 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CI/CD and Container Deployment - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 23</span>
+<h1>CI/CD and Container Deployment</h1>
+
+<h2>Setting up CI/CD Pipelines for Azure AI Solutions</h2>
+<p>Continuous Integration and Continuous Deployment (CI/CD) pipelines automate the process of building, testing, and deploying AI solutions. For Azure AI workloads, a CI/CD pipeline typically includes stages for provisioning infrastructure (Azure AI Search, Language, Vision, Speech resources), deploying model configurations (index schemas, skill sets, custom model packages), running validation tests (endpoint availability, response accuracy), and promoting changes across environments (dev, test, staging, production). Azure DevOps and GitHub Actions are the two primary pipeline tools tested on the AI-102 exam.</p>
+<p>In <strong>GitHub Actions</strong>, you define workflows as YAML files in the <code>.github/workflows</code> directory. Each workflow triggers on events like <code>push</code> to a branch, <code>pull_request</code>, or a scheduled cron job. Workflow jobs run on GitHub-hosted runners or self-hosted runners and can use Azure-specific actions like <code>azure/login</code> (authenticate with Azure CLI), <code>azure/arm-deploy</code> (deploy ARM/Bicep templates), and <code>azure/webapps-deploy</code> (deploy to App Service). In <strong>Azure DevOps</strong>, you define pipelines in YAML (<code>azure-pipelines.yml</code>) with stages, jobs, and steps. Azure DevOps provides built-in service connections for Azure authentication, library variable groups for secrets, and release gates for quality validation.</p>
+
+<pre><code># GitHub Actions workflow for deploying AI Search and Vision
+name: Deploy AI Solutions
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AZURE_RESOURCE_GROUP: ai-rg
+  LOCATION: eastus
+
+jobs:
+  deploy-infra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Bicep Infrastructure
+        uses: azure/arm-deploy@v2
+        with:
+          resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
+          template: ./infra/main.bicep
+          parameters: location=${{ env.LOCATION }}
+
+      - name: Deploy AI Search Index
+        run: |
+          az search index create \
+            --service-name ${{ vars.SEARCH_SERVICE }} \
+            --name knowledge-index \
+            --index-config ./indexes/knowledge-index.json
+
+  test-endpoints:
+    needs: deploy-infra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Run endpoint availability tests
+        run: |
+          python tests/test_endpoints.py \
+            --search-endpoint ${{ vars.SEARCH_ENDPOINT }} \
+            --vision-endpoint ${{ vars.VISION_ENDPOINT }} \
+            --language-endpoint ${{ vars.LANGUAGE_ENDPOINT }}</pre></code>
+
+<h2>Container Support for Azure AI Services</h2>
+<p>Several Azure AI Services are available as Docker containers that run on-premises or in any container platform. Containers are useful when you need to process data that must not leave your network (compliance), when you need offline processing capability, or when you require predictable latency without network overhead. Each container exposes the same REST API as its cloud counterpart — your application code does not change whether you call the cloud endpoint or the container endpoint.</p>
+
+<table>
+<tr><th>Service</th><th>Container Image (MCR)</th><th>Supported Features</th><th>Disconnected Support</th></tr>
+<tr><td>Azure AI Vision</td><td><code>mcr.microsoft.com/azure-cognitive-services/vision/read:latest</code></td><td>OCR (Read API), image analysis, dense captions, tags</td><td>Yes (v3.2)</td></tr>
+<tr><td>Azure AI Language</td><td><code>mcr.microsoft.com/azure-cognitive-services/textanalytics/language:latest</code></td><td>Key phrases, entity recognition, sentiment analysis, language detection, PII</td><td>Yes (sentiment, key phrases, language detection)</td></tr>
+<tr><td>Azure AI Speech</td><td><code>mcr.microsoft.com/azure-cognitive-services/speechservices/...:latest</code></td><td>Speech-to-text, text-to-speech, custom speech</td><td>Yes (STT, TTS, custom speech)</td></tr>
+<tr><td>LUIS</td><td><code>mcr.microsoft.com/azure-cognitive-services/luis:latest</code></td><td>Intent recognition, entity extraction (LUIS only, not CLU)</td><td>Yes</td></tr>
+<tr><td>Document Intelligence</td><td><code>mcr.microsoft.com/azure-cognitive-services/form-recognizer/...:latest</code></td><td>Layout, prebuilt models (invoice, receipt, ID), custom models</td><td>Yes</td></tr>
+<tr><td>Anomaly Detector</td><td><code>mcr.microsoft.com/azure-cognitive-services/anomaly-detector:latest</code></td><td>Univariate anomaly detection, change point detection</td><td>No</td></tr>
+</table>
+
+<p>Containers are pulled from Microsoft Container Registry (MCR). To run a container, you must accept the EULA and provide a billing endpoint URI and API key from an Azure resource. The container communicates periodically with the billing endpoint to report usage — it stops functioning if it cannot reach the billing endpoint for an extended period (typically a few hours). For <strong>disconnected</strong> (offline) scenarios, some containers support running without internet access after completing a one-time online registration step — this requires a special container configuration and is governed by specific licensing terms.</p>
+
+<h2>Deploying AI Containers: ACI, AKS, and IoT Edge</h2>
+<p>Azure Container Instances (ACI) is the simplest way to run a single container on Azure — you specify the image, resource limits, and environment variables, and Azure runs it as a serverless container. ACI is ideal for development, testing, and low-volume production workloads. Azure Kubernetes Service (AKS) is appropriate for high-volume scenarios requiring scaling, orchestration, and rolling updates. Azure IoT Edge extends containers to edge devices — you deploy AI containers to IoT Edge devices for real-time processing at the edge with intermittent cloud connectivity.</p>
+
+<pre><code># Docker Compose: Running Text Analytics + Vision containers locally
+version: "3.8"
+services:
+  text-analytics:
+    image: mcr.microsoft.com/azure-cognitive-services/textanalytics/language:latest
+    container_name: text-analytics
+    ports:
+      - "5000:5000"
+    environment:
+      - EULA=accept
+      - billing=${LANGUAGE_ENDPOINT}
+      - apikey=${LANGUAGE_KEY}
+
+  vision-read:
+    image: mcr.microsoft.com/azure-cognitive-services/vision/read:latest
+    container_name: vision-read
+    ports:
+      - "5001:5000"
+    environment:
+      - EULA=accept
+      - billing=${VISION_ENDPOINT}
+      - apikey=${VISION_KEY}
+
+  # ACI deployment (Azure CLI)
+  # az container create \
+  #   --resource-group ai-rg \
+  #   --name vision-container \
+  #   --image mcr.microsoft.com/azure-cognitive-services/vision/read:latest \
+  #   --cpu 4 --memory 8 \
+  #   --ports 5000 \
+  #   --environment-variables EULA=accept billing=$VISION_ENDPOINT apikey=$VISION_KEY</pre></code>
+
+<h2>Infrastructure as Code with Bicep</h2>
+<p>Bicep is a domain-specific language for deploying Azure resources declaratively. For AI solutions, Bicep templates define the AI Search service, Language service, Vision service, Speech service, their associated configurations, and role-based access control. You store Bicep templates in your repository and deploy them through CI/CD pipelines using the <code>azure/arm-deploy</code> action (GitHub Actions) or <code>AzureResourceManagerTemplateDeployment</code> task (Azure DevOps).</p>
+
+<pre><code>// Bicep template deploying AI Search, Language, Vision, and Speech
+param location string = resourceGroup().location
+param searchServiceName string
+param languageServiceName string
+param visionServiceName string
+param speechServiceName string
+param searchSku string = 'basic'
+
+resource searchService 'Microsoft.Search/searchServices@2023-11-01' = {
+  name: searchServiceName
+  location: location
+  sku: { name: searchSku }
+  properties: {
+    replicaCount: 1
+    partitionCount: 1
+    publicNetworkAccess: 'Enabled'
+    semanticSearch: 'free'
+  }
+}
+
+resource languageService 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
+  name: languageServiceName
+  location: location
+  kind: 'TextAnalytics'
+  sku: { name: 'S' }
+  properties: {
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource visionService 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
+  name: visionServiceName
+  location: location
+  kind: 'ComputerVision'
+  sku: { name: 'S1' }
+  properties: {
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource speechService 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
+  name: speechServiceName
+  location: location
+  kind: 'SpeechServices'
+  sku: { name: 'S0' }
+  properties: {
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+output searchEndpoint string = searchService.properties.endpoint
+output languageEndpoint string = languageService.properties.endpoint
+output visionEndpoint string = visionService.properties.endpoint
+output speechEndpoint string = speechService.properties.endpoint</pre></code>
+
+<h2>Automated Testing Strategies for AI Pipelines</h2>
+<p>AI pipelines require testing beyond standard unit and integration tests. You should validate that deployed models produce correct results, that endpoints respond within acceptable time, and that the response format matches expectations. The testing types relevant to the AI-102 exam include <strong>endpoint availability tests</strong> (HTTP 200 response from each AI service endpoint), <strong>functional accuracy tests</strong> (calling an OCR endpoint with a known test image and verifying the extracted text matches expected output), <strong>performance tests</strong> (response time below a threshold under expected load), and <strong>regression tests</strong> (re-running the same inputs through a new model version and comparing outputs to detect unexpected changes).</p>
+<p>For functional accuracy tests, maintain a test dataset of known inputs and expected outputs. For example, a Vision OCR test dataset might include 20 images with the expected OCR text for each. Your CI/CD pipeline runs the test script after deployment, calling the endpoint with each input and comparing the result to the expected output (using exact match, fuzzy match, or key-field comparison depending on the service). If the accuracy falls below a threshold, the pipeline fails and alerts the team. Performance tests use the same endpoints under controlled load — you can use tools like <code>locust</code> or <code>k6</code> to simulate concurrent requests and measure P50, P95, and P99 latency.</p>
+
+<div class="exam-tip">
+<h3>Exam Tip: Container Quotas, Disconnected Scenarios, MCR Image Patterns</h3>
+<p>The AI-102 exam tests container-specific knowledge. Know that all AI containers require the <code>EULA=accept</code>, <code>billing</code>, and <code>apikey</code> environment variables. Without a valid billing endpoint, the container stops after a grace period. <strong>Disconnected containers</strong> are a special licensing option for air-gapped environments — they require prior approval, a one-time online registration, and use a <code>Connected</code> vs <code>NotConnected</code> flag during registration. Not all containers support disconnected mode. For <strong>container quotas</strong>, understand that each container instance consumes transactions from the parent Azure resource's quota — if you run 5 containers all mapped to the same S0 resource, they share the 1,000 TPS limit. For <strong>MCR image pull patterns</strong>, know that images are tagged by version (<code>latest</code>, <code>3.2</code>, <code>3.2.2.1</code>) and you should pin to a specific version in production to avoid unexpected changes from <code>latest</code> tag updates. For <strong>deployment targets</strong>, remember ACI for simple single-container deployments, AKS for orchestrated multi-container deployments with scaling, and IoT Edge for edge device deployment with intermittent connectivity.</p>
+</div>
+
+<h2>Blue-Green Deployment and Rollback Strategies</h2>
+<p>When updating AI models — especially custom models like Custom Vision, custom NER, or fine-tuned OpenAI models — you need a strategy to deploy the new version without downtime and to roll back if the new version underperforms. Blue-green deployment maintains two identical environments: the <strong>blue</strong> environment (current production) and the <strong>green</strong> environment (new version). You route a subset of traffic to green for validation — once confirmed, you switch all traffic to green. If issues arise, you immediately route traffic back to blue. This pattern works well for containerized custom models where you deploy the green containers alongside blue, test them, and then update the load balancer or DNS to point to green.</p>
+<p>For Azure AI Services endpoints (like CLU, Question Answering, or Custom Vision predictions), the blue-green pattern maps to deployment slots. You create a staging deployment with the new model version, run validation tests against the staging endpoint, and then swap the staging and production slots. If the swap causes issues, you swap back. Azure AI Search supports index aliases — you build the new index with a new name, update the alias to point to the new index, and keep the old index as a rollback target. For OpenAI model deployments, you deploy the new model version under a different deployment name and update your application's configuration to point to the new deployment — rollback is simply reverting the configuration.</p>
+
+<h2>Exercise: GitHub Actions Pipeline for AI Search and Custom Vision</h2>
+<ol>
+<li>Create a GitHub repository with the following structure: <code>infra/main.bicep</code> (deploys AI Search + Custom Vision training resource), <code>.github/workflows/deploy.yml</code>, <code>indexes/knowledge-index.json</code> (index schema with semantic configuration), <code>skillsets/ocr-skillset.json</code> (skillset with OCR and key phrase skills), <code>tests/test_endpoints.py</code>.</li>
+<li>Write a Bicep template that deploys an AI Search service (Basic tier), a Custom Vision training resource (S0), and a Language service (S). Configure Custom Vision with a project and export the prediction endpoint as an output.</li>
+<li>Create a GitHub Actions workflow with two jobs: <code>deploy-infra</code> and <code>test-endpoints</code>. The first job deploys the Bicep template. The second job runs <code>test_endpoints.py</code> which calls each endpoint with a known test input — a test image URL for Custom Vision and a test query for AI Search.</li>
+<li>Add a third job <code>deploy-custom-vision</code> that runs a Python script to upload a test image to Custom Vision, train a classifier, and export the iteration. The training step should run only after <code>test-endpoints</code> passes.</li>
+<li>Configure environment variables and secrets in GitHub: <code>AZURE_CREDENTIALS</code> (service principal JSON), <code>SEARCH_ENDPOINT</code>, <code>VISION_ENDPOINT</code>, etc. Use GitHub Environments to separate dev and production configurations.</li>
+<li>Push to the main branch and verify the workflow runs successfully. Check the Azure portal to confirm the resources were created and the test results are visible in the workflow logs.</li>
+</ol>
+
+<h2>Summary</h2>
+<p>CI/CD pipelines automate the deployment and testing of Azure AI solutions across environments. GitHub Actions and Azure DevOps provide the tooling for infrastructure deployment, model configuration, and validation testing. Azure AI Services containers (Vision, Language, Speech, LUIS, Document Intelligence, Anomaly Detector) run in ACI, AKS, or IoT Edge — each with specific configuration requirements for billing, EULA acceptance, and disconnected mode. Bicep templates define infrastructure declaratively and integrate with CI/CD pipelines for repeatable deployments. Automated testing validates endpoint availability, functional accuracy, and performance before promoting changes. Blue-green deployment and index aliases enable safe model updates with instant rollback. On the AI-102 exam, focus on the list of services with container support, the three required container environment variables, and the appropriate deployment target for each scenario. The next chapter covers cost management, monitoring, and diagnostics for Azure AI solutions.</p>
+
+<nav>
+<a href="../index.html">&larr; Back to Index</a>
+<a href="24-cost-monitoring.html">Next: Cost Management, Monitoring, and Diagnostics &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Back Pressure Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:900px;margin:24px auto;padding:0 16px}
+.pipeline{display:flex;align-items:stretch;gap:0;margin:16px 0;flex-wrap:wrap;justify-content:center}
+.pipe-stage{background:#1e293b;border:2px solid #334155;border-radius:12px;padding:14px;min-width:120px;text-align:center;flex:1;max-width:160px}
+.pipe-stage h4{font-size:12px;margin-bottom:8px}
+.pipe-queue{background:#334155;border-radius:6px;padding:8px;min-height:50px;display:flex;flex-direction:column;gap:3px}
+.pipe-item{background:#0f172a;border-radius:4px;padding:3px 8px;font-size:10px;color:#e2e8f0;animation:slideIn .2s}
+@keyframes slideIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
+.pipe-connector{display:flex;align-items:center;justify-content:center;width:30px;color:#475569;font-size:16px}
+.pressure-gauge{display:flex;align-items:center;justify-content:center;gap:8px;margin:12px 0}
+.gauge-label{font-size:11px;color:#94a3b8}
+.gauge-track{width:120px;height:10px;background:#334155;border-radius:5px;overflow:hidden}
+.gauge-fill{height:100%;border-radius:5px;transition:width .3s}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">Back</a><h1>Back Pressure Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/12</div>
+<div class="hud-item"><span id="healthy">OK</span>System</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="pipeline" id="pipeline"></div>
+<div class="scenario-card">
+<h3 id="scenario-title">Overload Scenario</h3>
+<p id="scenario-desc"></p>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Back Pressure Master!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+var score=0,round=0,maxRounds=12,answered=false;
+var stages=[
+{name:"Producer",load:20,color:"#4ade80"},
+{name:"Queue",load:30,color:"#4ade80"},
+{name:"Processor",load:60,color:"#fbbf24"},
+{name:"Database",load:40,color:"#4ade80"}
+];
+var scenarios=[
+{desc:"Producer generates 1000 msg/sec but processor handles 200/sec. Queue filling up.",loads:[95,90,60,40],correct:"Apply back pressure to producer (slow down)",reason:"Don't let producer outrun consumer. Propagate pressure upstream."},
+{desc:"Database at 95% CPU. Processor queuing up.",loads:[40,50,70,95],correct:"Throttle processor to match DB capacity",reason:"Downstream bottleneck needs upstream throttling."},
+{desc:"Flash sale: 10x normal traffic. All stages overwhelmed.",loads:[98,95,85,80],correct:"Rate limit at the API gateway",reason:"First line of defense. Protect all downstream services."},
+{desc:"Queue full (100K messages). New messages arriving.",loads:[30,100,50,40],correct:"Drop low-priority messages with circuit breaker",reason:"When queue is full, prioritize critical messages."},
+{desc:"Processor 100% CPU, producer at 50%. Queue empty.",loads:[50,10,100,30],correct:"Scale horizontally (add processor instances)",reason:"CPU bottleneck needs horizontal scaling."},
+{desc:"Database connection pool exhausted. Requests queuing.",loads:[40,60,70,95],correct:"Reject requests with 503 + retry-after",reason:"When DB is saturated, fail fast with retry guidance."},
+{desc:"Event stream: consumer 3 hours behind producer.",loads:[60,85,40,30],correct:"Speed up consumer or add more consumers",reason:"Consumer lag needs more processing capacity."},
+{desc:"Microservice cascade: A→B→C all overloaded.",loads:[80,75,70,65],correct:"Circuit breaker on service C",reason:"Break the cascade at the failing point."},
+{desc:"Memory pressure: OOM kills in processor.",loads:[40,50,95,40],correct:"Add memory limits and backpressure",reason:"Memory exhaustion needs flow control."},
+{desc:"Read replica lagging 30 seconds behind primary.",loads:[50,40,30,85],correct:"Redirect reads to primary temporarily",reason:"Replica lag means stale reads. Use primary until caught up."},
+{desc:"Rate limiter allowing 10K req/min, but service handles 5K.",loads:[70,60,85,50],correct:"Lower rate limit to match capacity",reason:"Rate limits must align with actual downstream capacity."},
+{desc:"Lambda functions hitting concurrency limit.",loads:[90,80,70,60],correct:"Implement SQS queue as buffer",reason:"SQS decouples producer from consumer, absorbing spikes."}
+];
+function renderPipeline(){
+var el=document.getElementById("pipeline");
+el.innerHTML=stages.map(function(s,i){
+var loadColor=s.load>80?"#f87171":s.load>50?"#fbbf24":"#4ade80";
+return (i>0?"<div class='pipe-connector'>→</div>":"")+
+"<div class='pipe-stage'><h4>"+s.name+"</h4>"+
+"<div class='pressure-gauge'><div class='gauge-label'>Load</div>"+
+"<div class='gauge-track'><div class='gauge-fill' style='width:"+s.load+"%;background:"+loadColor+"'></div></div>"+
+"<div class='gauge-label'>"+s.load+"%</div></div>"+
+"<div class='pipe-queue'>"+Array.from({length:Math.min(8,Math.ceil(s.load/12))},function(_,j){return "<div class='pipe-item'>msg-"+(j+1)+"</div>";}).join("")+"</div></div>";
+}).join("");
+var systemStatus="OK";
+if(stages.some(function(s){return s.load>90;}))systemStatus="CRITICAL";
+else if(stages.some(function(s){return s.load>70;}))systemStatus="WARNING";
+document.getElementById("healthy").textContent=systemStatus;
+document.getElementById("healthy").style.color=systemStatus==="OK"?"#4ade80":systemStatus==="WARNING"?"#fbbf24":"#f87171";
+}
+function startRound(){
+answered=false;
+var s=scenarios[round%scenarios.length];
+stages.forEach(function(st,i){st.load=s.loads[i];st.color=s.loads[i]>80?"#f87171":s.loads[i]>50?"#fbbf24":"#4ade80";});
+renderPipeline();
+document.getElementById("scenario-title").textContent="Overload Detected!";
+document.getElementById("scenario-desc").textContent=s.desc;
+document.getElementById("feedback").className="feedback";
+document.getElementById("next-btn").style.display="none";
+document.getElementById("choices").innerHTML=[
+"Apply back pressure upstream",
+"Scale horizontally",
+"Rate limit at gateway",
+"Circuit breaker + reject"
+].map(function(c){return "<button class='choice-btn' onclick=\"answer('"+c+"','"+s.correct+"','"+s.reason.replace(/'/g,"\\'")+"')\">"+c+"</button>";}).join("");
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+var isCorrect=chosen===correct;
+if(isCorrect)score+=10;else score=Math.max(0,score-3);
+document.querySelectorAll(".choice-btn").forEach(function(b){
+if(b.textContent===correct)b.classList.add("correct");
+else if(b.textContent===chosen&&!isCorrect)b.classList.add("wrong");
+b.style.pointerEvents="none";
+});
+if(isCorrect){
+stages.forEach(function(s){s.load=Math.max(10,s.load-30);});
+}else{
+stages.forEach(function(s){s.load=Math.min(100,s.load+10);});
+}
+renderPipeline();
+var fb=document.getElementById("feedback");
+fb.className="feedback show "+(isCorrect?"correct-fb":"wrong-fb");
+fb.style.borderColor=isCorrect?"#4ade80":"#f87171";
+document.getElementById("fb-title").textContent=isCorrect?"Correct!":"Wrong";
+document.getElementById("fb-text").textContent=reason;
+document.getElementById("score").textContent=score;
+document.getElementById("next-btn").style.display="block";
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById("game-content").style.display="none";
+document.getElementById("game-over").style.display="block";
+document.getElementById("final-score").textContent=score;return;
+}
+document.getElementById("round").textContent=round+1;
+startRound();
+}
+function restart(){
+score=0;round=0;
+stages=[{name:"Producer",load:20,color:"#4ade80"},{name:"Queue",load:30,color:"#4ade80"},{name:"Processor",load:60,color:"#fbbf24"},{name:"Database",load:40,color:"#4ade80"}];
+document.getElementById("game-content").style.display="block";
+document.getElementById("game-over").style.display="none";
+document.getElementById("round").textContent=1;
+document.getElementById("score").textContent=0;
+startRound();
+}
+startRound();
+</script>
+</body>
+</html>

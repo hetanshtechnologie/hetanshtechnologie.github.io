@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hardware &amp; IoT - Node.js Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 13</span>
+    <h1>Hardware &amp; IoT with Node.js</h1>
+
+    <h2>Overview</h2>
+    <p>Node.js can interact with hardware, making it a great choice for IoT (Internet of Things) applications. The combination of JavaScript's ease of use and Node.js's event-driven model works well for sensor data collection, device control, and real-time dashboards.</p>
+
+    <h2>Raspberry Pi Setup</h2>
+    <p>The Raspberry Pi is the most popular board for Node.js IoT projects.</p>
+
+    <pre><code># Install Node.js on Raspberry Pi (Raspberry Pi OS)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Verify
+node --version
+npm --version</code></pre>
+
+    <h2>GPIO (General Purpose Input/Output)</h2>
+    <p>GPIO pins allow you to read sensors and control actuators. Use the <code>onoff</code> or <code>pigpio</code> library.</p>
+
+    <pre><code>// Install: npm install onoff
+
+const Gpio = require('onoff').Gpio;
+
+// Setup LED on GPIO 17
+const led = new Gpio(17, 'out');
+
+// Setup button on GPIO 18
+const button = new Gpio(18, 'in', 'both');
+
+// Blink LED
+let state = 0;
+setInterval(() => {
+  state = state ? 0 : 1;
+  led.writeSync(state);
+}, 1000);
+
+// Read button
+button.watch((err, value) => {
+  if (err) return console.error(err);
+  console.log('Button pressed! Value:', value);
+});
+
+// Cleanup on exit
+process.on('SIGINT', () => {
+  led.unexport();
+  button.unexport();
+  process.exit();
+});</code></pre>
+
+    <h2>LED Projects</h2>
+    <h3>Traffic Light Simulation</h3>
+    <pre><code>const Gpio = require('onoff').Gpio;
+
+const red = new Gpio(17, 'out');
+const yellow = new Gpio(27, 'out');
+const green = new Gpio(22, 'out');
+
+function setLights(r, y, g) {
+  red.writeSync(r);
+  yellow.writeSync(y);
+  green.writeSync(g);
+}
+
+// Simulate traffic light cycle
+async function trafficCycle() {
+  setLights(1, 0, 0); // Red
+  await sleep(3000);
+  setLights(1, 1, 0); // Red + Yellow
+  await sleep(1000);
+  setLights(0, 0, 1); // Green
+  await sleep(3000);
+  setLights(0, 1, 0); // Yellow
+  await sleep(1000);
+  trafficCycle();
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+trafficCycle();</code></pre>
+
+    <h2>Sensor Reading</h2>
+    <pre><code>// Temperature sensor (DS18B20 on Raspberry Pi)
+const fs = require('fs');
+
+const sensorPath = '/sys/bus/w1/devices/28-xxxx/w1_slave';
+
+function readTemperature() {
+  const data = fs.readFileSync(sensorPath, 'utf8');
+  const match = data.match(/t=(-?\d+)/);
+  if (match) {
+    const tempC = parseInt(match[1]) / 1000;
+    const tempF = tempC * 9 / 5 + 32;
+    return { celsius: tempC, fahrenheit: tempF };
+  }
+  return null;
+}
+
+setInterval(() => {
+  const temp = readTemperature();
+  if (temp) {
+    console.log(`Temperature: ${temp.celsius.toFixed(1)}°C / ${temp.fahrenheit.toFixed(1)}°F`);
+  }
+}, 5000);</code></pre>
+
+    <h2>WebSocket Integration</h2>
+    <p>Combine hardware with WebSockets for real-time browser dashboards.</p>
+
+    <pre><code>const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const Gpio = require('onoff').Gpio;
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+const sensor = new Gpio(4, 'in', 'both');
+
+// Serve static files
+app.use(express.static('public'));
+
+io.on('connection', (socket) => {
+  console.log('Dashboard connected');
+
+  // Send sensor data when it changes
+  sensor.watch((err, value) => {
+    if (err) return;
+    socket.emit('sensor', { value, timestamp: Date.now() });
+  });
+
+  socket.on('toggle-led', (state) => {
+    const led = new Gpio(17, 'out');
+    led.writeSync(state ? 1 : 0);
+  });
+});
+
+server.listen(3000, () => {
+  console.log('Server running on http://localhost:3000');
+});</code></pre>
+
+    <h2>IoT Components Guide</h2>
+    <table style="width:100%;border-collapse:collapse;">
+      <tr style="background:#e8f5e9;"><th style="padding:8px;text-align:left;border:1px solid #c8e6c9;">Component</th><th style="padding:8px;text-align:left;border:1px solid #c8e6c9;">Purpose</th><th style="padding:8px;text-align:left;border:1px solid #c8e6c9;">GPIO Pin Type</th></tr>
+      <tr><td style="padding:8px;border:1px solid #e0e0e0;">LED</td><td style="padding:8px;border:1px solid #e0e0e0;">Visual output</td><td style="padding:8px;border:1px solid #e0e0e0;">Output (digital)</td></tr>
+      <tr><td style="padding:8px;border:1px solid #e0e0e0;">Button</td><td style="padding:8px;border:1px solid #e0e0e0;">User input</td><td style="padding:8px;border:1px solid #e0e0e0;">Input (digital)</td></tr>
+      <tr><td style="padding:8px;border:1px solid #e0e0e0;">DHT11/DHT22</td><td style="padding:8px;border:1px solid #e0e0e0;">Temperature & humidity</td><td style="padding:8px;border:1px solid #e0e0e0;">Input (digital)</td></tr>
+      <tr><td style="padding:8px;border:1px solid #e0e0e0;">HC-SR04</td><td style="padding:8px;border:1px solid #e0e0e0;">Distance / ultrasonic</td><td style="padding:8px;border:1px solid #e0e0e0;">Input/Output (digital)</td></tr>
+      <tr><td style="padding:8px;border:1px solid #e0e0e0;">Servo Motor</td><td style="padding:8px;border:1px solid #e0e0e0;">Precise movement</td><td style="padding:8px;border:1px solid #e0e0e0;">PWM output</td></tr>
+      <tr><td style="padding:8px;border:1px solid #e0e0e0;">Buzzer</td><td style="padding:8px;border:1px solid #e0e0e0;">Sound output</td><td style="padding:8px;border:1px solid #e0e0e0;">Output (digital/PWM)</td></tr>
+    </table>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create a weather station on a Raspberry Pi that reads temperature and humidity from a DHT11 sensor every 10 seconds and serves the data on a real-time web dashboard using Socket.IO. Include a button to toggle an LED.
+    </div>
+
+    <nav>
+      <a href="12-advanced.html">&larr; Previous: Advanced Topics</a>
+      <a href="../">Back to Index</a>
+      <a href="14-practice.html">Next: Practice &amp; Certification &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

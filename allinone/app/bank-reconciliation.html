@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bank Reconciliation — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Bank Reconciliation</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-7xl mx-auto p-6">
+    <div id="alert"></div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="font-bold text-lg mb-1">Total Transactions</h2>
+        <div id="total-txns" class="text-3xl font-bold text-blue-600">0</div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="font-bold text-lg mb-1">Auto Matched</h2>
+        <div id="matched-txns" class="text-3xl font-bold text-green-600">0</div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="font-bold text-lg mb-1">Unmatched</h2>
+        <div id="unmatched-txns" class="text-3xl font-bold text-red-600">0</div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border p-6 mb-6">
+      <h2 class="font-bold text-lg mb-4">Import Bank Statement (CSV)</h2>
+      <form id="import-form" class="space-y-4">
+        <div class="grid grid-cols-3 gap-4">
+          <div><label class="block text-sm font-semibold mb-1">Bank Name</label><input type="text" id="bank-name" class="w-full border rounded px-3 py-2 text-sm" required></div>
+          <div><label class="block text-sm font-semibold mb-1">Account No</label><input type="text" id="acct-no" class="w-full border rounded px-3 py-2 text-sm"></div>
+          <div><label class="block text-sm font-semibold mb-1">Statement Date</label><input type="date" id="stmt-date" class="w-full border rounded px-3 py-2 text-sm"></div>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1">CSV File (columns: Date, Narration, Debit, Credit, Balance, RefNo)</label>
+          <input type="file" id="csv-file" accept=".csv" class="w-full border rounded px-3 py-2 text-sm">
+          <p class="text-xs text-gray-500 mt-1">Date format: dd/mm/yyyy or yyyy-mm-dd. Debit/Credit can be empty or 0. Header row required.</p>
+        </div>
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700">Import &amp; Auto-Match</button>
+      </form>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border p-6 mb-6">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="font-bold text-lg">Transaction List</h2>
+        <div class="flex gap-2">
+          <select id="match-filter" class="border rounded px-2 py-1 text-sm" onchange="loadTransactions()">
+            <option value="">All</option>
+            <option value="unmatched">Unmatched</option>
+            <option value="auto_matched">Auto Matched</option>
+            <option value="manual_matched">Manual Matched</option>
+            <option value="ignored">Ignored</option>
+          </select>
+          <select id="stmt-filter" class="border rounded px-2 py-1 text-sm" onchange="loadTransactions()">
+            <option value="">All Statements</option>
+          </select>
+        </div>
+      </div>
+      <div id="txn-loading">Loading...</div>
+      <div id="txn-table" class="hidden text-sm overflow-x-auto"></div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId = null;
+
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin(); if (!user) return;
+      orgId = await getOrgId(); if (!orgId) return;
+      await loadStmtFilter();
+      await loadTransactions();
+    });
+
+    document.getElementById('import-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const file = document.getElementById('csv-file').files[0];
+      if (!file) { showAlert('Please select a CSV file.', 'error'); return; }
+      const text = await file.text();
+      const lines = text.split('\n').filter(l => l.trim());
+      if (lines.length < 2) { showAlert('CSV must have a header row and at least one data row.', 'error'); return; }
+
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+      const dateIdx = headers.findIndex(h => h.includes('date'));
+      const narIdx = headers.findIndex(h => h.includes('nar')||h.includes('desc')||h.includes('particular'));
+      const drIdx = headers.findIndex(h => h.includes('debit')||h.includes('dr')||h.includes('withdrawal')||h.includes('withdraw'));
+      const crIdx = headers.findIndex(h => h.includes('credit')||h.includes('cr')||h.includes('deposit'));
+      const balIdx = headers.findIndex(h => h.includes('balance'));
+      const refIdx = headers.findIndex(h => h.includes('ref')||h.includes('chq')||h.includes('cheque')||h.includes('txn'));
+
+      if (dateIdx === -1) { showAlert('CSV must have a Date column.', 'error'); return; }
+
+      try {
+        const { data: stmt, error: stmtErr } = await erp.from('bank_statements').insert({
+          org_id: orgId, bank_name: document.getElementById('bank-name').value,
+          account_no: document.getElementById('acct-no').value||null,
+          statement_date: document.getElementById('stmt-date').value||null
+        }).select().single();
+        if (stmtErr) throw stmtErr;
+
+        const parsed = [];
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(',').map(c => c.trim());
+          const rawDate = cols[dateIdx] || '';
+          const parts = rawDate.includes('/') ? rawDate.split('/') : rawDate.split('-');
+          let txnDate = rawDate;
+          if (parts.length === 3) {
+            if (rawDate.includes('/')) txnDate = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+            else txnDate = `${parts[0]}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
+          }
+          const debit = parseFloat(cols[drIdx]?.replace(/[^0-9.-]/g,'') || '0') || 0;
+          const credit = parseFloat(cols[crIdx]?.replace(/[^0-9.-]/g,'') || '0') || 0;
+          parsed.push({
+            org_id: orgId, statement_id: stmt.id,
+            txn_date: txnDate || new Date().toISOString().split('T')[0],
+            narration: narIdx >= 0 ? cols[narIdx]||'' : '',
+            debit, credit,
+            balance: balIdx >= 0 ? parseFloat(cols[balIdx]?.replace(/[^0-9.-]/g,'')||'0')||null : null,
+            ref_no: refIdx >= 0 ? cols[refIdx]||'' : '',
+            match_status: 'unmatched'
+          });
+        }
+
+        const { error: insErr } = await erp.from('bank_transactions').insert(parsed);
+        if (insErr) throw insErr;
+
+        await autoMatch(stmt.id);
+        showAlert(`Imported ${parsed.length} transactions from ${lines.length-1} rows.`, 'success');
+        this.reset();
+        await loadStmtFilter();
+        await loadTransactions();
+      } catch (err) { showAlert(err.message, 'error'); }
+    });
+
+    async function autoMatch(stmtId) {
+      const { data: txns } = await erp.from('bank_transactions').select('*').eq('statement_id', stmtId).eq('match_status', 'unmatched');
+      if (!txns||!txns.length) return;
+
+      const { data: payments } = await erp.from('payments').select('*, invoices(invoice_no,total)').eq('org_id', orgId);
+      const pmtMap = {};
+      (payments||[]).forEach(p => {
+        const amt = Number(p.amount);
+        pmtMap[amt] = pmtMap[amt] || [];
+        pmtMap[amt].push(p);
+      });
+
+      for (const txn of txns) {
+        const amt = Number(txn.debit) || Number(txn.credit) || 0;
+        if (amt <= 0) continue;
+        const matches = pmtMap[amt];
+        if (!matches||!matches.length) continue;
+
+        for (const pmt of matches) {
+          if (pmt.matched_txn_id) continue;
+          const txnDate = new Date(txn.txn_date);
+          const pmtDate = new Date(pmt.payment_date);
+          const diffDays = Math.abs((txnDate - pmtDate) / (1000*60*60*24));
+
+          if (diffDays <= 3) {
+            await erp.from('bank_transactions').update({
+              match_status: 'auto_matched',
+              matched_payment_id: pmt.id,
+              matched_invoice_id: pmt.invoice_id
+            }).eq('id', txn.id);
+            break;
+          }
+        }
+      }
+    }
+
+    async function loadStmtFilter() {
+      const { data } = await erp.from('bank_statements').select('id, bank_name, statement_date').eq('org_id', orgId).order('created_at', { ascending: false });
+      const sel = document.getElementById('stmt-filter');
+      sel.innerHTML = '<option value="">All Statements</option>';
+      (data||[]).forEach(s => { const o=document.createElement('option');o.value=s.id;o.textContent=`${s.bank_name||'Bank'} - ${s.statement_date||''}`;sel.appendChild(o); });
+    }
+
+    async function loadTransactions() {
+      const stmtId = document.getElementById('stmt-filter').value;
+      const matchFilter = document.getElementById('match-filter').value;
+
+      let query = erp.from('bank_transactions').select('*, matched_payment:payments!matched_payment_id(amount,mode,reference_no), matched_invoice:invoices!matched_invoice_id(invoice_no,total)').eq('org_id', orgId).order('txn_date', { ascending: false }).limit(200);
+      if (stmtId) query = query.eq('statement_id', parseInt(stmtId));
+      if (matchFilter) query = query.eq('match_status', matchFilter);
+
+      const { data, error } = await query;
+      if (error) { showAlert(error.message,'error'); return; }
+
+      document.getElementById('total-txns').textContent = data?data.length||0:0;
+      document.getElementById('matched-txns').textContent = data?data.filter(t=>t.match_status==='auto_matched'||t.match_status==='manual_matched').length:0;
+      document.getElementById('unmatched-txns').textContent = data?data.filter(t=>t.match_status==='unmatched').length:0;
+
+      document.getElementById('txn-loading').classList.add('hidden');
+      const div = document.getElementById('txn-table'); div.classList.remove('hidden');
+      if (!data||!data.length) { div.innerHTML='<div class="p-4 text-gray-500 text-center">No transactions.</div>'; return; }
+
+      div.innerHTML = `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b text-left"><th class="p-3 font-semibold">Date</th><th class="p-3 font-semibold">Narration</th><th class="p-3 font-semibold">Debit</th><th class="p-3 font-semibold">Credit</th><th class="p-3 font-semibold">Ref No</th><th class="p-3 font-semibold">Status</th><th class="p-3 font-semibold">Matched To</th><th class="p-3"></th></tr></thead><tbody>${data.map(t => {
+        const statusColor = s => {
+          if (s==='auto_matched') return 'bg-green-100 text-green-700';
+          if (s==='manual_matched') return 'bg-blue-100 text-blue-700';
+          if (s==='ignored') return 'bg-gray-100 text-gray-500';
+          return 'bg-red-100 text-red-700';
+        };
+        const matchInfo = t.matched_invoice ? escapeHtml(t.matched_invoice.invoice_no) : t.matched_payment ? 'Payment: '+formatCurrency(t.matched_payment.amount) : '-';
+        return `<tr class="border-b hover:bg-gray-50">
+          <td class="p-3 text-xs">${formatDate(t.txn_date)}</td>
+          <td class="p-3 max-w-xs truncate">${escapeHtml(t.narration||'')}</td>
+          <td class="p-3 text-red-600">${t.debit>0?formatCurrency(t.debit):'-'}</td>
+          <td class="p-3 text-green-600">${t.credit>0?formatCurrency(t.credit):'-'}</td>
+          <td class="p-3 text-xs font-mono">${escapeHtml(t.ref_no||'-')}</td>
+          <td class="p-3"><span class="inline-block ${statusColor(t.match_status)} text-xs font-semibold px-2 py-0.5 rounded">${t.match_status.replace('_',' ')}</span></td>
+          <td class="p-3 text-xs">${matchInfo}</td>
+          <td class="p-3">${t.match_status==='unmatched'?`<button onclick="manualMatch(${t.id})" class="text-blue-600 hover:underline text-xs">Match</button>`:''}</td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+    }
+
+    async function manualMatch(txnId) {
+      const invNo = prompt('Enter invoice number to match (or leave blank to skip):');
+      if (invNo) {
+        const { data: inv } = await erp.from('invoices').select('id').eq('org_id', orgId).ilike('invoice_no', `%${invNo}%`).limit(1);
+        if (inv&&inv.length) {
+          await erp.from('bank_transactions').update({ match_status:'manual_matched', matched_invoice_id: inv[0].id }).eq('id', txnId);
+          showAlert('Matched to invoice #'+invNo, 'success');
+        } else {
+          showAlert('Invoice not found.', 'error');
+        }
+      } else {
+        await erp.from('bank_transactions').update({ match_status:'ignored' }).eq('id', txnId);
+      }
+      await loadTransactions();
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

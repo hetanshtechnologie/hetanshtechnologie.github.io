@@ -1,0 +1,107 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>183. Creating the Knowledge Source for Agentic Retrieval - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 183</span>
+<h1>Creating the Knowledge Source for Agentic Retrieval</h1>
+<p>Before an agent can answer questions from company documents, those documents need to live somewhere the retrieval pipeline can reach. That somewhere is the <strong>knowledge source</strong>: the raw, unmodified files — policy PDFs, product manuals, invoice samples — that will later be split into chunks, embedded into vectors, and indexed into a searchable knowledge base. This chapter prepares that source for the CloudXeus project. By the end you will have a storage account with an organized container of documents, ready for the knowledge base you build in the next chapter.</p>
+
+<h2>What a Knowledge Source Is</h2>
+<p>Think of a knowledge source as the shelf of ingredients and a knowledge base as the prepared meal. The source holds original files in their native form. The knowledge base is the structure built from them: text fragments, their embedding vectors, and the index that makes retrieval fast. The two layers stay separate because documents change. When a new version of a manual arrives, you replace the file in the source and re-run indexing, and the agent starts retrieving the new content without any manual rework.</p>
+
+<div class="note">
+<p>Keeping the source untouched also protects its role as the ground truth. Because the knowledge base is derived from these files, you can always trace a retrieved answer back to the original document — provided the source preserves the original, unmodified bytes.</p>
+</div>
+
+<h2>Choosing the Storage Layer</h2>
+<p>Azure Blob Storage is the natural home for a knowledge source. It stores files cheaply, scales to large volumes of documents, and integrates directly with the indexing services that build knowledge bases. Blobs are organized inside containers, and containers can hold folders that mirror the way your documents are organized on disk.</p>
+
+<table>
+<tr><th>Storage option</th><th>Good for</th><th>Notes</th></tr>
+<tr><td>Azure Blob Storage</td><td>Documents and files feeding an index</td><td>The standard choice for knowledge sources</td></tr>
+<tr><td>Azure Files</td><td>Shared SMB-style drives</td><td>Less common for retrieval pipelines</td></tr>
+<tr><td>Azure Data Lake Storage</td><td>Very large analytical datasets</td><td>Useful when the source is huge or analytics-driven</td></tr>
+<tr><td>SharePoint / OneDrive</td><td>Office content already in Microsoft 365</td><td>Convenient, but adds connector and permission complexity</td></tr>
+</table>
+
+<h2>Creating the Storage Account and Container</h2>
+<p>You can create the storage account in the Azure portal or with the Azure CLI. The CLI keeps the setup repeatable, which matters when you need to recreate environments for testing. From a terminal, run the following (line-continuation backslashes work in bash; use backticks in PowerShell):</p>
+
+<pre><code>az group create --name cloudxeus-docs-rg --location eastus
+
+az storage account create \
+    --name cloudxeusdocsstore \
+    --resource-group cloudxeus-docs-rg \
+    --location eastus \
+    --sku Standard_LRS \
+    --kind StorageV2
+
+az storage container create \
+    --name cloudxeus-docs \
+    --account-name cloudxeusdocsstore \
+    --auth-mode login</code></pre>
+
+<p>The portal route is equally simple: create a storage account of type <em>StorageV2</em>, then add a container to it. Either way, make a note of the storage account name and the container name — you will supply both when you connect the knowledge base.</p>
+
+<h2>Uploading and Organizing Documents</h2>
+<p>Most indexing pipelines accept the common office formats. The exact set your knowledge base supports depends on its parser, but this table is a good approximation:</p>
+
+<table>
+<tr><th>Format</th><th>Notes</th></tr>
+<tr><td>PDF</td><td>Digital PDFs extract directly; scanned PDFs require OCR</td></tr>
+<tr><td>DOCX</td><td>Word documents convert to text and structure</td></tr>
+<tr><td>TXT / MD</td><td>Simple and reliable to index</td></tr>
+<tr><td>HTML</td><td>Web pages flattened to text</td></tr>
+<tr><td>CSV / TSV</td><td>Delimited tabular data</td></tr>
+<tr><td>PPTX / XLSX</td><td>Slide and spreadsheet content</td></tr>
+</table>
+
+<p>Keep related documents together in folders. Under <code>cloudxeus-docs</code> you might create <code>policies/</code>, <code>product-manuals/</code>, and <code>invoices/</code>. Folder names often become part of the document metadata the agent can use, and separate folders make it easy to refresh one subject area without re-indexing everything.</p>
+
+<p>Upload a whole folder from your machine with a single command:</p>
+
+<pre><code>az storage blob upload-batch \
+    --account-name cloudxeusdocsstore \
+    --auth-mode login \
+    --destination cloudxeus-docs \
+    --source ./local-documents</code></pre>
+
+<div class="tip">
+<p>Keep a local copy of every file you upload. When you need to update the source, it is far easier to refresh from a canonical folder than to reconstruct the contents from scratch.</p>
+</div>
+
+<h2>Preparing Documents for Retrieval Quality</h2>
+<p>The quality of the knowledge base depends on the quality of its source. A few habits make retrieval dramatically better:</p>
+<ul>
+<li><strong>Use the current version.</strong> The index is rebuilt from whatever is actually in the container.</li>
+<li><strong>Prefer digital text.</strong> Digitally born PDFs and DOCX files extract cleanly; scanned pages introduce OCR errors into numbers and names.</li>
+<li><strong>Keep files focused.</strong> A single coherent document chunks better than a grab-bag of unrelated content.</li>
+<li><strong>Mind file sizes.</strong> Very large files may be split into many chunks; check the limits of your indexing service.</li>
+<li><strong>Remove superseded versions</strong> so retrieval does not surface stale information.</li>
+</ul>
+
+<h2>Permissions and Access</h2>
+<p>The knowledge base you create next must be allowed to read this container. If you followed the previous chapter, the required role assignments are already in place — typically the indexing service is granted a role such as <em>Storage Blob Data Reader</em> through a managed identity, or it connects using a connection string stored in its configuration. Verify the connection before building the index: from the storage account's <strong>Access Control</strong> page, confirm that the identity used by the indexing service appears with read permission on the container.</p>
+
+<h2>Summary</h2>
+<p>You created a Blob Storage account and a container to act as the knowledge source, uploaded and organized the CloudXeus documents, and confirmed that the permissions from the previous chapter let the indexing service read them. The source is now a clean, versioned shelf of original files. In the next chapter you will build the knowledge base on top of it and run the indexing job that turns these documents into retrievable vectors.</p>
+<nav>
+<a href="182-knowledge-source-pre-requisites-assigning-permissions.html">&larr; Previous: Knowledge source pre-requisites - Assigning permissions</a><a href="184-creating-the-knowledge-base-for-agentic-retrieval.html">Next: Creating the Knowledge Base for Agentic Retrieval &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

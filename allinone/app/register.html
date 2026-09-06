@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Register — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #f1f5f9; }
+  </style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body class="min-h-screen flex items-center justify-center">
+  <div class="bg-white rounded-xl shadow-sm border p-8 w-full max-w-md mx-4">
+    <div class="text-center mb-6">
+      <h1 class="text-2xl font-bold">Create Account</h1>
+      <p class="text-gray-500 text-sm mt-1">Register your organization</p>
+    </div>
+    <div id="alert"></div>
+    <form id="register-form">
+      <div class="mb-4">
+        <label class="block text-sm font-semibold mb-1">Full Name</label>
+        <input type="text" id="full_name" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" required>
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-semibold mb-1">Email</label>
+        <input type="email" id="email" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" required>
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-semibold mb-1">Phone</label>
+        <input type="tel" id="phone" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-semibold mb-1">Organization Name</label>
+        <input type="text" id="org_name" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" required>
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-semibold mb-1">Industry Type</label>
+        <select id="industry_type" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" required>
+          <option value="">Select industry...</option>
+        </select>
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-semibold mb-1">Password</label>
+        <input type="password" id="password" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" required minlength="6">
+      </div>
+      <button type="submit" class="w-full bg-blue-600 text-white font-semibold py-2 rounded-lg hover:bg-blue-700">Create Account</button>
+    </form>
+    <div class="mt-4 text-center text-sm text-gray-500">
+      Already have an account? <a href="index.html" class="text-blue-600 hover:underline">Sign In</a>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async function() {
+      const { data: { user } } = await erp.auth.getUser();
+      if (user) { window.location.href = 'dashboard.html'; return; }
+      const { data: configs } = await erp.from('industry_configs').select('industry_type, label').order('label');
+      const sel = document.getElementById('industry_type');
+      (configs || []).forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.industry_type;
+        opt.textContent = c.label;
+        sel.appendChild(opt);
+      });
+    });
+
+    document.getElementById('register-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn = this.querySelector('button');
+      btn.disabled = true;
+      btn.textContent = 'Creating account...';
+      try {
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        const fullName = document.getElementById('full_name').value.trim();
+        const phone = document.getElementById('phone').value.trim();
+        const orgName = document.getElementById('org_name').value.trim();
+        const industryType = document.getElementById('industry_type').value;
+
+        const { data: authData, error: authErr } = await erp.auth.signUp({ email, password });
+        if (authErr) throw authErr;
+        if (!authData.user) throw new Error('Signup failed');
+
+        const { data: org, error: orgErr } = await erp.from('organizations').insert({
+          name: orgName,
+          industry_type: industryType
+        }).select().single();
+        if (orgErr) throw orgErr;
+
+        const { error: profileErr } = await erp.from('user_profiles').insert({
+          id: authData.user.id,
+          org_id: org.id,
+          full_name: fullName,
+          role: 'admin',
+          phone
+        });
+        if (profileErr) throw profileErr;
+
+        showAlert('Account created! Redirecting...', 'success');
+        setTimeout(() => { window.location.href = 'dashboard.html'; }, 1500);
+      } catch (err) {
+        showAlert(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Create Account';
+      }
+    });
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

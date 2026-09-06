@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Company List Import - QNA</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #333; padding: 24px; max-width: 800px; margin: 0 auto; }
+h1 { font-size: 22px; margin-bottom: 8px; }
+p.subtitle { color: #666; font-size: 14px; margin-bottom: 20px; }
+.card { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+.btn-primary { background: #1a73e8; color: #fff; width: 100%; }
+.btn-primary:hover { background: #1557b0; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-success { background: #188038; color: #fff; }
+.btn-danger { background: #d93025; color: #fff; }
+#log { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; font-size: 13px; font-family: monospace; max-height: 400px; overflow-y: auto; white-space: pre-wrap; margin-top: 12px; }
+#log .done { color: #4ec9b0; }
+#log .error { color: #f44747; }
+#log .info { color: #ce9178; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.stat { background: #fff; border-radius: 8px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.stat .val { font-size: 24px; font-weight: 700; color: #1a73e8; }
+.stat .lbl { font-size: 12px; color: #666; margin-top: 4px; }
+.login-section { margin-bottom: 20px; }
+.login-section input { width: 100%; padding: 10px 12px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+#login-error { color: #d93025; font-size: 13px; margin-bottom: 8px; }
+#user-info { display: none; background: #e8f0fe; padding: 10px 14px; border-radius: 6px; font-size: 14px; margin-bottom: 16px; }
+</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+<h1>Company List - Bulk Import</h1>
+<p class="subtitle">Import companies paying 12LPA+ (Base for SDE-1, Role in India) into the QNA system<br>Credit: <strong>@adarshchetan</strong></p>
+
+<div class="card login-section" id="login-section">
+  <h3 style="margin-bottom:12px;">Login to QNA</h3>
+  <div id="login-error"></div>
+  <input type="email" id="login-email" placeholder="Email">
+  <input type="password" id="login-password" placeholder="Password">
+  <button class="btn btn-primary" id="login-btn">Sign In</button>
+</div>
+
+<div id="user-info"></div>
+
+<div class="stats" id="stats">
+  <div class="stat"><div class="val" id="s-progress">0</div><div class="lbl">Imported</div></div>
+  <div class="stat"><div class="val" id="s-total">0</div><div class="lbl">Total</div></div>
+  <div class="stat"><div class="val" id="s-pct">0%</div><div class="lbl">Progress</div></div>
+</div>
+
+<button class="btn btn-primary" id="import-btn" disabled style="margin-bottom:12px;">Start Import</button>
+
+<div id="log">Ready. Login and click Start Import.</div>
+
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<script>
+const sb = supabase.createClient(
+  'https://vgipghqejzbcoighktij.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnaXBnaHFlanpiY29pZ2hrdGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MjQ2MjIsImV4cCI6MjA5NTMwMDYyMn0.KoDwAZarGWOLwKXOwycA8wuIiIrksvZy7dyaO0-ehUo'
+);
+
+let currentUser = null;
+let categoryId = null;
+
+function log(msg, type) {
+  const el = document.getElementById('log');
+  el.innerHTML += `<span class="${type || 'info'}">${msg}</span>\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+async function login() {
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  if (!email || !password) { errEl.textContent = 'Please fill in all fields'; return; }
+  errEl.textContent = '';
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { errEl.textContent = error.message; return; }
+  currentUser = data.user;
+  document.getElementById('login-section').style.display = 'none';
+  document.getElementById('user-info').style.display = 'block';
+  document.getElementById('user-info').innerHTML = 'Logged in as: <strong>' + currentUser.email + '</strong>';
+  document.getElementById('import-btn').disabled = false;
+  log('Logged in as ' + currentUser.email, 'done');
+}
+
+document.getElementById('login-btn').addEventListener('click', login);
+document.getElementById('login-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+
+const companies = [
+"Acko","Adobe","Airbase","Airbnb","Airbus","Airtel X Labs","Ajio","Akamai","AlphaGrep","Alphonso","Amagi","Amazon","American Express","Angel One","Ansys","Anthem","Apna","AppDynamics","Arcesium","Arista","Atlassian","AutoDesk","Auzmor","Avail Finance","Avalara","BCG","BNY Mellon","Bain & Company","Bankbazaar","Belzabar","Bharatpe","Bigbasket","Biofourmis","Bizongo","Blackbuck","Blinkit","BloomReach","Booking","Bright Money","Clumio","Credgenics","Codenation","Cogoport","Cohesity","Coinbase","Coinswitch","CommerceIQ","Commvault","Confluent","CouchBase","Cred","Credit Suisse","Crowdfire","Cult Fit","DE Shaw","Datadog","Dealshare","Delhivery","Dialpad","Directi","Dp world","Dream 11","Daily Rounds","Dremio","Druva","Duetshe bank","Dunzo","Eightfold ai","Electronics Arts","Eltropy","Endurance","Enfusion","Epifi","Expedia","Falabella","Fanclash","Far Eye","FarEye","Fedility Investments","Fleetx","Flipkart","Broadcom","Browserstack","Bukuwarung","Buyhatke","Byjus","C2FO","Cadence","CashFree","Chargebee","Chegg","Chronus Software","Cisco","Citi Bank","Citrix","Citymall","Clarisights","ClearQuote","ClearTax","ClearTrip","Cloootrack","Cloud Lending","Flock","Fraazo","FreeCharge","FreshMenu","FreshWorks","FrontRow","FunPlus","GE Health Care","Games 24x7","GamesKraft","Gartner","Glance","Gojek","Goldman sachs","GoodWorker","Google","Grab","Graviton","Groupon","Groww","Gupshup","Harness","Headout","Hedge Fund","Hotstar","Idrive","Indeed","IndiaMart","Indiagold","Indmoney","InfoEdge","Informatica","Infoworks","Inmobi","Innovacer","InsideView","Instabase","Intel","Intuit","Ion Trading","Itilite","Ixigo","MPL","Magnitude","MakeMyTrip","Mastercard","MathWorks","McKinsey","Medianet","Meesho","Meidatek","Mentor Graphics","Mfine","Microsoft","MindTickle","MoenGage","Money Control","Moneyview","MoonFrog","Morgan Stanley","MotorQ","MSC","MyKaarma","Jio","JPMC","Jungle Games","Juniper Networks","Jupiter Money","Juspay","KLA","Khatabook","Komprise","Kuvera","LambdaTest","Leap Finance","Leena ai","Lenskart","Licious","Limeroad","Linkedin","Linq","Livspace","Jumio","Loco","Myntra","NK Securities","Nas Academy","Navi","Nektar ai","NetApp","Netomi","Nference","Nike","Ninjacart","NoBroker","Noccarc","Nurture Farm","Nutanix","Nvidia","OCI","OLX Group","OkCredit","Ola","Oppo","Oracle","Oyo","Palo Alto","PayU","Paypal","Paytm","Peak Ai","PharmEasy","Philips","Phonepe","Pickrr","Plivo","PlumHQ","Porter","Postman","Practo","Progress","PropertyGuru","Prophecy io","Public Sapient","Quad Eye","Qualcomm","Quizizz","Rain Instant Pay","Razorpay","Rebel Foods","Reliance Retail","Revolut","Rippling","Rivigo","Rubrik","Rupeek","SABRE","SAP Labs","Salesforce","Salesken","Samsung","Sapient","Schlumberger","SenseHq","Servicenow","ShareChat","Shiprocket","Sigmoid","Sigtuple","Simpl","Sixt","Slack","Snowflake","SocGen","Sostronk","Spinny","SplashLearn","Sprinklr","Stripe","Sumo Logic","Sumologic","Swiggy","Synopsys","Target","Tata 1mg","Telstra","Tesco","Tesla","Texas Instruments","Times Internet","Tokopedia","TomTom","Toppr","Tower Research Capital","Traveloka","Trifacta","Trinkerr","TruEra","Turvo","Twillio","Twitter","UOLO","Uber","Udaan","UiPath","Unacademy","Upstox","Urban Company","Urban Ladder","Visa","Vmware","Vogo","Vymo","Walmart","Wells Fargo","Whatfix","Wingify","Winzo","Wooqer","Xilinx","Yellow AI","Yubi","Yugabyte","Zebpay","Zenefits","Zeotap","Zepto","Zerodha","Zomato","Zoomcar","Telegram"
+];
+
+const DESC = "PAYING 12LPA+ BASE FOR SDE-1 ROLE IN INDIA. Credit: @adarshchetan";
+
+document.getElementById('s-total').textContent = companies.length;
+
+document.getElementById('import-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('import-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+
+  // Create category if not exists
+  log('Checking for existing CompanyList category...', 'info');
+  let { data: existingCats } = await sb.from('qna_categories').select('id').eq('name', 'CompanyList').maybeSingle();
+  if (existingCats) {
+    categoryId = existingCats.id;
+    log('Found existing CompanyList category (ID: ' + categoryId + ')', 'done');
+  } else {
+    log('Creating CompanyList category...', 'info');
+    const { data: catData, error: catErr } = await sb.from('qna_categories').insert({
+      name: 'CompanyList',
+      parent_id: null,
+      order_index: 1,
+      user_id: currentUser.id
+    }).select('id').single();
+    if (catErr) { log('Error creating category: ' + catErr.message, 'error'); btn.disabled = false; btn.textContent = 'Start Import'; return; }
+    categoryId = catData.id;
+    log('Created CompanyList category (ID: ' + categoryId + ')', 'done');
+  }
+
+  // Import companies as questions
+  let imported = 0;
+  let errors = 0;
+  const total = companies.length;
+
+  // Check existing question titles to avoid duplicates
+  const { data: existingQs } = await sb.from('qna_questions').select('title').eq('category_id', categoryId);
+  const existingTitles = new Set((existingQs || []).map(q => q.title.trim().toLowerCase()));
+
+  for (let i = 0; i < total; i++) {
+    const company = companies[i].trim();
+    if (!company) continue;
+
+    // Skip if already imported
+    if (existingTitles.has(company.toLowerCase())) {
+      log('SKIP (already exists): ' + company, 'info');
+      imported++;
+      updateStats(imported, total);
+      continue;
+    }
+
+    const { error: qErr } = await sb.from('qna_questions').insert({
+      title: company,
+      description: DESC,
+      category_id: categoryId,
+      order_index: i + 1,
+      is_hidden: false,
+      created_at: new Date().toISOString().replace('T', ' ').substring(0, 19),
+      user_id: currentUser.id
+    });
+
+    if (qErr) {
+      log('ERROR: ' + company + ' - ' + qErr.message, 'error');
+      errors++;
+    } else {
+      log('IMPORTED: ' + company, 'done');
+      imported++;
+    }
+    updateStats(imported, total);
+  }
+
+  log('--- Done! Imported: ' + imported + ', Errors: ' + errors + ' ---', imported === total ? 'done' : 'error');
+  btn.textContent = 'Import Complete';
+});
+
+function updateStats(imported, total) {
+  document.getElementById('s-progress').textContent = imported;
+  document.getElementById('s-pct').textContent = total > 0 ? Math.round(imported / total * 100) + '%' : '0%';
+}
+</script>
+<script src="../js/analytics-tracker.js" defer></script>
+</body>
+</html>

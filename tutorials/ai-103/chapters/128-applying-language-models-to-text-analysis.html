@@ -1,0 +1,97 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>128. Applying Language Models to Text Analysis - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 128</span>
+<h1>Applying Language Models to Text Analysis</h1>
+<p>Text analysis is one of the most common jobs for generative AI in the real world. Support teams need to know whether a message is angry, researchers need to pull names and dates out of articles, and product teams need to summarize what customers are talking about. This chapter explains how a large language model performs these jobs by prompting, what each task looks like, and — just as importantly — when a general-purpose LLM is the right tool and when a specialized service such as Azure AI Language is a better fit.</p>
+
+<h2>Why Text Analysis Is a Natural Job for LLMs</h2>
+<p>Language models are trained to recognize patterns in written text, so analyzing text plays directly to their strengths. No feature engineering, no per-task training data, and no bespoke model per job are needed. The same deployment that writes a summary can also detect sentiment, extract entities, or translate — the difference is only the prompt. This one-model-many-jobs property is what makes an LLM such a flexible foundation for text pipelines.</p>
+<p>Most text-analysis tasks fall into a small set of categories:</p>
+<ul>
+<li><strong>Extraction:</strong> pull specific facts out of text — people, places, dates, product names, contract clauses.</li>
+<li><strong>Classification:</strong> assign a category or label — sentiment, topic, intent, language.</li>
+<li><strong>Transformation:</strong> change the text — translate it, simplify it, rephrase it in a style.</li>
+<li><strong>Summarization:</strong> compress a long passage into a short statement of the key points.</li>
+<li><strong>Structured output:</strong> reshape free text into JSON or tables that downstream code can consume.</li>
+</ul>
+
+<h2>Entities and Topics</h2>
+<p><strong>Entity extraction</strong> asks the model to find specific things mentioned in a passage. People, organizations, locations, dates, monetary amounts, and product names are all entities. A support desk can extract the product name and ticket number from an email; a news pipeline can extract the politicians and companies mentioned in an article.</p>
+<p><strong>Topic detection</strong> is a coarser question: what is this text <em>about</em> overall? Instead of listing individual mentions, the model assigns one or more thematic labels such as "billing", "returns", or "privacy". Topics are useful for routing, tagging, and clustering large collections of documents.</p>
+<p>Both tasks come in two flavors. Naive prompting just asks the model to "find the entities" or "list the topics" and lets the model choose its own format. Structured prompting constrains the format — for example, always returning JSON with fixed field names — which makes the output much easier to parse in code.</p>
+
+<h2>Sentiment and Tone</h2>
+<p>Sentiment analysis assigns a polarity — positive, negative, or neutral — to a piece of text. Tone goes further and characterizes the emotional register: frustrated, sarcastic, appreciative, urgent. A chat model can do both in one pass and, unlike a simple polarity scorer, can explain <em>why</em> it reached its conclusion by quoting the words that triggered the judgment.</p>
+<div class="note">
+<p>Because a language model reasons over the whole sentence rather than a bag of words, it handles context far better than early keyword-based sentiment systems. The phrase "this is not bad" trips up a naive dictionary — the words "not" and "bad" are both negative — but an LLM reads the whole clause and correctly reports a mildly positive meaning.</p>
+</div>
+<p>When you need an explanation alongside the score, prompting wins. When you need to score millions of messages per day at minimal cost, a dedicated sentiment service is usually faster and cheaper per call.</p>
+
+<h2>Translation</h2>
+<p>Translation is another task where prompting is nearly trivial: hand the model a passage and the target language, and it returns the translation. Models trained on multilingual corpora handle dozens of languages, preserve tone and formality, and can even be asked to adapt a translation to a specific audience, such as a more formal register for business correspondence.</p>
+<p>The trade-offs matter at scale. General-purpose models produce fluent, context-aware translations, but specialized translation services are typically cheaper, faster, and tuned on far more parallel text. The chapter on Azure Translator shows the service approach; the translation lab shows the prompting approach.</p>
+
+<h2>Structured Output as the Glue</h2>
+<p>An analysis is only useful if the rest of your application can consume it. Most of the tasks above end in a structured result — a list of entities with types, a sentiment label with a confidence, a set of topics with scores. Modern chat APIs support JSON mode, which guarantees the model replies with valid JSON, letting you parse the analysis into native Python objects without fragile string parsing.</p>
+
+<pre><code>import json
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint="YOUR_ENDPOINT",
+    api_key="YOUR_KEY",
+    api_version="2024-06-01",
+)
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    response_format={"type": "json_object"},
+    messages=[
+        {"role": "system", "content": "Return a JSON object with keys entities and topics."},
+        {"role": "user", "content": "Our refund for order 4821 was declined last week."},
+    ],
+)
+
+data = json.loads(response.choices[0].message.content)
+print(data["entities"], data["topics"])</code></pre>
+
+<h2>LLM Prompting vs. a Specialized Service</h2>
+<p>Both approaches extract information from text, but they are built for different situations. The table below is the decision aid you will use throughout this section:</p>
+<table>
+<tr><th>Factor</th><th>Chat model prompting</th><th>Azure AI Language</th></tr>
+<tr><td>Flexibility</td><td>Handles any task you can describe</td><td>Fixed set of prebuilt capabilities</td></tr>
+<tr><td>Output format</td><td>Fully controllable via prompt and JSON mode</td><td>Fixed, documented response schemas</td></tr>
+<tr><td>Explanations</td><td>Can justify its analysis in words</td><td>Returns scores and spans, not prose</td></tr>
+<tr><td>Cost per call</td><td>Higher; billed per token</td><td>Lower; billed per document or call</td></tr>
+<tr><td>Latency</td><td>Higher; generates many tokens</td><td>Lower; typically single-pass analysis</td></tr>
+<tr><td>Best for</td><td>Unusual tasks, prototypes, deep reasoning</td><td>High-volume, well-defined, well-specified tasks</td></tr>
+</table>
+
+<div class="tip">
+<p>A sensible architecture uses both: an LLM for the tasks that need judgment and explanation, and a specialized service for the high-volume classification and extraction work where its fixed schemas are an asset rather than a limitation.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Text analysis by LLM is prompting in disguise: extraction, classification, transformation, and structured output are all achieved by describing the job and parsing the answer. This approach is flexible and explainable, but specialized services such as Azure AI Language offer lower cost and deterministic schemas for well-defined tasks. The next chapters turn these ideas into labs, starting with naive prompting for entities and topics.</p>
+<nav>
+<a href="127-code-and-resources-download-for-this-section.html">&larr; Previous: Code and resources download for this section</a><a href="129-lab-naive-prompting-for-entities-and-topics.html">Next: Lab - Naive Prompting for Entities and Topics &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

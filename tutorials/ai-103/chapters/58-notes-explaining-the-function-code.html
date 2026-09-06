@@ -1,0 +1,90 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>58. Notes - Explaining the Function code - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 58</span>
+<h1>Notes - Explaining the Function code</h1>
+<p>The previous lab produced a working function app, but if you cannot explain each line you will not be able to debug it or adapt it. This chapter walks through the code line by line: how the app object wires functions to routes, how the HTTP request flows in and out, how errors become status codes, and why the code is written the way it is.</p>
+
+<h2>The FunctionApp Object</h2>
+<p>The first line of any v2-model Python function app creates the central object that collects every function in the project:</p>
+
+<pre><code>app = func.FunctionApp()</code></pre>
+
+<p>Every function is attached to this <code>app</code> through a decorator. When the host starts, it imports <code>function_app.py</code>, finds <code>app</code>, and registers all of the decorated functions. If you rename this object you must also update the <code>function_app</code> setting that the host uses to locate it.</p>
+
+<h2>The Route Decorator</h2>
+<p>The decorator is the heart of the v2 model. It declares everything the runtime needs to expose a function over HTTP:</p>
+
+<pre><code>@app.route(route="orders/{order_id}", methods=["GET"],
+           auth_level=func.AuthLevel.ANONYMOUS)</code></pre>
+
+<ul>
+<li><strong>route</strong> is the URL pattern relative to the <code>/api</code> base prefix. Curly braces mark path parameters, which the runtime captures for you.</li>
+<li><strong>methods</strong> lists the HTTP verbs this route accepts. A <code>POST</code> to a route that only allows <code>GET</code> is rejected with 405 before your code runs.</li>
+<li><strong>auth_level</strong> controls whether callers need a key. <code>ANONYMOUS</code> means anyone can call it; you will switch this to <code>FUNCTION</code> later when locking the API down.</li>
+</ul>
+
+<h2>The Request Object</h2>
+<p>Each handler receives a <code>func.HttpRequest</code>. Three accessors cover the inputs you will use most:</p>
+<table>
+<tr><th>Accessor</th><th>What it returns</th><th>Used by</th></tr>
+<tr><td><code>req.route_params.get("order_id")</code></td><td>Values captured from the URL pattern</td><td><code>get_order</code>, <code>cancel_order</code></td></tr>
+<tr><td><code>req.params.get("email")</code></td><td>Query-string and form parameters</td><td><code>list_orders</code></td></tr>
+<tr><td><code>req.get_json()</code></td><td>The parsed JSON request body</td><td>Write operations that accept a payload</td></tr>
+</table>
+
+<h2>The Response Object</h2>
+<p>Every handler returns a <code>func.HttpResponse</code>. The response carries three things: the body, the status code, and the content type. Setting <code>mimetype="application/json"</code> matters because it tells the caller, and later the agent, that the payload is JSON rather than plain text:</p>
+
+<pre><code>return func.HttpResponse(json.dumps(order), mimetype="application/json")</code></pre>
+
+<p>Use <code>json.dumps</code> to serialize a Python dictionary or list. It produces a compact JSON string that you can embed directly in the response body.</p>
+
+<h2>Error Handling as Status Codes</h2>
+<p>The two failure paths in the code are deliberate design choices rather than accidents:</p>
+<ul>
+<li><strong>404 when the order is missing:</strong> the caller asked for a resource that does not exist. A support agent can use this to tell the customer politely that the id could not be found.</li>
+<li><strong>409 when cancelling twice:</strong> the request conflicts with the current state. A plain 400 would be wrong because the request itself is well-formed; 409 communicates that the state made it impossible.</li>
+</ul>
+
+<div class="tip">
+<p>Meaningful status codes are not just for REST purists. When an agent calls your API, the status code and the error body are the only signals it has to explain what went wrong. A 404 with <code>{"error": "Order not found"}</code> produces a far better agent answer than a generic 500.</p>
+</div>
+
+<h2>The In-Memory Data Store</h2>
+<p>The <code>ORDERS</code> dictionary plays the role of a database for the lab. It is a module-level constant, so every function shares the same view of the data during a single host session. Two consequences follow:</p>
+<ul>
+<li>Anything you change, such as a cancelled status, is visible to the other functions immediately.</li>
+<li>Nothing survives a restart, and nothing is shared across function instances.</li>
+</ul>
+
+<h2>Why Cancel Is a Separate Route</h2>
+<p>Note that cancel is <code>POST /orders/{order_id}/cancel</code> rather than <code>PUT /orders/{order_id}</code> with a status field. This is a deliberate API design choice: the operation is explicit, it cannot accidentally overwrite other fields, and it maps cleanly to a single tool operation when you describe it in OpenAPI. Small, single-purpose operations are easier for a model to reason about than a generic update that accepts many fields.</p>
+
+<div class="note">
+<p>If you add more functions to this project later, keep them in the same file or split them into separate modules imported into <code>function_app.py</code>. The host registers only functions that decorate the exported <code>app</code> object, so every handler must be attached there.</p>
+</div>
+
+<h2>Summary</h2>
+<p>The function code is a thin, explicit mapping between HTTP and data: decorators declare routes, request accessors pull inputs, handlers return JSON responses, and status codes carry the error story. With this understanding, you are ready for the next lab, which takes the same code and publishes it to Azure.</p>
+<nav>
+<a href="57-lab-building-the-cloudxeus-orders-api-with-azure-functions.html">&larr; Previous: Lab - Building the CloudXeus Orders API with Azure Functions</a><a href="59-lab-building-the-cloudxeus-orders-api-publishing-our-function-code.html">Next: Lab - Building the CloudXeus Orders API - Publishing our Function code &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

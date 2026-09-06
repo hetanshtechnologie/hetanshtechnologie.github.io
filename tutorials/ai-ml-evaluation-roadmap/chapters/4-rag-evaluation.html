@@ -1,0 +1,79 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>RAG Evaluation - AI &amp; ML Evaluation Roadmap 2026</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+  <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+  <h1>4. RAG Evaluation</h1>
+  <p class="tag">Part 4</p>
+
+  <p>Retrieval-augmented generation (RAG) has two halves that must both work: the <em>retriever</em> finds useful context, and the <em>generator</em> turns that context into an answer. A weak retriever starves the model; a weak generator ignores good context. This part covers evaluating both halves and the pipelines built around them.</p>
+
+  <h2>Retrieval Quality</h2>
+  <p>Retrieval quality is a ranking problem: given a query, are the relevant documents near the top? Measure it with the ranking metrics from Part 2 — Recall@K, Precision@K, MRR, MAP, and NDCG — where "relevance" means "this chunk contains the information needed to answer the question." Build a labeled set of query-to-relevant-chunk pairs and score the retriever on it independently of the generator.</p>
+
+  <h2>Chunk Quality</h2>
+  <p>How you split documents into chunks determines what the retriever can find. A chunk that splits a sentence in half, or mixes two unrelated topics, produces bad matches no matter how good the embedding model is. Evaluate chunking by checking how often the full answerable information lands in one retrievable chunk. Strategies to test: fixed-size windows with overlap, semantic splitting on paragraph or heading boundaries, and recursive splitting on structure.</p>
+
+  <h2>Embedding Quality</h2>
+  <p>The embedding model decides how "similar" two texts are in vector space. Good embeddings place paraphrases of the same meaning close together and unrelated topics far apart. Test them with a small set of pairs (query, relevant doc, hard negative) and check retrieval metrics or direct similarity separation. When you change embedding models, re-run the retrieval evaluation — small embedding changes can shift results noticeably.</p>
+
+  <h2>Reranker Evaluation</h2>
+  <p>A reranker re-scores the top K candidates to sharpen the ordering. To judge whether reranking actually helps, compare ranking metrics with and without the reranker on the same queries. Track both quality (NDCG) and the added latency, since a reranker that buys 2% NDCG at triple the latency may not be worth it.</p>
+
+  <h2>Context Precision</h2>
+  <p>Context precision asks whether the retrieved context is on-topic: are the chunks the system actually pulled relevant to the question, and are the relevant chunks ranked high enough? Low context precision means the generator is being given mostly irrelevant material and must fight through noise.</p>
+
+  <h2>Context Recall</h2>
+  <p>Context recall asks whether the retrieved set is <em>complete</em>: did the system find everything needed to answer well? A retriever can have high precision and still miss a key document, forcing the model to guess. The strongest signal is failure analysis — when answers are wrong, check whether the needed fact was even in the context.</p>
+  <table>
+    <tr><th>Metric</th><th>Question</th><th>Failure symptom</th></tr>
+    <tr><td>Context precision</td><td>Is what we retrieved relevant?</td><td>Answers ramble about unrelated topics</td></tr>
+    <tr><td>Context recall</td><td>Did we retrieve everything needed?</td><td>Answers confident but missing the key fact</td></tr>
+    <tr><td>Citation accuracy</td><td>Do citations match the answer?</td><td>Claim does not appear in the cited chunk</td></tr>
+    <tr><td>Hallucination rate</td><td>Is content grounded in context?</td><td>Fabricated names, numbers, or sources</td></tr>
+  </table>
+
+  <h2>Citation Accuracy</h2>
+  <p>When answers cite sources, each claim should actually appear in the cited chunk. Manually or automatically verify every citation. A high citation rate with low citation <em>accuracy</em> is a false sense of security — users trust citations that point to content that never said what you claimed.</p>
+
+  <h2>Hallucination Analysis</h2>
+  <p>In RAG, hallucination is usually a grounding failure: the model produced a statement not present in the retrieved context. Separate the failure causes: was the fact missing from the context (retrieval problem), or present but contradicted by the model (generation problem)? That split tells you which half of the pipeline to fix.</p>
+
+  <h2>RAGAS</h2>
+  <p>RAGAS is an open-source framework that scores RAG pipelines with LLM-judged metrics: faithfulness (answer vs context), answer relevance, context precision, and context recall. Because it computes without hand-labeled data, it is a fast way to get a baseline across many queries.</p>
+  <pre><code>from ragas import evaluate
+from ragas.metrics import faithfulness, context_precision, context_recall
+
+results = evaluate(dataset, metrics=[
+    faithfulness, context_precision, context_recall
+])
+print(results)</code></pre>
+  <div class="note"><strong>Watch out:</strong> LLM-judged RAGAS scores inherit the judge's biases and can drift when you swap the judge model. Anchor them to a hand-labeled set.</div>
+
+  <h2>DeepEval</h2>
+  <p>DeepEval provides a metric library and a test harness for LLM and RAG applications. You write test cases declaring expected answers, and DeepEval computes metrics like answer relevance, faithfulness, and hallucination, then produces a pass/fail report you can wire into CI.</p>
+
+  <h2>TruLens</h2>
+  <p>TruLens focuses on monitoring RAG (and other) applications in production. It instruments each pipeline run, records the feedback metrics per record, and shows trends over time so you can spot a retrieval regression or a drop in groundedness before users complain.</p>
+
+  <div class="exercise"><strong>Practice Task:</strong> Pick ten documents you know well, write five questions, and identify which chunks answer each. Run a retriever of your choice and compute Recall@3 and MRR. Then check, for three wrong answers from any RAG system, whether the missing fact was in the context. Write down which failures were retrieval problems and which were generation problems.</div>
+
+  <nav>
+    <a href="3-llm-evaluation.html">&larr; Previous: LLM Evaluation</a>
+    <a href="5-agent-evaluation.html">Next: AI Agent Evaluation &rarr;</a>
+  </nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

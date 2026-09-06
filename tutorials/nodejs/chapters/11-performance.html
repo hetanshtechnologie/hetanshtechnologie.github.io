@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Performance &amp; Scaling - Node.js Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 11</span>
+    <h1>Performance &amp; Scaling</h1>
+
+    <h2>Logging</h2>
+    <p>Structured logging is essential for debugging and monitoring production applications.</p>
+
+    <pre><code>// Install: npm install winston
+
+const winston = require('winston');
+
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: 'error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'combined.log' })
+  ]
+});
+
+// Usage
+logger.info('Server started', { port: 3000 });
+logger.error('Database connection failed', { error: err.message });</code></pre>
+
+    <h2>Monitoring</h2>
+    <ul>
+      <li><strong>Process Managers:</strong> PM2, forever — auto-restart, clustering</li>
+      <li><strong>APM Tools:</strong> New Relic, Datadog, Sentry — performance monitoring</li>
+      <li><strong>Metrics:</strong> Prometheus + Grafana — custom metrics dashboards</li>
+      <li><strong>Health Checks:</strong> Expose /health endpoint for load balancers</li>
+    </ul>
+
+    <pre><code>// Health check endpoint
+app.get('/health', (req, res) => {
+  const health = {
+    uptime: process.uptime(),
+    status: 'OK',
+    timestamp: Date.now(),
+    memory: process.memoryUsage()
+  };
+  res.json(health);
+});
+
+// Using PM2
+// Install: npm install -g pm2
+// pm2 start app.js -i max
+// pm2 monit
+// pm2 logs
+// pm2 status</code></pre>
+
+    <h2>Performance Optimization</h2>
+    <ul>
+      <li><strong>Use Gzip Compression:</strong> <code>npm install compression</code></li>
+      <li><strong>Enable Caching:</strong> Redis for in-memory caching</li>
+      <li><strong>Optimize Database Queries:</strong> Add indexes, avoid N+1 queries</li>
+      <li><strong>Use Connection Pooling:</strong> Reuse database connections</li>
+      <li><strong>Minify and Bundle:</strong> Reduce payload sizes</li>
+      <li><strong>CDN:</strong> Serve static assets via CDN</li>
+    </ul>
+
+    <pre><code>// Compression example
+const compression = require('compression');
+app.use(compression());
+
+// Simple in-memory cache
+const cache = new Map();
+async function getCachedData(key, fetchFn, ttl = 60) {
+  if (cache.has(key)) {
+    const { data, expiry } = cache.get(key);
+    if (Date.now() < expiry) return data;
+    cache.delete(key);
+  }
+  const data = await fetchFn();
+  cache.set(key, { data, expiry: Date.now() + ttl * 1000 });
+  return data;
+}</code></pre>
+
+    <h2>Child Processes</h2>
+    <p>Use <code>child_process</code> to run CPU-intensive operations in separate processes.</p>
+
+    <pre><code>const { spawn, exec, fork } = require('child_process');
+
+// Spawn (stream output)
+const ls = spawn('ls', ['-lh', '/usr']);
+ls.stdout.on('data', (data) => console.log(`stdout: ${data}`));
+
+// Exec (buffer output)
+exec('node --version', (err, stdout, stderr) => {
+  if (err) return console.error(err);
+  console.log('Node version:', stdout);
+});
+
+// Fork (new Node.js process)
+const child = fork('worker.js');
+child.send({ task: 'compute' });
+child.on('message', (result) => {
+  console.log('Worker result:', result);
+});</code></pre>
+
+    <h2>Clusters</h2>
+    <p>The <code>cluster</code> module allows you to create child processes that share the same server port, utilizing all CPU cores.</p>
+
+    <pre><code>const cluster = require('cluster');
+const http = require('http');
+const numCPUs = require('os').cpus().length;
+
+if (cluster.isMaster) {
+  console.log(`Master process ${process.pid} is running`);
+
+  // Fork workers
+  for (let i = 0; i < numCPUs; i++) {
+    cluster.fork();
+  }
+
+  cluster.on('exit', (worker, code, signal) => {
+    console.log(`Worker ${worker.process.pid} died. Restarting...`);
+    cluster.fork(); // Auto-restart
+  });
+} else {
+  // Workers share the HTTP server
+  http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end(`Handled by worker ${process.pid}`);
+  }).listen(3000);
+
+  console.log(`Worker ${process.pid} started`);
+}</code></pre>
+
+    <h2>Worker Threads</h2>
+    <p>For CPU-intensive JavaScript operations, use <code>worker_threads</code> which share the same process but run on separate threads.</p>
+
+    <pre><code>// main.js
+const { Worker } = require('worker_threads');
+
+const worker = new Worker('./worker-thread.js', {
+  workerData: { iterations: 1000000 }
+});
+
+worker.on('message', (result) => {
+  console.log('Result from worker:', result);
+});
+
+worker.on('error', (err) => console.error(err));
+
+// worker-thread.js
+const { parentPort, workerData } = require('worker_threads');
+
+function compute(iterations) {
+  let result = 0;
+  for (let i = 0; i < iterations; i++) {
+    result += Math.sqrt(i);
+  }
+  return result;
+}
+
+parentPort.postMessage(compute(workerData.iterations));</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create a simple Express app with a CPU-intensive endpoint. Use PM2 to run it in cluster mode with max instances. Compare the performance before and after clustering using <code>autocannon</code> or <code>wrk</code>.
+    </div>
+
+    <nav>
+      <a href="10-deployment.html">&larr; Previous: Deployment</a>
+      <a href="../">Back to Index</a>
+      <a href="12-advanced.html">Next: Advanced Topics &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

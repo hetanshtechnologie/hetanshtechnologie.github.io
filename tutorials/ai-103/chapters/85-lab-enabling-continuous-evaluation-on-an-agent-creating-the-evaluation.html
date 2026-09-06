@@ -1,0 +1,131 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>85. Lab - Enabling Continuous Evaluation on an Agent -Creating the evaluation - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 85</span>
+<h1>Lab - Enabling Continuous Evaluation on an Agent -Creating the evaluation</h1>
+<p>In the previous lab you connected your agent to Application Insights so that live traffic produces trace data. That telemetry is only useful if something examines it. This lab builds the second half of continuous evaluation: you will create an evaluation flow in Microsoft Foundry that pulls recent chat data, scores it with built-in evaluators such as groundedness and relevance, and produces a quality dashboard you can watch over time. By the end you will have a running evaluation that re-scores your agent on new data automatically.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>Your Foundry project with the <strong>support agent</strong> deployed from earlier labs.</li>
+<li>The agent connected to <strong>Application Insights</strong>, as completed in the previous lab.</li>
+<li>At least a handful of real or generated chat messages recorded in that workspace, because an evaluation needs data to score.</li>
+<li>A chat model deployment in the project that the evaluation can use as a judge (for example <code>gpt-4o-mini</code>).</li>
+</ul>
+
+<div class="note">
+<p>If your agent has little real traffic yet, send it a few test questions first — for example a product question, a pricing question, and an out-of-scope question. Each conversation will be captured by Application Insights and become candidate data for the evaluation.</p>
+</div>
+
+<h2>How the Evaluation Flow Works</h2>
+<p>A continuous evaluation flow in Foundry does three things in a loop: it reads a batch of recent conversations, runs one or more evaluators over them, and records the scores so you can view trends. The evaluators themselves are typically LLM-as-a-judge style prompts — a judge model reads the question, the retrieved context, and the answer, then scores a quality dimension on a scale. This is why you need a judge model deployment in addition to your agent's own model.</p>
+<p>The steps you will follow in the portal are:</p>
+<ol>
+<li>Create a new evaluation flow for your agent.</li>
+<li>Choose the data source: the traces stored in your Application Insights workspace.</li>
+<li>Pick the evaluators you want to run, such as groundedness, relevance, and coherence.</li>
+<li>Configure the judge model and the score scale.</li>
+<li>Define thresholds and alerts, then start the evaluation.</li>
+</ol>
+
+<h2>Creating the Evaluation</h2>
+<div class="exercise">
+<h3>Step 1 - Open the Evaluation page</h3>
+<p>In your Foundry project, open <strong>Evaluation</strong> from the left menu. On the <strong>Continuous evaluations</strong> tab, click <strong>Create evaluation</strong>.</p>
+
+<h3>Step 2 - Select the target and data source</h3>
+<p>Choose your support agent as the target application. For the data source select the Application Insights workspace you connected in the previous lab. Foundry will map each conversation into a record with fields such as the user question and the assistant's answer.</p>
+
+<h3>Step 3 - Pick the evaluators</h3>
+<p>Add built-in evaluators from the catalog. A useful starting set for a grounded support agent:</p>
+<table>
+<tr><th>Evaluator</th><th>What it measures</th></tr>
+<tr><td>Groundedness</td><td>Whether the answer is supported by the supplied context</td></tr>
+<tr><td>Relevance</td><td>Whether the answer addresses the user's question</td></tr>
+<tr><td>Coherence</td><td>Whether the answer reads as logical and connected</td></tr>
+<tr><td>Fluency</td><td>Whether the language is natural and grammatical</td></tr>
+</table>
+
+<h3>Step 4 - Configure the judge model</h3>
+<p>For each evaluator, select the judge model deployment (for example <code>gpt-4o-mini</code>) and the prompt that defines the scoring rubric. The default prompts give a score from 1 to 5; you can keep them or tighten the rubric to match your product.</p>
+
+<h3>Step 5 - Define thresholds and alerts</h3>
+<p>Set a threshold, such as <em>alert when groundedness drops below 3.5</em>. This turns the evaluation into a safety net: you get notified when quality degrades instead of discovering it in user complaints.</p>
+
+<h3>Step 6 - Start the evaluation</h3>
+<p>Click <strong>Create and start</strong>. Foundry runs the evaluation against the current data and schedules it to run on the interval you selected. After a few minutes, open the evaluation to see the score dashboard.</p>
+</div>
+
+<h2>Evaluating a Single Record Programmatically</h2>
+<p>You can also score individual conversations from code before you invest in a continuous flow. This is a quick way to prototype evaluator prompts. Install the evaluation SDK and run a one-off check with your own rubric:</p>
+
+<pre><code>pip install azure-ai-evaluation
+</code></pre>
+
+<pre><code>from azure.ai.evaluation import RelevanceEvaluator, GroundednessEvaluator
+from azure.identity import DefaultAzureCredential
+
+credential = DefaultAzureCredential()
+
+relevance = RelevanceEvaluator(
+    azure_ai_project={
+        "subscription_id": "YOUR_SUBSCRIPTION_ID",
+        "resource_group_name": "YOUR_RESOURCE_GROUP",
+        "project_name": "YOUR_PROJECT_NAME",
+    },
+    credential=credential,
+    model_config={
+        "type": "azure_openai",
+        "azure_endpoint": "https://YOUR_ENDPOINT.openai.azure.com/",
+        "api_key": "YOUR_KEY",
+        "azure_deployment": "gpt-4o-mini",
+    },
+)
+
+result = relevance(
+    query="What is the refund policy?",
+    response="We refund unused licenses within 30 days of purchase.",
+)
+
+print(result)
+</code></pre>
+
+<div class="tip">
+<p>Use the interactive <em>chat trace</em> view of one conversation to understand <em>why</em> a low score happened before you change anything. A low groundedness score usually means the retrieved context was missing or the model answered from memory.</p>
+</div>
+
+<h2>Interpreting the Results</h2>
+<p>The dashboard groups scores by evaluator and shows the distribution over time. Treat it as a health gauge:</p>
+<ul>
+<li>A <strong>stable high average</strong> means the agent is holding its quality bar.</li>
+<li>A <strong>declining trend</strong> often follows a change: a new system prompt, a different embedding model, or updated source documents.</li>
+<li>A <strong>spike of low scores</strong> usually points at a specific data problem, such as a batch of documents that fail to index.</li>
+</ul>
+
+<div class="warn">
+<p>Evaluations judge, they do not fix. When an alert fires, use the trace data to locate the failing conversations, then adjust the prompt, the retrieval, or the data — and let the next scheduled run confirm the improvement.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Continuous evaluation turns live telemetry into a quality signal. In this lab you created an evaluation flow, selected data from Application Insights, chose built-in evaluators, configured a judge model, and set thresholds that alert you when quality drops. You also saw how to score individual records from Python. With evaluations running, the next chapter looks at a specific quality dimension — response completeness — and how to improve it.</p>
+<nav>
+<a href="84-lab-enabling-continuous-evaluation-on-an-agent-adding-application-insights.html">&larr; Previous: Lab - Enabling Continuous Evaluation on an Agent - Adding Application Insights</a><a href="86-improving-response-completeness.html">Next: Improving Response Completeness &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

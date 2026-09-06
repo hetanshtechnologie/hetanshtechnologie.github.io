@@ -1,0 +1,125 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>182. Knowledge source pre-requisites - Assigning permissions - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 182</span>
+<h1>Knowledge source pre-requisites - Assigning permissions</h1>
+<p>The knowledge base pipeline crosses several Azure services, and each hop needs permission: the search indexer reads blobs, the embedding skill calls the embedding model, and the agent queries the index. The secure way to grant these is with managed identities and role assignments — no connection strings or keys embedded in code. This chapter creates those identities and grants exactly the roles each one needs.</p>
+
+<h2>Who Needs What</h2>
+<p>Three identities participate in the capstone. Each gets only the role its work requires, following the principle of least privilege:</p>
+<table>
+<tr><th>Identity</th><th>Needs access to</th><th>Role</th></tr>
+<tr><td>Search service (system-assigned identity)</td><td>The blob container with course PDFs</td><td>Storage Blob Data Reader</td></tr>
+<tr><td>Search service identity</td><td>The embedding model deployment</td><td>Cognitive Services OpenAI User</td></tr>
+<tr><td>The agent's identity</td><td>The search index</td><td>Search Index Data Reader</td></tr>
+</table>
+
+<div class="note">
+<p>For local development, the agent's identity is usually <em>you</em>: the Azure CLI user running the Python scripts. The last step grants your signed-in user the read role on the index, which is the lab equivalent of assigning it to a production identity.</p>
+</div>
+
+<h2>Step 1 - Enable the Search Service Identity</h2>
+<p>Give the search service a system-assigned managed identity, then capture its principal id — the Azure object that roles are assigned to:</p>
+<pre><code>az search service update `
+  --name $searchName `
+  --resource-group $rg `
+  --identity-type SystemAssigned
+
+$searchPrincipalId = az search service show `
+  --name $searchName `
+  --resource-group $rg `
+  --query identity.principalId -o tsv
+
+Write-Output "Search principal: $searchPrincipalId"
+</code></pre>
+
+<h2>Step 2 - Let the Search Service Read the Blobs</h2>
+<p>Assign the <em>Storage Blob Data Reader</em> role at the storage account scope, so the indexer can read the course PDFs:</p>
+<pre><code>$subId = (az account show --query id -o tsv)
+
+az role assignment create `
+  --assignee $searchPrincipalId `
+  --role "Storage Blob Data Reader" `
+  --scope "/subscriptions/$subId/resourceGroups/$rg/providers/Microsoft.Storage/storageAccounts/$storageName"
+</code></pre>
+
+<div class="warn">
+<p>Notice this role grants <em>read</em> only. The indexer never writes back to the source container, so data reader is the correct level. A data contributor role here would be excessive and is a common over-permissioning mistake.</p>
+</div>
+
+<h2>Step 3 - Let the Embedding Skill Call the Model</h2>
+<p>Assign the <em>Cognitive Services OpenAI User</em> role on the Foundry AI resource that holds the embedding deployment. This lets the search service invoke the model without an API key in the skillset:</p>
+<pre><code>az role assignment create `
+  --assignee $searchPrincipalId `
+  --role "Cognitive Services OpenAI User" `
+  --scope "/subscriptions/$subId/resourceGroups/$rg/providers/Microsoft.CognitiveServices/accounts/$aiResourceName"
+</code></pre>
+<p>Replace <code>$aiResourceName</code> with the name of your Foundry AI resource (the one from the model deployment chapter). With this in place, your skillset can switch from <code>apiKey</code> to a managed identity configuration.</p>
+
+<div class="tip">
+<p>The managed identity lives on the search service and is one configuration change away in the skillset: replace the <code>apiKey</code> field with the identity setup and the embedding skill authenticates without any secret. This is exactly how production enrichment pipelines are secured.</p>
+</div>
+
+<h2>Step 4 - Let the Agent Read the Index</h2>
+<p>Grant read access to the search index. For the local labs, assign the role to your signed-in Azure CLI user:</p>
+<pre><code>$userObjectId = az ad signed-in-user show --query id -o tsv
+
+az role assignment create `
+  --assignee-object-id $userObjectId `
+  --role "Search Index Data Reader" `
+  --scope "/subscriptions/$subId/resourceGroups/$rg/providers/Microsoft.Search/searchServices/$searchName"
+</code></pre>
+
+<div class="note">
+<p>Search offers two index roles. <em>Search Index Data Reader</em> allows queries only; <em>Search Index Data Contributor</em> allows documents to be added and changed. Use the reader role for the agent and the contributor role only for code that loads documents, never for an interactive assistant.</p>
+</div>
+
+<h2>Step 5 - Verify by Querying Without a Key</h2>
+<p>Role assignments can take a few minutes to propagate. Once they do, verify by authenticating with your identity rather than an API key. From Python, <code>DefaultAzureCredential</code> should now be enough to search the index:</p>
+<pre><code>from azure.identity import DefaultAzureCredential
+from azure.search.documents import SearchClient
+
+client = SearchClient(
+    endpoint="https://YOUR_SEARCH_SERVICE.search.windows.net",
+    index_name="docs-index-chunked",
+    credential=DefaultAzureCredential(),
+)
+
+results = client.search(search_text="course", top=3)
+for doc in results:
+    print(doc["metadata_storage_name"])
+</code></pre>
+<p>If this returns documents, the permission chain works end to end with no key involved.</p>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>403</code> from <code>DefaultAzureCredential</code></td><td>Role not propagated yet or missing</td><td>Wait a few minutes, then re-list the assignment.</td></tr>
+<tr><td>Indexer cannot read blobs</td><td>Missing Storage Blob Data Reader</td><td>Confirm the assignment at the storage account scope.</td></tr>
+<tr><td>Embedding skill fails with auth error</td><td>OpenAI role missing or skillset still using a key</td><td>Verify the Cognitive Services OpenAI User assignment.</td></tr>
+<tr><td>Role already exists</td><td>Assignment created twice</td><td>Add <code>--skip-assignment</code> or list and remove duplicates.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You enabled the search service's managed identity, granted it read access to the blob container and the embedding model, and gave your agent identity read access to the search index. The pipeline can now run without keys, and you verified it by querying the index with identity-based authentication. The next chapter creates the knowledge source itself and wires these permissions into agentic retrieval.</p>
+<nav>
+<a href="181-knowledge-source-pre-requisites-deploying-the-models.html">&larr; Previous: Knowledge source pre-requisites - Deploying the models</a><a href="183-creating-the-knowledge-source-for-agentic-retrieval.html">Next: Creating the Knowledge Source for Agentic Retrieval &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

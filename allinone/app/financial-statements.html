@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Financial Statements — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}.tab-btn.active{background:#2563eb;color:#fff;}.fin-table td{padding:6px 12px;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Financial Statements</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex gap-2 mb-6 flex-wrap">
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white active" data-tab="tb" onclick="switchTab('tb')">Trial Balance</button>
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700" data-tab="pl" onclick="switchTab('pl')">Profit &amp; Loss</button>
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700" data-tab="bs" onclick="switchTab('bs')">Balance Sheet</button>
+    </div>
+
+    <div class="flex gap-4 mb-4 items-center">
+      <div><label class="text-sm font-semibold">From</label><input type="date" id="from-date" class="border rounded px-2 py-1 text-sm"></div>
+      <div><label class="text-sm font-semibold">To</label><input type="date" id="to-date" class="border rounded px-2 py-1 text-sm"></div>
+      <button onclick="loadStatements()" class="bg-blue-600 text-white px-4 py-1.5 rounded text-sm font-semibold hover:bg-blue-700">Generate</button>
+      <button onclick="exportSheet()" class="bg-green-600 text-white px-4 py-1.5 rounded text-sm font-semibold hover:bg-green-700">Export to Sheets</button>
+    </div>
+
+    <div id="statement-content" class="bg-white rounded-xl shadow-sm border p-6">
+      <div id="loading" class="text-gray-500">Loading financial data...</div>
+      <div id="result" class="hidden"></div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId = null, activeTab = 'tb';
+    let accountsData = [], linesData = [];
+
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin(); if (!user) return;
+      orgId = await getOrgId(); if (!orgId) return;
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), 0, 1);
+      document.getElementById('from-date').value = firstDay.toISOString().split('T')[0];
+      document.getElementById('to-date').value = now.toISOString().split('T')[0];
+      await loadStatements();
+    });
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('bg-blue-600','text-white','active');
+        b.classList.add('bg-gray-200','text-gray-700');
+        if (b.dataset.tab === tab) {
+          b.classList.add('bg-blue-600','text-white','active');
+          b.classList.remove('bg-gray-200','text-gray-700');
+        }
+      });
+      renderStatement();
+    }
+
+    async function loadStatements() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('result').classList.add('hidden');
+
+      const { data: accts } = await erp.from('chart_of_accounts').select('*').eq('org_id', orgId).eq('is_active', true);
+      accountsData = accts || [];
+
+      const fromDate = document.getElementById('from-date').value || '2000-01-01';
+      const toDate = document.getElementById('to-date').value || '2099-12-31';
+
+      const { data: entries } = await erp.from('journal_entries').select('*, journal_lines(*)').eq('org_id', orgId).gte('entry_date', fromDate).lte('entry_date', toDate).order('entry_date');
+      linesData = [];
+      (entries||[]).forEach(e => {
+        (e.journal_lines||[]).forEach(l => {
+          linesData.push({ ...l, entry_date: e.entry_date, description: e.description });
+        });
+      });
+
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('result').classList.remove('hidden');
+      renderStatement();
+    }
+
+    function getAccountBalances() {
+      const balances = {};
+      accountsData.forEach(a => { balances[a.id] = { ...a, total_debit: 0, total_credit: 0, balance: 0 }; });
+      linesData.forEach(l => {
+        if (balances[l.account_id]) {
+          balances[l.account_id].total_debit += Number(l.debit||0);
+          balances[l.account_id].total_credit += Number(l.credit||0);
+        }
+      });
+      Object.values(balances).forEach(b => {
+        if (b.type === 'asset' || b.type === 'expense') {
+          b.balance = b.total_debit - b.total_credit;
+        } else {
+          b.balance = b.total_credit - b.total_debit;
+        }
+      });
+      return Object.values(balances).filter(b => b.balance !== 0);
+    }
+
+    function renderStatement() {
+      const div = document.getElementById('result');
+      const balances = getAccountBalances();
+
+      if (activeTab === 'tb') renderTrialBalance(div, balances);
+      else if (activeTab === 'pl') renderPL(div, balances);
+      else if (activeTab === 'bs') renderBalanceSheet(div, balances);
+    }
+
+    function renderTrialBalance(div, balances) {
+      let totalDr = 0, totalCr = 0;
+      let rows = balances.map(b => {
+        const dr = (b.type==='asset'||b.type==='expense') ? b.balance : 0;
+        const cr = (b.type==='liability'||b.type==='income'||b.type==='equity') ? b.balance : 0;
+        totalDr += dr; totalCr += cr;
+        return `<tr class="border-b"><td class="fin-table">${escapeHtml(b.code)}</td><td class="fin-table">${escapeHtml(b.name)}</td><td class="fin-table text-right">${formatCurrency(dr)}</td><td class="fin-table text-right">${formatCurrency(cr)}</td></tr>`;
+      }).join('');
+
+      div.innerHTML = `
+        <h2 class="text-xl font-bold mb-4">Trial Balance</h2>
+        <table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="p-2 text-left font-semibold">Code</th><th class="p-2 text-left font-semibold">Account</th><th class="p-2 text-right font-semibold">Debit</th><th class="p-2 text-right font-semibold">Credit</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr class="bg-gray-100 font-bold border-t"><td class="p-2" colspan="2">Total</td><td class="p-2 text-right">${formatCurrency(totalDr)}</td><td class="p-2 text-right">${formatCurrency(totalCr)}</td></tr></tfoot></table>
+        ${Math.abs(totalDr - totalCr) > 0.01 ? `<div class="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded">Trial balance does not balance! Difference: ${formatCurrency(totalDr - totalCr)}</div>` : `<div class="mt-4 p-3 bg-green-50 text-green-700 text-sm rounded">Trial balance is balanced.</div>`}`;
+    }
+
+    function renderPL(div, balances) {
+      const income = balances.filter(b => b.type === 'income');
+      const expenses = balances.filter(b => b.type === 'expense');
+      const totalIncome = income.reduce((s, b) => s + b.balance, 0);
+      const totalExpenses = expenses.reduce((s, b) => s + b.balance, 0);
+      const netProfit = totalIncome - totalExpenses;
+
+      div.innerHTML = `
+        <h2 class="text-xl font-bold mb-4">Profit &amp; Loss Statement</h2>
+        <div class="grid grid-cols-2 gap-8">
+          <div><h3 class="font-semibold text-green-700 mb-2">Income</h3>
+            <table class="w-full text-sm"><tbody>${income.map(b => `<tr class="border-b"><td class="fin-table">${escapeHtml(b.name)}</td><td class="fin-table text-right">${formatCurrency(b.balance)}</td></tr>`).join('')}
+            <tr class="font-bold border-t bg-green-50"><td class="fin-table">Total Income</td><td class="fin-table text-right">${formatCurrency(totalIncome)}</td></tr></tbody></table></div>
+          <div><h3 class="font-semibold text-red-700 mb-2">Expenses</h3>
+            <table class="w-full text-sm"><tbody>${expenses.map(b => `<tr class="border-b"><td class="fin-table">${escapeHtml(b.name)}</td><td class="fin-table text-right">${formatCurrency(b.balance)}</td></tr>`).join('')}
+            <tr class="font-bold border-t bg-red-50"><td class="fin-table">Total Expenses</td><td class="fin-table text-right">${formatCurrency(totalExpenses)}</td></tr></tbody></table></div>
+        </div>
+        <div class="mt-6 p-4 ${netProfit >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'} rounded-lg text-center text-lg font-bold">Net ${netProfit >= 0 ? 'Profit' : 'Loss'}: ${formatCurrency(Math.abs(netProfit))}</div>`;
+    }
+
+    function renderBalanceSheet(div, balances) {
+      const assets = balances.filter(b => b.type === 'asset');
+      const liabilities = balances.filter(b => b.type === 'liability');
+      const equity = balances.filter(b => b.type === 'equity');
+
+      const totalAssets = assets.reduce((s, b) => s + b.balance, 0);
+      const totalLiabilities = liabilities.reduce((s, b) => s + b.balance, 0);
+      const totalEquity = equity.reduce((s, b) => s + b.balance, 0);
+
+      div.innerHTML = `
+        <h2 class="text-xl font-bold mb-4">Balance Sheet</h2>
+        <div class="grid grid-cols-3 gap-6">
+          <div><h3 class="font-semibold text-blue-700 mb-2">Assets</h3>
+            <table class="w-full text-sm"><tbody>${assets.map(b => `<tr class="border-b"><td class="fin-table">${escapeHtml(b.name)}</td><td class="fin-table text-right">${formatCurrency(b.balance)}</td></tr>`).join('')}
+            <tr class="font-bold border-t bg-blue-50"><td class="fin-table">Total Assets</td><td class="fin-table text-right">${formatCurrency(totalAssets)}</td></tr></tbody></table></div>
+          <div><h3 class="font-semibold text-orange-700 mb-2">Liabilities</h3>
+            <table class="w-full text-sm"><tbody>${liabilities.map(b => `<tr class="border-b"><td class="fin-table">${escapeHtml(b.name)}</td><td class="fin-table text-right">${formatCurrency(b.balance)}</td></tr>`).join('')}
+            <tr class="font-bold border-t bg-orange-50"><td class="fin-table">Total Liabilities</td><td class="fin-table text-right">${formatCurrency(totalLiabilities)}</td></tr></tbody></table></div>
+          <div><h3 class="font-semibold text-green-700 mb-2">Equity</h3>
+            <table class="w-full text-sm"><tbody>${equity.map(b => `<tr class="border-b"><td class="fin-table">${escapeHtml(b.name)}</td><td class="fin-table text-right">${formatCurrency(b.balance)}</td></tr>`).join('')}
+            <tr class="font-bold border-t bg-green-50"><td class="fin-table">Total Equity</td><td class="fin-table text-right">${formatCurrency(totalEquity)}</td></tr></tbody></table></div>
+        </div>
+        <div class="mt-6 grid grid-cols-2 gap-4 text-center">
+          <div class="p-4 bg-blue-50 rounded-lg"><span class="text-sm text-gray-500">Total Assets</span><div class="text-xl font-bold">${formatCurrency(totalAssets)}</div></div>
+          <div class="p-4 bg-green-50 rounded-lg"><span class="text-sm text-gray-500">Total Liabilities + Equity</span><div class="text-xl font-bold">${formatCurrency(totalLiabilities + totalEquity)}</div></div>
+        </div>
+        ${Math.abs(totalAssets - (totalLiabilities + totalEquity)) > 0.01 ? `<div class="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded">Balance sheet does not balance! Difference: ${formatCurrency(totalAssets - (totalLiabilities + totalEquity))}</div>` : `<div class="mt-4 p-3 bg-green-50 text-green-700 text-sm rounded">Balance sheet is balanced. Assets = Liabilities + Equity</div>`}`;
+    }
+
+    function exportSheet() {
+      const balances = getAccountBalances();
+      let csv = 'Account Code,Account Name,Type,Debit,Credit,Balance\n';
+      balances.forEach(b => {
+        const dr = (b.type==='asset'||b.type==='expense') ? b.balance : 0;
+        const cr = (b.type==='liability'||b.type==='income'||b.type==='equity') ? b.balance : 0;
+        csv += `"${b.code}","${b.name}","${b.type}",${dr.toFixed(2)},${cr.toFixed(2)},${b.balance.toFixed(2)}\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${activeTab.toUpperCase()}_${document.getElementById('from-date').value}_to_${document.getElementById('to-date').value}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

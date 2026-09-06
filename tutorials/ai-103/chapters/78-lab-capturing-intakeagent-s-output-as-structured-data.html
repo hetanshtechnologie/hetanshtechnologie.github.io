@@ -1,0 +1,173 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>78. Lab - Capturing IntakeAgent's Output as Structured Data - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 78</span>
+<h1>Lab - Capturing IntakeAgent's Output as Structured Data</h1>
+<p>Right now IntakeAgent returns its intake record as free-flowing prose. That works for reading, but it is awkward for the next step of the workflow, which wants to branch on fields such as the account number or the priority. In this lab you will make IntakeAgent produce <em>structured data</em> instead: JSON that follows a fixed schema, so the rest of the pipeline can treat it as records rather than as text. You will configure structured output in the portal and then reproduce the same behavior from Python.</p>
+
+<h2>Objectives</h2>
+<ul>
+<li>Define a JSON schema for the intake record.</li>
+<li>Configure IntakeAgent to respond only with structured output.</li>
+<li>Update the workflow to consume the structured fields.</li>
+<li>Call the same structured-output endpoint from Python.</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>The <code>intake-pipeline</code> workflow and both CloudXeus agents from the previous labs.</li>
+<li>Python 3.9 or newer with the <code>openai</code> package installed.</li>
+</ul>
+
+<h2>Step 1: Design the Intake Schema</h2>
+<p>A schema tells the model exactly which fields to produce, which types they have, and which are required. Design the intake record with fields that the workflow will later branch on and log:</p>
+
+<pre><code>{
+  "type": "object",
+  "properties": {
+    "summary": { "type": "string", "description": "One sentence summarizing the request." },
+    "product": { "type": "string", "description": "CloudXeus product mentioned, if any." },
+    "is_urgent": { "type": "boolean", "description": "True if the customer signals urgency." },
+    "account_id": { "type": "string", "description": "Account or order number, if provided." }
+  },
+  "required": ["summary", "is_urgent"]
+}
+</code></pre>
+
+<div class="tip">
+<p>Notice that <code>product</code> and <code>account_id</code> are not in the required list. When a customer does not mention them, the model should not invent values — making them optional lets the output stay honest. Anything the workflow absolutely needs should be required; everything else should not.</p>
+</div>
+
+<h2>Step 2: Apply the Schema to IntakeAgent</h2>
+
+<div class="exercise">
+<h3>Configure structured output in the agent</h3>
+<ol>
+<li>Open IntakeAgent in the Foundry portal.</li>
+<li>In the agent's response configuration, enable <strong>structured output</strong> (sometimes labeled "output format" or "JSON response").</li>
+<li>Paste the schema from Step 1 as the response format, or build it with the schema editor.</li>
+<li>Save and publish a new version of the agent.</li>
+<li>Open the playground, resend the Meridian Retail message from the earlier lab, and confirm the reply is valid JSON matching the schema.</li>
+</ol>
+</div>
+
+<div class="warn">
+<p>Structured output constrains the shape of the response, not its content accuracy. The model will still write a summary that might overstate the original message. Keep the instructions that forbid invented facts — the schema guarantees JSON, and only the prompt guarantees truthful JSON.</p>
+</div>
+
+<h2>Step 3: Update the Workflow to Use the Fields</h2>
+<p>Back in the <code>intake-pipeline</code> workflow, IntakeAgent's output is now a JSON object instead of prose. Update the ResolverAgent node and the output node to use the individual fields.</p>
+
+<div class="exercise">
+<h3>Reference the structured fields</h3>
+<ol>
+<li>Open the ResolverAgent node and change its user message to reference the summary field:</li>
+</ol>
+<pre><code>Original customer message:
+$\{inputs.customer_message}
+
+Intake summary:
+$\{nodes.intake_agent.output.summary}
+</code></pre>
+<ol start="2">
+<li>In the Output node, add a new field <code>is_urgent</code> and bind it to <code>$\{nodes.intake_agent.output.is_urgent}</code>.</li>
+<li>Run the workflow again with the same test message and confirm <code>is_urgent</code> comes back as a true/false value rather than text.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>Because the output is now structured, the next lab's condition node can branch directly on <code>is_urgent</code>. That is the whole payoff of this step: deterministic downstream logic built on top of generative output.</p>
+</div>
+
+<h2>Step 4: Structured Output from Python</h2>
+<p>The same pattern works from Python, where you can go further and validate the response against a typed schema. The <code>openai</code> SDK supports a <code>response_format</code> parameter that requests strict JSON. Create <code>structured_intake.py</code>:</p>
+
+<pre><code>import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+intake_schema = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "product": {"type": "string"},
+        "is_urgent": {"type": "boolean"},
+        "account_id": {"type": "string"},
+    },
+    "required": ["summary", "is_urgent"],
+    "additionalProperties": False,
+}
+
+message = (
+    "Our virtual machine in eastus has been down for almost 2 hours "
+    "and our billing dashboard depends on it. This is urgent, we are "
+    "losing sales. Account AC-88231."
+)
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {"role": "system", "content": "You are IntakeAgent. Summarize the "
+         "customer request as JSON. Never invent fields."},
+        {"role": "user", "content": message},
+    ],
+    response_format={
+        "type": "json_schema",
+        "json_schema": {
+            "name": "intake_record",
+            "strict": True,
+            "schema": intake_schema,
+        },
+    },
+)
+
+import json
+record = json.loads(response.choices[0].message.content)
+print("Summary  :", record["summary"])
+print("Product  :", record.get("product", "not mentioned"))
+print("Urgent   :", record["is_urgent"])
+print("Account  :", record.get("account_id", "not mentioned"))
+</code></pre>
+
+<div class="exercise">
+<h3>Run and validate the output</h3>
+<ol>
+<li>Replace <code>YOUR_DEPLOYMENT_NAME</code> with your deployed model's name.</li>
+<li>Set your endpoint and key environment variables.</li>
+<li>Run the script and verify the printed fields match the message.</li>
+<li>Change the message so no account number is present, re-run, and confirm <code>Account</code> prints as "not mentioned" — proof the model respects the optional field.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>Strict mode with <code>additionalProperties: false</code> tells the provider to guarantee the model only emits fields from your schema. If your SDK version rejects an unexpected key, check that you are using a model and API version that support structured output with strict JSON schemas.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You designed a JSON schema for the intake record, applied it to IntakeAgent so it returns clean structured output, updated the workflow to consume individual fields, and reproduced the same structured behavior from Python with validation. The pipeline now produces data the next steps can branch on — which is exactly what you will do when you add conditions to the workflow in the next lab.</p>
+<nav>
+<a href="77-lab-building-workflows-in-the-foundry-portal.html">&larr; Previous: Lab - Building Workflows in the Foundry Portal</a><a href="79-lab-adding-conditions-to-the-workflow.html">Next: Lab - Adding conditions to the workflow &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

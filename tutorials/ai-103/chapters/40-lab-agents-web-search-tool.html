@@ -1,0 +1,148 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>40. Lab - Agents - Web Search tool - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 40</span>
+<h1>Lab - Agents - Web Search tool</h1>
+<p>Your trip-planner agent knows a lot from its training data but nothing about what is current. If a customer asks whether a museum is open tomorrow, the agent has no honest way to answer. In this lab you will attach the Web Search tool to the agent, so it can look up fresh information instead of guessing — the first time your agent will actually do something beyond generating text.</p>
+
+<h2>Objectives</h2>
+<ul>
+<li>Attach a web search tool to your agent in the Foundry portal.</li>
+<li>Test that the agent searches the web instead of answering from memory.</li>
+<li>Repeat the same configuration in code using the Azure AI Projects SDK.</li>
+</ul>
+
+<h2>Step 1: Add Web Search in the portal</h2>
+<p>Start in the Foundry portal, where the tool is one checkbox away. Web Search runs on Bing grounding, and your Foundry project needs a connection to the Bing search service before the agent can use it.</p>
+
+<div class="exercise">
+<h3>Attach the tool in the portal</h3>
+<ol>
+<li>Open your project in the Foundry portal and go to <strong>Agents</strong>.</li>
+<li>Open the <code>trip-planner</code> agent.</li>
+<li>Under <strong>Tools</strong>, enable <strong>Web Search</strong>. If prompted, select or create the Bing grounding connection.</li>
+<li>Save the agent. This creates a new version with the tool attached.</li>
+</ol>
+</div>
+
+<h2>Step 2: Test that the agent really searches</h2>
+<p>The playground is the fastest way to verify the tool works. Ask a question whose answer changes regularly — something the model cannot possibly know from training data alone.</p>
+
+<div class="exercise">
+<h3>Probe the agent with a time-sensitive question</h3>
+<ol>
+<li>Open the chat panel for the agent.</li>
+<li>Ask: <code>What is today's weather forecast in Seattle?</code></li>
+<li>Watch the agent's answer. A correct tool-powered reply states the forecast and typically mentions it comes from a web source.</li>
+<li>Ask the same question a second time and confirm the answer stays current.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>A good test question is one where the model would fail confidently without the tool. Weather, today's news, a sports score, or the current price of a product all work. If the agent answers with a plausible-sounding guess, the tool is not actually attached or the connection is misconfigured.</p>
+</div>
+
+<h2>Step 3: Attach the tool from code</h2>
+<p>For code-managed agents, attach the tool through the SDK. The pattern is to fetch the Bing grounding connection from your project and wrap it in a tool definition, then pass that definition to the agent.</p>
+
+<div class="exercise">
+<h3>Create <code>agent_with_search.py</code></h3>
+<pre><code>import os
+from dotenv import load_dotenv
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import BingGroundingTool
+
+load_dotenv()
+
+project_client = AIProjectClient.from_connection_string(
+    credential=DefaultAzureCredential(),
+    conn_str=os.getenv("PROJECT_CONNECTION_STRING"),
+)
+
+search_connection = project_client.connections.get(
+    connection_name="YOUR_BING_CONNECTION_NAME"
+)
+search_tool = BingGroundingTool(connection_id=search_connection.id)
+
+agent = project_client.agents.create_agent(
+    model="YOUR_DEPLOYMENT_NAME",
+    name="trip-planner-with-search",
+    instructions=(
+        "You are a travel planning assistant. Use web search whenever "
+        "the customer asks about current facts such as opening hours, "
+        "weather, prices, or events. Always prefer current information "
+        "over memory for anything time-sensitive."
+    ),
+    tools=search_tool.definitions,
+    temperature=0.5,
+)
+
+print(f"Agent created with web search: {agent.id}")
+</code></pre>
+</div>
+
+<div class="note">
+<p>The Bing grounding connection is created once in your project and shared by all agents that need it. Look up its exact name in your project's connections page rather than guessing — connection names are case-sensitive identifiers that the SDK matches literally.</p>
+</div>
+
+<h2>Step 4: Run the loop and observe a tool call</h2>
+<p>Extend the script (or reuse your invoke script) to send a time-sensitive question and print the run's steps. When the agent uses the tool, the run passes through <code>requires_action</code> while the search executes, and the final answer reflects the search results.</p>
+
+<div class="exercise">
+<h3>Invoke the agent and print the run steps</h3>
+<pre><code>import time
+
+thread = project_client.agents.create_thread()
+project_client.agents.create_message(
+    thread_id=thread.id,
+    role="user",
+    content="What events are happening in Paris this weekend?",
+)
+
+run = project_client.agents.create_run(
+    thread_id=thread.id, agent_id=agent.id
+)
+while run.status in ("queued", "in_progress", "requires_action"):
+    run = project_client.agents.get_run(
+        thread_id=thread.id, run_id=run.id
+    )
+    time.sleep(1)
+
+steps = project_client.agents.list_run_steps(
+    thread_id=thread.id, run_id=run.id
+)
+for step in steps.data:
+    print(step.type, getattr(step, "step_details", None))
+</code></pre>
+</div>
+
+<p>In the output, one of the steps should be a <code>tool_calls</code> step with a search request. That is your proof that the model chose to search rather than guess.</p>
+
+<div class="warn">
+<p>Web Search consumes quota and can add latency to each answer. On an agent used by many customers, search costs add up quickly. Only attach the tool where current information genuinely matters, and review the telemetry to confirm searches happen for the right kinds of questions.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You gave your agent its first real capability by attaching Web Search, verified through time-sensitive questions that the model searches instead of fabricating, and reproduced the same configuration in code. The run's tool-call steps showed the agent deciding, on its own, to reach out to the web. Next you will build a custom function — a tool whose executor is code you write yourself.</p>
+<nav>
+<a href="39-agent-tools-in-microsoft-foundry.html">&larr; Previous: Agent Tools in Microsoft Foundry</a><a href="41-lab-function-tool-calling-defining-the-agent.html">Next: Lab - Function Tool Calling - Defining the agent &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

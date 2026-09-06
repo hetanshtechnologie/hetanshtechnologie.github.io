@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Circuit Breaker Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:900px;margin:24px auto;padding:0 16px}
+.circuit-visual{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin:16px 0;text-align:center}
+.circuit-states{display:flex;justify-content:center;gap:24px;margin:16px 0}
+.state-box{background:#334155;border-radius:10px;padding:16px 20px;text-align:center;border:2px solid #475569;transition:all .3s;min-width:120px}
+.state-box.active{border-color:#38bdf8;box-shadow:0 0 20px rgba(56,189,248,.2)}
+.state-box.closed{border-color:#4ade80}
+.state-box.open{border-color:#f87171}
+.state-box.half{border-color:#fbbf24}
+.state-icon{font-size:28px;margin-bottom:6px}
+.state-label{font-size:13px;font-weight:600;color:#f8fafc}
+.state-desc{font-size:11px;color:#94a3b8;margin-top:4px}
+.circuit-line{display:flex;align-items:center;justify-content:center;gap:8px;margin:16px 0}
+.circuit-node{width:12px;height:12px;border-radius:50%;background:#334155;border:2px solid #475569;transition:all .3s}
+.circuit-node.success{background:#4ade80;border-color:#4ade80}
+.circuit-node.fail{background:#f87171;border-color:#f87171}
+.circuit-wire{flex:1;height:3px;background:#334155;border-radius:2px;position:relative;max-width:60px}
+.circuit-wire::after{content:'';position:absolute;right:-4px;top:-3px;border:4px solid transparent;border-left:6px solid}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.request-flow{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin:12px 0}
+.req-dot{width:10px;height:10px;border-radius:50%;animation:pulse 1s infinite}
+.req-dot.success{background:#4ade80}
+.req-dot.fail{background:#f87171}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.history{display:flex;gap:4px;justify-content:center;margin:8px 0}
+.history-dot{width:8px;height:8px;border-radius:50%}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>Circuit Breaker Game</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/15</div>
+<div class="hud-item">State: <span id="state">CLOSED</span></div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="circuit-visual">
+<div class="circuit-states">
+<div class="state-box closed active" id="st-closed"><div class="state-icon">🟢</div><div class="state-label">CLOSED</div><div class="state-desc">Normal operation</div></div>
+<div class="state-box half" id="st-half"><div class="state-icon">🟡</div><div class="state-label">HALF-OPEN</div><div class="state-desc">Testing recovery</div></div>
+<div class="state-box open" id="st-open"><div class="state-icon">🔴</div><div class="state-label">OPEN</div><div class="state-desc">Failing fast</div></div>
+</div>
+<div class="circuit-line" id="circuit-line"></div>
+</div>
+<div class="scenario-card">
+<h3 id="scenario-title">Circuit Breaker Decision</h3>
+<p id="scenario-desc"></p>
+</div>
+<div class="request-flow" id="request-flow"></div>
+<div class="history" id="history"></div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Circuit Breaker Expert!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=15,answered=false;
+let state='CLOSED',failCount=0,successCount=0;
+const scenarios=[
+{desc:"3/5 requests failed. Circuit is CLOSED. Next request?",state:'CLOSED',failRate:60,threshold:50,correct:"Continue sending (track failures)",reason:"Circuit is closed — keep sending but count failures toward threshold."},
+{desc:"5/5 requests failed. Threshold: 5 failures. Circuit is CLOSED.",state:'CLOSED',failRate:100,threshold:5,correct:"Open circuit",reason:"Failure threshold reached. Open circuit to prevent cascade failure."},
+{desc:"Circuit is OPEN. 30 seconds elapsed (timeout: 30s).",state:'OPEN',failRate:0,correct:"Move to HALF-OPEN",reason:"Timeout elapsed. Try a single request in half-open state."},
+{desc:"Circuit is HALF-OPEN. Test request succeeds.",state:'HALF-OPEN',failRate:0,correct:"Close circuit",reason:"Test request succeeded. Close circuit and resume normal operation."},
+{desc:"Circuit is HALF-OPEN. Test request fails.",state:'HALF-OPEN',failRate:100,correct:"Open circuit",reason:"Test request failed in half-open. Reopen circuit."},
+{desc:"Circuit is OPEN. 10 seconds elapsed (timeout: 30s).",state:'OPEN',failRate:0,correct:"Keep circuit OPEN",reason:"Timeout hasn't elapsed yet. Keep circuit open."},
+{desc:"Circuit is CLOSED. Last 10 requests: 2 failures.",state:'CLOSED',failRate:20,correct:"Continue (monitoring)",reason:"Failure rate below threshold. Keep circuit closed."},
+{desc:"Circuit is OPEN. Fallback returns cached data. Users happy.",state:'OPEN',failRate:0,correct:"Serve from cache",reason:"While circuit is open, serve stale data from cache."},
+{desc:"Circuit is HALF-OPEN. 3/5 test requests succeed.",state:'HALF-OPEN',failRate:40,correct:"Close circuit (success rate OK)",reason:"Majority succeeded. Close circuit."},
+{desc:"Circuit is CLOSED. Downstream service restarted. Requests normal.",state:'CLOSED',failRate:0,correct:"Reset failure counter",reason:"Service recovered. Reset the failure counter."},
+{desc:"Circuit is OPEN. Alert fires. Load drops 50%.",state:'OPEN',failRate:0,correct:"Notify ops team",reason:"Open circuit means degraded service. Alert the team."},
+{desc:"Circuit is CLOSED. 3 consecutive timeouts on health check.",state:'CLOSED',failRate:60,correct:"Increase monitoring",reason:"Consecutive timeouts are a warning. Increase monitoring frequency."},
+{desc:"Circuit is HALF-OPEN. Response time: 5s (normal: 200ms).",state:'HALF-OPEN',failRate:0,correct:"Reopen circuit (slow = degraded)",reason:"Slow responses indicate degraded service. Reopen circuit."},
+{desc:"Circuit is OPEN. Service recovers. Users see error pages.",state:'OPEN',failRate:0,correct:"Show graceful degradation UI",reason:"While circuit is open, show friendly error pages."},
+{desc:"Circuit is CLOSED. 8/10 requests failed. Threshold: 50%.",state:'CLOSED',failRate:80,correct:"Open circuit (80% > 50%)",reason:"80% failure rate exceeds 50% threshold. Open circuit."}
+];
+let historyDots=[];
+function init(){score=0;round=0;state='CLOSED';failCount=0;successCount=0;historyDots=[];startRound();}
+function updateVisual(){
+document.querySelectorAll('.state-box').forEach(b=>b.classList.remove('active'));
+document.getElementById('st-'+state.toLowerCase()).classList.add('active');
+document.getElementById('state').textContent=state;
+document.getElementById('state').style.color=state==='CLOSED'?'#4ade80':state==='OPEN'?'#f87171':'#fbbf24';
+}
+function startRound(){
+answered=false;
+const s=scenarios[round%scenarios.length];
+state=s.state;updateVisual();
+document.getElementById('scenario-title').textContent=`State: ${state}`;
+document.getElementById('scenario-desc').textContent=s.desc;
+// Generate request flow
+const flow=document.getElementById('request-flow');
+const reqs=5;
+flow.innerHTML=Array.from({length:reqs},(_,i)=>`<div class="req-dot ${i<Math.floor(reqs*s.failRate/100)?'fail':'success'}" style="animation-delay:${i*0.2}s"></div>`).join('');
+// History
+document.getElementById('history').innerHTML=historyDots.map(d=>`<div class="history-dot" style="background:${d?'#4ade80':'#f87171'}"></div>`).join('');
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+let choices;
+if(state==='CLOSED'){
+choices=['Continue sending (monitor)','Open circuit','Half-open test','Force timeout'];
+}else if(state==='OPEN'){
+choices=['Move to HALF-OPEN','Keep OPEN','Close circuit','Send batch request'];
+}else{
+choices=['Close circuit','Reopen circuit','Keep HALF-OPEN','Increase timeout'];
+}
+document.getElementById('choices').innerHTML=choices.map(c=>`<button class="choice-btn" onclick="answer('${c}','${s.correct}','${s.reason}')">${c}</button>`).join('');
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect)score+=10;else score=Math.max(0,score-3);
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const s=scenarios[round%scenarios.length];
+// Update state based on answer
+if(chosen.includes('Open')||chosen.includes('Reopen'))state='OPEN';
+else if(chosen.includes('Close'))state='CLOSED';
+else if(chosen.includes('HALF')||chosen.includes('Half'))state='HALF-OPEN';
+historyDots.push(isCorrect);
+if(historyDots.length>15)historyDots.shift();
+updateVisual();
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;document.getElementById('state').textContent='CLOSED';
+}
+init();
+</script>
+</body>
+</html>

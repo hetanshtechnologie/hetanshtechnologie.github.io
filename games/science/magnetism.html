@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Magnetism Explorer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:16px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.question-card{background:#1e293b;border-radius:16px;padding:30px;max-width:600px;width:100%;text-align:center;border:2px solid #334155}
+.magnet-display{font-size:4rem;margin:16px 0}
+.object-display{font-size:3.5rem;margin:12px 0}
+.question-text{font-size:1.15rem;margin-bottom:20px;line-height:1.5}
+.options{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.option-btn{background:#0f172a;color:#e2e8f0;border:2px solid #475569;padding:16px;border-radius:12px;font-size:1rem;cursor:pointer;transition:all .2s}
+.option-btn:hover{border-color:#38bdf8;background:#1e293b}
+.option-btn.correct{border-color:#22c55e;background:rgba(34,197,94,0.15);color:#22c55e}
+.option-btn.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15);color:#ef4444}
+.option-btn.disabled{pointer-events:none;opacity:.7}
+.feedback{margin-top:16px;padding:12px;border-radius:8px;font-size:1rem;min-height:2.5em}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.progress-bar{width:100%;max-width:600px;height:8px;background:#1e293b;border-radius:4px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#38bdf8,#22c55e);border-radius:4px;transition:width .3s}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🧲 Magnetism Explorer</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/10</span>
+<span>✅ Streak: <b id="streak">0</b></span>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progress" style="width:0%"></div></div>
+<div class="question-card" id="card">
+<div class="magnet-display" id="magnet-emoji">🧲</div>
+<div class="object-display" id="object-emoji">❓</div>
+<div class="question-text" id="question"></div>
+<div class="options" id="options"></div>
+<div class="feedback" id="feedback"></div>
+</div>
+<button class="btn" id="next-btn" style="display:none" onclick="nextQuestion()">Next ➡️</button>
+</div>
+<script>
+let score=0,level=1,qNum=0,streak=0,maxQ=10,answered=false;
+const questions=[
+  {emoji:'🧲',obj:'📌',q:'Is a steel paper clip magnetic?',opts:['Yes — attracted','No — not attracted','Repelled','No effect'],ans:0,explain:'Steel is ferromagnetic — iron in steel is strongly attracted to magnets.'},
+  {emoji:'🧲',obj:'🪵',q:'Is a wooden stick magnetic?',opts:['Yes — attracted','No — not attracted','Repelled','Slightly magnetic'],ans:1,explain:'Wood is not magnetic. It contains no ferromagnetic materials.'},
+  {emoji:'🧲',obj:'🔩',q:'Is an iron nail magnetic?',opts:['Yes — attracted','No — not attracted','Repelled sometimes','Only in water'],ans:0,explain:'Iron is ferromagnetic — the most common magnetic material.'},
+  {emoji:'🧲',obj:'🥫',q:'Is an aluminum can attracted to a magnet?',opts:['Yes — strongly','No — not attracted','Only if cold','Only copper cans'],ans:1,explain:'Aluminum is paramagnetic — too weak to notice. Not attracted to magnets.'},
+  {emoji:'🧲',obj:'🪙',q:'Is a copper penny magnetic?',opts:['Yes — attracted','No — not attracted','Repelled','Only new pennies'],ans:1,explain:'Copper is diamagnetic. It\'s actually very slightly repelled, but not attracted.'},
+  {emoji:'🧲',obj:'🔑',q:'Is a stainless steel key magnetic?',opts:['Yes — attracted','No — not attracted','Depends on type','Only gold keys'],ans:0,explain:'Most stainless steel (ferritic/martensitic) is magnetic due to iron content.'},
+  {emoji:'🧲',obj:'💎',q:'Is a diamond magnetic?',opts:['Yes — strongly','Slightly repelled','No — not magnetic','Only red diamonds'],ans:1,explain:'Diamond (carbon) is diamagnetic — very slightly repelled by magnetic fields.'},
+  {emoji:'🧲',obj:'🧂',q:'Is salt (NaCl) magnetic?',opts:['Yes','No — not magnetic','Paramagnetic','Only in solution'],ans:1,explain:'Salt is diamagnetic. It has no unpaired electrons for magnetic attraction.'},
+  {emoji:'🧲',obj:'🧲',q:'What happens when two N poles are brought together?',opts:['Attract','Repel','Nothing','Rotate'],ans:1,explain:'Like poles repel, opposite poles attract — fundamental law of magnetism.'},
+  {emoji:'🧲',obj:'🧭',q:'What material is a compass needle made of?',opts:['Copper','Aluminum','Steel (ferromagnetic)','Plastic'],ans:2,explain:'Compass needles are made of steel, a ferromagnetic material that aligns with Earth\'s field.'},
+  {emoji:'🧲',obj:'⛓️',q:'Is a steel chain magnetic?',opts:['Yes — attracted','No','Only if heated','Only gold chains'],ans:0,explain:'Steel chains contain iron, making them ferromagnetic and attracted to magnets.'},
+  {emoji:'🧲',obj:'🪃',q:'Is a boomerang (wood/plastic) magnetic?',opts:['Yes','No — not magnetic','If painted','Only metal ones'],ans:1,explain:'Wood and plastic contain no ferromagnetic materials.'},
+  {emoji:'🧲',obj:'🪞',q:'Is a glass mirror magnetic?',opts:['Slightly repelled','Strongly attracted','No — not magnetic','Repelled strongly'],ans:0,explain:'Glass is diamagnetic. The metallic coating (aluminum/silver) can be slightly affected.'},
+  {emoji:'🧲',obj:'🧽',q:'Is a steel wool magnetic?',opts:['Yes — strongly','No','Only wet','Only burned'],ans:0,explain:'Steel wool is made of fine iron/steel fibers — strongly ferromagnetic!'},
+  {emoji:'🧲',obj:'🥄',q:'Is a silver spoon magnetic?',opts:['Yes','No — silver is not magnetic','Only if heated','Depends on purity'],ans:1,explain:'Silver is diamagnetic. Sterling silver spoons are not attracted to magnets.'},
+  {emoji:'🧲',obj:'🧲',q:'Which material is paramagnetic?',opts:['Iron','Aluminum','Copper','Gold'],ans:1,explain:'Aluminum is paramagnetic — weakly attracted but not strongly like iron (ferromagnetic).'},
+  {emoji:'🧲',obj:'🌍',q:'Earth acts like a giant...?',opts:['Battery','Magnet','Resistor','Capacitor'],ans:1,explain:'Earth\'s iron core generates a magnetic field — it\'s a giant bar magnet!'},
+  {emoji:'🧲',obj:'❄️',q:'Is snow/ice magnetic?',opts:['Yes','No','Paramagnetic','Repelled'],ans:1,explain:'Water (H₂O) is diamagnetic — not attracted to magnets.'},
+  {emoji:'🧲',obj:'🧲',q:'How do you make a temporary magnet?',opts:['Rub with wool','Stroke with a magnet','Heat it','Freeze it'],ans:1,explain:'Stroking iron/steel with a magnet aligns its magnetic domains, creating a magnet.'},
+  {emoji:'🧲',obj:'🧲',q:'What is a permanent magnet?',opts:['One that never loses strength','One with aligned domains','One made of gold','One that works underwater'],ans:1,explain:'Permanent magnets have aligned magnetic domains that stay aligned without external field.'},
+];
+let shuffledQ=[...questions].sort(()=>Math.random()-0.5);
+
+function showQuestion(){
+  if(qNum>=maxQ){showResults();return}
+  answered=false;
+  let q=shuffledQ[qNum];
+  document.getElementById('magnet-emoji').textContent=q.emoji;
+  document.getElementById('object-emoji').textContent=q.obj;
+  document.getElementById('question').textContent=q.q;
+  document.getElementById('qnum').textContent=qNum+1;
+  document.getElementById('progress').style.width=(qNum/maxQ*100)+'%';
+  document.getElementById('feedback').textContent='';
+  document.getElementById('feedback').style.background='transparent';
+  const opts=document.getElementById('options');opts.innerHTML='';
+  q.opts.forEach((o,i)=>{
+    const b=document.createElement('button');b.className='option-btn';b.textContent=o;
+    b.onclick=()=>checkAnswer(i);opts.appendChild(b);
+  });
+  document.getElementById('next-btn').style.display='none';
+}
+
+function checkAnswer(i){
+  if(answered)return;answered=true;
+  let q=shuffledQ[qNum];
+  let btns=document.querySelectorAll('.option-btn');
+  btns.forEach((b,j)=>{b.classList.add('disabled');if(j===q.ans)b.classList.add('correct');if(j===i&&i!==q.ans)b.classList.add('wrong')});
+  let fb=document.getElementById('feedback');
+  if(i===q.ans){
+    score+=10+streak*5;streak++;
+    fb.textContent='✅ Correct! '+q.explain;
+    fb.style.background='rgba(34,197,94,0.15)';
+  }else{
+    streak=0;
+    fb.textContent='❌ Wrong! '+q.explain;
+    fb.style.background='rgba(239,68,68,0.15)';
+  }
+  document.getElementById('score').textContent=score;
+  document.getElementById('streak').textContent=streak;
+  document.getElementById('next-btn').style.display='inline-block';
+}
+
+function nextQuestion(){
+  qNum++;showQuestion();
+}
+
+function showResults(){
+  document.getElementById('card').innerHTML=`
+    <div style="font-size:3rem;margin-bottom:16px">🏆</div>
+    <div style="font-size:1.5rem;font-weight:700;margin-bottom:12px">Level ${level} Complete!</div>
+    <div style="font-size:1.1rem;margin-bottom:8px">Score: ${score} | Streak bonus earned!</div>
+    <div style="margin:16px 0">
+      <button class="btn" onclick="levelUp()">⬆️ Next Level</button>
+      <button class="btn secondary" style="background:#475569;color:#e2e8f0;margin-left:8px" onclick="restart()">↺ Restart</button>
+    </div>`;
+}
+
+function levelUp(){
+  level++;qNum=0;streak=0;shuffledQ=[...questions].sort(()=>Math.random()-0.5);
+  document.getElementById('level').textContent=level;
+  document.getElementById('card').innerHTML=`
+    <div style="font-size:3rem;margin-bottom:16px">🧲</div>
+    <div style="font-size:1.3rem;margin-bottom:12px">Level ${level} — Harder questions!</div>
+    <button class="btn" onclick="startLevel()">Start ⚡</button>`;
+}
+
+function startLevel(){showQuestion();}
+
+function restart(){
+  score=0;level=1;qNum=0;streak=0;
+  document.getElementById('score').textContent=0;
+  document.getElementById('level').textContent=1;
+  document.getElementById('streak').textContent=0;
+  shuffledQ=[...questions].sort(()=>Math.random()-0.5);
+  showQuestion();
+}
+
+showQuestion();
+</script>
+</body>
+</html>

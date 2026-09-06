@@ -1,0 +1,142 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>282. Lab - Face service - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 282</span>
+<h1>Lab - Face service</h1>
+<p>In this lab you will create an Azure AI Face resource, obtain its endpoint and key, and call the detection and analysis operations for real. You will use the REST API directly, which makes the request and response structure visible and gives you a foundation for the Python version in the next chapter.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>An <strong>Azure subscription</strong> with permissions to create resources.</li>
+<li>The <strong>Azure CLI</strong> installed and signed in, or access to the Azure portal.</li>
+<li>A photo with one or two clear faces, stored locally.</li>
+</ul>
+
+<h2>Create the Face Resource</h2>
+<div class="exercise">
+<h3>Step 1 - Sign in to the Azure CLI</h3>
+<pre><code>az login
+</code></pre>
+<p>Follow the browser prompt and select the subscription you want to use.</p>
+
+<h3>Step 2 - Create a resource group</h3>
+<pre><code>az group create --name rg-ai103 --location eastus
+</code></pre>
+
+<h3>Step 3 - Create the Face account</h3>
+<p>Create a Cognitive Services multi-service account. This kind of account exposes the Face API under the <code>Face</code> sub-endpoint, and it also gives you room to reuse the same account for other vision services later in the course:</p>
+<pre><code>az cognitiveservices account create \
+    --name cs-ai103 \
+    --resource-group rg-ai103 \
+    --kind CognitiveServices \
+    --sku S0 \
+    --location eastus
+</code></pre>
+
+<h3>Step 4 - Fetch the endpoint and a key</h3>
+<pre><code>az cognitiveservices account show --name cs-ai103 --resource-group rg-ai103
+az cognitiveservices account keys list --name cs-ai103 --resource-group rg-ai103
+</code></pre>
+<p>Copy the <code>properties.endpoint</code> value and one of the keys. Store them in environment variables so your commands stay clean:</p>
+<pre><code>$env:AZURE_FACE_ENDPOINT = "https://cs-ai103.cognitiveservices.azure.com/"
+$env:AZURE_FACE_KEY = "YOUR_KEY"
+</code></pre>
+</div>
+
+<h2>Detect Faces in an Image</h2>
+<p>Detection is a single POST to the <code>/face/v1.0/detect</code> endpoint. The following PowerShell request sends a public image URL and asks for the age and glasses attributes:</p>
+<div class="exercise">
+<h3>Step 5 - Call detect with a URL</h3>
+<pre><code>$body = @{ url = "https://example.com/your-photo.jpg" } | ConvertTo-Json
+
+$response = Invoke-RestMethod `
+    -Uri "$env:AZURE_FACE_ENDPOINT/face/v1.0/detect?returnFaceAttributes=age,glasses,emotion" `
+    -Method Post `
+    -Headers @{ "Ocp-Apim-Subscription-Key" = $env:AZURE_FACE_KEY } `
+    -ContentType "application/json" `
+    -Body $body
+
+$response | ConvertTo-Json -Depth 5
+</code></pre>
+<p>The result is an array of faces. Each element contains <code>faceRectangle</code> with the pixel coordinates, a <code>faceId</code>, and the attributes you requested.</p>
+</div>
+<div class="tip">
+<p>If you use curl instead, the equivalent command is:</p>
+<pre><code>curl -X POST "https://cs-ai103.cognitiveservices.azure.com/face/v1.0/detect?returnFaceAttributes=age,glasses" -H "Ocp-Apim-Subscription-Key: $env:AZURE_FACE_KEY" -H "Content-Type: application/json" --data-raw "{\"url\":\"https://example.com/your-photo.jpg\"}"
+</code></pre>
+</div>
+
+<h2>Send the Image as Raw Bytes</h2>
+<p>Public URLs are convenient but often not available — many applications hold images in local storage or in a database. The detect endpoint also accepts the raw image bytes directly in the request body, with a binary content type:</p>
+<pre><code>$imageBytes = [System.IO.File]::ReadAllBytes("C:\temp\face.jpg")
+
+$response = Invoke-RestMethod `
+    -Uri "$env:AZURE_FACE_ENDPOINT/face/v1.0/detect?returnFaceRectangle=true" `
+    -Method Post `
+    -Headers @{ "Ocp-Apim-Subscription-Key" = $env:AZURE_FACE_KEY } `
+    -ContentType "application/octet-stream" `
+    -Body $imageBytes
+
+$response | ConvertTo-Json -Depth 5
+</code></pre>
+<div class="warn">
+<p>When you pass image bytes directly you cannot also pass a JSON body, so all configuration travels in the query string. Keep images under the size limit documented for the service — for the detection endpoint that is 6 MB for the binary body — and re-encode very large files before sending them.</p>
+</div>
+
+<h2>Observing the Response Shape</h2>
+<p>Regardless of whether you send a URL or bytes, the response follows the same shape. A single face produces something like this (values shown are illustrative):</p>
+<pre><code>[
+  {
+    "faceId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "faceRectangle": {
+      "top": 64,
+      "left": 120,
+      "width": 180,
+      "height": 180
+    },
+    "faceAttributes": {
+      "age": 32.0,
+      "glasses": "NoGlasses",
+      "emotion": {
+        "happiness": 0.97,
+        "neutral": 0.01,
+        "anger": 0.0,
+        "surprise": 0.0,
+        "sadness": 0.0,
+        "fear": 0.0,
+        "disgust": 0.0
+      }
+    }
+  }
+]
+</code></pre>
+
+<h2>Clean Up the Resource</h2>
+<p>Once you have confirmed detection works, you can keep the account for the next chapters or delete it to avoid further charges:</p>
+<pre><code>az cognitiveservices account delete --name cs-ai103 --resource-group rg-ai103
+az group delete --name rg-ai103 --yes
+</code></pre>
+
+<h2>Summary</h2>
+<p>You created a Cognitive Services account, discovered the Face endpoint and its subscription key, and made working detect calls using both a public image URL and raw image bytes. You have also seen the structure of the JSON response, including the bounding box, the face ID, and the requested attributes. The next chapter reimplements the same workflow in Python, which is the language most of your integration work will use.</p>
+<nav>
+<a href="281-the-face-service.html">&larr; Previous: The Face service</a><a href="283-lab-python-face-service.html">Next: Lab - Python - Face service &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

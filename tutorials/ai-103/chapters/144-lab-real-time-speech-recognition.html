@@ -1,0 +1,119 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>144. Lab - Real-Time Speech Recognition - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 144</span>
+<h1>Lab - Real-Time Speech Recognition</h1>
+<p>In this lab you will move from transcribing a file to listening to a live microphone. Realtime recognition streams audio to the Speech service as you speak and returns partial results along the way, updating a caption as each new phrase is finalized. This is the pattern behind live dictation and voice assistants, and it uses the same Speech SDK you already know — the difference is in how the audio is captured and how results arrive.</p>
+
+<h2>Realtime vs. One-Shot Recognition</h2>
+<p>The previous lab used <code>recognize_once()</code>, which is a request–response call: record a short utterance, get one final result. Realtime recognition is event-driven. You start a recognizer, it raises events throughout the session, and you subscribe to those events:</p>
+<ul>
+<li><strong>Recognizing:</strong> fired as partial, intermediate results arrive while you are still speaking.</li>
+<li><strong>Recognized:</strong> fired when a phrase is finalized.</li>
+<li><strong>SessionStarted / SessionStopped:</strong> mark the lifetime of the listening session.</li>
+</ul>
+<p>This event model is what makes captions feel live: the partial text updates every fraction of a second, and the final text replaces the partial as soon as the service commits to it.</p>
+
+<div class="exercise">
+<h3>Exercise: Live dictation from your microphone</h3>
+
+<h3>Step 1 — Reuse your Speech resource</h3>
+<p>This lab needs the same resource as the previous one. Confirm your key and region are available as environment variables:</p>
+<pre><code>echo $env:YOUR_SPEECH_KEY
+echo $env:YOUR_SPEECH_REGION</code></pre>
+<p>If they are not set, set them again before running the script.</p>
+
+<h3>Step 2 — Create the realtime script</h3>
+<p>Create <code>realtime_dictation.py</code> with the following code. It captures from the default microphone, prints partial results as they arrive, and keeps listening until you press Enter.</p>
+<pre><code>import os
+import threading
+import time
+
+import azure.cognitiveservices.speech as speechsdk
+
+SPEECH_KEY = os.environ.get("YOUR_SPEECH_KEY", "")
+SPEECH_REGION = os.environ.get("YOUR_SPEECH_REGION", "")
+
+speech_config = speechsdk.SpeechConfig(
+    subscription=SPEECH_KEY,
+    region=SPEECH_REGION,
+)
+speech_config.speech_recognition_language = "en-US"
+speech_config.enable_dictation()
+
+audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
+recognizer = speechsdk.SpeechRecognizer(
+    speech_config=speech_config,
+    audio_config=audio_config,
+)
+
+def on_partial(evt):
+    print("\rpartial: " + evt.text, end="", flush=True)
+
+def on_recognized(evt):
+    print("\rfinal:   " + evt.text)
+
+def on_canceled(evt):
+    details = speechsdk.CancellationDetails(evt)
+    print(f"\ncanceled: {details.reason} — {details.error_details}")
+
+recognizer.recognizing.connect(on_partial)
+recognizer.recognized.connect(on_recognized)
+recognizer.canceled.connect(on_canceled)
+
+def stop_when_enter_pressed():
+    input("\nPress Enter to stop listening...\n")
+    recognizer.stop_continuous_recognition()
+
+print("Listening... speak now.")
+recognizer.start_continuous_recognition()
+
+threading.Thread(target=stop_when_enter_pressed, daemon=True).start()
+
+while recognizer.state != speechsdk.RecognizerState.Stopped:
+    time.sleep(0.5)
+
+print("\nSession finished.")</code></pre>
+
+<h3>Step 3 — Run and speak</h3>
+<pre><code>python realtime_dictation.py</code></pre>
+<p>Read a few sentences aloud. You should see partial text updating on the line as you speak, then a final line once each phrase settles. Press Enter to stop.</p>
+</div>
+
+<h2>Why Partial Results Matter</h2>
+<p>Partial results are the reason a realtime experience feels instant. A user does not wait for the service to decide the whole sentence is done; they watch the text appear word by word. Your application can choose how to treat partials — render them in a lighter style to signal they are provisional, and replace them with the final result when <code>Recognized</code> arrives.</p>
+
+<div class="tip">
+<p>If your default microphone captures a lot of ambient noise, recognition accuracy drops. Try setting the audio config to a known microphone by name, or record a quieter sample and confirm the phrase list from the previous lab still helps with any domain terms.</p>
+</div>
+
+<h2>Continuous vs. Single Recognition</h2>
+<p>Notice the two different calls this lab uses. <code>start_continuous_recognition()</code> keeps the session open, firing events until you stop it. That is what you want for dictation, captions, or an always-on voice interface. <code>recognize_once()</code>, by contrast, returns after a single utterance. If you are building a wake-word or push-to-talk experience, the once pattern gives you a simple loop; if you want open listening, go continuous.</p>
+
+<div class="warn">
+<p>Continuous recognition holds an open connection to the Speech service the entire time it listens, and it bills for the time the connection is active. In a real product, stop the recognizer when the user is not speaking and restart it on demand, rather than leaving it running indefinitely.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Realtime recognition turns the Speech SDK into a live captioning machine. You subscribed to the <code>recognizing</code>, <code>recognized</code>, and <code>canceled</code> events, captured audio from the default microphone, and ran a continuous session that streams partial results as you speak. In the next chapter you will flip direction and make the service speak instead of listen.</p>
+<nav>
+<a href="143-lab-speech-to-text-via-code.html">&larr; Previous: Lab - Speech to Text via Code</a><a href="145-text-to-speech.html">Next: Text to Speech &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

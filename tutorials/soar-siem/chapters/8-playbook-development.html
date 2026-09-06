@@ -1,0 +1,144 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>8. Playbook Development - SOAR &amp; SIEM Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>8. Playbook Development</h1>
+<p class="tag">Chapter 8</p>
+
+<h2>What is a Playbook?</h2>
+<p>A <strong>playbook</strong> is an executable, machine-readable workflow that defines how the SOAR responds to a specific trigger — usually an alert type or an incident condition. It is the automation of a documented incident-response procedure: the difference is that the SOAR can execute it deterministically, log every step, and handle the routine parts without a human.</p>
+
+<div class="note">
+<strong>Playbook vs Runbook:</strong> A <em>runbook</em> is human documentation — "if X happens, do steps A, B, C." A <em>playbook</em> is that procedure encoded into automation. Most mature SOCs start with runbooks, then convert the highest-volume, most-repetitive ones into playbooks.
+</div>
+
+<h2>Anatomy of a Playbook</h2>
+<p>Every playbook has common building blocks:</p>
+<table>
+<tr><th>Building Block</th><th>Purpose</th><th>Example</th></tr>
+<tr><td>Trigger</td><td>What starts the playbook</td><td>New alert from SIEM, webhook, scheduled time, case field change</td></tr>
+<tr><td>Input normalization</td><td>Extract structured data from the alert</td><td>Parse alert JSON → artifacts (IP, hash, user)</td></tr>
+<tr><td>Enrichment</td><td>Add context</td><td>VirusTotal hash lookup, asset criticality check, intel feed query</td></tr>
+<tr><td>Decision / condition</td><td>Branch based on data</td><td>IF hash is malicious AND asset is critical THEN quarantine</td></tr>
+<tr><td>Action</td><td>Invoke an external tool</td><td>Isolate endpoint via EDR API</td></tr>
+<tr><td>Loop</td><td>Repeat over a list</td><td>Block each malicious IP in a firewall</td></tr>
+<tr><td>Human approval</td><td>Pause for judgment</td><td>Require analyst approval before destructive action</td></tr>
+<tr><td>Notification</td><td>Inform people</td><td>Post summary to Teams/email, create ITSM ticket</td></tr>
+<tr><td>Output / case update</td><td>Record results</td><td>Attach evidence, update case status, add timeline entries</td></tr>
+<tr><td>Error handling</td><td>Fail safely</td><td>Retry logic, fallback to manual escalation</td></tr>
+</table>
+
+<h2>Playbook Development Lifecycle</h2>
+<ol>
+<li><strong>Select the use case:</strong> pick high-volume, high-repetition, well-understood alerts first.</li>
+<li><strong>Document the runbook:</strong> write the human procedure; get IR lead approval.</li>
+<li><strong>Design the flow:</strong> map triggers, steps, decisions, and approvals on a whiteboard.</li>
+<li><strong>Build:</strong> implement in the visual editor (and custom code where needed).</li>
+<li><strong>Test:</strong> run with synthetic alerts; verify each branch and error path.</li>
+<li><strong>Deploy:</strong> enable in production, usually on a limited subset first.</li>
+<li><strong>Monitor &amp; tune:</strong> review success/failure rates, false actions, and cycle time.</li>
+</ol>
+
+<h2>Design Principles for Reliable Playbooks</h2>
+<ul>
+<li><strong>Fail safe:</strong> when in doubt, default to human escalation, not to a destructive action.</li>
+<li><strong>Start narrow:</strong> target one alert type, one scenario. Broaden after proven.</li>
+<li><strong>Make actions idempotent:</strong> running the same step twice should be harmless (blocking an already-blocked IP should not error).</li>
+<li><strong>Bounded loops:</strong> always cap loop iterations and add timeouts.</li>
+<li><strong>Approval gates for high blast radius:</strong> production isolation, mass blocking, account deletion.</li>
+<li><strong>Rich logging:</strong> log inputs, outputs, decisions, and errors so any step is reconstructable.</li>
+<li><strong>No hardcoded secrets:</strong> pull credentials from the platform's vault.</li>
+</ul>
+
+<div class="warn">
+<strong>Critical:</strong> Always consider <em>blast radius</em>. If a playbook misbehaves, how much damage can it do? Design maximum-damage-per-run to be small, and put manual approval on anything that can break production. Test destructive playbooks in a staging environment first.
+</div>
+
+<h2>Example: Phishing Playbook Flow</h2>
+<pre><code>Trigger: SIEM alert "Phishing email reported"
+  1. Parse artifacts: sender, subject, URLs, file hashes
+  2. Enrich URL via URLScan + file hash via VirusTotal
+  3. IF URL or hash is malicious:
+        - Block on email gateway (approval not required)
+        - Search mailbox for other deliveries
+        - Quarantine affected user's mailbox if requested
+  4. Create case, assign to Tier-1 analyst
+  5. IF asset is VIP user: notify IR lead + flag priority
+  6. Post summary to #phishing-response channel
+  7. Update case status and attach evidence
+Error handling:
+  - On enrichment API failure: retry twice, then skip to analyst
+  - On blocking failure: escalate case priority</code></pre>
+
+<p>This single playbook reduces a 30-minute manual task to seconds of automation plus a quick analyst review.</p>
+
+<h2>Representing Playbooks as Code</h2>
+<p>Some platforms let you build playbooks programmatically. This is valuable for version control, review, and testing — the same "playbooks as code" philosophy as detection-as-code.</p>
+
+<pre><code># Simplified conceptual playbook (JSON-ish)
+{
+  "name": "Block Malicious Hash",
+  "trigger": {"type": "alert", "filter": "alert.type == 'malware_detected'"},
+  "steps": [
+    {"action": "vault.secret.get", "inputs": {"name": "edr_token"}},
+    {"action": "edr.query_file_reputation", "inputs": {"hash": "{{alert.artifact.hash}}"}},
+    {"if": "{{steps.reputation.verdict == 'malicious'}}",
+     "then": [
+        {"action": "edr.quarantine_file", "inputs": {"hash": "{{alert.artifact.hash}}"}, "needs_approval": true},
+        {"action": "notify.slack", "inputs": {"channel": "#ir", "text": "Quarantined {{alert.artifact.hash}}"}}
+     ],
+     "else": [{"action": "case.close_as_fp"}]}
+  ]
+}</code></pre>
+
+<p>Whether you use a visual editor or code, keep playbooks in source control and require peer review for changes to destructive actions.</p>
+
+<h2>Common Playbook Patterns</h2>
+<ul>
+<li><strong>Enrich-and-route:</strong> gather context, then route to the right team with a prepopulated case.</li>
+<li><strong>Auto-triage:</strong> determine benign vs suspicious, auto-close FPs, escalate the rest.</li>
+<li><strong>Contain-and-block:</strong> block IOCs on security controls, with approval for high-impact targets.</li>
+<li><strong>Evidence capture:</strong> collect logs, memory, and disk forensics before containment.</li>
+<li><strong>Notification tree:</strong> page the right people based on severity and asset criticality.</li>
+<li><strong>Case deduplication:</strong> merge related alerts into one incident to reduce noise.</li>
+</ul>
+
+<h2>Testing and Simulation</h2>
+<p>Playbooks must be tested like software. Techniques include:</p>
+<ul>
+<li><strong>Dry-run mode:</strong> execute the flow but simulate external calls.</li>
+<li><strong>Staging connectors:</strong> point actions at test instances.</li>
+<li><strong>Synthetic alerts:</strong> feed realistic fake alerts through each branch.</li>
+<li><strong>Failure injection:</strong> test what happens when APIs time out or return errors.</li>
+<li><strong>Load testing:</strong> verify behavior during alert storms (many concurrent runs).</li>
+<li><strong>Tabletop drills:</strong> simulate a major incident with the playbook and the team together.</li>
+</ul>
+
+<h2>Metrics for Playbooks</h2>
+<ul>
+<li><strong>Automation rate:</strong> % of alerts fully handled without human action.</li>
+<li><strong>Cycle time:</strong> how long a playbook run takes end to end.</li>
+<li><strong>Success rate:</strong> % of runs that complete without error.</li>
+<li><strong>Error rate by step:</strong> which connector/step fails most (drives fixes).</li>
+<li><strong>Approval latency:</strong> how long humans take to approve — a silent bottleneck.</li>
+<li><strong>Escalation rate:</strong> how often automation hands off to humans.</li>
+</ul>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Choose one alert type (e.g., "Suspicious PowerShell execution"). Write its runbook in 10 steps. Then encode it as a playbook design: list the trigger, every step, all decision points, loop boundaries, approval gates, notifications, and error handling. Finally, write a test checklist with at least one synthetic test for each branch.
+</div>
+
+<nav>
+  <a href="7-soar-platforms.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="9-security-automation.html">Next: Security Automation in Action &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

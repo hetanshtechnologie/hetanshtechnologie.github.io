@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Angular Memory Card Game</title>
+<link rel="manifest" href="../manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="../icon-192.svg">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px}
+a{color:#38bdf8;text-decoration:none;font-size:14px}a:hover{text-decoration:underline}
+h1{color:#f43f5e;font-size:24px;margin:10px 0;text-align:center}
+.subtitle{color:#94a3b8;font-size:13px;text-align:center;margin-bottom:20px}
+.card{background:#1e293b;border-radius:12px;padding:24px;border:1px solid #334155;max-width:500px;width:100%;margin-bottom:16px}
+.stats{display:flex;gap:12px;margin:16px 0;justify-content:center}
+.stat{background:#0f172a;border-radius:8px;padding:12px 20px;text-align:center;border:1px solid #334155}
+.stat .val{font-size:22px;font-weight:800;color:#f43f5e}
+.stat .lbl{font-size:11px;color:#94a3b8}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0}
+.card-tile{aspect-ratio:1;border-radius:10px;cursor:pointer;perspective:600px;position:relative}
+.card-inner{width:100%;height:100%;position:relative;transform-style:preserve-3d;transition:transform 0.5s}
+.card-tile.flipped .card-inner{transform:rotateY(180deg)}
+.card-front,.card-back{position:absolute;width:100%;height:100%;backface-visibility:hidden;border-radius:10px;display:flex;align-items:center;justify-content:center;border:2px solid #334155}
+.card-back{background:#0f172a;font-size:24px;color:#334155}
+.card-front{background:#1e293b;transform:rotateY(180deg);font-size:28px;border-color:#f43f5e}
+.card-tile.matched .card-front{border-color:#22c55e;background:rgba(34,197,94,0.15)}
+.angular-tip{background:#1a1a2e;border-left:3px solid #f43f5e;padding:12px 16px;margin:16px 0;border-radius:0 8px 8px 0;font-size:13px;line-height:1.5;max-width:500px;width:100%}
+.angular-tip b{color:#f43f5e}
+.angular-tip code{background:#334155;padding:2px 6px;border-radius:4px;font-size:12px;color:#fb923c}
+.btn{padding:12px 24px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin:8px}
+.btn-primary{background:#f43f5e;color:#fff}.btn-primary:hover{background:#e11d48}
+.btn-secondary{background:#334155;color:#e2e8f0}.btn-secondary:hover{background:#475569}
+.level-select{display:flex;gap:8px;justify-content:center;margin:16px 0}
+.level-btn{padding:8px 20px;border:2px solid #334155;border-radius:20px;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:13px}
+.level-btn.active{border-color:#f43f5e;color:#f43f5e}
+#start-screen{text-align:center}
+#game-screen{display:none}
+#result-screen{display:none;text-align:center}
+.score-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+.score-item{background:#0f172a;border-radius:8px;padding:16px;text-align:center;border:1px solid #334155}
+.score-item .val{font-size:32px;font-weight:800;color:#f43f5e}
+.score-item .lbl{font-size:12px;color:#94a3b8;margin-top:4px}
+</style>
+</head>
+<body>
+<a href="../index.html">&larr; Back to Games</a>
+<h1>Memory Card Game</h1>
+<div class="subtitle">Learn Angular Components + State Management</div>
+
+<div id="start-screen" class="card">
+  <div style="font-size:48px;margin-bottom:16px">🃏</div>
+  <h2 style="font-size:22px;color:#f43f5e;margin-bottom:12px">Angular Memory Cards</h2>
+  <p style="color:#94a3b8;margin-bottom:16px">Flip cards to find matching Angular concept pairs. Teaches component communication and state management.</p>
+  <div class="angular-tip">
+    <b>This game teaches:</b><br>
+    - Component state with BehaviorSubject<br>
+    - Child → Parent communication via @Output<br>
+    - Immutable state updates for OnPush detection<br>
+    - NgRx-style state management patterns
+  </div>
+  <div class="level-select">
+    <button class="level-btn active" onclick="setLevel(4,this)">4x3 Easy</button>
+    <button class="level-btn" onclick="setLevel(6,this)">4x4 Medium</button>
+    <button class="level-btn" onclick="setLevel(8,this)">4x5 Hard</button>
+  </div>
+  <button class="btn btn-primary" onclick="startGame()">Start Game</button>
+</div>
+
+<div id="game-screen">
+  <div class="stats">
+    <div class="stat"><div class="val" id="moves">0</div><div class="lbl">Moves</div></div>
+    <div class="stat"><div class="val" id="matches">0</div><div class="lbl">Matches</div></div>
+    <div class="stat"><div class="val" id="timer">0s</div><div class="lbl">Time</div></div>
+  </div>
+  <div class="grid" id="grid"></div>
+  <div class="angular-tip" id="tip" style="display:none"></div>
+</div>
+
+<div id="result-screen" class="card">
+  <div style="font-size:48px;margin-bottom:8px">🏆</div>
+  <h2 style="font-size:24px;color:#f43f5e;margin:12px 0">You Win!</h2>
+  <div class="score-grid">
+    <div class="score-item"><div class="val" id="rMoves">0</div><div class="lbl">Moves</div></div>
+    <div class="score-item"><div class="val" id="rTime">0s</div><div class="lbl">Time</div></div>
+  </div>
+  <div class="angular-tip" id="resultTip"></div>
+  <button class="btn btn-primary" onclick="startGame()">Play Again</button>
+  <button class="btn btn-secondary" onclick="location.href='../index.html'">Back to Games</button>
+</div>
+
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("../sw.js").catch(function(){});}
+</script>
+<script>
+var pairs=[
+{emoji:"📦",name:"@Component",tip:"<b>@Component</b> decorator marks a class as an Angular component with metadata like template and styles."},
+{emoji:"🔧",name:"@Injectable",tip:"<b>@Injectable({providedIn:'root'})</b> makes a service available app-wide via Dependency Injection."},
+{emoji:"📋",name:"@Input()",tip:"<b>@Input()</b> lets parent components pass data into child components."},
+{emoji:"📤",name:"@Output()",tip:"<b>@Output()</b> with EventEmitter lets child components send data back to parents."},
+{emoji:"🔄",name:"ngOnInit",tip:"<b>ngOnInit()</b> lifecycle hook runs after the component is initialized. Perfect for data fetching."},
+{emoji:"🗑️",name:"ngOnDestroy",tip:"<b>ngOnDestroy()</b> cleans up subscriptions and resources to prevent memory leaks."},
+{emoji:"📡",name:"HttpClient",tip:"<b>HttpClient</b> module handles HTTP requests and returns Observables."},
+{emoji:"🎭",name:"BehaviorSubject",tip:"<b>BehaviorSubject</b> holds current state and emits it to new subscribers — core of state management."},
+{emoji:"⚡",name:"RxJS pipe()",tip:"<b>pipe()</b> chains RxJS operators like map, filter, tap for reactive data flows."},
+{emoji:"🏗️",name:"NgModule",tip:"<b>NgModule</b> organizes related components, services, and pipes into cohesive modules."},
+{emoji:"🧭",name:"Router",tip:"<b>RouterModule</b> handles navigation between views with URL-based routing."},
+{emoji:"✅",name:"FormsModule",tip:"<b>FormsModule</b> enables template-driven forms with ngModel two-way binding."},
+{emoji:"🎯",name:"Directive",tip:"<b>Directives</b> add behavior to elements — structural (*ngIf) or attribute (ngStyle)."},
+{emoji:"🔌",name:"Provider",tip:"<b>Providers</b> register services for DI. providedIn:'root' is the modern shorthand."},
+{emoji:"📱",name:"OnPush",tip:"<b>ChangeDetectionStrategy.OnPush</b> optimizes performance by skipping unchanged components."}
+];
+var cols=4,pairsCount=6,tiles=[],flipped=[],matched=[],moveCount=0,matchCount=0,tid=null,tsecs=0;
+
+function setLevel(n,el){
+  cols=4;pairsCount=n;
+  var btns=document.querySelectorAll(".level-btn");
+  for(var i=0;i<btns.length;i++)btns[i].classList.remove("active");
+  el.classList.add("active");
+}
+
+function startGame(){
+  document.getElementById("start-screen").style.display="none";
+  document.getElementById("result-screen").style.display="none";
+  document.getElementById("game-screen").style.display="block";
+  moveCount=0;matchCount=0;tsecs=0;flipped=[];matched=[];
+  document.getElementById("moves").textContent="0";
+  document.getElementById("matches").textContent="0";
+  document.getElementById("timer").textContent="0s";
+  clearInterval(tid);
+  tid=setInterval(function(){tsecs++;document.getElementById("timer").textContent=tsecs+"s";},1000);
+
+  var sel=pairs.slice(0,pairsCount);
+  var arr=[];
+  for(var i=0;i<sel.length;i++){
+    arr.push({emoji:sel[i].emoji,name:sel[i].name,tip:sel[i].tip,id:i});
+    arr.push({emoji:sel[i].emoji,name:sel[i].name,tip:sel[i].tip,id:i});
+  }
+  for(var i=arr.length-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var tmp=arr[i];arr[i]=arr[j];arr[j]=tmp;
+  }
+  tiles=arr;
+
+  var rows=Math.ceil(arr.length/cols);
+  var g=document.getElementById("grid");
+  g.style.gridTemplateColumns="repeat("+cols+",1fr)";
+  g.innerHTML="";
+  for(var i=0;i<arr.length;i++){
+    var d=document.createElement("div");
+    d.className="card-tile";
+    d.setAttribute("data-idx",i);
+    d.innerHTML='<div class="card-inner"><div class="card-back">❓</div><div class="card-front">'+arr[i].emoji+'</div></div>';
+    d.onclick=(function(x){return function(){flip(x)}})(i);
+    g.appendChild(d);
+  }
+}
+
+function flip(idx){
+  if(flipped.length>=2)return;
+  if(matched.indexOf(tiles[idx].id)!==-1)return;
+  if(flipped.indexOf(idx)!==-1)return;
+  var el=document.querySelectorAll(".card-tile")[idx];
+  el.classList.add("flipped");
+  flipped.push(idx);
+  if(flipped.length===2){
+    moveCount++;
+    document.getElementById("moves").textContent=moveCount;
+    var a=tiles[flipped[0]],b=tiles[flipped[1]];
+    if(a.id===b.id){
+      matched.push(a.id);
+      matchCount++;
+      document.getElementById("matches").textContent=matchCount;
+      document.querySelectorAll(".card-tile")[flipped[0]].classList.add("matched");
+      document.querySelectorAll(".card-tile")[flipped[1]].classList.add("matched");
+      document.getElementById("tip").innerHTML=a.tip;
+      document.getElementById("tip").style.display="block";
+      flipped=[];
+      if(matchCount===pairsCount)win();
+    }else{
+      var f0=flipped[0],f1=flipped[1];
+      setTimeout(function(){
+        document.querySelectorAll(".card-tile")[f0].classList.remove("flipped");
+        document.querySelectorAll(".card-tile")[f1].classList.remove("flipped");
+        flipped=[];
+      },800);
+    }
+  }
+}
+
+function win(){
+  clearInterval(tid);
+  document.getElementById("game-screen").style.display="none";
+  document.getElementById("result-screen").style.display="block";
+  document.getElementById("rMoves").textContent=moveCount;
+  document.getElementById("rTime").textContent=tsecs+"s";
+  var stars=moveCount<=pairsCount+2?"⭐⭐⭐":moveCount<=pairsCount*2?"⭐⭐":"⭐";
+  var tip="<b>State Management Insight:</b> In Angular, use <code>BehaviorSubject</code> in a service to manage game state. Components subscribe via async pipe, and state updates via <code>next()</code> trigger change detection automatically.";
+  document.getElementById("resultTip").innerHTML=tip;
+}
+</script>
+</body>
+</html>

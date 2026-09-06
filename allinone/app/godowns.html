@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Godowns — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Godowns / Warehouses</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">Godowns / Warehouses</h1>
+      <button onclick="showGodownForm()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">+ Add Godown</button>
+    </div>
+    <div id="alert"></div>
+
+    <div id="godown-form" class="hidden bg-white rounded-xl shadow-sm border p-6 mb-6">
+      <form id="godown-entry-form" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <input type="hidden" id="godown-edit-id">
+        <div><label class="block text-sm font-semibold mb-1">Name *</label><input type="text" id="godown-name" class="w-full border rounded px-3 py-2 text-sm" required></div>
+        <div><label class="block text-sm font-semibold mb-1">Location</label><input type="text" id="godown-location" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="block text-sm font-semibold mb-1">Contact Person</label><input type="text" id="godown-manager" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><label class="block text-sm font-semibold mb-1">Phone</label><input type="text" id="godown-contact" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div class="md:col-span-2"><label class="block text-sm font-semibold mb-1">Address</label><textarea id="godown-address" class="w-full border rounded px-3 py-2 text-sm" rows="2"></textarea></div>
+        <div class="flex items-end gap-2">
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700">Save</button>
+          <button type="button" onclick="hideGodownForm()" class="bg-gray-200 px-4 py-2 rounded text-sm hover:bg-gray-300">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="loading" class="text-gray-500 mb-4">Loading...</div>
+    <div id="godowns-list" class="hidden bg-white rounded-xl shadow-sm border overflow-x-auto"></div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId = null;
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin(); if (!user) return;
+      orgId = await getOrgId(); if (!orgId) return;
+      await loadGodowns();
+    });
+
+    document.getElementById('godown-entry-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const editId = document.getElementById('godown-edit-id').value;
+      const data = {
+        org_id: orgId, name: document.getElementById('godown-name').value,
+        location: document.getElementById('godown-location').value||null,
+        manager: document.getElementById('godown-manager').value||null,
+        contact: document.getElementById('godown-contact').value||null,
+        address: document.getElementById('godown-address').value||null
+      };
+      try {
+        if (editId) { await erp.from('godowns').update(data).eq('id', parseInt(editId)); }
+        else { const { error } = await erp.from('godowns').insert(data); if (error) throw error; }
+        showAlert(editId ? 'Godown updated!' : 'Godown created!', 'success');
+        hideGodownForm(); await loadGodowns();
+      } catch (err) { showAlert(err.message, 'error'); }
+    });
+
+    async function loadGodowns() {
+      const { data, error } = await erp.from('godowns').select('*').eq('org_id', orgId).eq('is_active', true).order('name');
+      if (error) { document.getElementById('loading').textContent = 'Error: ' + error.message; return; }
+      document.getElementById('loading').classList.add('hidden');
+      const div = document.getElementById('godowns-list'); div.classList.remove('hidden');
+      if (!data||!data.length) { div.innerHTML = '<div class="p-6 text-gray-500 text-center">No godowns yet. Add one above.</div>'; return; }
+      div.innerHTML = `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b text-left"><th class="p-3 font-semibold">Name</th><th class="p-3 font-semibold">Location</th><th class="p-3 font-semibold">Manager</th><th class="p-3 font-semibold">Contact</th><th class="p-3 font-semibold">Address</th><th class="p-3"></th></tr></thead><tbody>${data.map(g => `<tr class="border-b"><td class="p-3 font-medium">${escapeHtml(g.name)}</td><td class="p-3">${escapeHtml(g.location||'-')}</td><td class="p-3">${escapeHtml(g.manager||'-')}</td><td class="p-3">${escapeHtml(g.contact||'-')}</td><td class="p-3 text-xs">${escapeHtml(g.address||'-')}</td><td class="p-3"><button onclick="editGodown(${g.id})" class="text-blue-600 hover:underline text-xs mr-2">Edit</button><button onclick="deleteGodown(${g.id})" class="text-red-500 hover:underline text-xs">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    }
+
+    function showGodownForm(data) {
+      document.getElementById('godown-form').classList.remove('hidden');
+      if (data) {
+        document.getElementById('godown-edit-id').value = data.id;
+        document.getElementById('godown-name').value = data.name;
+        document.getElementById('godown-location').value = data.location||'';
+        document.getElementById('godown-manager').value = data.manager||'';
+        document.getElementById('godown-contact').value = data.contact||'';
+        document.getElementById('godown-address').value = data.address||'';
+      }
+    }
+
+    function hideGodownForm() {
+      document.getElementById('godown-form').classList.add('hidden');
+      document.getElementById('godown-entry-form').reset();
+      document.getElementById('godown-edit-id').value = '';
+    }
+
+    async function editGodown(id) {
+      const { data } = await erp.from('godowns').select('*').eq('id', id).single();
+      if (data) showGodownForm(data);
+    }
+
+    async function deleteGodown(id) {
+      if (!confirm('Delete this godown?')) return;
+      try { await erp.from('godowns').delete().eq('id', id); showAlert('Deleted.', 'success'); await loadGodowns(); } catch (err) { showAlert(err.message, 'error'); }
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

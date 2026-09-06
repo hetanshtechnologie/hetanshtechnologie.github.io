@@ -1,0 +1,159 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>54. The OpenAPI Specification - The Contract Behind the Tool - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 54</span>
+<h1>The OpenAPI Specification - The Contract Behind the Tool</h1>
+<p>Before a machine can call an API reliably, it needs to know exactly what the API accepts and returns. The OpenAPI Specification is the de facto standard for that description: a JSON or YAML document that defines the endpoints, the inputs, the outputs, and the errors of an HTTP API. In this chapter you learn the parts of an OpenAPI document and write a small one for the CloudXeus orders service.</p>
+
+<h2>What an API Contract Buys You</h2>
+<ul>
+<li>Clients, including agents, can discover operations without reading source code.</li>
+<li>Tools can generate code, tests, and documentation from one file.</li>
+<li>Foundry can convert operations into callable agent tools automatically.</li>
+<li>Changes become reviewable diffs instead of undocumented rewrites.</li>
+</ul>
+
+<h2>The Shape of an OpenAPI Document</h2>
+<p>Every OpenAPI document is organized around four top-level sections:</p>
+<ul>
+<li><strong>info:</strong> the title, version, and description of the API.</li>
+<li><strong>servers:</strong> the base URLs the API is hosted at.</li>
+<li><strong>paths:</strong> the actual operations, grouped by URL path.</li>
+<li><strong>components:</strong> reusable schemas and other building blocks.</li>
+</ul>
+<p>Optionally, a security section declares how callers authenticate.</p>
+
+<h2>Operations</h2>
+<p>A path such as <code>/orders/{order_id}</code> can have several operations, one per HTTP method. Each operation declares:</p>
+<ul>
+<li><strong>operationId:</strong> a unique name that tools use to refer to the operation.</li>
+<li><strong>summary and description:</strong> human- and model-readable guidance on when to use it.</li>
+<li><strong>parameters:</strong> path, query, and header inputs.</li>
+<li><strong>requestBody:</strong> the JSON payload for write operations.</li>
+<li><strong>responses:</strong> the possible status codes and their shapes.</li>
+</ul>
+
+<div class="tip">
+<p>Write the summary and description for the model, not only for humans. In an agent setting these strings are the model's manual for when to pick each operation, so be concrete: <em>Get the full status of one CloudXeus order by its id</em> beats <em>Get order</em>.</p>
+</div>
+
+<h2>Components and Schemas</h2>
+<p>Repeated shapes are defined once in <code>components/schemas</code> and referenced with <code>$ref</code>. This keeps the document tidy and makes request and response bodies precise:</p>
+
+<pre><code>"components": {
+  "schemas": {
+    "Order": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string"},
+        "customer_email": {"type": "string"},
+        "status": {"type": "string", "enum": ["placed", "shipped", "cancelled"]},
+        "total": {"type": "number"}
+      },
+      "required": ["id", "customer_email", "status"]
+    }
+  }
+}</code></pre>
+
+<h2>A Complete Example</h2>
+<p>Putting it together, a minimal CloudXeus orders API spec has two operations: list orders for a customer, and get one order by id.</p>
+
+<pre><code>{
+  "openapi": "3.0.1",
+  "info": {"title": "CloudXeus Orders API", "version": "1.0.0"},
+  "servers": [{"url": "https://YOUR_FUNCTION_APP.azurewebsites.net/api"}],
+  "paths": {
+    "/orders": {
+      "get": {
+        "operationId": "list_orders",
+        "summary": "List orders for a customer",
+        "parameters": [
+          {"name": "email", "in": "query", "required": true,
+           "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "The customer's orders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/Order"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{order_id}": {
+      "get": {
+        "operationId": "get_order",
+        "summary": "Get one CloudXeus order by its id",
+        "parameters": [
+          {"name": "order_id", "in": "path", "required": true,
+           "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "The order",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Order"}
+              }
+            }
+          },
+          "404": {"description": "Order not found"}
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "customer_email": {"type": "string"},
+          "status": {"type": "string"},
+          "total": {"type": "number"}
+        }
+      }
+    }
+  }
+}</code></pre>
+
+<div class="note">
+<p>The <code>operationId</code> becomes the tool name when Foundry imports this spec, so choose short, unique, snake_case names. Duplicate operationIds are invalid and will fail to import.</p>
+</div>
+
+<h2>Validating and Maintaining the Spec</h2>
+<ul>
+<li>Validate your file against the OpenAPI schema with a tool such as the Swagger editor before importing it.</li>
+<li>Keep descriptions in sync with the real API; an outdated spec produces confident but wrong tool calls.</li>
+<li>Version the API and its spec together so agents always bind to a consistent contract.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>The OpenAPI Specification is the contract that turns an HTTP API into something agents can use. You now know its four main sections, how operations are described, and how components keep schemas reusable. Next you meet Azure Functions, the serverless service that will host the CloudXeus orders API behind that spec.</p>
+<nav>
+<a href="53-building-an-api-powered-agent-with-openapi-tools-on-microsoft-foundry.html">&larr; Previous: Building an API-Powered Agent with OpenAPI Tools on Microsoft Foundry</a><a href="55-what-are-azure-functions.html">Next: What Are Azure Functions &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

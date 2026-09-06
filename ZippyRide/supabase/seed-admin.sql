@@ -1,0 +1,12 @@
+-- ============================================================
+-- ZippyRide Admin Seed
+-- ============================================================
+-- Run this AFTER creating the auth user via Supabase Dashboard:
+--   1. Go to Authentication > Users > Add User
+--   2. Email: admin@zippyride.com  Password: admin123
+--   3. Copy the new user's UUID from the list
+--   4. Replace 'USER_UUID_HERE' below and run this SQL
+-- ============================================================
+
+-- INSERT INTO public.profiles (id, name, email, role)
+-- VALUES ('USER_UUID_HERE', 'Admin', 'admin@zippyride.com', 'admin');

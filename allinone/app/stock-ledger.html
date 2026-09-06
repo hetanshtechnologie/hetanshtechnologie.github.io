@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stock Ledger — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}td{padding:6px 10px;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Stock Ledger</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-7xl mx-auto p-6">
+    <div class="flex flex-wrap gap-4 mb-6 items-center">
+      <select id="product-select" class="border rounded px-3 py-2 text-sm w-72" onchange="loadLedger()"><option value="">— Select Product —</option></select>
+      <input type="date" id="from-date" class="border rounded px-2 py-1.5 text-sm">
+      <input type="date" id="to-date" class="border rounded px-2 py-1.5 text-sm">
+      <button onclick="loadLedger()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700">View</button>
+      <button onclick="exportStock()" class="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700">Export</button>
+    </div>
+    <div id="product-info" class="hidden"></div>
+    <div class="bg-white rounded-xl shadow-sm border p-6 mt-4">
+      <div id="loading" class="text-center text-gray-400 py-8">Select a product to view stock ledger</div>
+      <div id="content" class="hidden overflow-x-auto"></div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId, products = [], currentStock = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const user = await requireLogin(); if(!user) return;
+      orgId = await getOrgId(); if(!orgId) return;
+      const { data: prd } = await erp.from('products').select('id,name,code,unit,selling_price,cost_price').eq('org_id', orgId).eq('is_active', true).order('name');
+      products = prd || [];
+      const sel = document.getElementById('product-select');
+      products.forEach(p => { const o = document.createElement('option'); o.value=p.id; o.textContent=`${p.code||''} - ${p.name} (${p.unit||'pc'})`; sel.appendChild(o); });
+      const d = new Date(); document.getElementById('to-date').value = d.toISOString().split('T')[0];
+      d.setMonth(d.getMonth()-1); document.getElementById('from-date').value = d.toISOString().split('T')[0];
+    });
+
+    async function loadLedger() {
+      const pid = parseInt(document.getElementById('product-select').value);
+      if(!pid) return;
+      document.getElementById('loading').classList.remove('hidden'); document.getElementById('content').classList.add('hidden');
+      const prod = products.find(p => p.id === pid);
+      const from = document.getElementById('from-date').value || '2000-01-01';
+      const to = document.getElementById('to-date').value || '2099-12-31';
+
+      // Get batches for this product
+      const { data: batches } = await erp.from('inventory_batches').select('*, godowns(name)').eq('org_id', orgId).eq('product_id', pid);
+      // Get invoices with this product
+      const { data: lines } = await erp.from('invoice_lines').select('*, invoices!inner(invoice_no,invoice_date,doc_type,org_id)').eq('product_id', pid).gte('invoices.invoice_date', from).lte('invoices.invoice_date', to);
+
+      // Build stock ledger
+      let opening = { qty: 0, value: 0 };
+      let items = [];
+      (lines||[]).forEach(l => {
+        const d = l.invoices?.invoice_date;
+        if(d && d < from) {
+          opening.qty += Number(l.qty||0);
+          opening.value += Number(l.amount||0);
+        } else {
+          items.push({ date: d, ref: l.invoices?.invoice_no||'', doc_type: l.invoices?.doc_type||'invoice', type: 'sale', qty: Number(l.qty||0), rate: Number(l.rate||0), value: Number(l.amount||0) });
+        }
+      });
+      (batches||[]).forEach(b => {
+        if(b.grn_date && b.grn_date < from) {
+          opening.qty += Number(b.qty||0);
+          opening.value += Number(b.qty||0) * Number(b.unit_cost||0);
+        } else if(b.grn_date && b.grn_date >= from && b.grn_date <= to) {
+          items.push({ date: b.grn_date, ref: b.batch_no||'GRN', doc_type: 'purchase', type: 'purchase', qty: Number(b.qty||0), rate: Number(b.unit_cost||0), value: Number(b.qty||0) * Number(b.unit_cost||0) });
+        }
+      });
+      items.sort((a,b) => (a.date||'').localeCompare(b.date||''));
+
+      currentStock = [];
+      let runningQty = opening.qty;
+      let runningVal = opening.value;
+      const avgRate = opening.qty > 0 ? opening.value / opening.qty : 0;
+      items.forEach(i => {
+        runningQty += (i.type === 'purchase' ? i.qty : -i.qty);
+        currentStock.push({ ...i, running_qty: runningQty });
+      });
+
+      document.getElementById('product-info').innerHTML = `
+        <div class="bg-white rounded-xl shadow-sm border p-4 grid grid-cols-4 gap-4">
+          <div><span class="text-xs text-gray-500">Product</span><div class="font-bold">${escapeHtml(prod?.name||'')}</div></div>
+          <div><span class="text-xs text-gray-500">Code</span><div>${escapeHtml(prod?.code||'')}</div></div>
+          <div><span class="text-xs text-gray-500">Opening (${from})</span><div class="font-bold">${opening.qty} ${prod?.unit||''} @ ${formatCurrency(avgRate)}</div></div>
+          <div><span class="text-xs text-gray-500">Closing (${to})</span><div class="font-bold">${runningQty} ${prod?.unit||''} | Value: ${formatCurrency(avgRate * runningQty)}</div></div>
+        </div>`;
+      document.getElementById('product-info').classList.remove('hidden');
+      document.getElementById('loading').classList.add('hidden'); document.getElementById('content').classList.remove('hidden');
+
+      document.getElementById('content').innerHTML = currentStock.length ? `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">Date</th><th class="text-left p-2 font-semibold">Ref</th><th class="text-left p-2 font-semibold">Type</th><th class="text-right p-2 font-semibold">In</th><th class="text-right p-2 font-semibold">Out</th><th class="text-right p-2 font-semibold">Rate</th><th class="text-right p-2 font-semibold">Value</th><th class="text-right p-2 font-semibold">Balance Qty</th></tr></thead><tbody>${
+        currentStock.map(i => `<tr class="border-b">
+          <td>${i.date||''}</td><td>${escapeHtml(i.ref)}</td>
+          <td><span class="px-2 py-0.5 rounded text-xs font-medium ${i.type==='purchase'?'bg-green-100 text-green-700':'bg-blue-100 text-blue-700'}">${i.type}</span></td>
+          <td class="text-right">${i.type==='purchase' ? i.qty : '-'}</td>
+          <td class="text-right">${i.type==='sale' ? i.qty : '-'}</td>
+          <td class="text-right">${formatCurrency(i.rate)}</td>
+          <td class="text-right">${formatCurrency(i.value)}</td>
+          <td class="text-right font-bold">${i.running_qty}</td></tr>`).join('')
+      }</tbody></table>` : '<p class="text-center text-gray-400 py-4">No stock movements found for this period</p>';
+    }
+
+    function exportStock() {
+      if(!currentStock.length) return;
+      let csv = 'Date,Ref,Type,In,Out,Rate,Value,Balance\n';
+      currentStock.forEach(i => csv += `"${i.date||''}","${i.ref}",${i.type},${i.type==='purchase'?i.qty:0},${i.type==='sale'?i.qty:0},${i.rate},${i.value},${i.running_qty}\n`);
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = 'stock_ledger.csv'; a.click();
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

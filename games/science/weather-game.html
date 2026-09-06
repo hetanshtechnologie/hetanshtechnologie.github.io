@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Weather Prediction</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.weather-scene{width:100%;max-width:600px;height:180px;border:2px solid #334155;border-radius:12px;background:linear-gradient(180deg,#1e293b,#0f172a);display:flex;align-items:center;justify-content:center;font-size:4rem;position:relative;overflow:hidden}
+.cloud-display{position:absolute;font-size:2.5rem}
+.card{background:#1e293b;border-radius:16px;padding:20px;max-width:600px;width:100%;text-align:center;border:2px solid #334155}
+.q-text{font-size:1rem;margin:10px 0;line-height:1.4}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.opt{background:#0f172a;color:#e2e8f0;border:2px solid #475569;padding:12px;border-radius:8px;font-size:.85rem;cursor:pointer;transition:all .2s}
+.opt:hover{border-color:#38bdf8}
+.opt.correct{border-color:#22c55e;background:rgba(34,197,94,0.15)}
+.opt.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15)}
+.opt.disabled{pointer-events:none;opacity:.7}
+.fb{margin-top:10px;padding:10px;border-radius:8px;font-size:.9rem;min-height:2em}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+.cloud-card{display:inline-block;background:#1e293b;border:2px solid #334155;border-radius:12px;padding:16px;margin:8px}
+.cloud-name{font-size:1.1rem;font-weight:700;margin-bottom:6px}
+.cloud-desc{font-size:.8rem;color:#94a3b8}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🌤️ Weather Prediction</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/10</span>
+</div>
+<div class="weather-scene" id="scene"></div>
+<div class="card">
+<div class="q-text" id="qtext"></div>
+<div class="opts" id="opts"></div>
+<div class="fb" id="fb"></div>
+</div>
+<button class="btn" id="next-btn" style="display:none" onclick="nextQ()">Next ➡️</button>
+</div>
+<script>
+let score=0,level=1,qNum=0,answered=false;
+const questions=[
+  {scene:'☀️',clouds:'',q:'Clear sky with bright sunshine. What weather will follow?',opts:['Hot, sunny weather','Heavy rain','Snowfall','Fog'],ans:0,explain:'Clear skies mean high pressure — sunny, stable weather.'},
+  {scene:'☁️',clouds:'☁️☁️☁️',q:'Thick, dark clouds filling the sky. What weather is coming?',opts:['Rain or storm','Clear skies','Heatwave','Earthquake'],ans:0,explain:'Dark cumulonimbus clouds indicate approaching rain or thunderstorms.'},
+  {scene:'🌫️',clouds:'🌫️',q:'Dense fog covers the ground in the morning. What does it predict?',opts:['Clear afternoon likely','Heavy storm','Snow','Wind'],ans:0,explain:'Morning fog often burns off by afternoon as sun heats the air.'},
+  {scene:'🌈',clouds:'🌧️',q:'A rainbow appears after rain. What does it indicate?',opts:['Rain is ending, clearing ahead','Storm is intensifying','Snow coming','Drought'],ans:0,explain:'Rainbows form when sun appears from behind rain — weather is clearing.'},
+  {scene:'⚡',clouds:'⛈️',q:'Lightning and thunder with heavy rain. What phenomenon?',opts:['Thunderstorm','Tornado','Blizzard','Drought'],ans:0,explain:'Thunderstorms have lightning, thunder, heavy rain, and sometimes hail.'},
+  {scene:'❄️',clouds:'🌨️❄️',q:'Temperature drops below 0°C with clouds. What weather?',opts:['Snow','Rain','Heat wave','Fog'],ans:0,explain:'When temperature is below freezing and moisture is present, it snows.'},
+  {scene:'🌪️',clouds:'',q:'Funnel cloud touches down from dark storm cloud. What is this?',opts:['Tornado','Hurricane','Blizzard','Dust devil'],ans:0,explain:'A tornado is a violently rotating column of air from a thunderstorm.'},
+  {scene:'🌊',clouds:'🌀',q:'Massive swirling storm over warm ocean water. What is it?',opts:['Hurricane/Cyclone','Thunderstorm','Tornado','Dust storm'],ans:0,explain:'Hurricanes (cyclones) form over warm tropical oceans with organized rotation.'},
+  {scene:'💨',clouds:'',q:'Strong winds blow dust and dry leaves rapidly. What condition?',opts:['High winds / approaching front','Calm weather','Snowfall','Fog'],ans:0,explain:'Strong winds often precede a weather front or indicate pressure changes.'},
+  {scene:'🌡️',clouds:'☁️',q:'Temperature drops rapidly with thick clouds approaching from west.',opts:['Cold front arriving','Heat wave','Clear sky','Earthquake'],ans:0,explain:'Cold fronts bring rapid temperature drops, clouds, and often precipitation.'},
+  {scene:'🌅',clouds:'',q:'Red sky at sunrise. What weather does it predict?',opts:['Fair weather coming','Storm approaching','Snow','Tornado'],ans:0,explain:'"Red sky in morning, sailor\'s take warning" — but actually red sky at sunrise means fair weather ahead.'},
+  {scene:'☁️',clouds:'☁️☁️',q:'Puffy cumulus clouds at noon. What weather?',opts:['Fair weather','Heavy rain','Snowstorm','Hurricane'],ans:0,explain:'Cumulus clouds (fair-weather clouds) indicate stable conditions.'},
+  {scene:'🌧️',clouds:'🌧️🌧️🌧️',q:'Continuous steady rain from stratus clouds all day.',opts:['Will continue or worsen','Clearing soon','Heat wave','Tornado'],ans:0,explain:'Stratus clouds bring prolonged, steady precipitation that may last for days.'},
+  {scene:'🌙',clouds:'🌫️',q:'Frost forms on a clear, still night. What will morning bring?',opts:['Sunny but cold morning','Heavy rain','Windstorm','Tornado'],ans:0,explain:'Radiational cooling on clear nights causes frost; morning will be cold but clear.'},
+  {scene:'💨',clouds:'🌪️',q:'Green-tinted sky with large hail and rotating clouds.',opts:['Tornado likely','Heat wave','Snowstorm','Calm weather'],ans:0,explain:'Green sky + large hail + rotation = strong likelihood of tornadoes.'},
+];
+let shuffled=[...questions].sort(()=>Math.random()-0.5);
+
+function showQ(){
+  if(qNum>=10){showResults();return}
+  answered=false;
+  document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';
+  document.getElementById('next-btn').style.display='none';
+  document.getElementById('qnum').textContent=qNum+1;
+  let q=shuffled[qNum];
+  document.getElementById('scene').innerHTML='<span>'+q.scene+'</span><div class="cloud-display" style="top:10px">'+q.clouds+'</div>';
+  document.getElementById('qtext').textContent=q.q;
+  const opts=document.getElementById('opts');opts.innerHTML='';
+  q.opts.forEach((o,i)=>{const b=document.createElement('button');b.className='opt';b.textContent=o;b.onclick=()=>check(i);opts.appendChild(b)});
+}
+
+function check(i){
+  if(answered)return;answered=true;
+  let q=shuffled[qNum];
+  document.querySelectorAll('.opt').forEach((b,j)=>{if(j===q.ans)b.classList.add('correct');if(j===i&&i!==q.ans)b.classList.add('wrong')});
+  let fb=document.getElementById('fb');
+  if(i===q.ans){let pts=10+level*5;score+=pts;fb.innerHTML='✅ '+q.explain+' <b>+'+pts+' pts</b>';fb.style.background='rgba(34,197,94,0.15)'}
+  else{fb.innerHTML='❌ '+q.explain;fb.style.background='rgba(239,68,68,0.15)'}
+  document.getElementById('score').textContent=score;document.getElementById('next-btn').style.display='inline-block';
+}
+
+function nextQ(){qNum++;showQ()}
+function showResults(){
+  document.getElementById('scene').innerHTML='<span>🏆</span>';
+  document.getElementById('qtext').innerHTML='Level '+level+' Complete! Score: '+score;
+  document.getElementById('opts').innerHTML='<button class="btn" onclick="nextLevel()">Next Level ⬆️</button> <button class="btn sec" onclick="restart()">↺ Restart</button>';
+  document.getElementById('fb').textContent='';document.getElementById('next-btn').style.display='none';
+}
+function nextLevel(){level++;qNum=0;shuffled=[...questions].sort(()=>Math.random()-0.5);document.getElementById('level').textContent=level;showQ()}
+function restart(){score=0;level=1;qNum=0;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;shuffled=[...questions].sort(()=>Math.random()-0.5);showQ()}
+showQ();
+</script>
+</body>
+</html>

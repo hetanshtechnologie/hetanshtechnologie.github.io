@@ -1,0 +1,195 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Maze Game</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.card { background: #1e293b; }
+canvas { border: 2px solid #334155; border-radius: 8px; display: block; margin: 0 auto; }
+</style>
+</head>
+<body class="min-h-screen text-white">
+<a href="index.html" class="fixed top-4 left-4 text-blue-400 hover:text-blue-300 text-sm font-semibold z-50">← Back to Games</a>
+<div class="container mx-auto px-4 py-12 max-w-2xl">
+  <h1 class="text-3xl font-bold text-center mb-6">Maze Game</h1>
+  <div class="card rounded-xl p-6 shadow-xl">
+    <div class="flex justify-between items-center mb-4">
+      <span class="text-gray-400 text-sm">⏱ <span id="timer" class="text-white font-mono">0:00</span></span>
+      <span class="text-gray-400 text-sm">Moves: <span id="moves" class="text-yellow-400 font-bold">0</span></span>
+    </div>
+    <canvas id="maze" width="520" height="520"></canvas>
+    <div class="flex gap-3 mt-4 justify-center flex-wrap">
+      <button onclick="toggleReveal()" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded text-sm font-semibold transition" id="reveal-btn">👁 Reveal Walls</button>
+      <button onclick="showHint()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded text-sm font-semibold transition">💡 Hint</button>
+      <button onclick="restart()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-semibold transition">🔄 Restart</button>
+    </div>
+    <p class="text-center text-gray-500 text-xs mt-3">Use arrow keys or WASD to move. Reach the green goal!</p>
+  </div>
+</div>
+<script>
+const COLS = 20, ROWS = 20;
+const CELL = 26;
+const canvas = document.getElementById('maze');
+const ctx = canvas.getContext('2d');
+canvas.width = COLS*CELL; canvas.height = ROWS*CELL;
+let walls, playerX, playerY, goalX, goalY, moveCount, timerInterval, seconds, revealed, won, hintPath;
+function init() {
+  generateMaze();
+  playerX = 0; playerY = 0;
+  goalX = COLS-1; goalY = ROWS-1;
+  moveCount = 0; seconds = 0; won = false; revealed = false; hintPath = null;
+  clearInterval(timerInterval);
+  document.getElementById('moves').textContent = '0';
+  document.getElementById('timer').textContent = '0:00';
+  document.getElementById('reveal-btn').textContent = '👁 Reveal Walls';
+  timerInterval = setInterval(() => { seconds++; const m=Math.floor(seconds/60); const s=seconds%60; document.getElementById('timer').textContent = m+':'+(s<10?'0':'')+s; }, 1000);
+  render();
+}
+function generateMaze() {
+  // walls[r][c] = {top, right, bottom, left}
+  walls = [];
+  for (let r = 0; r < ROWS; r++) {
+    walls[r] = [];
+    for (let c = 0; c < COLS; c++) {
+      walls[r][c] = {top:true, right:true, bottom:true, left:true};
+    }
+  }
+  const visited = Array.from({length:ROWS}, () => Array(COLS).fill(false));
+  const stack = [[0,0]];
+  visited[0][0] = true;
+  const dirs = [{dr:-1,dc:0,wall:'top',opp:'bottom'},{dr:0,dc:1,wall:'right',opp:'left'},{dr:1,dc:0,wall:'bottom',opp:'top'},{dr:0,dc:-1,wall:'left',opp:'right'}];
+  while (stack.length > 0) {
+    const [cr,cc] = stack[stack.length-1];
+    const unvisited = dirs.filter(d => {
+      const nr=cr+d.dr, nc=cc+d.dc;
+      return nr>=0&&nr<ROWS&&nc>=0&&nc<COLS&&!visited[nr][nc];
+    });
+    if (unvisited.length === 0) { stack.pop(); continue; }
+    const d = unvisited[Math.floor(Math.random()*unvisited.length)];
+    const nr=cr+d.dr, nc=cc+d.dc;
+    walls[cr][cc][d.wall] = false;
+    walls[nr][nc][d.opp] = false;
+    visited[nr][nc] = true;
+    stack.push([nr,nc]);
+  }
+}
+function render() {
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Draw hint path
+  if (hintPath) {
+    ctx.fillStyle = 'rgba(250,204,21,0.2)';
+    hintPath.forEach(([r,c]) => ctx.fillRect(c*CELL+1, r*CELL+1, CELL-2, CELL-2));
+  }
+  // Draw visited cells subtly
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 1;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      ctx.strokeRect(c*CELL, r*CELL, CELL, CELL);
+    }
+  }
+  // Draw walls
+  ctx.strokeStyle = revealed ? '#64748b' : '#1e293b';
+  ctx.lineWidth = 2;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (walls[r][c].top) { ctx.beginPath(); ctx.moveTo(c*CELL,r*CELL); ctx.lineTo((c+1)*CELL,r*CELL); ctx.stroke(); }
+      if (walls[r][c].right) { ctx.beginPath(); ctx.moveTo((c+1)*CELL,r*CELL); ctx.lineTo((c+1)*CELL,(r+1)*CELL); ctx.stroke(); }
+      if (walls[r][c].bottom) { ctx.beginPath(); ctx.moveTo(c*CELL,(r+1)*CELL); ctx.lineTo((c+1)*CELL,(r+1)*CELL); ctx.stroke(); }
+      if (walls[r][c].left) { ctx.beginPath(); ctx.moveTo(c*CELL,r*CELL); ctx.lineTo(c*CELL,(r+1)*CELL); ctx.stroke(); }
+    }
+  }
+  // Draw goal
+  ctx.fillStyle = '#22c55e';
+  ctx.fillRect(goalX*CELL+4, goalY*CELL+4, CELL-8, CELL-8);
+  // Draw player
+  ctx.fillStyle = '#3b82f6';
+  ctx.beginPath();
+  ctx.arc(playerX*CELL+CELL/2, playerY*CELL+CELL/2, CELL/2-3, 0, Math.PI*2);
+  ctx.fill();
+}
+function movePlayer(dx, dy) {
+  if (won) return;
+  const wallMap = {(0):'top',(1):'right',(2):'bottom',(3):'left'};
+  const wallKey = dx===0?(dy===-1?'top':'bottom'):(dx===1?'right':'left');
+  if (walls[playerY][playerX][wallKey]) return;
+  playerX += dx;
+  playerY += dy;
+  moveCount++;
+  document.getElementById('moves').textContent = moveCount;
+  hintPath = null;
+  render();
+  if (playerX===goalX && playerY===goalY) {
+    won = true;
+    clearInterval(timerInterval);
+    setTimeout(() => alert('You reached the goal in '+moveCount+' moves and '+document.getElementById('timer').textContent+'!'), 100);
+  }
+}
+document.addEventListener('keydown', (e) => {
+  switch(e.key) {
+    case 'ArrowUp': case 'w': case 'W': e.preventDefault(); movePlayer(0,-1); break;
+    case 'ArrowDown': case 's': case 'S': e.preventDefault(); movePlayer(0,1); break;
+    case 'ArrowLeft': case 'a': case 'A': e.preventDefault(); movePlayer(-1,0); break;
+    case 'ArrowRight': case 'd': case 'D': e.preventDefault(); movePlayer(1,0); break;
+  }
+});
+function toggleReveal() {
+  revealed = !revealed;
+  document.getElementById('reveal-btn').textContent = revealed ? '🙈 Hide Walls' : '👁 Reveal Walls';
+  render();
+}
+function showHint() {
+  // BFS to find shortest path
+  const visited = Array.from({length:ROWS}, () => Array(COLS).fill(false));
+  const parent = Array.from({length:ROWS}, () => Array(COLS).fill(null));
+  const queue = [[playerY, playerX]];
+  visited[playerY][playerX] = true;
+  const dirs = [{dr:-1,dc:0,wall:'top'},{dr:0,dc:1,wall:'right'},{dr:1,dc:0,wall:'bottom'},{dr:0,dc:-1,wall:'left'}];
+  while (queue.length > 0) {
+    const [cr,cc] = queue.shift();
+    if (cr===goalY && cc===goalX) break;
+    for (const d of dirs) {
+      const nr=cr+d.dr, nc=cc+d.dc;
+      if (nr<0||nr>=ROWS||nc<0||nc>=COLS||visited[nr][nc]) continue;
+      if (walls[cr][cc][d.wall]) continue;
+      visited[nr][nc] = true;
+      parent[nr][nc] = [cr,cc];
+      queue.push([nr,nc]);
+    }
+  }
+  // Trace back first 5 steps
+  hintPath = [];
+  let cur = [goalY, goalX];
+  while (cur && !(cur[0]===playerY && cur[1]===playerX)) {
+    hintPath.push(cur);
+    cur = parent[cur[0]][cur[1]];
+  }
+  hintPath.reverse();
+  if (hintPath.length > 5) hintPath = hintPath.slice(0,5);
+  render();
+}
+function restart() { init(); }
+init();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

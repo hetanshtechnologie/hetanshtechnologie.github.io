@@ -1,0 +1,219 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Speech Translation - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 14</span>
+<h1>Speech Translation</h1>
+
+<h2>Azure Speech Translation Overview</h2>
+<p>Azure Speech Translation combines Speech-to-Text and machine translation into a single service. It takes spoken audio in one language and produces translated output in another language — either as text or as synthesized speech. Rather than chaining separate STT and translation calls, Speech Translation handles both steps in one optimized pipeline, reducing latency and simplifying application code. The service is part of the Azure Speech SDK and shares the same resource and key configuration as the other speech services.</p>
+<p>The service supports two modes: speech-to-speech translation and speech-to-text translation. In speech-to-speech mode, the input audio is transcribed, translated, and then synthesized into speech in the target language — the end user hears a spoken translation. In speech-to-text mode, the input audio is transcribed and translated, and the result is returned as text only — the application displays the translation rather than speaking it. The choice between the two modes depends on whether the output needs to be audible or visual.</p>
+
+<table>
+<tr><th>Mode</th><th>Input</th><th>Processing Steps</th><th>Output</th><th>Use Case</th></tr>
+<tr><td>Speech-to-text translation</td><td>Audio</td><td>Transcribe + Translate</td><td>Translated text</td><td>Subtitles, chat translation</td></tr>
+<tr><td>Speech-to-speech translation</td><td>Audio</td><td>Transcribe + Translate + Synthesize</td><td>Translated speech</td><td>Real-time interpretation, multilingual meetings</td></tr>
+</table>
+
+<h2>Source Language Identification: Auto-Detect or Specify</h2>
+<p>When initiating a translation session, you must specify the source language or enable auto-detection. If you know the incoming language, specify it explicitly using the locale code (e.g., "en-US", "de-DE", "zh-CN"). Explicit specification is faster because the service skips the language detection step. If the source language is unknown or may change during a session, enable auto-detection. The service analyzes the initial audio and attempts to identify the language. Once detected, it applies the same language for the duration of the session. In continuous recognition scenarios where the speaker might switch languages, you can use multi-language identification to detect and adapt to language changes mid-session.</p>
+<p>Language detection adds approximately one second of latency at the start of a session and requires at least a few seconds of audio to produce reliable results. For scenarios where the source language is fixed (such as a multilingual conference where each presenter announces their language), specifying the language explicitly gives better performance. For scenarios where you have no advance information (like an international customer support hotline), auto-detection is the practical choice.</p>
+
+<h2>Multi-Language Simultaneous Translation</h2>
+<p>A powerful feature of Speech Translation is the ability to translate into multiple target languages simultaneously from a single audio stream. The service transcribes the source audio once and then translates that transcription into every target language you specify. The translations are generated in parallel and returned through separate event handlers. This is essential for multilingual audiences — a single presenter can have their speech translated into five languages at once, with each language streamed to a separate output channel.</p>
+<p>Each target language consumes its own translation capacity, so the pricing is additive. The maximum number of simultaneous target languages is limited by the service tier, and adding more languages increases the latency proportionally. For production applications targeting four or more languages, consider using a dedicated translator for each language pair or routing through a queue system to manage load.</p>
+
+<h2>Code Sample: Speech-to-Speech Translation in Python</h2>
+
+<pre><code>import os
+import azure.cognitiveservices.speech as speechsdk
+
+speech_key = os.environ["SPEECH_KEY"]
+service_region = os.environ["SPEECH_REGION"]
+
+# Configure translation: English -> German (spoken output)
+translation_config = speechsdk.translation.SpeechTranslationConfig(
+    subscription=speech_key,
+    region=service_region
+)
+translation_config.speech_recognition_language = "en-US"
+translation_config.add_target_language("de")
+
+# Set the voice for synthesized output in the target language
+translation_config.voice_name = "de-DE-KatjaNeural"
+
+# Use the default microphone as audio input
+audio_config = speechsdk.audio.AudioConfig(
+    use_default_microphone=True
+)
+
+# Create the translation recognizer
+recognizer = speechsdk.translation.TranslationRecognizer(
+    translation_config=translation_config,
+    audio_config=audio_config
+)
+
+# Handle translated results
+def translated(evt):
+    result = evt.result
+    print(f"Original: {result.text}")
+    for lang, translation in result.translations.items():
+        print(f"Translated ({lang}): {translation}")
+
+# Handle partial results (interim)
+def recognizing(evt):
+    result = evt.result
+    print(f"Partial: {result.text}")
+    for lang, translation in result.translations.items():
+        print(f"  -> ({lang}): {translation}")
+
+recognizer.recognized.connect(translated)
+recognizer.recognizing.connect(recognizing)
+
+print("Speak in English. Translation will be spoken in German.")
+recognizer.start_continuous_recognition()
+
+try:
+    import time
+    while True:
+        time.sleep(0.5)
+except KeyboardInterrupt:
+    recognizer.stop_continuous_recognition()</code></pre>
+
+<h2>Code Sample: Speech-to-Text Translation</h2>
+
+<pre><code>import os
+import azure.cognitiveservices.speech as speechsdk
+
+speech_key = os.environ["SPEECH_KEY"]
+service_region = os.environ["SPEECH_REGION"]
+
+# Translation config: French -> English (text output only)
+translation_config = speechsdk.translation.SpeechTranslationConfig(
+    subscription=speech_key,
+    region=service_region
+)
+translation_config.speech_recognition_language = "fr-FR"
+translation_config.add_target_language("en")
+
+# No voice_name set — speech-to-text mode (no synthesis)
+
+audio_config = speechsdk.audio.AudioConfig(
+    use_default_microphone=True
+)
+
+recognizer = speechsdk.translation.TranslationRecognizer(
+    translation_config=translation_config,
+    audio_config=audio_config
+)
+
+result = recognizer.recognize_once_async().get()
+
+if result.reason == speechsdk.ResultReason.TranslatedSpeech:
+    print(f"Original (French): {result.text}")
+    print(f"Translation (English): {result.translations['en']}")
+elif result.reason == speechsdk.ResultReason.NoMatch:
+    print("No speech could be recognized.")
+elif result.reason == speechsdk.ResultReason.Canceled:
+    cancellation = result.cancellation_details
+    print(f"Canceled: {cancellation.reason}")
+    print(f"Error details: {cancellation.error_details}")</code></pre>
+
+<pre><code>// C# - speech-to-text translation
+using Microsoft.CognitiveServices.Speech;
+using Microsoft.CognitiveServices.Speech.Translation;
+
+var speechKey = Environment.GetEnvironmentVariable("SPEECH_KEY");
+var serviceRegion = Environment.GetEnvironmentVariable("SPEECH_REGION");
+
+var translationConfig = SpeechTranslationConfig.FromSubscription(
+    speechKey, serviceRegion);
+translationConfig.SpeechRecognitionLanguage = "es-ES";
+translationConfig.AddTargetLanguage("en");
+
+using var recognizer = new TranslationRecognizer(translationConfig);
+
+Console.WriteLine("Speak in Spanish. Press Enter to stop.");
+recognizer.Recognized += (s, e) =>
+{
+    if (e.Result.Reason == ResultReason.TranslatedSpeech)
+    {
+        Console.WriteLine($"Original: {e.Result.Text}");
+        Console.WriteLine($"English: {e.Result.Translations["en"]}");
+    }
+};
+
+await recognizer.StartContinuousRecognitionAsync();
+Console.ReadLine();
+await recognizer.StopContinuousRecognitionAsync();</code></pre>
+
+<h2>Azure AI Translator Service for Text Translation</h2>
+<p>The Azure AI Translator service (formerly Microsoft Translator Text API) handles text-to-text translation and is a separate service from Speech Translation. While Speech Translation handles the full audio pipeline, the Translator service works with text only. It is part of the Azure AI Language services and provides several capabilities beyond basic translation: language detection (identifies the language of input text), transliteration (converts text between scripts, such as Arabic to Latin), bilingual dictionary lookup (returns alternative translations with usage examples), and break sentence (splits text into sentences for proper translation segmentation).</p>
+<p>Translator supports over 130 languages and uses a customizable neural machine translation engine. You can build custom translation models using the Custom Translator feature to translate domain-specific terminology accurately. The service uses a dynamic dictionary feature where you can provide a specific translation for a specific term by marking it in the source text. For production applications, you typically use Translator for text inputs (chat messages, documents, user interface strings) and Speech Translation for audio inputs (conversations, presentations, calls).</p>
+
+<table>
+<tr><th>Feature</th><th>Speech Translation</th><th>Azure AI Translator (Text)</th></tr>
+<tr><td>Input type</td><td>Audio</td><td>Text</td></tr>
+<tr><td>Output type</td><td>Text or speech</td><td>Text</td></tr>
+<tr><td>Source language</td><td>Auto-detect or specify</td><td>Auto-detect or specify</td></tr>
+<tr><td>Target languages</td><td>Up to 10 simultaneous</td><td>Up to 100 simultaneous</td></tr>
+<tr><td>Customization</td><td>Custom speech + custom translation</td><td>Custom translation models</td></tr>
+<tr><td>SDK/API</td><td>Speech SDK (TranslationRecognizer)</td><td>REST API or Translator SDK</td></tr>
+<tr><td>Use case</td><td>Real-time conversation translation</td><td>Document, UI, and text translation</td></tr>
+</table>
+
+<h2>Custom Translation: Building Domain-Specific Translation Models</h2>
+<p>General-purpose translation models handle everyday language well but struggle with specialized terminology. A standard English-to-French model might translate "migration" as "voyage" (travel) when the intended meaning is "migration de donn&eacute;es" (data migration). Custom Translator addresses this by training a custom model on your domain-specific parallel documents — pairs of documents where the same content is available in both source and target languages. The training process adapts the base translation model to favor your domain's terminology and phrasing.</p>
+<p>To create a custom translation model, navigate to the Custom Translator portal within Azure AI Translator. Upload parallel documents (TMX files, XLIFF files, or aligned sentence pairs in TXT format). The system automatically aligns sentences across the language pair and trains a model. You can evaluate the model against a test set (held-out parallel documents not used in training) by comparing BLEU scores against the base model. A 5+ point BLEU improvement typically justifies deploying the custom model. Custom models are deployed to a custom endpoint with a unique category ID that you pass in API calls to route requests to your model.</p>
+
+<h2>Creating a Translator Resource</h2>
+<p>To use Azure AI Translator, create a Translator resource in the Azure portal. You can create it as a stand-alone resource or as a feature of a multi-service Cognitive Services resource. The stand-alone resource is simpler for focused translation workloads. The multi-service resource is more economical if you are using multiple Azure AI services together. The resource provides an endpoint URL and two keys for authentication. The Translator service has a free tier (F0) that provides 2 million characters per month, which is sufficient for development and testing.</p>
+<p>After creating the resource, you can test translation in Language Studio under the "Translate text" feature. Language Studio provides a simple interface where you enter text, select source and target languages, and see the translation result. This is useful for verifying language support and testing translation quality before building your application.</p>
+
+<div class="exam-tip">
+<h3>Exam Tip: Speech Translation vs. Text Translation, When to Use Each</h3>
+<p>The AI-102 exam tests your ability to choose between Speech Translation and Text Translation for different scenarios. Speech Translation is the right choice when the input is spoken audio and you need real-time translation — live meetings, multilingual conferences, customer service calls, and interpretation systems. Text Translation is the right choice when the input is written text — documents, UI localization, chat messages, and email translation. A common hybrid pattern is to use Speech-to-Text to transcribe audio, then pass the resulting text to Translator for document-quality translation, but this is less efficient than using Speech Translation for real-time scenarios. Know the supported languages for each service — Speech Translation supports fewer languages than Text Translation. For the exam, also know that speech translation can auto-detect the source language or accept an explicit locale code, and that you can add multiple target languages to a single translation session.</p>
+</div>
+
+<h2>Language Studio Demo for Translation</h2>
+<p>Language Studio provides a no-code demonstration of both speech and text translation. Under the "Translate speech-to-speech" section, you can select the source and target languages, speak into your microphone, and hear the translated speech played back. Under "Translate text," you can type or paste text and see translations into up to 100 languages simultaneously. These demos are useful for exploring the capabilities before writing code, and for testing language pairs to verify that your chosen languages are supported. The demos use your Azure resource, so the translation quality and supported features match what your application will experience through the API.</p>
+
+<div class="exercise">
+<h3>Exercise: Build a Multi-Lingual Speech Translator</h3>
+<p>Create a Python application that translates live speech from English into three target languages simultaneously:</p>
+<ol>
+<li>Set up a Speech resource in Azure and note the key and region.</li>
+<li>Create a SpeechTranslationConfig configured for English source with three target languages: German (de), French (fr), and Spanish (es).</li>
+<li>Set the voice for one of the target languages so the app produces speech-to-speech translation for that language.</li>
+<li>Implement continuous recognition from the microphone.</li>
+<li>Display partial translations in real-time (the recognizing event) and final translations when each utterance completes.</li>
+<li>Add a command to switch the source language to Spanish mid-session using auto-detection.</li>
+<li>Handle the case where the user speaks a language that is not in your supported set — display a friendly error or fall back to auto-detection.</li>
+<li>Write the translated output to a log file with timestamps for each utterance.</li>
+</ol>
+<p>Test the app with a partner — have one person speak English sentences while another person checks the accuracy of the German, French, and Spanish translations. Document 10 test sentences and the accuracy of each translation, noting any patterns where translations are incorrect.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Azure Speech Translation combines speech recognition and machine translation into a single optimized pipeline. It supports speech-to-text translation (audio to translated text) and speech-to-speech translation (audio to translated speech). The source language can be specified explicitly or auto-detected. Multiple target languages can be translated simultaneously from a single audio stream. The Azure AI Translator service handles text-only translation with support for over 130 languages, language detection, transliteration, and custom translation models. Custom Translator lets you build domain-specific models using parallel documents. For the AI-102 exam, understand the difference between speech and text translation, know when to use each, and be familiar with the TranslationRecognizer SDK class and its configuration. The next chapter covers Azure AI Content Safety for building responsible AI applications with content moderation.</p>
+
+<nav>
+<a href="13-text-to-speech.html">&larr; Previous: Text-to-Speech and SSML</a>
+<a href="15-content-safety.html">Next: Azure AI Content Safety &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

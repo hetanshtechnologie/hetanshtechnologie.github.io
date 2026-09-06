@@ -1,0 +1,132 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>10. Building Reliable Data Pipelines - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>10. Building Reliable Data Pipelines</h1>
+<p class="tag">Chapter 10</p>
+
+<h2>Reliability Is the Job</h2>
+<p>Anyone can write a query that works once. Data engineering is the discipline of making it work <em>every day</em>, on schedule, correctly, and observably. This chapter turns the pieces from earlier chapters — BigQuery, Dataproc, Airflow/Composer, Python — into a systematic approach to building pipelines that don't break (and when they do, fail loudly and recover cleanly).</p>
+
+<h2>Pipeline Design Patterns</h2>
+<table>
+<tr><th>Pattern</th><th>Description</th><th>When to Use</th></tr>
+<tr><td>Incremental load</td><td>Load only new/changed data (by timestamp or ID)</td><td>Default for high-volume tables; minimizes cost and runtime</td></tr>
+<tr><td>Full load / snapshot</td><td>Replace the whole table each run</td><td>Small tables, dimensions, reference data</td></tr>
+<tr><td>Append-only with partitions</td><td>Add a new partition per run, never touch history</td><td>Event/fact data, immutable logs</td></tr>
+<tr><td>Merge (upsert)</td><td>Insert new rows and update changed ones</td><td>Mutable operational data (orders, profiles)</td></tr>
+<tr><td>Landing → staging → curated</td><td>Layered lake: raw, cleaned, modeled</td><td>Lakehouse architectures; keeps raw data for reprocessing</td></tr>
+</table>
+
+<h2>The Medallion / Layered Lake Pattern</h2>
+<p>Data lands raw, is cleaned, then is modeled for consumption:</p>
+<ul>
+<li><strong>Bronze (raw/landing):</strong> exactly as received, immutable, in GCS (Parquet/Avro/JSON).</li>
+<li><strong>Silver (cleaned/trusted):</strong> validated, deduplicated, standardized schema, still granular.</li>
+<li><strong>Gold (curated/consumption):</strong> aggregated, joined, business-ready for BI and ML.</li>
+</ul>
+
+<p>This layering makes reprocessing safe (raw is never destroyed), makes lineage clear, and matches the dbt model philosophy (Chapter 11).</p>
+
+<h2>Idempotency: The Golden Rule</h2>
+<p>An operation is <strong>idempotent</strong> if running it twice has the same effect as running it once. Pipelines that fail partway and get re-run are inevitable, so every step must be idempotent:</p>
+<ul>
+<li>Write to date-partitioned destinations; write with <code>overwrite</code> per partition.</li>
+<li>Use merge/upsert instead of blind append for mutable data.</li>
+<li>Deduplicate before load (or dedupe at read time in the modeling layer).</li>
+<li>Avoid global "truncate table then load" patterns that break when the load fails.</li>
+</ul>
+
+<pre><code># BigQuery: idempotent partition overwrite
+bq query \
+  --replace \
+  --destination_table=myproj.analytics.orders_daily \
+  --range_partitioning=order_date,0,1,1 \
+  "SELECT ... FROM myproj.analytics.orders WHERE DATE(order_ts) = '{{ ds }}'"</code></pre>
+
+<h2>Error Handling and Retry Strategy</h2>
+<ul>
+<li>Classify failures: <strong>transient</strong> (network blip, quota) → retry with backoff; <strong>permanent</strong> (bad schema, bad data) → fail loudly, alert, do not retry blindly.</li>
+<li>In Airflow: task-level <code>retries</code> + <code>retry_delay</code>, plus <code>trigger_rule</code> for downstream handling.</li>
+<li>Use dead-letter queues / quarantine tables for bad records instead of failing whole batches.</li>
+<li>Log the input path, job parameters, and error in every failure so debugging starts fast.</li>
+</ul>
+
+<h2>Data Quality Checks</h2>
+<p>Automated checks are the difference between "pipeline ran" and "pipeline ran correctly." Build a checks layer between stages:</p>
+<ul>
+<li><strong>Completeness:</strong> row counts match expected ranges; no unexpected nulls.</li>
+<li><strong>Freshness:</strong> data for the expected date/time actually arrived.</li>
+<li><strong>Uniqueness:</strong> primary keys are unique.</li>
+<li><strong>Validity:</strong> values within allowed domains (dates parse, amounts positive).</li>
+<li><strong>Consistency:</strong> sums match upstream vs downstream (e.g., revenue in staging equals revenue in gold).</li>
+</ul>
+
+<pre><code>-- Example: freshness + count check as a SQL query that must return 0 rows
+SELECT 'missing partition' AS check, 1 AS flag
+WHERE NOT EXISTS (
+  SELECT 1 FROM myproj.analytics.orders
+  WHERE DATE(order_ts) = CURRENT_DATE - 1
+);</code></pre>
+
+<p>dbt (next chapter) has built-in test types (unique, not_null, accepted_values, relationships) that formalize exactly these checks.</p>
+
+<h2>Observability: Logging, Monitoring, Lineage</h2>
+<ul>
+<li><strong>Structured logs:</strong> JSON logs with job id, dates, counts, and durations; shipped to Cloud Logging.</li>
+<li><strong>Metrics:</strong> record row counts, bytes, run durations to Cloud Monitoring; alert on anomalies (a 50% drop in rows is an incident).</li>
+<li><strong>Alerting:</strong> Airflow failure alerts, freshness SLA alerts, quality-check failures.</li>
+<li><strong>Lineage:</strong> Dataplex lineage shows which job produced which table — essential for incident response and audits.</li>
+<li><strong>Dashboards:</strong> a "pipeline health" dashboard for the team (success/fail per DAG, MTTR for failures).</li>
+</ul>
+
+<h2>Testing Pipelines</h2>
+<ul>
+<li><strong>Unit:</strong> pure functions, SQL snippets against small fixtures.</li>
+<li><strong>Integration:</strong> run a DAG against a dev BigQuery/GCS with sample data.</li>
+<li><strong>Contract tests:</strong> validate schemas between producer and consumer stages.</li>
+<li><strong>Replay/reconcile:</strong> re-run a completed day in a sandbox and diff outputs — catches non-determinism and drift.</li>
+</ul>
+
+<h2>Backfilling and Reprocessing</h2>
+<p>When logic changes, you must rebuild history. Design for it:</p>
+<ul>
+<li>Parameterize every job by date (<code>--start_date --end_date</code>).</li>
+<li>Keep raw (bronze) data so you can rebuild any layer.</li>
+<li>Use Airflow backfill (<code>airflow dags backfill</code> or a trigger with start/end) for controlled reprocessing.</li>
+<li>Prefer partition-level rebuilds over full-table rebuilds.</li>
+</ul>
+
+<h2>A Reference Reliable Pipeline</h2>
+<pre><code>DAG: daily_orders_etl (schedule 06:00, data date {{ ds }})
+  ├─ wait_for_raw_files (GCS sensor)
+  ├─ load_raw (CSV → BigQuery bronze partition)
+  ├─ quality_raw (row counts > 0, no null order_id)
+  ├─ transform (dbt run / BigQuery SQL → silver + gold)
+  ├─ quality_gold (sums reconcile, uniqueness on PK)
+  └─ notify (success summary to Slack; on failure → alert + page)
+Retries: 2 with 5-min backoff on load/transform; no retry on quality fail.
+Idempotency: partition overwrite everywhere; merge for mutable tables.</code></pre>
+
+<div class="note">
+<strong>Design review checklist:</strong> Is every step idempotent? Can I re-run one day without touching others? Do I alert on freshness and counts, not just failures? Is raw data preserved for rebuilds? Do checks run between stages, not just at the end? If yes to all, the pipeline will survive contact with reality.
+</div>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Take the sample orders scenario from earlier chapters and design a full three-layer (bronze/silver/gold) pipeline in a diagram: sources, GCS layout, BigQuery tables with partitioning/clustering, dbt models, and Airflow DAG with a quality gate. Write the SQL for one completeness check and one consistency check. Then identify the three most likely real-world failure modes and how each is handled.
+</div>
+
+<nav>
+  <a href="9-cloud-composer.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="11-dbt.html">Next: dbt: The Data Build Tool &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

@@ -1,0 +1,143 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tower of Hanoi</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.card { background: #1e293b; }
+.peg-area {
+  width: 180px; height: 200px; position: relative; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  border-bottom: 4px solid #475569; transition: background 0.2s;
+}
+.peg-area:hover { background: rgba(255,255,255,0.03); }
+.peg-area.selected { background: rgba(59,130,246,0.15); border-bottom-color: #3b82f6; }
+.peg-rod {
+  width: 8px; height: 120px; background: #475569; border-radius: 4px 4px 0 0;
+  position: absolute; bottom: 4px;
+}
+.disk {
+  height: 28px; border-radius: 14px; position: absolute; display: flex;
+  align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+  color: white; transition: all 0.3s ease;
+}
+.disk:hover { filter: brightness(1.2); }
+.peg-label { position: absolute; bottom: -28px; color: #94a3b8; font-size: 13px; font-weight: 600; }
+</style>
+</head>
+<body class="min-h-screen text-white">
+<a href="index.html" class="fixed top-4 left-4 text-blue-400 hover:text-blue-300 text-sm font-semibold z-50">← Back to Games</a>
+<div class="container mx-auto px-4 py-12 max-w-2xl">
+  <h1 class="text-3xl font-bold text-center mb-6">Tower of Hanoi</h1>
+  <div class="card rounded-xl p-6 shadow-xl">
+    <div class="flex justify-between items-center mb-4">
+      <span class="text-gray-400 text-sm">⏱ <span id="timer" class="text-white font-mono">0:00</span></span>
+      <span class="text-gray-400 text-sm">Moves: <span id="moves" class="text-yellow-400 font-bold">0</span></span>
+      <span class="text-gray-400 text-sm">Min: <span id="min-moves" class="text-green-400 font-bold">31</span></span>
+    </div>
+    <div class="flex justify-center gap-2 mb-6" id="pegs"></div>
+    <div class="flex gap-3 justify-center">
+      <button onclick="restart()" class="px-5 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-semibold transition">🔄 Restart</button>
+    </div>
+    <p class="text-center text-gray-500 text-xs mt-3">Click a disk to select, then click a peg to move it.</p>
+  </div>
+</div>
+<script>
+const DISK_COUNT = 5;
+const DISK_COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6'];
+let pegs, selectedPeg, moveCount, timerInterval, seconds, won;
+function init() {
+  pegs = [[],[],[]];
+  for (let i = DISK_COUNT; i >= 1; i--) pegs[0].push(i);
+  selectedPeg = -1;
+  moveCount = 0;
+  seconds = 0;
+  won = false;
+  clearInterval(timerInterval);
+  document.getElementById('moves').textContent = '0';
+  document.getElementById('timer').textContent = '0:00';
+  document.getElementById('min-moves').textContent = Math.pow(2,DISK_COUNT)-1;
+  render();
+  timerInterval = setInterval(() => { seconds++; const m=Math.floor(seconds/60); const s=seconds%60; document.getElementById('timer').textContent = m+':'+(s<10?'0':'')+s; }, 1000);
+}
+function render() {
+  const container = document.getElementById('pegs');
+  container.innerHTML = '';
+  for (let p = 0; p < 3; p++) {
+    const area = document.createElement('div');
+    area.className = 'peg-area' + (selectedPeg===p?' selected':'');
+    area.onclick = () => clickPeg(p);
+    const rod = document.createElement('div');
+    rod.className = 'peg-rod';
+    area.appendChild(rod);
+    const label = document.createElement('div');
+    label.className = 'peg-label';
+    label.textContent = String.fromCharCode(65+p);
+    area.appendChild(label);
+    for (let d = 0; d < pegs[p].length; d++) {
+      const disk = document.createElement('div');
+      const size = pegs[p][d];
+      const w = 40 + size * 28;
+      disk.className = 'disk';
+      disk.style.width = w+'px';
+      disk.style.bottom = (8 + d*32)+'px';
+      disk.style.background = DISK_COLORS[size-1];
+      disk.textContent = size;
+      area.appendChild(disk);
+    }
+    container.appendChild(area);
+  }
+}
+function clickPeg(p) {
+  if (won) return;
+  if (selectedPeg === -1) {
+    if (pegs[p].length > 0) { selectedPeg = p; render(); }
+  } else {
+    if (selectedPeg === p) { selectedPeg = -1; render(); return; }
+    const disk = pegs[selectedPeg][pegs[selectedPeg].length-1];
+    if (pegs[p].length === 0 || pegs[p][pegs[p].length-1] > disk) {
+      pegs[p].push(pegs[selectedPeg].pop());
+      moveCount++;
+      document.getElementById('moves').textContent = moveCount;
+      selectedPeg = -1;
+      render();
+      checkWin();
+    } else {
+      selectedPeg = -1;
+      render();
+    }
+  }
+}
+function checkWin() {
+  if (pegs[2].length === DISK_COUNT) {
+    won = true;
+    clearInterval(timerInterval);
+    const optimal = Math.pow(2,DISK_COUNT)-1;
+    const rating = moveCount<=optimal?'Perfect!':moveCount<=optimal+5?'Excellent!':'Good job!';
+    setTimeout(() => alert('You win! '+moveCount+' moves ('+rating+') in '+document.getElementById('timer').textContent+'!'), 100);
+  }
+}
+function restart() { init(); }
+init();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

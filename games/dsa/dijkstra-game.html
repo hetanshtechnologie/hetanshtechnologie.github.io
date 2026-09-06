@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dijkstra's Shortest Path Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:950px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.3rem}
+.graph-area{position:relative;height:420px;background:#1e293b;border-radius:12px;margin-bottom:20px;overflow:hidden}
+.graph-area svg{width:100%;height:100%}
+.edge{stroke:#475569;stroke-width:2}
+.edge.relaxed{stroke:#22c55e;stroke-width:3}
+.edge.shortest{stroke:#facc15;stroke-width:4}
+.weight-text{fill:#94a3b8;font-size:13px;font-weight:600;text-anchor:middle}
+.node-circle{fill:#334155;stroke:#64748b;stroke-width:3;transition:all .3s}
+.node-circle.processed{fill:#14532d;stroke:#22c55e}
+.node-circle.current{fill:#38bdf8;stroke:#f1f5f9;stroke-width:3;filter:drop-shadow(0 0 10px #38bdf8)}
+.node-circle.relaxing{fill:#422006;stroke:#facc15}
+.node-text{fill:#e2e8f0;font-size:16px;font-weight:700;text-anchor:middle;dominant-baseline:central;pointer-events:none}
+.node-dist{fill:#facc15;font-size:11px;font-weight:600;text-anchor:middle}
+.table-display{background:#1e293b;border-radius:12px;padding:16px;margin-bottom:20px;overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px 12px;text-align:center;border-bottom:1px solid #334155;font-size:.9rem}
+th{color:#94a3b8;font-weight:600}
+td.processed{color:#22c55e}
+td.current{color:#38bdf8;font-weight:700}
+td.infinity{color:#64748b}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.choice-btn{display:block;width:100%;padding:12px 20px;margin-bottom:8px;background:#334155;color:#e2e8f0;border:2px solid #475569;border-radius:8px;font-size:1rem;cursor:pointer;text-align:left;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.choice-btn.correct{border-color:#22c55e;background:#14532d}
+.choice-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:12px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&#8592; Home</a><h1>Dijkstra's Algorithm Game</h1></div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Round: <span class="score-val" id="round">1</span></span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="graph-area"><svg id="graphSvg"></svg></div>
+  <div class="table-display" id="distTable"></div>
+  <div class="instructions"><h2>How to Play</h2><p>Dijkstra's finds shortest paths. Pick the next node to process, or predict the updated distance after relaxing an edge!</p></div>
+  <div id="messageArea"></div>
+  <div id="choicesArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startRound()">Start Round</button>
+    <button class="btn btn-secondary" id="resetBtn" onclick="resetAll()" style="display:none">New Graph</button>
+  </div>
+</div>
+<script>
+let nodes=[],edges=[],dist=[],processed=new Set(),currentNode=-1,score=0,round=1,streak=0,startNode=0;
+
+function genGraph(){
+  const n=6;nodes=[];edges=[];
+  const names='ABCDEF';
+  for(let i=0;i<n;i++){
+    const angle=(i/n)*Math.PI*2-Math.PI/2;
+    nodes.push({id:i,name:names[i],x:320+160*Math.cos(angle),y:200+150*Math.sin(angle),adj:[]});
+  }
+  for(let i=1;i<n;i++){
+    const p=Math.floor(Math.random()*i);const w=Math.floor(Math.random()*9)+1;
+    edges.push({from:p,to:i,weight:w});
+    nodes[p].adj.push({to:i,weight:w});nodes[i].adj.push({to:p,weight:w});
+  }
+  for(let i=0;i<2;i++){
+    let a=Math.floor(Math.random()*n),b=Math.floor(Math.random()*n);
+    if(a!==b&&!edges.some(e=>(e.from===a&&e.to===b)||(e.from===b&&e.to===a))){
+      const w=Math.floor(Math.random()*9)+1;
+      edges.push({from:a,to:b,weight:w});
+      nodes[a].adj.push({to:b,weight:w});nodes[b].adj.push({to:a,weight:w});
+    }
+  }
+}
+
+function renderGraph(){
+  const svg=document.getElementById('graphSvg');svg.innerHTML='';
+  edges.forEach(e=>{
+    const a=nodes[e.from],b=nodes[e.to];
+    const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1',a.x);l.setAttribute('y1',a.y);l.setAttribute('x2',b.x);l.setAttribute('y2',b.y);
+    l.classList.add('edge');
+    if(processed.has(e.from)&&processed.has(e.to))l.classList.add('relaxed');
+    svg.appendChild(l);
+    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',mx);t.setAttribute('y',my-8);t.classList.add('weight-text');t.textContent=e.weight;
+    svg.appendChild(t);
+  });
+  nodes.forEach(n=>{
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',n.x);c.setAttribute('cy',n.y);c.setAttribute('r',28);
+    c.classList.add('node-circle');
+    if(n.id===currentNode)c.classList.add('current');
+    else if(processed.has(n.id))c.classList.add('processed');
+    g.appendChild(c);
+    const t=document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('x',n.x);t.setAttribute('y',n.y);t.classList.add('node-text');t.textContent=n.name;
+    g.appendChild(t);
+    if(dist[n.id]!==undefined&&dist[n.id]<Infinity){
+      const d=document.createElementNS('http://www.w3.org/2000/svg','text');
+      d.setAttribute('x',n.x);d.setAttribute('y',n.y+22);d.classList.add('node-dist');d.textContent='d='+dist[n.id];
+      g.appendChild(d);
+    }
+    svg.appendChild(g);
+  });
+}
+
+function renderTable(){
+  let html='<table><tr><th>Node</th>';
+  nodes.forEach(n=>html+=`<th>${n.name}</th>`);
+  html+='</tr><tr><td>Distance</td>';
+  nodes.forEach(n=>{
+    const d=dist[n.id];
+    const cls=n.id===currentNode?'current':processed.has(n.id)?'processed':d===Infinity?'infinity':'';
+    html+=`<td class="${cls}">${d===Infinity?'∞':d}</td>`;
+  });
+  html+='</tr><tr><td>Processed</td>';
+  nodes.forEach(n=>html+=`<td class="${processed.has(n.id)?'processed':''}">${processed.has(n.id)?'✓':''}</td>`);
+  html+='</tr></table>';
+  document.getElementById('distTable').innerHTML=html;
+}
+
+function updateScore(ok){if(ok){score+=10+streak*5;streak++}else{streak=0}document.getElementById('score').textContent=score;document.getElementById('streak').textContent=streak}
+
+function startRound(){
+  genGraph();startNode=Math.floor(Math.random()*nodes.length);
+  dist=Array(nodes.length).fill(Infinity);dist[startNode]=0;
+  processed=new Set();currentNode=-1;
+  renderGraph();renderTable();showQ();
+  document.getElementById('startBtn').style.display='none';
+  document.getElementById('resetBtn').style.display='';
+  document.getElementById('round').textContent=round;
+  document.getElementById('messageArea').innerHTML='';
+}
+
+function showQ(){
+  if(processed.size===nodes.length){
+    document.getElementById('messageArea').innerHTML='<div class="message correct">All shortest paths found!</div>';
+    document.getElementById('choicesArea').innerHTML='';
+    round++;document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Next Round';
+    document.getElementById('resetBtn').style.display='none';
+    return;
+  }
+  // Find unprocessed node with min distance
+  let minDist=Infinity,minNode=-1;
+  nodes.forEach(n=>{if(!processed.has(n.id)&&dist[n.id]<minDist){minDist=dist[n.id];minNode=n.id}});
+  const target=minNode;
+  const choices=nodes.filter(n=>!processed.has(n.id)).map(n=>({text:`Process ${n.name} (distance=${dist[n.id]===Infinity?'∞':dist[n.id]})`,correct:n.id===target}));
+  choices.sort(()=>Math.random()-.5);
+  let html=`<p style="margin-bottom:8px;color:#94a3b8">Which node should Dijkstra process next?</p>`;
+  choices.forEach(c=>{html+=`<button class="choice-btn" onclick="answer(${c.correct},this)">${c.text}</button>`});
+  document.getElementById('choicesArea').innerHTML=html;
+}
+
+function answer(ok,el){
+  document.querySelectorAll('.choice-btn').forEach(b=>b.disabled=true);
+  el.classList.add(ok?'correct':'wrong');
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Correct! +'+(10+streak*5)+' points':'Wrong! Dijkstra always picks the unvisited node with smallest distance.'}</div>`;
+  updateScore(ok);
+  setTimeout(()=>{
+    let minDist=Infinity,minNode=-1;
+    nodes.forEach(n=>{if(!processed.has(n.id)&&dist[n.id]<minDist){minDist=dist[n.id];minNode=n.id}});
+    currentNode=minNode;processed.add(minNode);
+    // Relax neighbors
+    nodes[minNode].adj.forEach(e=>{if(!processed.has(e.to)){const nd=dist[minNode]+e.weight;if(nd<dist[e.to])dist[e.to]=nd}});
+    renderGraph();renderTable();showQ();
+  },800);
+}
+
+function resetAll(){
+  document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Start Round';
+  document.getElementById('resetBtn').style.display='none';
+  document.getElementById('choicesArea').innerHTML='';document.getElementById('messageArea').innerHTML='';
+  document.getElementById('graphSvg').innerHTML='';document.getElementById('distTable').innerHTML='';
+}
+</script>
+</body>
+</html>

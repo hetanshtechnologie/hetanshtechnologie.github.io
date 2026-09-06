@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fixed Assets & Depreciation — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}td{padding:6px 10px;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Fixed Assets</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-7xl mx-auto p-6">
+    <div id="kpi" class="grid grid-cols-5 gap-3 mb-6"></div>
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white active" data-tab="register" onclick="switchTab('register')">Asset Register</button>
+      <button class="tab-btn px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700" data-tab="depr" onclick="switchTab('depr')">Depreciation Chart</button>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+      <div id="loading" class="text-center text-gray-400 py-8">Loading...</div>
+      <div id="tab-content" class="hidden"></div>
+    </div>
+  </div>
+
+  <!-- Asset Modal -->
+  <div id="asset-modal" class="fixed inset-0 bg-black bg-opacity-40 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl max-h-screen overflow-y-auto">
+      <h3 class="text-lg font-bold mb-4">Add Fixed Asset</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="col-span-2"><input type="text" id="fa-name" placeholder="Asset Name" class="w-full border rounded px-3 py-2 text-sm" required></div>
+        <div><input type="text" id="fa-code" placeholder="Asset Code" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><select id="fa-category" class="w-full border rounded px-3 py-2 text-sm"><option value="">Category</option><option value="building">Building</option><option value="plant_machinery">Plant & Machinery</option><option value="furniture">Furniture</option><option value="vehicle">Vehicle</option><option value="computer">Computer</option><option value="electrical">Electrical</option><option value="office_equipment">Office Equipment</option><option value="other">Other</option></select></div>
+        <div><input type="date" id="fa-purchase-date" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div><input type="number" id="fa-cost" step="0.01" placeholder="Purchase Cost" class="w-full border rounded px-3 py-2 text-sm" required></div>
+        <div><input type="number" id="fa-life" placeholder="Useful Life (yrs)" class="w-full border rounded px-3 py-2 text-sm" value="5"></div>
+        <div><input type="number" id="fa-residual" step="0.01" placeholder="Residual %" class="w-full border rounded px-3 py-2 text-sm" value="5"></div>
+        <div><select id="fa-depr-method" class="w-full border rounded px-3 py-2 text-sm"><option value="wdcf">WDV (Written Down Value)</option><option value="slm">SLM (Straight Line)</option></select></div>
+        <div><input type="text" id="fa-location" placeholder="Location" class="w-full border rounded px-3 py-2 text-sm"></div>
+        <div class="col-span-2"><textarea id="fa-notes" placeholder="Notes" class="w-full border rounded px-3 py-2 text-sm"></textarea></div>
+      </div>
+      <div class="flex gap-3 mt-4">
+        <button onclick="saveAsset()" class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">Save</button>
+        <button onclick="closeModal()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-300">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId, activeTab = 'register', assets = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const user = await requireLogin(); if(!user) return;
+      orgId = await getOrgId(); if(!orgId) return;
+      await loadData();
+    });
+
+    function switchTab(t) {
+      activeTab = t;
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('bg-blue-600','text-white','active');
+        b.classList.add('bg-gray-200','text-gray-700');
+        if(b.dataset.tab === t) { b.classList.add('bg-blue-600','text-white','active'); b.classList.remove('bg-gray-200','text-gray-700'); }
+      });
+      renderTab();
+    }
+
+    async function loadData() {
+      const { data } = await erp.from('fixed_assets').select('*').eq('org_id', orgId).order('purchase_date', { ascending: false });
+      assets = data || [];
+      // Auto-calculate depreciation
+      const today = new Date();
+      assets = assets.map(a => {
+        const cost = Number(a.purchase_cost);
+        const life = a.useful_life_yrs || 5;
+        const residual = cost * (a.residual_pct||5) / 100;
+        const deprBase = cost - residual;
+        const purchaseDate = new Date(a.purchase_date);
+        const monthsOwned = (today.getFullYear() - purchaseDate.getFullYear()) * 12 + (today.getMonth() - purchaseDate.getMonth());
+        let annualDep = 0;
+        if(a.depreciation_method === 'slm') {
+          annualDep = deprBase / life;
+        } else {
+          const rate = 1 - Math.pow(residual/cost, 1/life);
+          annualDep = cost * rate;
+        }
+        const currentDep = annualDep * Math.min(monthsOwned / 12, life);
+        const bookValue = cost - currentDep;
+        return { ...a, _currentDep: Math.max(0, currentDep), _bookValue: Math.max(residual, bookValue), _annualDep: annualDep };
+      });
+      renderTab();
+    }
+
+    function renderTab() {
+      const totalCost = assets.reduce((s,a) => s + Number(a.purchase_cost), 0);
+      const totalDep = assets.reduce((s,a) => s + a._currentDep, 0);
+      const totalBV = assets.reduce((s,a) => s + a._bookValue, 0);
+      const activeCount = assets.filter(a => a.status === 'active').length;
+
+      document.getElementById('kpi').innerHTML = `
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Total Assets</div><div class="text-lg font-bold">${assets.length}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Active</div><div class="text-lg font-bold text-green-600">${activeCount}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Purchase Cost</div><div class="text-lg font-bold">${formatCurrency(totalCost)}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Accum. Depreciation</div><div class="text-lg font-bold text-orange-600">${formatCurrency(totalDep)}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Book Value</div><div class="text-lg font-bold text-blue-600">${formatCurrency(totalBV)}</div></div>`;
+
+      if(activeTab === 'register') renderRegister();
+      else renderDeprChart();
+    }
+
+    function renderRegister() {
+      document.getElementById('loading').classList.add('hidden'); document.getElementById('tab-content').classList.remove('hidden');
+      let rows = assets.map(a => `<tr class="border-b text-sm">
+        <td>${escapeHtml(a.asset_name)}</td><td>${escapeHtml(a.asset_code||'')}</td>
+        <td><span class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100">${a.category||''}</span></td>
+        <td>${formatDate(a.purchase_date)}</td><td class="text-right">${formatCurrency(a.purchase_cost)}</td>
+        <td class="text-right">${a._annualDep.toFixed(0)}</td>
+        <td class="text-right">${a._currentDep.toFixed(0)}</td>
+        <td class="text-right font-bold">${a._bookValue.toFixed(0)}</td>
+        <td><span class="px-2 py-0.5 rounded text-xs font-medium ${a.status==='active'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}">${a.status}</span></td>
+        <td>${a.location||''}</td>
+        <td><button onclick="deleteAsset(${a.id})" class="text-red-500 hover:underline text-xs">Del</button></td></tr>`).join('');
+      document.getElementById('tab-content').innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-lg font-bold">Asset Register</h2>
+          <button onclick="openModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700">+ Add Asset</button>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full text-xs whitespace-nowrap"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">Asset</th><th class="text-left p-2 font-semibold">Code</th><th class="text-left p-2 font-semibold">Category</th><th class="text-left p-2 font-semibold">Purchase</th><th class="text-right p-2 font-semibold">Cost</th><th class="text-right p-2 font-semibold">Annual Dep</th><th class="text-right p-2 font-semibold">Dep to Date</th><th class="text-right p-2 font-semibold">Book Value</th><th class="text-left p-2 font-semibold">Status</th><th class="text-left p-2 font-semibold">Location</th><th class="text-left p-2 font-semibold"></th></tr></thead><tbody>${rows||'<tr><td colspan="11" class="text-center text-gray-400 py-6">No fixed assets added</td></tr>'}</tbody></table></div>`;
+    }
+
+    function renderDeprChart() {
+      document.getElementById('loading').classList.add('hidden'); document.getElementById('tab-content').classList.remove('hidden');
+      // Group by category
+      const groups = {};
+      assets.filter(a => a.status === 'active').forEach(a => {
+        const cat = a.category||'other';
+        if(!groups[cat]) groups[cat] = { cost:0, dep:0, bv:0, count:0 };
+        groups[cat].cost += Number(a.purchase_cost);
+        groups[cat].dep += a._currentDep;
+        groups[cat].bv += a._bookValue;
+        groups[cat].count++;
+      });
+      let rows = Object.entries(groups).map(([cat, g]) => `<tr class="border-b text-sm">
+        <td class="font-medium capitalize">${cat.replace(/_/g,' ')}</td><td class="text-right">${g.count}</td>
+        <td class="text-right">${formatCurrency(g.cost)}</td><td class="text-right">${formatCurrency(g.dep)}</td>
+        <td class="text-right font-bold">${formatCurrency(g.bv)}</td>
+        <td><div class="w-24 bg-gray-200 rounded h-2"><div class="bg-blue-600 rounded h-2" style="width:${g.cost>0?Math.min(100,(g.dep/g.cost*100)):0}%"></div></div></td>
+      </tr>`).join('');
+      const total = { cost: assets.reduce((s,a)=>s+Number(a.purchase_cost),0), dep: assets.reduce((s,a)=>s+a._currentDep,0) };
+      document.getElementById('tab-content').innerHTML = `
+        <h2 class="text-lg font-bold mb-4">Depreciation Chart (Active Assets)</h2>
+        <div class="overflow-x-auto"><table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">Category</th><th class="text-right p-2 font-semibold">Count</th><th class="text-right p-2 font-semibold">Cost</th><th class="text-right p-2 font-semibold">Depreciation</th><th class="text-right p-2 font-semibold">Book Value</th><th class="text-left p-2 font-semibold">% Dep</th></tr></thead><tbody>${rows}</tbody>
+        <tfoot><tr class="font-bold bg-gray-50 border-t"><td>Total</td><td class="text-right">${assets.filter(a=>a.status==='active').length}</td><td class="text-right">${formatCurrency(total.cost)}</td><td class="text-right">${formatCurrency(total.dep)}</td><td class="text-right">${formatCurrency(assets.reduce((s,a)=>s+a._bookValue,0))}</td><td></td></tr></tfoot></table></div>`;
+    }
+
+    function openModal() {
+      document.getElementById('asset-modal').style.display = 'flex';
+      ['fa-name','fa-code','fa-cost','fa-life','fa-residual','fa-location','fa-notes'].forEach(id => document.getElementById(id).value='');
+      document.getElementById('fa-purchase-date').value = new Date().toISOString().split('T')[0];
+      document.getElementById('fa-category').selectedIndex = 0;
+      document.getElementById('fa-depr-method').selectedIndex = 0;
+    }
+    function closeModal() { document.getElementById('asset-modal').style.display = 'none'; }
+
+    async function saveAsset() {
+      const data = {
+        org_id: orgId,
+        asset_name: document.getElementById('fa-name').value,
+        asset_code: document.getElementById('fa-code').value,
+        category: document.getElementById('fa-category').value||null,
+        purchase_date: document.getElementById('fa-purchase-date').value,
+        purchase_cost: parseFloat(document.getElementById('fa-cost').value)||0,
+        useful_life_yrs: parseInt(document.getElementById('fa-life').value)||5,
+        residual_pct: parseFloat(document.getElementById('fa-residual').value)||5,
+        depreciation_method: document.getElementById('fa-depr-method').value,
+        location: document.getElementById('fa-location').value,
+        notes: document.getElementById('fa-notes').value
+      };
+      if(!data.asset_name) return alert('Asset name required');
+      if(!data.purchase_cost) return alert('Purchase cost required');
+      const { error } = await erp.from('fixed_assets').insert(data);
+      if(error) return alert('Error: '+error.message);
+      closeModal(); loadData();
+    }
+
+    async function deleteAsset(id) { if(!confirm('Delete this asset?')) return; await erp.from('fixed_assets').delete().eq('id',id); loadData(); }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

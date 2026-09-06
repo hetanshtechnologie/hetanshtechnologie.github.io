@@ -1,0 +1,107 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>108. Calling an Azure MCP Server - Primer - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 108</span>
+<h1>Calling an Azure MCP Server - Primer</h1>
+<p>Azure offers MCP servers that expose its AI services — language, speech, computer vision, and more — as standard MCP endpoints. This chapter is a primer: it shows what an Azure MCP server looks like, how a client connects, and the sequence of calls your code will make. The next chapters turn each of these steps into a hands-on lab.</p>
+
+<h2>What an Azure MCP Server Looks Like</h2>
+<p>An Azure MCP server is a small service — typically containerized and hosted in a platform like Azure Container Apps — that wraps one or more Azure AI services behind the MCP protocol. Instead of calling the language service REST API directly, your agent calls a tool exposed by the server, and the server makes the Azure call for you. The server owns the authentication to Azure, so your client does not need Azure keys at all.</p>
+
+<table>
+<tr><th>Azure MCP server</th><th>Example tools it exposes</th></tr>
+<tr><td>Azure Language server</td><td>Translate text, detect language, analyze sentiment, extract entities</td></tr>
+<tr><td>Azure Speech server</td><td>Speech-to-text, text-to-speech, speech translation</td></tr>
+<tr><td>Azure Vision server</td><td>Image analysis, OCR, captioning</td></tr>
+</table>
+
+<div class="note">
+<p>Think of the server as an adapter between the MCP world and Azure's own APIs. Your agent speaks MCP; the server translates into Azure REST calls and translates the results back. This is the same "one server, many consumers" benefit from the previous chapter, applied to Azure services.</p>
+</div>
+
+<h2>The Connection Sequence</h2>
+<p>Every client-server session follows the same outline:</p>
+<ol>
+<li><strong>Connect:</strong> the client opens a transport to the server's endpoint (HTTP in the hosted case) and performs the MCP handshake — exchanging protocol version and capabilities.</li>
+<li><strong>Initialize:</strong> the server announces what it supports. The client records the server's capabilities.</li>
+<li><strong>Discover tools:</strong> the client requests <code>tools/list</code> and receives the server's tool catalog with schemas.</li>
+<li><strong>Call tools:</strong> for each tool the model wants, the client sends <code>tools/call</code> with a name and arguments, and receives structured results.</li>
+</ol>
+
+<p>The protocol layer is identical regardless of which Azure service sits behind the server. Only the tool names and arguments differ.</p>
+
+<h2>Authentication in Two Layers</h2>
+<p>Calling an Azure MCP server involves authentication at two distinct boundaries:</p>
+<ul>
+<li><strong>Client to server:</strong> the HTTP connection may require an API key or an Azure identity token so only authorized clients can reach the endpoint. This is configured when the server is deployed.</li>
+<li><strong>Server to Azure:</strong> the server authenticates to the Azure service it wraps, typically with a managed identity assigned to the server's hosting environment. Your code never sees those credentials.</li>
+</ul>
+
+<div class="warn">
+<p>Do not store Azure resource keys in your client. The whole point of the managed-identity pattern is that credentials live only on the server side. If your client needs a secret, it is the <em>server's</em> access key — keep it in a place your agent code controls, such as an environment variable or a secret store.</p>
+</div>
+
+<h2>Discovering Tools from Python</h2>
+<p>The official MCP Python SDK makes the client side short and readable. Listing tools looks like this:</p>
+
+<pre><code>import asyncio
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.sse import sse_client
+
+
+async def list_tools(server_url: str):
+    transport = sse_client(server_url)
+    read, write = await transport.__aenter__()
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        for tool in tools.tools:
+            print(tool.name, "-", tool.description)
+
+
+asyncio.run(list_tools("http://YOUR_SERVER_ENDPOINT/sse"))</code></pre>
+
+<p>The <code>ClientSession</code> handles the handshake, <code>initialize()</code> negotiates capabilities, and <code>list_tools()</code> returns the catalog. Once you have the catalog, calling a tool is a single method:</p>
+
+<pre><code>result = await session.call_tool("translate_text", {"text": "Hello", "to": "es"})</code></pre>
+
+<h2>Feeding Tools to a Model</h2>
+<p>An MCP connection only becomes an <em>agent</em> when the discovered tools are given to a model. The standard loop from earlier chapters applies: convert each tool's name, description, and input schema into a binding for your LLM, let the model decide, execute the call through MCP, and return the result. The MCP SDK even ships helpers to convert its tool objects into the schema shape that models expect, so the two worlds connect cleanly.</p>
+
+<h2>What Can Go Wrong</h2>
+<p>When a call fails, the usual suspects are:</p>
+<ul>
+<li><strong>Connection errors:</strong> the server is unreachable, the endpoint URL is wrong, or the server is still starting up.</li>
+<li><strong>Authentication failures:</strong> the server's access key is missing, wrong, or the identity has no permission to the underlying Azure service.</li>
+<li><strong>Schema mismatches:</strong> your call passes arguments that do not match the tool's input schema.</li>
+<li><strong>Azure-side errors:</strong> the underlying service is unavailable or out of quota; the server usually relays the error text in the tool result.</li>
+</ul>
+
+<div class="tip">
+<p>Start debugging with <code>tools/list</code>. If discovery works, transport and authentication are fine, and the problem is in the call. If discovery itself fails, the issue is connectivity or credentials — check the server endpoint and access key first.</p>
+</div>
+
+<h2>Summary</h2>
+<p>An Azure MCP server wraps Azure AI services behind the standard MCP protocol, so an agent can translate text, analyze images, or synthesize speech with ordinary tool calls. The client connects, initializes, discovers tools, and calls them; authentication splits into a client-to-server key and a server-to-Azure managed identity. In the next chapter you will deploy an Azure MCP server of your own.</p>
+<nav>
+<a href="107-why-was-the-model-context-protocol-designed.html">&larr; Previous: Why was the Model Context Protocol designed</a><a href="109-lab-azure-mcp-server-deployment.html">Next: Lab - Azure MCP Server deployment &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

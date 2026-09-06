@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0/1 Knapsack Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:900px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.3rem}
+.knapsack-info{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:20px}
+.info-box{background:#1e293b;border-radius:12px;padding:16px 20px;text-align:center;flex:1;min-width:140px}
+.info-box h3{color:#94a3b8;font-size:.8rem;margin-bottom:6px}
+.info-box .val{color:#38bdf8;font-size:1.5rem;font-weight:700}
+.items-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.item-card{background:#1e293b;border-radius:12px;padding:16px;text-align:center;border:3px solid #334155;transition:all .3s;cursor:pointer}
+.item-card:hover{border-color:#475569}
+.item-card.selected{border-color:#22c55e;background:#14532d}
+.item-card.wrong-select{border-color:#ef4444;background:#7f1d1d}
+.item-card .name{font-weight:700;margin-bottom:6px;font-size:1.1rem}
+.item-card .weight{color:#facc15;font-size:.85rem}
+.item-card .value{color:#4ade80;font-size:.85rem}
+.item-card .ratio{color:#94a3b8;font-size:.75rem}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.btn-success{background:#22c55e;color:#fff}
+.choice-btn{display:block;width:100%;padding:12px 20px;margin-bottom:8px;background:#334155;color:#e2e8f0;border:2px solid #475569;border-radius:8px;font-size:1rem;cursor:pointer;text-align:left;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.choice-btn.correct{border-color:#22c55e;background:#14532d}
+.choice-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:12px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+.result-box{background:#1e293b;border-radius:12px;padding:16px;margin-bottom:16px;text-align:center}
+.result-label{color:#94a3b8;font-size:.85rem}
+.result-val{color:#4ade80;font-size:1.3rem;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&#8592; Home</a><h1>0/1 Knapsack Game</h1></div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Round: <span class="score-val" id="round">1</span></span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="knapsack-info">
+    <div class="info-box"><h3>Capacity</h3><div class="val" id="capacity">-</div></div>
+    <div class="info-box"><h3>Current Weight</h3><div class="val" id="curWeight">0</div></div>
+    <div class="info-box"><h3>Current Value</h3><div class="val" id="curValue">0</div></div>
+    <div class="info-box"><h3>Optimal Value</h3><div class="val" id="optVal">-</div></div>
+  </div>
+  <div class="items-grid" id="itemsGrid"></div>
+  <div class="instructions"><h2>How to Play</h2><p>0/1 Knapsack: pick items to maximize value within weight capacity. Each item can be taken (1) or left (0). Choose the optimal combination!</p></div>
+  <div id="messageArea"></div>
+  <div id="choicesArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startRound()">Start Round</button>
+    <button class="btn btn-success" id="submitBtn" onclick="submitAnswer()" style="display:none">Submit Selection</button>
+    <button class="btn btn-secondary" id="resetBtn" onclick="resetAll()" style="display:none">New Round</button>
+  </div>
+</div>
+<script>
+let items=[],capacity=0,selected=new Set(),score=0,round=1,streak=0,optimal=0;
+
+function genItems(){
+  const names=['Gold','Silver','Gem','Ring','Crown','Amulet','Sword','Shield','Potion','Scroll'];
+  items=[];const n=4+Math.floor(Math.random()*3);
+  for(let i=0;i<n;i++){
+    const w=Math.floor(Math.random()*8)+2;
+    const v=Math.floor(Math.random()*20)+5;
+    items.push({id:i,name:names[i%names.length],weight:w,value:v,ratio:(v/w).toFixed(2)});
+  }
+  capacity=Math.floor(items.reduce((s,it)=>s+it.weight,0)*0.5);
+}
+
+function knapsack(){
+  const n=items.length;
+  const dp=Array.from({length:n+1},()=>Array(capacity+1).fill(0));
+  for(let i=1;i<=n;i++){
+    for(let w=0;w<=capacity;w++){
+      dp[i][w]=dp[i-1][w];
+      if(items[i-1].weight<=w){
+        dp[i][w]=Math.max(dp[i][w],dp[i-1][w-items[i-1].weight]+items[i-1].value);
+      }
+    }
+  }
+  // Backtrack to find items
+  const optItems=new Set();let w=capacity;
+  for(let i=n;i>0;i--){
+    if(dp[i][w]!==dp[i-1][w]){optItems.add(i-1);w-=items[i-1].weight}
+  }
+  return{value:dp[n][capacity],items:optItems};
+}
+
+function renderItems(){
+  const el=document.getElementById('itemsGrid');el.innerHTML='';
+  items.forEach((it,i)=>{
+    const card=document.createElement('div');card.className='item-card';
+    if(selected.has(i))card.classList.add('selected');
+    card.innerHTML=`<div class="name">${it.name}</div><div class="weight">Weight: ${it.weight}</div><div class="value">Value: ${it.value}</div><div class="ratio">Ratio: ${it.ratio}</div>`;
+    card.onclick=()=>{if(selected.has(i))selected.delete(i);else selected.add(i);renderItems();updateInfo()};
+    el.appendChild(card);
+  });
+}
+
+function updateInfo(){
+  let tw=0,tv=0;selected.forEach(i=>{tw+=items[i].weight;tv+=items[i].value});
+  document.getElementById('curWeight').textContent=tw;
+  document.getElementById('curValue').textContent=tv;
+  document.getElementById('curWeight').style.color=tw>capacity?'#ef4444':'#38bdf8';
+}
+
+function updateScore(ok){if(ok){score+=10+streak*5;streak++}else{streak=0}document.getElementById('score').textContent=score;document.getElementById('streak').textContent=streak}
+
+function startRound(){
+  genItems();selected=new Set();
+  const opt=knapsack();optimal=opt.value;
+  document.getElementById('capacity').textContent=capacity;
+  document.getElementById('optVal').textContent='?';
+  renderItems();updateInfo();showQ();
+  document.getElementById('startBtn').style.display='none';
+  ['submitBtn','resetBtn'].forEach(id=>document.getElementById(id).style.display='');
+  document.getElementById('round').textContent=round;
+  document.getElementById('messageArea').innerHTML='';
+  document.getElementById('choicesArea').innerHTML='';
+}
+
+function showQ(){
+  let choices=[
+    {text:`Select items to maximize value (capacity=${capacity}). Click items, then submit!`,correct:true}
+  ];
+  let html=`<p style="margin-bottom:8px;color:#94a3b8">Select items that maximize value without exceeding weight ${capacity}.</p>`;
+  document.getElementById('choicesArea').innerHTML=html;
+}
+
+function submitAnswer(){
+  let tw=0,tv=0;selected.forEach(i=>{tw+=items[i].weight;tv+=items[i].value});
+  const ok=tw<=capacity&&tv===optimal;
+  document.getElementById('optVal').textContent=optimal;
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Optimal! +'+(10+streak*5)+' points':'Not optimal. You got '+tv+', optimal was '+optimal+'.'}</div>`;
+  updateScore(ok);
+  // Show optimal items
+  const opt=knapsack();
+  document.querySelectorAll('.item-card').forEach((card,i)=>{
+    card.style.pointerEvents='none';
+    if(opt.items.has(i)&&!selected.has(i))card.classList.add('wrong-select');
+  });
+  round++;
+  setTimeout(()=>{
+    document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Next Round';
+    ['submitBtn','resetBtn'].forEach(id=>document.getElementById(id).style.display='none');
+  },2000);
+}
+
+function resetAll(){
+  document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Start Round';
+  ['submitBtn','resetBtn'].forEach(id=>document.getElementById(id).style.display='none');
+  document.getElementById('choicesArea').innerHTML='';document.getElementById('messageArea').innerHTML='';
+  document.getElementById('itemsGrid').innerHTML='';
+  document.getElementById('capacity').textContent='-';
+  document.getElementById('curWeight').textContent='0';
+  document.getElementById('curValue').textContent='0';
+  document.getElementById('optVal').textContent='-';
+}
+</script>
+</body>
+</html>

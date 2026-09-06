@@ -1,0 +1,94 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>34. Let's try to register our agent again - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 34</span>
+<h1>Let's try to register our agent again</h1>
+<p>If you ran the previous lab's script twice, you now have two agents named <code>trip-planner</code>. That is the natural result of a script that only knows how to create. Real registration code must be safe to run again and again — the same outcome each time, no duplicates, no errors. In this chapter you will think about registration as an idempotent operation and change your script to "register our agent again" correctly.</p>
+
+<h2>The Problem with Create-Only Registration</h2>
+<p>A registration script with a single <code>create_agent</code> call behaves like a button that is only safe to press once. Rerunning it duplicates the agent, which pollutes the project, wastes storage, and confuses anyone later looking for "the" trip-planner agent. The failure mode is silent: nothing errors, you just end up with a pile of near-identical agents.</p>
+<p>The fix is to decide what <em>register</em> means. Instead of "create one now," the script should mean "make sure exactly one agent with this name exists and has the right configuration." That is idempotency: running the operation any number of times produces the same end state.</p>
+
+<h2>The Register-Or-Reuse Pattern</h2>
+<p>The safest version of the pattern has three steps:</p>
+<ol>
+<li><strong>Look up</strong> whether an agent with the target name already exists.</li>
+<li><strong>Reuse</strong> it if it does, and optionally update its configuration.</li>
+<li><strong>Create</strong> it only when nothing matching was found.</li>
+</ol>
+<p>This turns the script from a fragile action into a repeatable tool that a team can run in any environment — a developer laptop, a staging pipeline, a fresh project — and trust to converge on the same state.</p>
+
+<div class="note">
+<p>The pattern also makes deployment safe. If your project is deleted and recreated, the first registration run rebuilds the agent. If the project already contains it, the run simply confirms it and moves on. That resilience is what you want from infrastructure automation.</p>
+</div>
+
+<h2>Updating vs. Replacing Configuration</h2>
+<p>Reusing an existing agent raises a second question: should you overwrite its instructions every run? For code-managed agents the answer is usually yes. The instructions in your repository are the source of truth, so each registration run should push the current instructions, model, and name onto the existing agent. That way, when a pull request changes the prompt, the next registration run deploys that change to the project.</p>
+
+<table>
+<tr><th>Approach</th><th>Behavior</th><th>Best for</th></tr>
+<tr><td>Create only</td><td>Errors or duplicates on a second run</td><td>One-off setup scripts</td></tr>
+<tr><td>Create or reuse</td><td>Leaves existing agent untouched</td><td>Agents edited in the portal</td></tr>
+<tr><td>Create, reuse, or update</td><td>Pushes repository config every run</td><td>Code-managed agents and CI/CD</td></tr>
+</table>
+
+<h2>A Safer Registration Flow</h2>
+<p>The improved script lists existing agents, filters for the target name, and decides what to do based on what it finds. The idea applies regardless of the exact SDK calls you use.</p>
+
+<pre><code>existing = project_client.agents.list_agents()
+
+match = next(
+    (a for a in existing.data if a.name == "trip-planner"),
+    None,
+)
+
+if match is None:
+    agent = project_client.agents.create_agent(
+        model="YOUR_DEPLOYMENT_NAME",
+        name="trip-planner",
+        instructions=load_instructions(),
+    )
+    print(f"Created new agent: {agent.id}")
+else:
+    agent = project_client.agents.update_agent(
+        match.id,
+        model="YOUR_DEPLOYMENT_NAME",
+        instructions=load_instructions(),
+    )
+    print(f"Updated existing agent: {agent.id}")
+</code></pre>
+
+<div class="tip">
+<p>Wrap the registration in a small function that takes the project client and the agent definition, and returns the final agent. Both your manual scripts and your pipeline can call the same function, which keeps the "only one trip-planner exists" rule enforced everywhere.</p>
+</div>
+
+<h2>Handling the Human Factor</h2>
+<p>Idempotent code cannot fix every mess. If you already created several duplicate agents by hand, the script will happily reuse the first one it finds while the duplicates remain. Before adopting the pattern, spend a few minutes tidying the project: decide which agent is canonical, delete the copies from the portal, and let the script manage exactly that one from then on.</p>
+
+<div class="warn">
+<p>Deleting an agent removes its run history and traces. If you are cleaning up duplicates, first confirm none of them is being called by an application or pinned by a published version.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Registration code must be safe to run repeatedly. By moving from create-only to a look-up, reuse, and update flow, you make your agent definitions reproducible, your pipelines idempotent, and your repository the single source of truth for configuration. With a stable, registered agent in place, the next lab shows how to talk to it — invoking your agent exactly the way a production application would.</p>
+<nav>
+<a href="33-lab-building-a-prompt-agent-via-code.html">&larr; Previous: Lab - Building a prompt agent via code</a><a href="35-lab-invoking-our-agent.html">Next: Lab - Invoking our agent &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

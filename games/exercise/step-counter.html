@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Step Counter 👟</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.top-bar{width:100%;padding:12px 20px;background:#1e293b;display:flex;justify-content:space-between;align-items:center}
+.top-bar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.top-bar h1{font-size:18px}
+.game{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;max-width:500px;padding:20px}
+.hidden{display:none}
+.result-card{background:#1e293b;border-radius:16px;padding:30px;text-align:center}
+.result-card h2{color:#22d3ee}
+.result-card p{color:#94a3b8;margin:5px 0}
+.play-again{background:#22d3ee;color:#0f172a;border:none;padding:14px 40px;border-radius:12px;font-size:18px;font-weight:bold;cursor:pointer;margin-top:15px}
+.step-circle{width:200px;height:200px;border-radius:50%;background:#1e293b;border:8px solid #22d3ee;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:15px 0}
+.step-count{font-size:56px;font-weight:bold;color:#22d3ee}
+.step-label{font-size:14px;color:#94a3b8}
+.distance-display{font-size:18px;color:#f59e0b;margin:5px 0}
+.calories-display{font-size:16px;color:#22c55e;margin:5px 0}
+.tap-btn{width:160px;height:160px;border-radius:50%;background:linear-gradient(135deg,#22d3ee,#06b6d4);border:none;color:#0f172a;font-size:24px;font-weight:bold;cursor:pointer;transition:transform .1s}
+.tap-btn:active{transform:scale(.92)}
+.score-display{display:flex;gap:12px;margin:10px 0;flex-wrap:wrap;justify-content:center}
+.score-box{background:#1e293b;padding:8px 16px;border-radius:10px;text-align:center}
+.score-box .label{font-size:11px;color:#94a3b8}
+.score-box .value{font-size:18px;font-weight:bold;color:#22d3ee}
+.milestones{width:100%;margin:10px 0}
+.milestone{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;background:#1e293b;margin:4px 0;transition:all .2s}
+.milestone.reached{background:#166534;border:1px solid #22c55e}
+.milestone .m-icon{font-size:20px}
+.milestone .m-text{flex:1;font-size:13px}
+.milestone .m-check{color:#22c55e;font-size:16px}
+.progress-bar{width:100%;height:12px;background:#1e293b;border-radius:6px;margin:8px 0;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#22d3ee,#38bdf8);border-radius:6px;transition:width .3s}
+.footer-info{color:#64748b;font-size:12px;margin-top:5px}
+</style>
+</head>
+<body>
+<div class="top-bar"><a href="../index.html">← Back</a><h1>Step Counter 👟</h1><span></span></div>
+<div class="game" id="startScreen">
+  <div style="font-size:80px;animation:bounce 1s infinite">👟</div>
+  <style>@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-15px)}}</style>
+  <h2 style="margin:15px 0">Step Counter</h2>
+  <p style="color:#94a3b8;text-align:center">Tap each step you take!<br>Track distance, calories, and milestones.</p>
+  <div style="margin:10px 0">
+    <label style="color:#94a3b8;font-size:13px">Your stride length (cm):</label>
+    <input type="number" id="strideInput" value="75" min="40" max="120" style="width:70px;padding:6px;border-radius:6px;background:#1e293b;border:1px solid #334155;color:#e2e8f0;text-align:center;font-size:14px">
+  </div>
+  <button class="play-again" onclick="startGame()">Start Walking</button>
+</div>
+<div class="game hidden" id="gameScreen">
+  <div class="score-display">
+    <div class="score-box"><div class="label">STEPS</div><div class="value" id="stepVal">0</div></div>
+    <div class="score-box"><div class="label">DISTANCE</div><div class="value" id="distVal">0m</div></div>
+    <div class="score-box"><div class="label">CALORIES</div><div class="value" id="calVal">0</div></div>
+  </div>
+  <div class="step-circle">
+    <div class="step-count" id="stepCount">0</div>
+    <div class="step-label">STEPS</div>
+  </div>
+  <div class="distance-display" id="distDisplay">0.00 km</div>
+  <div class="calories-display" id="calDisplay">🔥 0 kcal burned</div>
+  <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+  <div class="milestones" id="milestones"></div>
+  <button class="tap-btn" onclick="doStep()">STEP!</button>
+  <div class="footer-info">Tap each step or press spacebar</div>
+</div>
+<div class="game hidden" id="resultScreen">
+  <div class="result-card">
+    <div style="font-size:80px">🏆</div>
+    <h2>Walk Complete!</h2>
+    <p>Total Steps: <span id="finalSteps">0</span></p>
+    <p>Distance: <span id="finalDist">0</span></p>
+    <p>Calories: <span id="finalCal">0</span></p>
+    <p>Score: <span id="finalScore">0</span></p>
+    <button class="play-again" onclick="resetGame()">Play Again</button>
+  </div>
+</div>
+<script>
+let steps=0,score=0,strideCm=75;
+const milestones=[
+  {steps:100,icon:'🌱',text:'100 Steps - Getting Started!'},
+  {steps:500,icon:'🚶',text:'500 Steps - Walking!'},
+  {steps:1000,icon:'🏃',text:'1,000 Steps - 1K!'},
+  {steps:2500,icon:'🔥',text:'2,500 Steps - On Fire!'},
+  {steps:5000,icon:'⭐',text:'5,000 Steps - Halfway to 10K!'},
+  {steps:10000,icon:'🏆',text:'10,000 Steps - Daily Goal!'},
+  {steps:15000,icon:'💎',text:'15,000 Steps - Diamond!'},
+  {steps:20000,icon:'👑',text:'20,000 Steps - Champion!'}
+];
+let reachedMilestones=new Set();
+function startGame(){document.getElementById('startScreen').classList.add('hidden');document.getElementById('gameScreen').classList.remove('hidden');
+  steps=0;score=0;strideCm=parseInt(document.getElementById('strideInput').value)||75;reachedMilestones=new Set();buildMilestones();updateDisplay()}
+function buildMilestones(){let m=document.getElementById('milestones');m.innerHTML='';milestones.forEach(ms=>{
+  let div=document.createElement('div');div.className='milestone';div.id='ms'+ms.steps;
+  div.innerHTML=`<span class="m-icon">${ms.icon}</span><span class="m-text">${ms.text}</span><span class="m-check" id="mc${ms.steps}"></span>`;m.appendChild(div);
+})}
+function doStep(){
+  steps++;score+=10;checkMilestones();updateDisplay();
+}
+function checkMilestones(){
+  milestones.forEach(ms=>{
+    if(steps>=ms.steps&&!reachedMilestones.has(ms.steps)){
+      reachedMilestones.add(ms.steps);score+=200;
+      let el=document.getElementById('ms'+ms.steps);if(el){el.classList.add('reached')}
+      let check=document.getElementById('mc'+ms.steps);if(check)check.textContent='✅';
+    }
+  });
+}
+function updateDisplay(){
+  let distM=steps*strideCm/100;let distKm=(distM/1000).toFixed(2);
+  let cal=Math.round(steps*0.04);
+  document.getElementById('stepCount').textContent=steps;
+  document.getElementById('stepVal').textContent=steps;
+  document.getElementById('distVal').textContent=distM<1000?Math.round(distM)+'m':distKm+'km';
+  document.getElementById('distDisplay').textContent=distKm+' km';
+  document.getElementById('calVal').textContent=cal;
+  document.getElementById('calDisplay').textContent='🔥 '+cal+' kcal burned';
+  let nextMs=milestones.find(m=>!reachedMilestones.has(m.steps));
+  if(nextMs){document.getElementById('progressFill').style.width=Math.min(100,(steps/nextMs.steps)*100)+'%'}
+  else{document.getElementById('progressFill').style.width='100%'}
+}
+function resetGame(){document.getElementById('resultScreen').classList.add('hidden');document.getElementById('startScreen').classList.remove('hidden')}
+function endGame(){document.getElementById('gameScreen').classList.add('hidden');document.getElementById('resultScreen').classList.remove('hidden');
+  let distM=steps*strideCm/100;
+  document.getElementById('finalSteps').textContent=steps;
+  document.getElementById('finalDist').textContent=(distM/1000).toFixed(2)+' km';
+  document.getElementById('finalCal').textContent=Math.round(steps*0.04)+' kcal';
+  document.getElementById('finalScore').textContent=score;
+}
+document.addEventListener('keydown',e=>{if(e.code==='Space'&&!document.getElementById('gameScreen').classList.contains('hidden')){e.preventDefault();doStep()}});
+</script>
+</body></html>

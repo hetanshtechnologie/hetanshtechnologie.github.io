@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GSTR-2A/2B Reconciliation — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}td{padding:6px 10px;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">GSTR-2A/2B Reconciliation</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-7xl mx-auto p-6">
+    <!-- KPI Cards -->
+    <div id="kpi" class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6"></div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- GSTR-2A Data Section -->
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-lg font-bold">GSTR-2A Records</h2>
+          <button onclick="openAddRecord()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700">+ Add</button>
+        </div>
+        <div class="mb-3 flex gap-2">
+          <input type="month" id="gstr-period" class="border rounded px-2 py-1 text-sm" onchange="loadGSTR()">
+          <select id="gstr-status" class="border rounded px-2 py-1 text-sm" onchange="loadGSTR()">
+            <option value="">All</option><option value="pending">Pending</option>
+            <option value="matched">Matched</option><option value="mismatched">Mismatched</option>
+          </select>
+        </div>
+        <div id="gstr-loading" class="text-center text-gray-400 py-4 text-sm">Loading...</div>
+        <div id="gstr-list" class="hidden max-h-96 overflow-y-auto"></div>
+      </div>
+
+      <!-- Purchase Invoices Section -->
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-lg font-bold">Purchase Invoices</h2>
+        </div>
+        <div class="mb-3 flex gap-2">
+          <select id="pi-party" class="border rounded px-2 py-1 text-sm flex-1" onchange="loadPurchaseInvoices()">
+            <option value="">All Suppliers</option>
+          </select>
+        </div>
+        <div id="pi-loading" class="text-center text-gray-400 py-4 text-sm">Loading...</div>
+        <div id="pi-list" class="hidden max-h-96 overflow-y-auto"></div>
+      </div>
+    </div>
+
+    <!-- Reconciliation Results -->
+    <div class="bg-white rounded-xl shadow-sm border p-6 mt-6">
+      <h2 class="text-lg font-bold mb-4">Reconciliation Summary</h2>
+      <div id="recon-content" class="overflow-x-auto"></div>
+    </div>
+  </div>
+
+  <!-- Add GSTR-2A Record Modal -->
+  <div id="gstr-modal" class="fixed inset-0 bg-black bg-opacity-40 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
+      <h3 class="text-lg font-bold mb-4">Add GSTR-2A Record</h3>
+      <div class="space-y-3">
+        <select id="gstr-party" class="w-full border rounded px-3 py-2 text-sm"><option value="">Select Supplier</option></select>
+        <input type="text" id="gstr-gstin" placeholder="Supplier GSTIN" class="w-full border rounded px-3 py-2 text-sm">
+        <input type="text" id="gstr-invno" placeholder="Invoice No" class="w-full border rounded px-3 py-2 text-sm" required>
+        <input type="date" id="gstr-invdate" class="w-full border rounded px-3 py-2 text-sm">
+        <input type="number" id="gstr-taxable" step="0.01" placeholder="Taxable Amount" class="w-full border rounded px-3 py-2 text-sm">
+        <input type="number" id="gstr-cgst" step="0.01" placeholder="CGST Amount" class="w-full border rounded px-3 py-2 text-sm">
+        <input type="number" id="gstr-sgst" step="0.01" placeholder="SGST Amount" class="w-full border rounded px-3 py-2 text-sm">
+        <input type="number" id="gstr-igst" step="0.01" placeholder="IGST Amount" class="w-full border rounded px-3 py-2 text-sm">
+      </div>
+      <div class="flex gap-3 mt-4">
+        <button onclick="saveGSTRRecord()" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700">Save</button>
+        <button onclick="closeGSTRModal()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm font-semibold">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId, suppliers = [], gstrRecords = [], purchaseInvs = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const user = await requireLogin(); if(!user) return;
+      orgId = await getOrgId(); if(!orgId) return;
+      const { data: p } = await erp.from('parties').select('id,name,gstin').eq('org_id', orgId).in('type',['supplier','both']);
+      suppliers = p || [];
+      const selParty = document.getElementById('pi-party');
+      const selGstr = document.getElementById('gstr-party');
+      suppliers.forEach(s => {
+        const o1 = document.createElement('option'); o1.value = s.id; o1.textContent = `${s.name} (${s.gstin||'No GSTIN'})`;
+        selParty.appendChild(o1);
+        const o2 = document.createElement('option'); o2.value = s.id; o2.textContent = s.name;
+        selGstr.appendChild(o2);
+      });
+      const now = new Date();
+      document.getElementById('gstr-period').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      await loadGSTR();
+      await loadPurchaseInvoices();
+      await loadReconciliation();
+    });
+
+    async function loadGSTR() {
+      document.getElementById('gstr-loading').classList.remove('hidden');
+      document.getElementById('gstr-list').classList.add('hidden');
+      let q = erp.from('gst_records').select('*, parties(name)').eq('org_id', orgId).eq('return_type','GSTR2A').order('invoice_date', { ascending: false });
+      const period = document.getElementById('gstr-period').value;
+      if(period) q = q.eq('return_period', period);
+      const status = document.getElementById('gstr-status').value;
+      if(status) q = q.eq('status', status);
+      const { data } = await q;
+      gstrRecords = data || [];
+      document.getElementById('gstr-loading').classList.add('hidden');
+      document.getElementById('gstr-list').classList.remove('hidden');
+      document.getElementById('gstr-list').innerHTML = (gstrRecords.length ?
+        '<table class="w-full text-xs"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-1 font-semibold">Invoice</th><th class="text-left p-1 font-semibold">Supplier</th><th class="text-right p-1 font-semibold">Taxable</th><th class="text-left p-1 font-semibold">Status</th><th class="text-left p-1 font-semibold"></th></tr></thead><tbody>' +
+        gstrRecords.map(r => `<tr class="border-b"><td class="p-1">${escapeHtml(r.invoice_no||'')}</td><td class="p-1">${r.parties ? escapeHtml(r.parties.name) : ''}</td><td class="p-1 text-right">${formatCurrency(r.taxable_amt)}</td><td class="p-1"><span class="px-1.5 py-0.5 rounded text-xs font-medium ${r.status==='matched'?'bg-green-100 text-green-700':r.status==='mismatched'?'bg-red-100 text-red-700':'bg-yellow-100 text-yellow-700'}">${r.status}</span></td><td class="p-1"><button onclick="deleteGSTR(${r.id})" class="text-red-500 hover:underline text-xs">X</button></td></tr>`).join('') + '</tbody></table>' : '<p class="text-center text-gray-400 text-sm py-4">No GSTR-2A records found</p>');
+    }
+
+    async function loadPurchaseInvoices() {
+      document.getElementById('pi-loading').classList.remove('hidden');
+      document.getElementById('pi-list').classList.add('hidden');
+      let q = erp.from('invoices').select('*, parties!inner(name,gstin)').eq('org_id', orgId).in('doc_type',['invoice','challan']);
+      const pid = document.getElementById('pi-party').value;
+      if(pid) q = q.eq('parties.id', pid);
+      q = q.not('parties.type','eq','customer').order('invoice_date', { ascending: false });
+      const { data } = await q;
+      purchaseInvs = data || [];
+      document.getElementById('pi-loading').classList.add('hidden');
+      document.getElementById('pi-list').classList.remove('hidden');
+      document.getElementById('pi-list').innerHTML = (purchaseInvs.length ?
+        '<table class="w-full text-xs"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-1 font-semibold">Invoice</th><th class="text-left p-1 font-semibold">Supplier</th><th class="text-right p-1 font-semibold">Amount</th><th class="text-left p-1 font-semibold">GSTIN</th></tr></thead><tbody>' +
+        purchaseInvs.map(inv => `<tr class="border-b"><td class="p-1">${escapeHtml(inv.invoice_no)}</td><td class="p-1">${escapeHtml(inv.parties.name)}</td><td class="p-1 text-right">${formatCurrency(inv.total_amt||0)}</td><td class="p-1">${escapeHtml(inv.parties.gstin||'')}</td></tr>`).join('') + '</tbody></table>' : '<p class="text-center text-gray-400 text-sm py-4">No purchase invoices found</p>');
+    }
+
+    async function loadReconciliation() {
+      const { data: matched } = await erp.from('gst_records').select('id').eq('org_id', orgId).eq('return_type','GSTR2A').eq('status','matched');
+      const { data: pending } = await erp.from('gst_records').select('id').eq('org_id', orgId).eq('return_type','GSTR2A').eq('status','pending');
+      const { data: mismatched } = await erp.from('gst_records').select('id').eq('org_id', orgId).eq('return_type','GSTR2A').eq('status','mismatched');
+      const totalGSTR = gstrRecords.length;
+      const totalPI = purchaseInvs.length;
+      const matchCount = (matched||[]).length;
+      const pendingCount = (pending||[]).length;
+      const mismatchCount = (mismatched||[]).length;
+
+      document.getElementById('kpi').innerHTML = `
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">2A Records</div><div class="text-lg font-bold">${totalGSTR}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Purchase Invoices</div><div class="text-lg font-bold">${totalPI}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Matched</div><div class="text-lg font-bold text-green-600">${matchCount}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Pending</div><div class="text-lg font-bold text-yellow-600">${pendingCount}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Mismatched</div><div class="text-lg font-bold text-red-600">${mismatchCount}</div></div>`;
+
+      // Build reconciliation table: compare GSTR-2A vs purchase invoices
+      let reconRows = gstrRecords.map(g => {
+        const match = purchaseInvs.find(p =>
+          p.invoice_no === g.invoice_no &&
+          Math.abs(Number(p.taxable_amt||0) - Number(g.taxable_amt||0)) < 1
+        );
+        if(match && g.status !== 'matched') {
+          erp.from('gst_records').update({ status: 'matched', invoice_id: match.id }).eq('id', g.id).then();
+        } else if(!match && g.status !== 'mismatched' && g.status !== 'pending') {
+          erp.from('gst_records').update({ status: 'pending' }).eq('id', g.id).then();
+        }
+        const pi = purchaseInvs.find(p => p.invoice_no === g.invoice_no);
+        const amtMatch = pi && Math.abs(Number(pi.taxable_amt||0) - Number(g.taxable_amt||0)) < 1;
+        return `<tr class="border-b text-xs">
+          <td>${escapeHtml(g.invoice_no||'')}</td><td>${g.parties?escapeHtml(g.parties.name):''}</td>
+          <td class="text-right">${formatCurrency(g.taxable_amt)}</td>
+          <td>${pi ? escapeHtml(pi.invoice_no) : '<span class="text-red-500">Not found</span>'}</td>
+          <td class="text-right">${pi ? formatCurrency(pi.taxable_amt) : '-'}</td>
+          <td>${amtMatch ? '<span class="text-green-600 font-medium">&#10003;</span>' : pi ? '<span class="text-red-600 font-medium">&#10007;</span>' : '-'}</td>
+        </tr>`;
+      }).join('');
+
+      document.getElementById('recon-content').innerHTML = reconRows ? `<table class="w-full text-xs"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">2A Invoice</th><th class="text-left p-2 font-semibold">Supplier</th><th class="text-right p-2 font-semibold">2A Amount</th><th class="text-left p-2 font-semibold">Purchase Inv</th><th class="text-right p-2 font-semibold">Purchase Amt</th><th class="text-left p-2 font-semibold">Match</th></tr></thead><tbody>${reconRows}</tbody></table>` : '<p class="text-center text-gray-400 py-4">No GSTR-2A records to reconcile</p>';
+    }
+
+    function openAddRecord() {
+      const sel = document.getElementById('gstr-party');
+      sel.innerHTML = '<option value="">Select Supplier</option>' + suppliers.map(s => `<option value="${s.id}" data-gstin="${escapeHtml(s.gstin||'')}">${escapeHtml(s.name)}</option>`).join('');
+      document.getElementById('gstr-modal').style.display = 'flex';
+      ['gstr-invno','gstr-taxable','gstr-cgst','gstr-sgst','gstr-igst'].forEach(id => document.getElementById(id).value = '');
+      document.getElementById('gstr-invdate').value = new Date().toISOString().split('T')[0];
+    }
+    function closeGSTRModal() { document.getElementById('gstr-modal').style.display = 'none'; }
+    async function saveGSTRRecord() {
+      const sId = document.getElementById('gstr-party').value;
+      const party = suppliers.find(p => p.id === Number(sId));
+      const data = {
+        org_id: orgId, return_type: 'GSTR2A',
+        return_period: document.getElementById('gstr-period').value,
+        party_id: sId || null, gstin: party ? party.gstin : (document.getElementById('gstr-gstin').value||null),
+        invoice_no: document.getElementById('gstr-invno').value,
+        invoice_date: document.getElementById('gstr-invdate').value||null,
+        taxable_amt: parseFloat(document.getElementById('gstr-taxable').value)||0,
+        cgst_amt: parseFloat(document.getElementById('gstr-cgst').value)||0,
+        sgst_amt: parseFloat(document.getElementById('gstr-sgst').value)||0,
+        igst_amt: parseFloat(document.getElementById('gstr-igst').value)||0
+      };
+      if(!data.invoice_no) return alert('Invoice No is required');
+      const { error } = await erp.from('gst_records').insert(data);
+      if(error) return alert('Error: '+error.message);
+      closeGSTRModal();
+      await loadGSTR(); await loadReconciliation();
+    }
+    async function deleteGSTR(id) { if(!confirm('Delete this record?')) return; await erp.from('gst_records').delete().eq('id',id); await loadGSTR(); await loadReconciliation(); }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

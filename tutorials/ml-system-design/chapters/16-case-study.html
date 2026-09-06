@@ -1,0 +1,82 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>16. Case Study — ML System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>16. Case Study: Recommendation System</h1>
+<p>Design a production recommendation system for an e-commerce platform with 50M users and 5M products. Homepage recommendations, product page similar items, checkout cross-sells.</p>
+<h2>Requirements</h2>
+<ul>
+<li><strong>Functional:</strong> Personalized home page recommendations, similar products on product page, frequently-bought-together on checkout.</li>
+<li><strong>Non-functional:</strong> p99 &lt; 200ms homepage, 10K QPS peak, 99.95% uptime, recommendations update within 1 hour of user action.</li>
+</ul>
+<h2>Scale Estimation</h2>
+<pre><code>MAU: 50M → DAU: ~20M (40%)
+Homepage loads/day: 40M (2 per user)
+Peak QPS: 10,000 (including holiday surge)
+Products per recommendation: 20
+Features per user: ~200, per product: ~100
+Feature vector size: ~300 × 8 bytes = 2.4KB</code></pre>
+<h2>Architecture: Two-Stage Retrieval + Ranking</h2>
+<p><strong>Stage 1: Retrieval (candidate generation)</strong> — Retrieve 500 candidate products per user from multiple sources:</p>
+<ul>
+<li>Collaborative filtering (Matrix Factorization embeddings)</li>
+<li>Content-based (product category similarity)</li>
+<li>Trending / popular (cold-start for new users)</li>
+</ul>
+<p><strong>Stage 2: Ranking</strong> — Score 500 candidates with a deep neural network:</p>
+<ul>
+<li>User embedding (128-dim, stored in Redis)</li>
+<li>Product embedding (128-dim, stored in Redis)</li>
+<li>Cross features (user-product interactions)</li>
+<li>Context features (time of day, device type)</li>
+<li>Output: top-20 ranked products</li>
+</ul>
+<p><strong>Stage 3: Post-processing</strong> — Business rules, diversity, personalization boost.</p>
+<h2>Caching Strategy</h2>
+<table>
+<tr><th>Cache</th><th>Key</th><th>TTL</th><th>Store</th></tr>
+<tr><td>Homepage recs</td><td>user_id</td><td>1 hour</td><td>Redis</td></tr>
+<tr><td>Similar products</td><td>product_id</td><td>24 hours</td><td>Redis</td></tr>
+<tr><td>User embeddings</td><td>user_id</td><td>1 hour</td><td>Redis</td></tr>
+<tr><td>Product embeddings</td><td>product_id</td><td>24 hours</td><td>Redis</td></tr>
+<tr><td>Trending (per category)</td><td>category + region</td><td>5 minutes</td><td>Redis</td></tr>
+</table>
+<h2>Data Pipeline</h2>
+<pre><code># Offline training (daily)
+1. Load 30 days of interaction data (clicks, purchases, cart adds)
+2. Compute user and product embeddings (Matrix Factorization, 128-dim)
+3. Train ranking model (DNN with cross features)
+4. Evaluate → register if metrics improve
+
+# Online feature computation (streaming)
+Real-time events → Kafka → Flink → update embeddings
+Invalidate caches for affected users/products
+
+# Batch feature computation (hourly)
+Popularity scores, "frequently bought together" pairs, price elasticity</code></pre>
+<h2>Key Trade-offs</h2>
+<ul>
+<li><strong>Personalization vs cold-start:</strong> Blend trending items for new users, increase personalization as data accumulates.</li>
+<li><strong>Freshness vs stability:</strong> Micro-batch embedding updates every 5 minutes instead of real-time to avoid thrashing.</li>
+<li><strong>Diversity vs relevance:</strong> Apply diversity penalty (MMR — Maximum Marginal Relevance) to avoid showing 20 products from same brand.</li>
+</ul>
+<div class="exercise"><strong>Exercise:</strong> Extend this system with a real-time session-based component. The user's current browsing session (last 5 clicks) should instantly adjust recommendations without waiting for daily retraining. Describe: session vector computation, storage (which DB?), blending with long-term embeddings, and the additional latency budget.</div>
+<nav><a href="15-trade-offs.html">&larr; Previous</a><a href="../index.html">Index</a><a href="17-interview-prep.html">Next: Interview Prep &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

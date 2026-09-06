@@ -1,0 +1,100 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>19. Case Study — AI System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>19. Case Study: Recommendation Engine</h1>
+<p>Design a production recommendation engine for an e-commerce platform with 50M users and 5M products. The system must serve personalized product recommendations on the homepage, product page, and checkout page.</p>
+<h2>Requirements</h2>
+<ul>
+<li><strong>Functional:</strong> Show personalized product recommendations to each user. Support "similar products" on product pages. Support "frequently bought together" on checkout.</li>
+<li><strong>Non-functional:</strong> p99 latency &lt; 200ms for homepage, 500M DAU, 10K QPS peak, 99.95% uptime. Recommendations must update within 1 hour of user action.</li>
+</ul>
+<h2>Scale Estimation</h2>
+<pre><code>MAU: 50M → DAU: ~20M (40%)
+Homepage loads per day: 40M (2 per user per day)
+Peak QPS: ~2,000 with 5x holiday surge → 10,000 QPS
+Products per recommendation: 20
+Total recommendations per day: 40M × 20 = 800M
+
+Features per user: ~200 (demographics, purchase history, browsing, etc.)
+Features per product: ~100 (category, price, rating, inventory, etc.)
+Feature store read per request: ~300 features × 8 bytes ≈ 2.4KB</code></pre>
+<h2>Architecture</h2>
+<p>The recommendation system uses a two-stage retrieval + ranking architecture:</p>
+<pre><code># Two-stage pipeline
+Stage 1: Retrieval (candidate generation)
+  Retrieve 500 candidate products per user
+  Methods:
+    - Collaborative filtering (matrix factorization)
+    - Content-based filtering (product category similarity)
+    - Trending / popular items (cold-start fallback)
+
+Stage 2: Ranking
+  Score and rank the 500 candidates using a deep neural network
+  Features: user embeddings, product embeddings, cross features, context
+  Output: top-20 ranked products
+
+Stage 3: Post-processing
+  Apply business rules (exclude out-of-stock, respect price filters)
+  Apply diversity rules (don't show 20 products from the same brand)
+  Apply personalization rules (boost categories user browsed recently)</code></pre>
+<h2>Caching Strategy</h2>
+<table>
+<tr><th>Cache Type</th><th>Key</th><th>TTL</th><th>Rationale</th></tr>
+<tr><td>Homepage recommendations</td><td>user_id + page</td><td>1 hour</td><td>Slow-changing for most users</td></tr>
+<tr><td>Similar products</td><td>product_id</td><td>24 hours</td><td>Product similarity changes rarely</td></tr>
+<tr><td>Product embeddings</td><td>product_id</td><td>24 hours</td><td>Stored in Redis, recomputed daily</td></tr>
+<tr><td>User embeddings</td><td>user_id</td><td>1 hour</td><td>Updated after purchase/click</td></tr>
+<tr><td>Trending products</td><td>category + region</td><td>5 minutes</td><td>Changes with real-time trends</td></tr>
+</table>
+<h2>Data Pipeline</h2>
+<pre><code># Offline training (daily at midnight)
+1. Load user interaction logs (clicks, purchases, cart adds) from past 30 days
+2. Compute user and product embeddings (Matrix Factorization, 128-dim)
+3. Train ranking model (DNN with cross features)
+4. Evaluate on held-out test set
+5. Register if metrics improve
+
+# Online feature computation (streaming)
+Real-time events (click, add-to-cart, purchase):
+  → Kafka → feature update → invalidate relevant caches
+  → Update user embedding incrementally
+
+# Batch feature computation (hourly)
+Compute aggregated features:
+  - Popularity scores per category
+  - "Frequently bought together" pairs
+  - Price elasticity per segment</code></pre>
+<h2>Monitoring</h2>
+<ul>
+<li><strong>Business metrics:</strong> Click-through rate, conversion rate, revenue per recommendation.</li>
+<li><strong>System metrics:</strong> Latency p50/p95/p99, retrieval count, cache hit ratio, feature fetch time.</li>
+<li><strong>Model metrics:</strong> Prediction distribution, feature drift, user embedding drift.</li>
+<li><strong>A/B testing:</strong> Continuous comparison of champion vs challenger models.</li>
+</ul>
+<h2>Key Trade-offs</h2>
+<ul>
+<li><strong>Personalization vs cold-start:</strong> New users have no history → rely on trending/popular items. Gradually blend in personalized recommendations as data accumulates.</li>
+<li><strong>Freshness vs stability:</strong> Real-time embedding updates improve freshness but can cause thrashing. Micro-batch updates every 5 minutes balance both.</li>
+<li><strong>Diversity vs relevance:</strong> Strictly relevant recommendations may all be from one category. Apply diversity penalty during ranking.</li>
+</ul>
+<div class="exercise"><strong>Exercise:</strong> Extend this recommendation engine to include a "real-time session-based" component that uses the user's current browsing session (last 5 clicks) to adjust recommendations instantly, without waiting for daily retraining. Describe: a) how you compute session vectors, b) where you store them, c) how they blend with the user's long-term profile, d) the latency budget for the session component.</div>
+<nav><a href="18-security.html">&larr; Previous</a><a href="../index.html">Index</a><a href="20-trade-offs.html">Next: Trade-Offs &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

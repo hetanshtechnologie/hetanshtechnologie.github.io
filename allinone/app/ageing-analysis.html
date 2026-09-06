@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ageing Analysis — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}td{padding:6px 10px;}.age-0{background:#dcfce7}.age-1-30{background:#fef9c3}.age-31-60{background:#fed7aa}.age-61-90{background:#fecaca}.age-90{background:#fca5a5}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Ageing Analysis</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-7xl mx-auto p-6">
+    <div class="flex gap-4 mb-6 items-center">
+      <button onclick="loadData('receivable')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white active" data-type="receivable">Receivables</button>
+      <button onclick="loadData('payable')" class="px-4 py-2 rounded-lg text-sm font-semibold bg-gray-200 text-gray-700" data-type="payable">Payables</button>
+      <select id="age-as-of" class="border rounded px-2 py-1.5 text-sm" onchange="loadData()">
+        <option value="">As of today</option>
+      </select>
+      <button onclick="exportAgeing()" class="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700">Export CSV</button>
+    </div>
+    <div id="kpi" class="grid grid-cols-4 gap-3 mb-6"></div>
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+      <div id="loading" class="text-center text-gray-400 py-8">Loading...</div>
+      <div id="content" class="hidden overflow-x-auto"></div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId, activeType = 'receivable', currentData = [];
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const user = await requireLogin(); if(!user) return;
+      orgId = await getOrgId(); if(!orgId) return;
+      const sel = document.getElementById('age-as-of');
+      for(let i=0; i<12; i++) { const d=new Date(); d.setMonth(d.getMonth()-i); const v=d.toISOString().split('T')[0]; const o=new Option(d.toLocaleDateString('en-IN',{month:'long',year:'numeric'}),v); sel.appendChild(o); }
+      loadData();
+    });
+
+    async function loadData(type) {
+      if(type) { activeType = type;
+        document.querySelectorAll('[data-type]').forEach(b => { b.classList.remove('bg-blue-600','text-white','active'); b.classList.add('bg-gray-200','text-gray-700'); if(b.dataset.type===type) { b.classList.add('bg-blue-600','text-white','active'); b.classList.remove('bg-gray-200','text-gray-700'); } });
+      }
+      document.getElementById('loading').classList.remove('hidden'); document.getElementById('content').classList.add('hidden');
+      const asOf = document.getElementById('age-as-of').value || new Date().toISOString().split('T')[0];
+
+      // Get all parties with outstanding
+      const { data: parties } = await erp.from('parties').select('id,name,type,gstin,phone,email,opening_bal,credit_limit').eq('org_id', orgId).eq('is_active', true);
+      const partyType = activeType === 'receivable' ? ['customer','both'] : ['supplier','both'];
+      const filtered = (parties||[]).filter(p => partyType.includes(p.type));
+
+      // Get invoices
+      const { data: invoices } = await erp.from('invoices').select('id,invoice_no,invoice_date,due_date,total,paid_amt,customer_id,status').eq('org_id', orgId).lte('invoice_date', asOf);
+
+      // Get payments
+      const { data: payments } = await erp.from('payments').select('id,party_id,payment_date,amount,mode').eq('org_id', orgId).lte('payment_date', asOf);
+
+      const now = new Date(asOf);
+      const ageing = { '0':0, '1-30':0, '31-60':0, '61-90':0, '90+':0 };
+
+      let rows = filtered.map(p => {
+        const invs = (invoices||[]).filter(i => Number(i.customer_id) === p.id);
+        const pymts = (payments||[]).filter(py => Number(py.party_id) === p.id);
+        const totalBilled = invs.reduce((s,i) => s + Number(i.total||0), 0);
+        const totalPaid = pymts.reduce((s,py) => s + Number(py.amount||0), 0);
+        let outstanding = totalBilled - totalPaid + Number(p.opening_bal||0);
+        if(outstanding < 0) outstanding = 0;
+
+        // Find oldest due date for ageing
+        let oldestDue = null;
+        invs.forEach(i => {
+          if(i.status !== 'paid' && i.status !== 'cancelled') {
+            const d = new Date(i.due_date || i.invoice_date);
+            if(!oldestDue || d < oldestDue) oldestDue = d;
+          }
+        });
+        const days = oldestDue ? Math.floor((now - new Date(oldestDue)) / (1000*60*60*24)) : 0;
+        const bucket = days <= 0 ? '0' : days <= 30 ? '1-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+';
+        ageing[bucket] = (ageing[bucket]||0) + outstanding;
+
+        return { id: p.id, name: p.name, gstin: p.gstin||'', type: p.type, billed: totalBilled, paid: totalPaid, outstanding, days: Math.max(0,days), bucket, credit_limit: p.credit_limit };
+      });
+
+      rows = rows.filter(r => r.outstanding > 0).sort((a,b) => b.outstanding - a.outstanding);
+      currentData = rows;
+
+      document.getElementById('kpi').innerHTML = `
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Total Parties</div><div class="text-lg font-bold">${rows.length}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Total Outstanding</div><div class="text-lg font-bold text-blue-600">${formatCurrency(rows.reduce((s,r)=>s+r.outstanding,0))}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Over 90 Days</div><div class="text-lg font-bold text-red-600">${formatCurrency(ageing['90+'])}</div></div>
+        <div class="bg-white p-3 rounded-lg border text-center"><div class="text-xs text-gray-500">Current (0 days)</div><div class="text-lg font-bold text-green-600">${formatCurrency(ageing['0'])}</div></div>`;
+
+      document.getElementById('loading').classList.add('hidden'); document.getElementById('content').classList.remove('hidden');
+      document.getElementById('content').innerHTML = `
+        <table class="w-full text-sm whitespace-nowrap">
+          <thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">Party</th><th class="text-left p-2 font-semibold">GSTIN</th><th class="text-right p-2 font-semibold">Billed</th><th class="text-right p-2 font-semibold">Paid</th><th class="text-right p-2 font-semibold">Outstanding</th><th class="text-right p-2 font-semibold">Days</th><th class="text-left p-2 font-semibold">Bucket</th><th class="text-left p-2 font-semibold">Credit Limit</th></tr></thead>
+          <tbody>${rows.map(r => `<tr class="border-b ${r.bucket === '0' ? 'age-0' : r.bucket === '1-30' ? 'age-1-30' : r.bucket === '31-60' ? 'age-31-60' : r.bucket === '61-90' ? 'age-61-90' : 'age-90'}">
+            <td class="font-medium">${escapeHtml(r.name)}</td><td>${escapeHtml(r.gstin)}</td>
+            <td class="text-right">${formatCurrency(r.billed)}</td><td class="text-right">${formatCurrency(r.paid)}</td>
+            <td class="text-right font-bold">${formatCurrency(r.outstanding)}</td><td class="text-right">${r.days}</td>
+            <td><span class="px-2 py-0.5 rounded text-xs font-medium ${r.bucket==='0'?'bg-green-100 text-green-700':r.bucket==='90+'?'bg-red-100 text-red-700':'bg-yellow-100 text-yellow-700'}">${r.bucket} days</span></td>
+            <td>${r.credit_limit ? formatCurrency(r.credit_limit) : '-'}</td></tr>`).join('')}
+          </tbody>
+          <tfoot><tr class="font-bold bg-gray-50 border-t"><td colspan="2">Total</td><td class="text-right">${formatCurrency(rows.reduce((s,r)=>s+r.billed,0))}</td><td class="text-right">${formatCurrency(rows.reduce((s,r)=>s+r.paid,0))}</td><td class="text-right">${formatCurrency(rows.reduce((s,r)=>s+r.outstanding,0))}</td><td></td><td></td><td></td></tr></tfoot></table>
+        <div class="mt-4 grid grid-cols-5 gap-2 text-xs">${Object.entries(ageing).map(([k,v]) => `<div class="p-2 rounded text-center font-medium ${k==='0'?'bg-green-100':k==='90+'?'bg-red-100':'bg-yellow-100'}"><span class="text-gray-600">${k} days</span><br><span class="text-lg font-bold">${formatCurrency(v)}</span></div>`).join('')}</div>`;
+    }
+
+    function exportAgeing() {
+      if(!currentData.length) return;
+      let csv = 'Party,GSTIN,Billed,Paid,Outstanding,Days,Bucket\n';
+      currentData.forEach(r => csv += `"${r.name}","${r.gstin}",${r.billed.toFixed(2)},${r.paid.toFixed(2)},${r.outstanding.toFixed(2)},${r.days},"${r.bucket}"\n`);
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download = `${activeType}_ageing.csv`; a.click();
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

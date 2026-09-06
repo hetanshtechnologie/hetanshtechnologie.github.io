@@ -1,0 +1,173 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent-to-Agent Communication — MAF Fundamentals</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <h1>12. Agent-to-Agent Communication</h1>
+
+    <h2>Why Agent-to-Agent Communication?</h2>
+    <p>Real-world workflows require specialized agents collaborating. Instead of one monolithic agent, you create a network of specialists that discover, negotiate, and delegate tasks among themselves. This pattern enables scalability, autonomy, and fault isolation.</p>
+
+    <h2>Communication Patterns</h2>
+    <table>
+      <tr><th>Pattern</th><th>Description</th><th>When to Use</th></tr>
+      <tr><td>Direct Handoff</td><td>Agent passes control to another agent explicitly</td><td>Clear escalation paths, hierarchical teams</td></tr>
+      <tr><td>Pub/Sub (Broadcast)</td><td>Agent publishes a task; subscribers bid or claim</td><td>Open task queues, load balancing</td></tr>
+      <tr><td>Message Broker</td><td>Agents communicate via a shared queue or bus</td><td>Decoupled systems, async workflows</td></tr>
+      <tr><td>Blackboard</td><td>Shared state space where agents read/write</td><td>Collaborative problem solving</td></tr>
+    </table>
+
+    <h2>Direct Handoff in MAF</h2>
+    <p>MAF orchestrators natively support agent-to-agent handoffs. The orchestrator routes context and controls the conversation flow:</p>
+    <pre><code>const triageAgent = new Agent({
+  name: "Triage",
+  instructions: "Route users to the right specialist: Billing or Support.",
+  tools: [
+    new Tool({
+      name: "transferToBilling",
+      handler: (ctx) => orchestrator.handoff("Billing", ctx)
+    }),
+    new Tool({
+      name: "transferToSupport",
+      handler: (ctx) => orchestrator.handoff("Support", ctx)
+    })
+  ]
+});
+
+const billingAgent = new Agent({
+  name: "Billing",
+  instructions: "Handle billing inquiries, invoices, and payments."
+});
+
+const supportAgent = new Agent({
+  name: "Support",
+  instructions: "Handle technical support and troubleshooting."
+});
+
+const orchestrator = new Orchestrator({
+  agents: [triageAgent, billingAgent, supportAgent],
+  defaultAgent: triageAgent
+});</code></pre>
+
+    <h2>Message Broker Pattern with Azure Service Bus</h2>
+    <p>For loosely coupled agent networks, use a message broker. Agents communicate asynchronously through topics and queues:</p>
+    <pre><code>const { ServiceBusClient } = require("@azure/service-bus");
+
+async function publishTask(task) {
+  const sender = sbClient.createSender("agent-tasks");
+  await sender.sendMessages({
+    body: task,
+    sessionId: task.type // enables session-based processing
+  });
+}
+
+class OrderProcessorAgent {
+  async handleMessage(message) {
+    const order = message.body;
+    // Process order, then publish to next stage
+    await publishTask({ type: "fulfillment", orderId: order.id });
+  }
+}</code></pre>
+
+    <h2>Decentralized Agent Discovery</h2>
+    <p>Agents can register themselves in a service registry and discover peers dynamically:</p>
+    <pre><code>class AgentRegistry {
+  constructor() {
+    this.agents = new Map();
+  }
+
+  register(name, capabilities, endpoint) {
+    this.agents.set(name, { capabilities, endpoint, status: "available" });
+  }
+
+  findAgents(capability) {
+    return Array.from(this.agents.entries())
+      .filter(([_, agent]) => agent.capabilities.includes(capability))
+      .map(([name, agent]) => ({ name, endpoint: agent.endpoint }));
+  }
+}
+
+// Agents discover peers at runtime
+const registry = new AgentRegistry();
+registry.register("DataAnalyzer", ["analysis", "charting"], "http://analyzer:5001");
+registry.register("ReportGenerator", ["reporting"], "http://reporter:5002");
+
+const analysts = registry.findAgents("analysis");</code></pre>
+
+    <h2>Negotiation and Task Allocation</h2>
+    <p>In advanced networks, agents negotiate who handles a task. A common approach is a contract-net protocol:</p>
+    <pre><code>class ContractNetProtocol {
+  async solicitBids(task, availableAgents) {
+    const bids = await Promise.all(
+      availableAgents.map(agent => this.requestBid(agent, task))
+    );
+    const winner = bids.reduce((best, bid) =>
+      bid.confidence > best.confidence ? bid : best
+    );
+    return winner;
+  }
+
+  async requestBid(agent, task) {
+    const response = await fetch(`${agent.endpoint}/bid`, {
+      method: "POST",
+      body: JSON.stringify(task)
+    });
+    const { confidence, eta } = await response.json();
+    return { agent, confidence, eta };
+  }
+}</code></pre>
+
+    <h2>Observability in Agent Networks</h2>
+    <p>Distributed tracing is critical. Use correlation IDs and OpenTelemetry to trace messages across agents:</p>
+    <pre><code>const tracer = opentelemetry.trace.getTracer("agent-network");
+
+async function handleMessage(message) {
+  const span = tracer.startSpan("agent.process", {
+    attributes: {
+      "agent.name": this.name,
+      "message.type": message.type,
+      "correlation.id": message.correlationId
+    }
+  });
+  try { await this.process(message); }
+  finally { span.end(); }
+}</code></pre>
+
+    <div class="info">
+      <strong>💡 Key Insight:</strong> Agent-to-agent communication shifts the architecture from "orchestrator-driven" to "agent-driven" — agents decide who to talk to, making the system more resilient and scalable.
+    </div>
+
+    <div class="exercise">
+      <strong>✏️ Exercise:</strong> Design a four-agent network for a pizza delivery service: OrderTaker, Kitchen, Delivery, and Feedback agents. Describe which communication pattern each pair uses and how they handle a "runner out of stock" scenario.
+    </div>
+
+    <nav>
+      <a href="11-custom-model-fine-tuning.html">&larr; Previous</a>
+      <a href="../index.html">Back to Index</a>
+      <a href="13-human-in-the-loop.html">Next: Human-in-the-Loop &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

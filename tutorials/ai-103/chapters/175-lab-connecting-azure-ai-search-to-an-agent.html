@@ -1,0 +1,140 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>175. Lab - Connecting Azure AI Search to an Agent - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 175</span>
+<h1>Lab - Connecting Azure AI Search to an Agent</h1>
+<p>Your index holds enriched, searchable chunks. This lab connects it to an agent so you can hold a conversation grounded in your documents. You will create an agent in Azure AI Agent Service, attach the search index as a tool, and watch the model decide to search, read the results, and answer with sources.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>The <strong>chunked index</strong> <code>docs-index-chunked</code> with vectors from the enrichment lab.</li>
+<li>A <strong>Foundry project</strong> and its connection string (found on the project overview page).</li>
+<li>A deployed chat model, such as <code>gpt-4o-mini</code>, in that project.</li>
+<li>Python 3.9 or later with a virtual environment, and the packages installed:
+<pre><code>pip install azure-ai-projects azure-identity
+</code></pre>
+</li>
+</ul>
+
+<div class="note">
+<p>The code below authenticates with <code>DefaultAzureCredential</code>, which works with <code>az login</code> from the Azure CLI. When you run the script locally, sign in first with <code>az login</code> so the credential can obtain a token for your subscription.</p>
+</div>
+
+<h2>Step 1 - Understand the Tool Definition</h2>
+<p>The search index tool tells the agent that a searchable index exists. It carries the index name and, in this simple setup, a search key for access. During a conversation the agent decides when to call the tool and what to search for; the platform performs the request and hands the top chunks back as tool output.</p>
+
+<div class="warn">
+<p>Putting an API key in the tool definition is fine for a local lab. For production, remove the key and give the agent's identity a role such as <em>Search Index Data Reader</em> on the search service instead — the pattern used later in the capstone project's permissions chapter.</p>
+</div>
+
+<h2>Step 2 - Write the Agent Script</h2>
+<p>Save the following as <code>agent_search.py</code> and replace the three placeholders with your project connection string, index name, and search key:</p>
+<pre><code>from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import SearchIndexTool
+from azure.identity import DefaultAzureCredential
+
+conn_str = "YOUR_PROJECT_CONNECTION_STRING"
+index_name = "docs-index-chunked"
+search_api_key = "YOUR_SEARCH_API_KEY"
+
+project = AIProjectClient.from_connection_string(
+    conn_str=conn_str,
+    credential=DefaultAzureCredential(),
+)
+
+tool = SearchIndexTool(
+    index={"index_name": index_name, "api_key": search_api_key}
+)
+
+agent = project.agents.create_agent(
+    model="gpt-4o-mini",
+    name="docs-assistant",
+    instructions=(
+        "You are a support assistant that answers from the course documents. "
+        "Answer only using the search results you are given. "
+        "If the results do not contain the answer, say that you could not find it. "
+        "Always name the source file you are citing."
+    ),
+    tools=[tool.definition],
+)
+
+thread = project.agents.create_thread()
+
+project.agents.create_message(
+    thread_id=thread.id,
+    role="user",
+    content="How do I reset the device to factory defaults?",
+)
+
+run = project.agents.create_and_process_run(
+    thread_id=thread.id,
+    agent_id=agent.id,
+)
+
+messages = project.agents.list_messages(thread_id=thread.id)
+for message in messages.data:
+    if message.role != "assistant":
+        continue
+    for item in message.content:
+        if hasattr(item, "text"):
+            print(item.text.value)
+        elif hasattr(item, "tool_call"):
+            print("[tool call]", item.tool_call.tool_name)
+</code></pre>
+
+<h2>Step 3 - Run and Observe the Search</h2>
+<p>Run the script from your virtual environment:</p>
+<pre><code>python agent_search.py
+</code></pre>
+<p>The printed output should include two things: a <code>tool call</code> line showing the agent searched the index, and an assistant answer that cites a source file and stays within the retrieved content.</p>
+
+<div class="tip">
+<p>Turn on tracing if you want to see the exact query the model chose and the chunks that were retrieved:</p>
+<pre><code>pip install azure-monitor-opentelemetry azure-ai-projects[telemetry]
+</code></pre>
+<p>Then inspect the tool call arguments in the trace to judge whether the model composed good search terms.</p>
+</div>
+
+<h2>Step 4 - Try Questions That Need No Search</h2>
+<p>The point of an agent is that it decides. Ask a greeting — <em>"Hi, what can you help me with?"</em> — and then a grounded question. The first should not trigger a tool call; the second should. If the agent searches on the greeting, tighten the instructions so it only queries when the index is actually needed.</p>
+
+<h2>Step 5 - Create the Same Agent in the Portal (Optional)</h2>
+<p>To see the same wiring without code: open your Foundry project, create an agent, choose your chat model, then add an <strong>Index</strong> connection pointing at <code>docs-index-chunked</code>. Set the same grounding instructions in the agent's system message and chat in the playground. The portal path and the SDK path configure the same capabilities.</p>
+
+<div class="note">
+<p>If you use the portal's index connection instead of the code tool, retrieval may run automatically for every message rather than at the model's discretion. That is fine for demo purposes; the code tool is what gives you the explicit control most production agents need.</p>
+</div>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td>Script exits with a credential error</td><td>No Azure token available</td><td>Run <code>az login</code> and retry.</td></tr>
+<tr><td>Agent never calls the tool</td><td>Instructions too vague or no tool attached</td><td>Confirm <code>tools=[tool.definition]</code> and describe when to search.</td></tr>
+<tr><td><code>Index not found</code> in tool call</td><td>Index name or key mismatch</td><td>Verify <code>index_name</code> and the key via <code>az search index list</code>.</td></tr>
+<tr><td>Answers not grounded</td><td>Model answers from training</td><td>Strengthen the instruction to answer only from results.</td></tr>
+<tr><td>Empty result set</td><td>Index empty or terms absent</td><td>Check <code>documentCount</code>; re-run the enrichment indexer.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You attached your chunked search index to an agent as a tool, ran a grounded conversation from Python, verified the model both searched and cited sources, and reproduced the setup through the portal. Your agent now answers from your documents instead of its training data. The next chapter is the section quiz that reviews the whole search arc.</p>
+<nav>
+<a href="174-connecting-azure-ai-search-to-an-agent.html">&larr; Previous: Connecting Azure AI Search to an Agent</a><a href="176-section-quiz.html">Next: Section Quiz &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DB Sharding Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:1000px;margin:24px auto;padding:0 16px}
+.shard-grid{display:flex;gap:12px;justify-content:center;margin:16px 0;flex-wrap:wrap}
+.shard{background:#1e293b;border:2px solid #334155;border-radius:12px;padding:14px;width:200px;min-height:120px;transition:all .2s}
+.shard.dragover{border-color:#38bdf8;background:rgba(56,189,248,.05)}
+.shard h3{font-size:13px;color:#f8fafc;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.shard h3::before{content:'';width:8px;height:8px;border-radius:50%;display:inline-block}
+.shard.s0 h3::before{background:#4ade80}
+.shard.s1 h3::before{background:#38bdf8}
+.shard.s2 h3::before{background:#a78bfa}
+.shard.s3 h3::before{background:#fbbf24}
+.shard-items{min-height:60px}
+.shard-item{background:#334155;border-radius:6px;padding:6px 10px;font-size:11px;margin-bottom:4px;display:flex;justify-content:space-between;animation:fadeIn .3s}
+@keyframes fadeIn{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
+.incoming-data{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.incoming-data h3{margin-bottom:12px}
+.data-pool{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:16px}
+.data-item{background:#334155;border:2px solid #475569;border-radius:8px;padding:8px 14px;font-size:12px;cursor:grab;transition:all .2s;user-select:none}
+.data-item:active{cursor:grabbing;border-color:#38bdf8}
+.data-item.placed{opacity:.4;border-color:#4ade80;pointer-events:none}
+.data-item.highlight{border-color:#38bdf8;box-shadow:0 0 10px rgba(56,189,248,.3)}
+.shard-strategy{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0}
+.shard-strategy h3{font-size:14px;margin-bottom:12px}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.balance-bar{display:flex;align-items:center;gap:4px;margin-top:8px;height:8px;background:#334155;border-radius:4px;overflow:hidden}
+.balance-fill{height:100%;border-radius:4px;transition:width .3s}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>Database Sharding</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/15</div>
+<div class="hud-item"><span id="balance">100%</span>Balance</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="shard-grid" id="shards"></div>
+<div class="incoming-data">
+<h3 id="data-title">Route Data to Shards</h3>
+<div class="data-pool" id="data-pool"></div>
+<p style="color:#94a3b8;font-size:13px" id="data-hint">Choose the best sharding strategy for even distribution</p>
+</div>
+<div class="shard-strategy">
+<h3>Select Sharding Strategy</h3>
+<div class="choices" id="choices"></div>
+</div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Sharding Expert!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=15,answered=false;
+let shards=[[],[],[],[]];
+const strategies=[
+{name:'Range Sharding',desc:'Divide by value ranges (e.g., A-H, I-P, Q-Z)',bestFor:'Sequential data, time-series'},
+{name:'Hash Sharding',desc:'Hash key % num_shards',bestFor:'Even distribution, random access'},
+{name:'Directory-Based',desc:'Lookup table maps keys to shards',bestFor:'Flexible, complex routing'},
+{name:'Geo-Based',desc:'Shard by geographic region',bestFor:'Location-aware services'},
+{name:'Consistent Hashing',desc:'Hash ring with virtual nodes',bestFor:'Dynamic shard addition/removal'}
+];
+const datasets=[
+{type:'user_id',data:['user:1001','user:1002','user:1003','user:1004','user:1005','user:1006'],best:'Hash Sharding',reason:'User IDs are uniform — hash for even distribution'},
+{type:'timestamp',data:['2024-01','2024-02','2024-03','2024-04','2024-05','2024-06'],best:'Range Sharding',reason:'Time-series data is naturally ordered — range sharding enables efficient range queries'},
+{type:'region',data:['US-East','US-West','EU-West','EU-East','AP-South','AP-East'],best:'Geo-Based',reason:'Geographic data should be co-located with users for low latency'},
+{type:'order_id',data:['ORD-7821','ORD-3456','ORD-9012','ORD-1122','ORD-5566','ORD-8899'],best:'Hash Sharding',reason:'Order IDs are random — hash for even distribution across shards'},
+{type:'tenant',data:['tenant-A','tenant-B','tenant-C','tenant-D','tenant-E','tenant-F'],best:'Directory-Based',reason:'Multi-tenant systems benefit from directory-based routing for flexibility'},
+{type:'product_sku',data:['SKU-AAA','SKU-BBB','SKU-CCC','SKU-DDD','SKU-EEE','SKU-FFF'],best:'Range Sharding',reason:'SKUs with prefix patterns work well with range sharding'},
+{type:'session',data:['sess:x8k2','sess:m9p3','sess:j4l7','sess:n6q1','sess:r2t5','sess:w3y8'],best:'Hash Sharding',reason:'Session IDs are random — hash distributes evenly'},
+{type:'email',data:['a@mail.com','b@mail.com','c@mail.com','d@mail.com','e@mail.com','f@mail.com'],best:'Hash Sharding',reason:'Emails are uniformly distributed — hash for even spread'},
+{type:'transaction',data:['TXN-100','TXN-200','TXN-300','TXN-400','TXN-500','TXN-600'],best:'Hash Sharding',reason:'Transaction IDs should be evenly distributed'},
+{type:'log_entry',data:['LOG-ERROR','LOG-INFO','LOG-WARN','LOG-DEBUG','LOG-TRACE','LOG-FATAL'],best:'Directory-Based',reason:'Log types need flexible routing rules'},
+{type:'sensor_id',data:['S-001','S-002','S-003','S-004','S-005','S-006'],best:'Hash Sharding',reason:'Sensor IDs are sequential — hash prevents hotspots'},
+{type:'country',data:['US','UK','DE','FR','JP','IN'],best:'Geo-Based',reason:'Country data is inherently geographic'},
+{type:'date_range',data:['2024-Q1','2024-Q2','2024-Q3','2024-Q4','2025-Q1','2025-Q2'],best:'Range Sharding',reason:'Quarterly data is sequential — range sharding is natural'},
+{type:'chat_room',data:['room:abc','room:def','room:ghi','room:jkl','room:mno','room:pqr'],best:'Consistent Hashing',reason:'Chat rooms grow dynamically — consistent hashing handles resize'},
+{type:'inventory_sku',data:['INV-001','INV-002','INV-003','INV-004','INV-005','INV-006'],best:'Hash Sharding',reason:'Inventory items should distribute evenly'}
+];
+function init(){
+score=0;round=0;shards=[[],[],[],[]];
+renderShards();startRound();
+}
+function renderShards(){
+const el=document.getElementById('shards');
+el.innerHTML=shards.map((s,i)=>{
+const colors=['#4ade80','#38bdf8','#a78bfa','#fbbf24'];
+const load=Math.min(100,s.length*20);
+return`<div class="shard s${i}" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="dropData(event,${i});this.classList.remove('dragover')">
+<h3>Shard ${i+1} (${s.length} items)</h3>
+<div class="shard-items">${s.map(item=>`<div class="shard-item"><span>${item}</span><span style="color:${colors[i]};font-size:10px">✓</span></div>`).join('')||'<div style="color:#475569;font-size:11px;padding:8px">Empty</div>'}</div>
+<div class="balance-bar"><div class="balance-fill" style="width:${load}%;background:${colors[i]}"></div></div>
+</div>`;
+}).join('');
+}
+function startRound(){
+answered=false;
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+const ds=datasets[round%datasets.length];
+document.getElementById('data-title').textContent=`Route ${ds.type} data`;
+document.getElementById('data-hint').textContent=`Best strategy: ${ds.best}`;
+const pool=document.getElementById('data-pool');
+pool.innerHTML=ds.data.map((d,i)=>`<div class="data-item" draggable="true" ondragstart="dragData(event,'${d}')" id="dp-${i}">${d}</div>`).join('');
+const choices=document.getElementById('choices');
+const opts=strategies.map(s=>s.name).sort(()=>Math.random()-.5);
+choices.innerHTML=opts.map(n=>`<button class="choice-btn" onclick="answer('${n}','${ds.best}','${ds.reason.replace(/'/g,"\\'")}')">${n}</button>`).join('');
+}
+let dragItem='';
+function dragData(e,item){dragItem=item;e.dataTransfer.setData('text',item);}
+function dropData(e,shardIdx){
+e.preventDefault();
+if(answered||!dragItem)return;
+shards[shardIdx].push(dragItem);
+const itemEl=document.querySelector(`[id^="dp-"]:not(.placed)`);
+if(itemEl)itemEl.classList.add('placed');
+renderShards();dragItem='';
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect)score+=10;else score=Math.max(0,score-5);
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=`${correct}: ${reason}`;
+document.getElementById('score').textContent=score;
+// balance calc
+const counts=shards.map(s=>s.length);
+const avg=counts.reduce((a,b)=>a+b,0)/4;
+const balance=avg?Math.round(100-Math.max(...counts.map(c=>Math.abs(c-avg)))*15):100;
+document.getElementById('balance').textContent=Math.max(0,Math.min(100,balance))+'%';
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;
+}
+init();
+</script>
+</body>
+</html>

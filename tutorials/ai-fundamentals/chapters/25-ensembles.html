@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 25: Ensemble Methods: Bagging &amp; Boosting | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 25</span>
+    <h1>Ensemble Methods: Bagging &amp; Boosting</h1>
+
+    <p>The previous chapter showed that a single decision tree overfits easily. The fix is one of the most powerful ideas in machine learning: instead of trusting one model, combine many. This chapter builds the three great families of ensembles — bagging (random forests), classic boosting (AdaBoost), and modern gradient boosting (including XGBoost) — and walks through a complete random forest regression project.</p>
+
+    <h2>Bagging and Boosting: Ensemble Techniques</h2>
+    <p>An ensemble is a collection of weak-ish models whose outputs are combined. Bagging and boosting are the two main recipes for building one.</p>
+    <ul>
+        <li><strong>Bagging</strong> (bootstrap aggregating): train many models in parallel, each on its own random sample of the training rows (drawn with replacement). For regression, predictions are averaged; for classification, models vote and the majority wins. Because each sample is different, the models disagree in useful ways and their errors partially cancel out.</li>
+        <li><strong>Boosting</strong>: train models sequentially, each one focusing on the mistakes of its predecessors. Later models see more of the data that earlier models got wrong, and each model votes with a weight proportional to its skill.</li>
+    </ul>
+    <p>Both approaches turn weak learners into strong ones. Bagging mainly reduces variance; boosting reduces both bias and variance.</p>
+
+    <h2>Random Forest Regression</h2>
+    <p>A random forest is bagging applied to decision trees with one crucial twist: at every split, each tree may only consider a random subset of the features. This forces the trees to disagree even more, and averaging over more disagreement reduces variance further.</p>
+    <p>For regression, every tree outputs a number and the forest returns the mean of those numbers. For classification, each tree votes and the most popular class wins. The two dominant controls are <code>n_estimators</code> (number of trees) and <code>max_depth</code> (how deep each tree may grow).</p>
+    <pre><code>from sklearn.ensemble import RandomForestRegressor
+
+rf = RandomForestRegressor(n_estimators=100, max_depth=6, random_state=42)
+rf.fit(X_train, y_train)
+print(rf.score(X_test, y_test))</code></pre>
+
+    <h2>Problem Classification for a Random Forest Project</h2>
+    <p>Before writing code, classify the task. Ask three questions:</p>
+    <ul>
+        <li>Is the target <strong>continuous</strong> (a price, a score) or <strong>categorical</strong> (a class label)? That decides regressor versus classifier.</li>
+        <li>What is the <strong>evaluation metric</strong>? Use R-squared and MAE for regression; accuracy, precision, recall or F1 for classification.</li>
+        <li>How much data do we have? Forests shine with thousands of rows and many features; for tiny datasets a simpler model may generalize better.</li>
+    </ul>
+    <div class="info">
+        <strong>Why it matters:</strong> forests are robust, need little tuning to beat a single tree, and give a free importance ranking of features (<code>feature_importances_</code>). They are an excellent default choice for tabular data.
+    </div>
+
+    <h2>Feature Engineering (Part 1)</h2>
+    <p>Feature engineering for trees starts with data hygiene. Handle missing values (impute with the median or most frequent value), drop near-duplicate rows, and check data types — dates and strings are usually not what the model wants. Then look at the distribution of each feature with histograms to catch outliers and skewed columns. Trees are invariant to monotone transformations, so you do not need to scale or normalize anything.</p>
+
+    <h2>Feature Engineering (Part 2)</h2>
+    <p>Next, encode categorical columns. Ordinal categories (small/medium/large) can use label encoding; unordered categories should use one-hot encoding so the tree can split on each level individually. Then create derived features that capture structure the raw columns hide — for a car dataset, "age of the car = current year - model year" or "price per kilometre" are informative. Finally, drop redundant columns (two features that are perfectly correlated add noise, not signal).</p>
+
+    <h2>Model Training Steps</h2>
+    <ol>
+        <li>Split the data into train and test sets once, and never touch the test set until the end.</li>
+        <li>Train a default forest and record the baseline score.</li>
+        <li>Tune <code>n_estimators</code>, <code>max_depth</code> and <code>min_samples_leaf</code> with <code>GridSearchCV</code>.</li>
+        <li>Re-fit the best configuration on the full training set and evaluate it once on the held-out test set.</li>
+    </ol>
+
+    <h2>A Random Forest Regression Project</h2>
+    <h3>Problem Statement</h3>
+    <p>Suppose we must predict the selling price of used cars from features like age, mileage, fuel type, transmission, and owner count. The target is continuous, so this is a regression problem, and the natural metrics are MAE and R-squared.</p>
+    <h3>Feature Engineering</h3>
+    <pre><code>import pandas as pd
+from sklearn.model_selection import train_test_split
+
+df = pd.read_csv("cars.csv")
+df["age"] = 2026 - df["year"]                    # derived feature
+df = pd.get_dummies(df, columns=["fuel", "transmission"], drop_first=True)
+df = df.fillna(df.median(numeric_only=True))
+
+X = df.drop(columns=["price"])
+y = df["price"]
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)</code></pre>
+    <h3>Model Training</h3>
+    <pre><code>from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
+
+rf = RandomForestRegressor(n_estimators=150, max_depth=10, min_samples_leaf=3,
+                           random_state=42)
+rf.fit(X_train, y_train)
+
+pred = rf.predict(X_test)
+print("R2 :", round(rf.score(X_test, y_test), 3))
+print("MAE:", round(mean_absolute_error(y_test, pred), 2))
+print(sorted(zip(X.columns, rf.feature_importances_),
+             key=lambda t: t[1], reverse=True)[:5])</code></pre>
+    <p>The feature importances tell you which columns actually drive price — often age and mileage dominate, confirming the intuition behind the engineered features.</p>
+    <div class="note">
+        <strong>Remember:</strong> the forest averages many trees, so it is far harder to overfit than a single tree. If the test score is still far below the train score, tighten <code>max_depth</code> and raise <code>min_samples_leaf</code> rather than adding more trees.
+    </div>
+
+    <h2>Introduction to the AdaBoost Algorithm</h2>
+    <p>AdaBoost (Adaptive Boosting) chains many weak learners instead of averaging parallel ones. The classic weak learner is a <strong>decision stump</strong> — a tree of depth one, which asks a single question. Rather than resampling rows, AdaBoost assigns each training example a weight and adjusts those weights after every stump.</p>
+    <h3>Creating a Decision Tree Stump</h3>
+    <p>Start with equal weights (all 1/N). Train a stump on the weighted data and record its weighted error <code>e</code>. A stump is weak by design, so <code>e</code> is usually less than 0.5 but not near zero.</p>
+    <h3>Performance of a Decision Tree Stump</h3>
+    <p>The stump's importance is its <strong>voting weight</strong>, computed from its error:</p>
+    <pre><code>alpha = 0.5 * ln( (1 - e) / e )</code></pre>
+    <p>When <code>e</code> is small, <code>alpha</code> is large and that stump's vote counts heavily; when <code>e</code> approaches 0.5 (random guessing), <code>alpha</code> approaches 0.</p>
+    <h3>Updating Weights</h3>
+    <p>After each stump, every training example's weight is updated so the next stump is forced to pay attention to the hard cases:</p>
+    <pre><code>misclassified:  w = w * exp(alpha)
+correctly classified: w = w * exp(-alpha)</code></pre>
+    <p>Misclassified points grow heavier; correctly classified points shrink.</p>
+    <h3>Normalizing Weights and Assigning Bins</h3>
+    <p>Divide every weight by the total so they sum to 1 and behave like a probability distribution. Then arrange the points along a line from 0 to 1, each occupying a segment proportional to its weight — these segments are the "bins" used for sampling.</p>
+    <h3>Selecting New Datapoints for the Next Tree</h3>
+    <p>To build the next stump's dataset, draw N points with replacement, where the chance of picking a point equals its bin width. Heavier points (the mistakes) are sampled more often, so each new stump sees a version of the data biased toward what the ensemble currently gets wrong.</p>
+    <h3>Final Prediction for AdaBoost</h3>
+    <p>Prediction is a weighted vote. Every stump predicts, and its vote counts <code>alpha</code> times. The class receiving the largest total weighted vote wins. (For multiclass problems, scikit-learn uses the SAMME variant, which extends the same idea.)</p>
+
+    <h2>AdaBoost in scikit-learn</h2>
+    <h3>AdaBoost Model Training</h3>
+    <pre><code>from sklearn.ensemble import AdaBoostClassifier
+from sklearn.tree import DecisionTreeClassifier
+
+base = DecisionTreeClassifier(max_depth=1, random_state=42)
+ada = AdaBoostClassifier(estimator=base, n_estimators=50,
+                         learning_rate=1.0, random_state=42)
+ada.fit(X_train, y_train)
+print(ada.score(X_test, y_test))</code></pre>
+    <h3>AdaBoost Regressor Training</h3>
+    <p>AdaBoost handles regression too, by reweighting points whose errors are largest:</p>
+    <pre><code>from sklearn.ensemble import AdaBoostRegressor
+
+ada_r = AdaBoostRegressor(n_estimators=50, learning_rate=1.0, random_state=42)
+ada_r.fit(X_train, y_train)
+print(ada_r.score(X_test, y_test))</code></pre>
+    <p>AdaBoost is sensitive to noise: when the data contains many outliers, the boosting weights keep chasing points that are impossible to learn, and performance degrades.</p>
+
+    <h2>Gradient Boosting</h2>
+    <h3>Gradient Boosting Regression</h3>
+    <p>Gradient boosting drops reweighting entirely. Each new tree is fit to the <strong>residuals</strong> (the negative gradient of the loss) of the current ensemble. The recipe is simple:</p>
+    <ol>
+        <li>Start with a constant prediction, usually the mean of the target.</li>
+        <li>Compute the residuals: actual - current prediction.</li>
+        <li>Fit a small tree to predict those residuals.</li>
+        <li>Add the tree's predictions times a learning rate to the ensemble's prediction.</li>
+        <li>Repeat for <code>n_estimators</code> rounds.</li>
+    </ol>
+    <p>Because each tree chases the leftover error, boosting is a low-bias method. The learning rate (often 0.01 to 0.1) controls how hard each tree pushes; smaller rates need more trees but generalize better.</p>
+    <h3>Gradient Boosting Classifier Training</h3>
+    <pre><code>from sklearn.ensemble import GradientBoostingClassifier
+
+gbc = GradientBoostingClassifier(n_estimators=100, max_depth=3,
+                                 learning_rate=0.1, random_state=42)
+gbc.fit(X_train, y_train)
+print(gbc.score(X_test, y_test))</code></pre>
+    <h3>Gradient Boosting Regressor Training</h3>
+    <pre><code>from sklearn.ensemble import GradientBoostingRegressor
+
+gbr = GradientBoostingRegressor(n_estimators=100, max_depth=3,
+                                learning_rate=0.1, random_state=42)
+gbr.fit(X_train, y_train)
+print(gbr.score(X_test, y_test))</code></pre>
+    <p>Gradient boosting usually beats random forests on raw accuracy, but it overfits faster if depth or the number of estimators is too large — treat validation curves as a must.</p>
+
+    <h2>XGBoost: The Champion Ensemble</h2>
+    <h3>XGBoost Classification Intuition</h3>
+    <p>XGBoost (Extreme Gradient Boosting) is gradient boosting with serious engineering and regularization. Three ideas set it apart:</p>
+    <ul>
+        <li><strong>Second-order objective:</strong> it uses both the first derivative (gradient, g) and second derivative (Hessian, h) of the loss, so the direction of each step is more accurate.</li>
+        <li><strong>Regularized trees:</strong> the objective includes a complexity penalty on the number of leaves, which directly fights overfitting.</li>
+        <li><strong>Column subsampling:</strong> like random forests, each split can use only a random subset of features, adding further diversity.</li>
+    </ul>
+    <p>Each leaf's score is closed-form. For a leaf with gradients summing to <code>G</code> and Hessians summing to <code>H</code>, the optimal score is:</p>
+    <pre><code>leaf score = -G / (H + lambda)</code></pre>
+    <p>The <code>lambda</code> term regularizes: a larger lambda shrinks leaf values and prevents huge jumps. XGBoost also handles missing values natively by learning which direction to route them, which removes a whole preprocessing step.</p>
+    <h3>XGBoost Regressor</h3>
+    <p>For regression the loss is squared error, whose Hessian is constant, so the math simplifies — but the same regularization and subsampling machinery applies, making XGBoost just as powerful for continuous targets.</p>
+    <h3>Model Training with XGBoost</h3>
+    <pre><code>import xgboost as xgb
+
+xgb_clf = xgb.XGBClassifier(n_estimators=100, max_depth=4,
+                            learning_rate=0.1, subsample=0.8, random_state=42)
+xgb_clf.fit(X_train, y_train)
+print(xgb_clf.score(X_test, y_test))</code></pre>
+    <h3>XGBoost Regressor Training</h3>
+    <pre><code>xgb_reg = xgb.XGBRegressor(n_estimators=150, max_depth=4,
+                            learning_rate=0.05, subsample=0.8, random_state=42)
+xgb_reg.fit(X_train, y_train)
+print(xgb_reg.score(X_test, y_test))</code></pre>
+    <p>XGBoost ships with its own plotting utilities (<code>xgb.plot_importance</code>) and built-in cross-validation, and it is the go-to baseline for tabular competition data.</p>
+
+    <div class="info">
+        <strong>Choosing an ensemble:</strong> start with a random forest when you want robustness and quick, understandable results; switch to gradient boosting or XGBoost when maximum accuracy matters and you can afford tuning time. AdaBoost is worth knowing but is fragile with noisy data, so modern projects usually prefer gradient-based variants.
+    </div>
+
+    <div class="exercise">
+        <strong>Practice:</strong> load a small tabular regression dataset (for example the scikit-learn <code>california_housing</code> or <code>diabetes</code> data) and train four models on the same split: <code>RandomForestRegressor</code>, <code>AdaBoostRegressor</code>, <code>GradientBoostingRegressor</code>, and <code>XGBRegressor</code>. Compare their test R-squared and MAE side by side, then check which features each model ranks most important. Write one sentence explaining why the boosted models did or did not outperform the forest.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="24-decision-trees.html">Prev: Decision Trees</a>
+        <a href="26-unsupervised.html">Next: Unsupervised Learning &amp; Dimensionality</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

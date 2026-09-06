@@ -1,0 +1,180 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>60. Writing the OpenAPI Spec for the CloudXeus Orders API - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 60</span>
+<h1>Writing the OpenAPI Spec for the CloudXeus Orders API</h1>
+<p>The CloudXeus orders API now runs in Azure, but an agent still has no idea what it does. The OpenAPI specification is the bridge: a machine-readable document that lists every operation, its inputs, and its outputs. In this chapter you write the complete specification for the three orders operations, mirroring the code you deployed.</p>
+
+<h2>Recap: The Four Sections You Need</h2>
+<p>As covered earlier, an OpenAPI document is built from the same building blocks:</p>
+<ul>
+<li><strong>info</strong> &mdash; title and version of the API.</li>
+<li><strong>servers</strong> &mdash; the base URL that hosts the operations.</li>
+<li><strong>paths</strong> &mdash; one block per endpoint, with one entry per HTTP method.</li>
+<li><strong>components</strong> &mdash; reusable schemas referenced from paths.</li>
+</ul>
+
+<h2>The Server URL</h2>
+<p>The <code>servers</code> block points at the deployed function app. Every path in the document is resolved against this URL, so the <code>/api</code> prefix must be included:</p>
+
+<pre><code>"servers": [
+  {
+    "url": "https://func-cloudxeus-orders-001.azurewebsites.net/api"
+  }
+]</code></pre>
+
+<div class="tip">
+<p>Replace the host with your own function app name. If you later publish a second environment, such as staging, you add another server entry and the agent connection can pick which one to use.</p>
+</div>
+
+<h2>Describing the Three Operations</h2>
+<p>Each operation needs an <code>operationId</code>, a <code>summary</code>, and precise parameter and response definitions. The operationId becomes the tool name in Foundry, so keep them unique and descriptive. The summary is what the model reads when deciding whether to call the tool, so describe the outcome, not the mechanics.</p>
+
+<pre><code>{
+  "openapi": "3.0.1",
+  "info": {"title": "CloudXeus Orders API", "version": "1.0.0"},
+  "servers": [{"url": "https://YOUR_FUNCTION_APP.azurewebsites.net/api"}],
+  "paths": {
+    "/orders/{order_id}": {
+      "get": {
+        "operationId": "get_order",
+        "summary": "Fetch a single CloudXeus order by its order id",
+        "description": "Returns the status, customer email, and total for one order.",
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The requested order",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Order"}
+              }
+            }
+          },
+          "404": {"description": "Order not found"}
+        }
+      }
+    },
+    "/orders": {
+      "get": {
+        "operationId": "list_orders",
+        "summary": "List every order belonging to a customer email",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "query",
+            "required": true,
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The customer's orders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {"$ref": "#/components/schemas/Order"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{order_id}/cancel": {
+      "post": {
+        "operationId": "cancel_order",
+        "summary": "Cancel a CloudXeus order by its order id",
+        "description": "Changes the order status to cancelled. Returns 409 if already cancelled.",
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cancelled order",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Order"}
+              }
+            }
+          },
+          "404": {"description": "Order not found"},
+          "409": {"description": "Order is already cancelled"}
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "customer_email": {"type": "string"},
+          "status": {"type": "string",
+                      "enum": ["placed", "shipped", "cancelled"]},
+          "total": {"type": "number"}
+        },
+        "required": ["id", "customer_email", "status", "total"]
+      }
+    }
+  }
+}</code></pre>
+
+<h2>Reading the Spec Back Against the Code</h2>
+<p>Every endpoint in the function code has a counterpart in the spec:</p>
+<table>
+<tr><th>Function</th><th>Spec entry</th><th>Detail to check</th></tr>
+<tr><td><code>get_order</code></td><td><code>GET /orders/{order_id}</code></td><td>Path parameter marked required, 404 documented</td></tr>
+<tr><td><code>list_orders</code></td><td><code>GET /orders</code></td><td>Query parameter <code>email</code> required</td></tr>
+<tr><td><code>cancel_order</code></td><td><code>POST /orders/{order_id}/cancel</code></td><td>409 documented for the duplicate-cancel case</td></tr>
+</table>
+
+<div class="warn">
+<p>The spec and the code must agree in every detail. If the spec claims a parameter is optional but the code requires it, the agent will build malformed requests and the tool will fail at runtime. Keep the enum of status values in sync with what the code can actually return.</p>
+</div>
+
+<h2>Validating the Document</h2>
+<p>Before you hand the spec to an agent, validate it:</p>
+<ul>
+<li>Paste the JSON into the online Swagger Editor and confirm it parses with no errors.</li>
+<li>Confirm every operationId is unique.</li>
+<li>Confirm every <code>$ref</code> points at a schema that exists in <code>components</code>.</li>
+</ul>
+<p>Save the finished document as <code>cloudxeus-orders-api.openapi.json</code>; you will upload it when you attach the tool to the agent.</p>
+
+<h2>Summary</h2>
+<p>The OpenAPI document turns the deployed API into a tool contract: it names the operations, declares their inputs, and describes their responses, all in a file an agent can read. With the spec written and validated, the next chapter attaches it to a Foundry agent and watches the tool in action.</p>
+<nav>
+<a href="59-lab-building-the-cloudxeus-orders-api-publishing-our-function-code.html">&larr; Previous: Lab - Building the CloudXeus Orders API - Publishing our Function code</a><a href="61-attaching-the-api-to-an-agent-the-openapi-tool-in-action.html">Next: Attaching the API to an Agent - The OpenAPI Tool in Action &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

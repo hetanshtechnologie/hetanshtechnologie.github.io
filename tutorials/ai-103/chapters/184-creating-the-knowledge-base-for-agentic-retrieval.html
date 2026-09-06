@@ -1,0 +1,117 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>184. Creating the Knowledge Base for Agentic Retrieval - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 184</span>
+<h1>Creating the Knowledge Base for Agentic Retrieval</h1>
+<p>With the documents sitting in storage, the next task is to turn them into something an agent can search. That transformation happens in a <strong>knowledge base</strong>: the indexing service reads the source documents, splits them into manageable chunks, converts each chunk into an embedding vector using an embedding model, and stores the results in a vector index. This chapter creates that knowledge base for the CloudXeus documents and verifies that retrieval actually works before any agent is attached.</p>
+
+<h2>What a Knowledge Base Contains</h2>
+<p>A knowledge base is not a copy of the documents. It is a derived, searchable structure with three parts:</p>
+<ul>
+<li><strong>Chunks:</strong> the source text broken into passages small enough for a model to reason over.</li>
+<li><strong>Embeddings:</strong> the numeric vectors that capture the meaning of each chunk, produced by an embedding model.</li>
+<li><strong>Index:</strong> the organized collection of chunks and vectors that a query can search, along with metadata such as the original file name and location.</li>
+</ul>
+<p>When a user asks the agent a question, retrieval converts the question into an embedding, finds the chunks whose vectors are most similar, and hands those passages to the model as context. The model then answers strictly from what was retrieved — this grounding is what keeps responses accurate and traceable.</p>
+
+<h2>How Indexing Works</h2>
+<p>Indexing runs as a pipeline with a few distinct stages:</p>
+<ol>
+<li><strong>Connect to the source.</strong> The service reads the container you prepared in the previous chapter.</li>
+<li><strong>Extract text.</strong> Each file is parsed into readable text, with OCR applied to scanned pages when supported.</li>
+<li><strong>Chunk.</strong> The text is split on natural boundaries such as headings and paragraphs so each chunk stays coherent.</li>
+<li><strong>Embed.</strong> Each chunk is passed through the embedding model to produce a vector.</li>
+<li><strong>Write to the index.</strong> Chunks, vectors, and metadata are stored so they can be searched later.</li>
+</ol>
+
+<div class="note">
+<p>Chunking is a quality lever you will tune more than once. Small chunks are precise but lose surrounding context; large chunks keep context but dilute relevance. Starting with modest chunks that follow document structure, then adjusting based on observed retrieval results, is the standard workflow.</p>
+</div>
+
+<h2>Prerequisites for Indexing</h2>
+<p>Before you create the knowledge base, confirm the pieces from the preceding chapters are in place:</p>
+<ul>
+<li>The <strong>embedding model deployment</strong> you created in the model-deployment chapter — its name is referenced by the index configuration.</li>
+<li>The <strong>storage source</strong> from the previous chapter, reachable and readable.</li>
+<li>The <strong>permissions</strong> assigned in the prerequisite chapter, so the indexing service can authenticate to storage.</li>
+</ul>
+
+<h2>Creating the Knowledge Base in the Foundry Portal</h2>
+<p>In Microsoft Foundry, knowledge bases live inside your project. To create one:</p>
+<ol>
+<li>Open your Foundry project and navigate to the <strong>Knowledge bases</strong> page.</li>
+<li>Click <strong>Create</strong> and give the knowledge base a name, for example <code>cloudxeus-docs</code>.</li>
+<li>Choose the index configuration: the index name, the vector index type, and the embedding deployment.</li>
+<li>Add the storage source by selecting the container <code>cloudxeus-docs</code> from your storage account.</li>
+<li>Confirm the connection details and click <strong>Create</strong>.</li>
+</ol>
+<p>Creation registers the knowledge base and starts the indexing job. Most Foundry UIs let you watch progress from the same page.</p>
+
+<h2>Creating the Knowledge Base with the API</h2>
+<p>The same operation is available through a REST API, which is what your deployment automation will use. Register the knowledge base with a <code>PUT</code> request against your project's endpoint:</p>
+
+<pre><code>PUT https://YOUR_PROJECT_URI/knowledgebases/cloudxeus-docs?api-version=2025-05-01-preview</code></pre>
+
+<p>with a body that describes the index and the source:</p>
+
+<pre><code>{
+  "index": {
+    "indexName": "cloudxeus-docs-index",
+    "indexKind": "vector",
+    "embedding": {
+      "deploymentName": "text-embedding-ada-002",
+      "dimensions": 1536
+    },
+    "instructions": "Split documents on headings and paragraphs, keeping passages short."
+  },
+  "sources": [
+    {
+      "uri": "https://cloudxeusdocsstore.blob.core.windows.net/cloudxeus-docs",
+      "connectionString": "DefaultEndpointsProtocol=https;AccountName=cloudxeusdocsstore;AccountKey=YOUR_KEY;EndpointSuffix=core.windows.net",
+      "documentId": "/sources/cloudxeus-docs"
+    }
+  ]
+}</code></pre>
+
+<div class="warn">
+<p>The connection string contains the storage account key. Prefer a managed identity when the service supports it, and never commit a connection string to source control. If you must use a key, rotate it regularly and store it in a secret store.</p>
+</div>
+
+<h2>Running and Monitoring the Indexing Job</h2>
+<p>After registration, an indexing job begins automatically. As it runs, check these signals:</p>
+<ul>
+<li><strong>Status:</strong> the job moves through queued, running, and completed states.</li>
+<li><strong>Document count:</strong> the number of files successfully processed versus the number attempted.</li>
+<li><strong>Failures:</strong> files that could not be parsed, usually due to an unsupported format or an unreadable scan. Fix the file and re-run the job.</li>
+</ul>
+
+<div class="tip">
+<p>Index in a small batch first — a handful of documents — before pointing the job at the whole container. This gives you fast feedback on chunking and extraction quality without burning time on a large run that needs changes.</p>
+</div>
+
+<h2>Verifying Retrieval</h2>
+<p>A knowledge base that never returns the right passages is worse than no knowledge base. Verify it before wiring in an agent. In the Foundry portal, open the knowledge base and run a test question such as <em>"What is the return policy?"</em>. Look at the chunks that come back: do they actually answer the question, and are they drawn from the right documents? If retrieval misses, adjust chunk size or the embedding model and re-run indexing.</p>
+
+<h2>Summary</h2>
+<p>You registered a knowledge base over the CloudXeus storage source, configured its index and embedding model, ran the indexing job, and checked that retrieval returns relevant chunks. The knowledge base is now ready for agents. In the next chapter you will look at the hard cases — scanned PDFs and tables that span multiple pages — and how to parse them so they index well.</p>
+<nav>
+<a href="183-creating-the-knowledge-source-for-agentic-retrieval.html">&larr; Previous: Creating the Knowledge Source for Agentic Retrieval</a><a href="185-advanced-data-parsing-for-scanned-pdfs-and-multi-page-tables.html">Next: Advanced Data Parsing for Scanned PDFs and Multi-Page Tables &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

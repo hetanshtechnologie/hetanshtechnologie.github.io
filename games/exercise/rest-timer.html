@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rest Timer ⏱️</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+.top-bar{width:100%;padding:12px 20px;background:#1e293b;display:flex;justify-content:space-between;align-items:center}
+.top-bar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.top-bar h1{font-size:18px}
+.game{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;max-width:500px;padding:20px}
+.hidden{display:none}
+.timer-circle{width:250px;height:250px;border-radius:50%;border:8px solid #334155;display:flex;align-items:center;justify-content:center;flex-direction:column;margin:20px 0;position:relative}
+.timer-circle.work{border-color:#22c55e;box-shadow:0 0 30px rgba(34,197,94,0.3)}
+.timer-circle.rest{border-color:#38bdf8;box-shadow:0 0 30px rgba(56,189,248,0.3)}
+.timer-text{font-size:64px;font-weight:bold;font-family:'Courier New',monospace}
+.timer-label{font-size:16px;margin-top:5px}
+.btn-row{display:flex;gap:10px;margin:10px 0}
+.btn{padding:12px 24px;border:none;border-radius:10px;font-size:16px;font-weight:bold;cursor:pointer}
+.btn-start{background:#22c55e;color:#fff}
+.btn-pause{background:#f59e0b;color:#0f172a}
+.btn-stop{background:#ef4444;color:#fff}
+.btn-config{background:#1e293b;color:#e2e8f0;border:2px solid #334155}
+.config-row{display:flex;gap:10px;margin:10px 0;flex-wrap:wrap;justify-content:center}
+.config-item{background:#1e293b;padding:10px 16px;border-radius:10px;text-align:center;min-width:80px}
+.config-item label{font-size:12px;color:#94a3b8;display:block}
+.config-item input{background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:6px;border-radius:6px;width:60px;text-align:center;font-size:16px}
+.interval-display{display:flex;gap:8px;margin:10px 0}
+.interval-dot{width:16px;height:16px;border-radius:50%;background:#334155;transition:all .3s}
+.interval-dot.done{background:#22c55e}
+.interval-dot.current{background:#f59e0b;transform:scale(1.3)}
+.result-card{background:#1e293b;border-radius:16px;padding:30px;text-align:center}
+.result-card h2{color:#22c55e}
+.result-card p{color:#94a3b8;margin:5px 0}
+.play-again{background:#22c55e;color:#fff;border:none;padding:14px 40px;border-radius:12px;font-size:18px;font-weight:bold;cursor:pointer;margin-top:15px}
+.score-display{display:flex;gap:15px;margin:10px 0}
+.score-box{background:#1e293b;padding:10px 18px;border-radius:10px;text-align:center}
+.score-box .label{font-size:12px;color:#94a3b8}
+.score-box .value{font-size:22px;font-weight:bold;color:#22c55e}
+</style>
+</head>
+<body>
+<div class="top-bar"><a href="../index.html">← Back</a><h1>Rest Timer ⏱️</h1><span></span></div>
+<div class="game" id="startScreen">
+  <div style="font-size:80px;animation:bounce 1s infinite">⏱️</div>
+  <style>@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-15px)}}</style>
+  <h2 style="margin:15px 0">Interval Timer</h2>
+  <p style="color:#94a3b8;text-align:center">Set up work/rest intervals<br>and train with structured rest!</p>
+  <div class="config-row">
+    <div class="config-item"><label>Work (s)</label><input type="number" id="workTime" value="30" min="5" max="120"></div>
+    <div class="config-item"><label>Rest (s)</label><input type="number" id="restTime" value="15" min="5" max="120"></div>
+    <div class="config-item"><label>Rounds</label><input type="number" id="roundCount" value="5" min="1" max="20"></div>
+  </div>
+  <button class="play-again btn btn-start" onclick="startInterval()">Start Intervals</button>
+</div>
+<div class="game hidden" id="gameScreen">
+  <div class="score-display">
+    <div class="score-box"><div class="label">ROUND</div><div class="value" id="roundVal">1/5</div></div>
+    <div class="score-box"><div class="label">PHASE</div><div class="value" id="phaseVal">WORK</div></div>
+  </div>
+  <div class="interval-display" id="intervalDots"></div>
+  <div class="timer-circle" id="timerCircle">
+    <div class="timer-text" id="timerText">0:30</div>
+    <div class="timer-label" id="timerLabel">WORK!</div>
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()">Pause</button>
+    <button class="btn btn-stop" onclick="stopInterval()">Stop</button>
+  </div>
+</div>
+<div class="game hidden" id="resultScreen">
+  <div class="result-card">
+    <div style="font-size:80px">🏆</div>
+    <h2>Intervals Done!</h2>
+    <p>Rounds Completed: <span id="finalRounds">0</span></p>
+    <p>Total Time: <span id="finalTime">0:00</span></p>
+    <p>Total Work: <span id="finalWork">0s</span></p>
+    <p>Score: <span id="finalScore">0</span></p>
+    <button class="play-again" onclick="resetGame()">Play Again</button>
+  </div>
+</div>
+<script>
+let workT=30,restT=15,totalRounds=5,currentRound=1,isWork=true,timeLeft=0,timerInt=null,started=false,paused=false,elapsed=0;
+function startInterval(){
+  workT=parseInt(document.getElementById('workTime').value)||30;restT=parseInt(document.getElementById('restTime').value)||15;totalRounds=parseInt(document.getElementById('roundCount').value)||5;
+  document.getElementById('startScreen').classList.add('hidden');document.getElementById('gameScreen').classList.remove('hidden');
+  currentRound=1;isWork=true;timeLeft=workT;elapsed=0;buildDots();updateDisplay();
+  timerInt=setInterval(tick,1000);started=true;paused=false;
+}
+function buildDots(){let d=document.getElementById('intervalDots');d.innerHTML='';for(let i=0;i<totalRounds;i++){let dot=document.createElement('div');dot.className='interval-dot';dot.id='dot'+i;d.appendChild(dot)}updateDots()}
+function updateDots(){for(let i=0;i<totalRounds;i++){let dot=document.getElementById('dot'+i);if(!dot)continue;dot.className='interval-dot';if(i<currentRound-1)dot.classList.add('done');if(i===currentRound-1)dot.classList.add('current')}}
+function tick(){
+  if(paused)return;elapsed++;timeLeft--;
+  if(timeLeft<=0){
+    if(isWork){isWork=false;timeLeft=restT}
+    else{currentRound++;if(currentRound>totalRounds){endGame();return}isWork=true;timeLeft=workT}
+    updateDots();
+  }
+  updateDisplay();
+}
+function updateDisplay(){
+  let m=Math.floor(timeLeft/60),s=timeLeft%60;
+  document.getElementById('timerText').textContent=m+':'+(s<10?'0':'')+s;
+  document.getElementById('timerLabel').textContent=isWork?'WORK!':'REST';
+  document.getElementById('timerLabel').style.color=isWork?'#22c55e':'#38bdf8';
+  document.getElementById('phaseVal').textContent=isWork?'WORK':'REST';
+  document.getElementById('phaseVal').style.color=isWork?'#22c55e':'#38bdf8';
+  document.getElementById('roundVal').textContent=currentRound+'/'+totalRounds;
+  let circle=document.getElementById('timerCircle');circle.className='timer-circle '+(isWork?'work':'rest');
+}
+function togglePause(){paused=!paused;document.getElementById('pauseBtn').textContent=paused?'Resume':'Pause'}
+function stopInterval(){clearInterval(timerInt);endGame()}
+function resetGame(){document.getElementById('resultScreen').classList.add('hidden');document.getElementById('startScreen').classList.remove('hidden');started=false}
+function endGame(){started=false;clearInterval(timerInt);document.getElementById('gameScreen').classList.add('hidden');document.getElementById('resultScreen').classList.remove('hidden');
+  document.getElementById('finalRounds').textContent=Math.max(0,currentRound-1);let m=Math.floor(elapsed/60),s=elapsed%60;
+  document.getElementById('finalTime').textContent=m+':'+(s<10?'0':'')+s;
+  document.getElementById('finalWork').textContent=(Math.max(0,currentRound-1)*workT)+'s';document.getElementById('finalScore').textContent=Math.max(0,currentRound-1)*100}
+</script>
+</body></html>

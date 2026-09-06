@@ -1,0 +1,140 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>135. Lab - Language Detection with Azure Language - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 135</span>
+<h1>Lab - Language Detection with Azure Language</h1>
+<p>Before you can translate, summarize, or route a document, you often need to know what language it is written in. Azure AI Language detects the language of a text and returns the language code plus a confidence score. In this lab you will detect languages for single documents and batches, and interpret confidence to decide when a result is trustworthy.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>The Azure AI Language resource, endpoint, and key from the previous lab.</li>
+<li>The text analytics SDK installed in your <code>ai103-language</code> environment.</li>
+</ul>
+
+<h2>Step 1: Set Up the Client</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Create the detection script</h3>
+<p>Create <code>lang_detect.py</code>:</p>
+<pre><code>import os
+
+from azure.ai.textanalytics import TextAnalyticsClient
+from azure.core.credentials import AzureKeyCredential
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = TextAnalyticsClient(
+    endpoint=os.getenv("AZURE_LANGUAGE_ENDPOINT"),
+    credential=AzureKeyCredential(os.getenv("AZURE_LANGUAGE_KEY")),
+)</code></pre>
+<p>Run the file once to confirm the client builds without error.</p>
+</div>
+
+<h2>Step 2: Detect a Single Document's Language</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Detect and report</h3>
+<p>Append the detection call:</p>
+<pre><code>text = "Die Prüfung der Rohrleitungen ist für Montag geplant."
+
+result = client.detect_language(documents=[text])[0]
+if result.is_error:
+    print("Error:", result.error.code, result.error.message)
+else:
+    print("Language code:", result.primary_language.iso6391_name)
+    print("Language name:", result.primary_language.name)
+    print("Confidence:", result.primary_language.confidence_score)</code></pre>
+<ol>
+<li>Run the script. The service should return <code>de</code> for German with a confidence near 1.0.</li>
+<li>Swap in sentences in English, Spanish, Japanese, and French and note how the <code>iso6391_name</code> changes.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>The detection result is a scored object, not prose: a language code, a human-readable name, and a confidence score. That fixed shape is exactly why this job suits a dedicated service — no prompt parsing, no JSON negotiation, just fields.</p>
+</div>
+
+<h2>Step 3: Detect Languages for a Batch</h2>
+
+<div class="exercise">
+<h3>Exercise 3: One call, many documents</h3>
+<p>Pass a list of documents to a single call:</p>
+<pre><code>batch = [
+    "The quarterly earnings report is ready for review.",
+    "Der neue Sensor wird nächste Woche installiert.",
+    "La factura fue enviada por correo electrónico.",
+    "商品は明日発送されます。",
+    "Rapport mensuel disponible sur le portail.",
+]
+
+results = client.detect_language(documents=batch)
+for i, res in enumerate(results, start=1):
+    if res.is_error:
+        print(f"Doc {i}: error {res.error.code}")
+    else:
+        lang = res.primary_language
+        print(f"Doc {i}: {lang.iso6391_name} ({lang.name}) "
+              f"confidence={lang.confidence_score:.2f}")</code></pre>
+<ol>
+<li>Run the script. Each document should be classified with its own language code and confidence.</li>
+<li>Add a short English sentence such as "Hello, how are you?" and observe how the confidence drops on very short or ambiguous texts compared with longer passages.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>Short texts are the hardest case for any language detector — a single word can be shared by many languages. When you route on language, apply a confidence threshold (for example, 0.8) and send low-confidence documents to a human or a fallback queue instead of guessing.</p>
+</div>
+
+<h2>Step 4: Route by Language</h2>
+
+<div class="exercise">
+<h3>Exercise 4: Build a tiny router</h3>
+<p>Use the detected code to pick a downstream handler:</p>
+<pre><code>def route(text: str) -&gt; str:
+    res = client.detect_language(documents=[text])[0]
+    if res.is_error:
+        return "unclassified"
+    lang = res.primary_language.iso6391_name
+    if res.primary_language.confidence_score &lt; 0.8:
+        return "needs-human-review"
+    mapping = {"en": "english-pipeline", "de": "german-pipeline", "fr": "french-pipeline"}
+    return mapping.get(lang, "other-language-pipeline")
+
+
+samples = [
+    "Refund approved, money returns in five days.",
+    "Le remboursement est approuvé.",
+    "Kurze Nachricht.",
+]
+for s in samples:
+    print(f"{s[:30]!r:35s} -&gt; {route(s)}")</code></pre>
+<ol>
+<li>Run the script. Long, clear sentences route to their pipeline; the very short German phrase should drop below the threshold and be flagged for review.</li>
+<li>Adjust the threshold and rerun to see how the routing decision flips for borderline texts.</li>
+</ol>
+</div>
+
+<h2>Summary</h2>
+<p>You detected the language of single documents and batches with Azure AI Language, read the language code, name, and confidence score, and used those fields to route documents by language with a confidence threshold. In the next lab you will use the same client to extract named entities from text.</p>
+<nav>
+<a href="134-lab-pii-detection-and-redaction-with-azure-language.html">&larr; Previous: Lab - PII Detection and Redaction with Azure Language</a><a href="136-lab-prebuilt-named-entity-recognition-with-azure-language.html">Next: Lab - Prebuilt Named Entity Recognition with Azure Language &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

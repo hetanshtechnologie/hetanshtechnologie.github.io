@@ -1,0 +1,183 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Custom Text Classification and NER - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 9</span>
+<h1>Custom Text Classification and NER</h1>
+
+<h2>When to Use Custom Text Models vs. Prebuilt</h2>
+<p>The prebuilt Azure AI Language APIs handle general-purpose NLP tasks well. They recognize common entities like people and locations, detect sentiment across standard text types, and extract topical key phrases. However, every domain has specialized vocabulary and concepts that prebuilt models do not understand. A medical record contains diagnosis codes and drug names. A legal contract references specific statutes and clauses. A support ticket system uses internal product categories and issue types.</p>
+<p>Custom text models fill this gap. You train them on your own labeled documents to recognize the entities and classifications that matter in your domain. Use custom models when the prebuilt APIs do not recognize your domain-specific terms, when you need to classify documents into categories unique to your organization, or when you need higher accuracy than the general-purpose models provide for your specific content. Do not use custom models when the prebuilt APIs already meet your accuracy requirements, when you lack sufficient labeled training data (minimum 10-15 documents per class), or when you need a quick proof-of-concept without investing in data labeling.</p>
+
+<table>
+<tr><th>Factor</th><th>Prebuilt APIs</th><th>Custom Models</th></tr>
+<tr><td>Training data needed</td><td>None</td><td>Minimum 10-50 labeled documents per class</td></tr>
+<tr><td>Domain coverage</td><td>General purpose</td><td>Domain-specific vocabulary and concepts</td></tr>
+<tr><td>Setup time</td><td>Minutes (call API)</td><td>Days to weeks (label, train, iterate)</td></tr>
+<tr><td>Accuracy on general text</td><td>High</td><td>Variable (depends on data quality)</td></tr>
+<tr><td>Accuracy on domain text</td><td>Low to moderate</td><td>Potentially very high</td></tr>
+<tr><td>Maintenance</td><td>None (Microsoft updates)</td><td>Ongoing (retrain as data evolves)</td></tr>
+</table>
+
+<h2>Custom Text Classification: Single-Label vs. Multi-Label</h2>
+<p>Custom text classification assigns one or more categories to a document. The choice between single-label and multi-label depends on whether your categories are mutually exclusive. Single-label classification assigns exactly one category to each document. This is appropriate for scenarios like routing support tickets to a single department, classifying news articles into one primary topic, or grading documents as pass or fail.</p>
+<p>Multi-label classification assigns zero, one, or multiple categories to each document. This is appropriate when a document could belong to several categories simultaneously. For example, a product review might discuss both "battery life" and "screen quality." A legal document might involve multiple practice areas. A medical record might have multiple diagnoses. Multi-label models are more flexible but require more training data because the model must learn which combinations of labels are valid.</p>
+
+<h2>Custom NER: Entity Extraction for Domain-Specific Terms</h2>
+<p>Custom NER (Named Entity Recognition) lets you define entity types relevant to your domain and train a model to extract them from text. Unlike classification, which categorizes whole documents, NER extracts specific spans of text and labels them with entity types. This is valuable for extracting structured data from unstructured documents.</p>
+<p>Common custom NER use cases include extracting medication names and dosages from clinical notes, identifying contract parties and effective dates from legal agreements, extracting product names and error codes from support tickets, pulling invoice numbers and vendor names from procurement documents, and identifying equipment serial numbers and maintenance dates from service logs.</p>
+
+<h2>Creating a Custom Language Project in Language Studio</h2>
+<p>Azure AI Language Studio provides a graphical interface for creating, training, and deploying custom text models. To get started, navigate to language.cognitive.azure.com and sign in with your Azure credentials. Click on "Custom text classification" or "Custom named entity recognition" to create a new project.</p>
+<p>Before creating a project, ensure you have a Language resource in a region that supports custom features. As of the current release, supported regions include West Europe, East US, and South Central US. The resource must be the Standard S0 tier; the Free F0 tier does not support custom model training.</p>
+<p>When you create a project in Language Studio, you provide a project name, description, the primary language of your documents, and the Azure Language resource to use. Language Studio then creates a storage container in your associated Azure Storage account where training data and model artifacts are stored.</p>
+
+<pre><code># Create a custom language project using the Azure CLI
+# (after setting up the required storage and RBAC permissions)
+az resource create \
+    --resource-group rg-ai102-study \
+    --resource-type Microsoft.CognitiveServices/accounts \
+    --name language-ai102-custom \
+    --location eastus \
+    --kind TextAnalytics \
+    --sku S \
+    --yes</code></pre>
+
+<h2>Labeling Data for Custom Models</h2>
+<p>Data labeling is the most critical step in building custom NLP models. The quality of your labels directly determines model accuracy. For custom text classification, you upload documents in Language Studio and assign one or more classes to each document. You can upload documents in two formats: individual files (one document per file) or a single dataset file with all documents and labels in a JSONL format. The JSONL format is recommended for large datasets because it bundles everything into one manageable file.</p>
+<p>For custom NER, labeling involves selecting text spans within each document and assigning entity types. Language Studio provides a visual labeling interface where you highlight text with your cursor and select the entity type from a dropdown. Each entity span can overlap with others, and you can assign multiple entity types to the same span if needed.</p>
+<p>Best practices for labeling include: labeling all instances of an entity type consistently across all documents, including enough context in each label span to be unambiguous but not including unnecessary surrounding text, balancing the number of labeled instances across entity types, and having at least 10-20 labeled instances per entity type for NER and 10-15 documents per class for classification. Add edge cases to your training data — documents that are borderline between two classes or that contain entities in unusual contexts.</p>
+
+<div class="warn">
+<p>Labeling inconsistencies are the most common cause of poor custom model performance. If one annotator labels "Dr. Smith" as a Person entity and another labels the same term as a Profession entity, the model will be confused. Establish clear labeling guidelines before starting. For production projects, have two annotators independently label the same documents and measure inter-annotator agreement. Resolve disagreements through discussion before training.</p>
+</div>
+
+<div class="exam-tip">
+<h3>Exam Tip: Data Format for Custom Models</h3>
+<p>The AI-102 exam tests your understanding of the data format for custom model training. For custom text classification, documents are labeled with classes. For custom NER, documents are labeled with entity spans defined by offset and length within the text. The training data can be uploaded in Language Studio interactively or imported via the API in JSONL format. Each JSONL line contains the document text and an array of labels. Remember that you cannot mix classification and NER in a single project — you need separate projects for each task type.</p>
+</div>
+
+<h2>Training and Evaluating Custom Models</h2>
+<p>After labeling your data, you start training in Language Studio. The training process splits your labeled data into training, validation, and test sets. The default split allocates 80% for training, 10% for validation, and 10% for testing. You can customize this split if you have specific requirements.</p>
+<p>Training time depends on the dataset size and the model complexity. A small dataset of 100 documents might train in under a minute, while a large dataset of 10,000 documents could take an hour or more. After training completes, Language Studio displays evaluation metrics. For classification, the metrics include precision, recall, and F1 score for each class and overall. For NER, the metrics also include precision, recall, and F1, computed at the entity level — a prediction is correct only if both the entity type and the exact text span match the ground truth.</p>
+
+<table>
+<tr><th>Metric</th><th>Classification</th><th>NER</th><th>What It Measures</th></tr>
+<tr><td>Precision</td><td>Yes</td><td>Yes</td><td>Of the model's predictions, how many were correct</td></tr>
+<tr><td>Recall</td><td>Yes</td><td>Yes</td><td>Of the actual labels, how many did the model find</td></tr>
+<tr><td>F1 Score</td><td>Yes</td><td>Yes</td><td>Harmonic mean of precision and recall</td></tr>
+<tr><td>Confusion Matrix</td><td>Yes</td><td>No</td><td>Shows which classes are commonly confused</td></tr>
+<tr><td>Entity-level F1</td><td>No</td><td>Yes</td><td>F1 computed per entity type</td></tr>
+</table>
+
+<h2>Deploying and Consuming Custom Models via API</h2>
+<p>Once you are satisfied with the evaluation metrics, deploy the model in Language Studio. Deployment makes the model available at a prediction endpoint. You can deploy to a staging slot for testing and a production slot for live traffic. Each deployment has its own endpoint URL. This two-slot approach lets you validate a new model without disrupting production.</p>
+<p>To consume the deployed model, call the prediction endpoint with your documents. The following Python example calls a custom text classification endpoint:</p>
+
+<pre><code>import os
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.textanalytics import TextAnalyticsClient
+
+endpoint = os.environ["LANGUAGE_ENDPOINT"]
+key = os.environ["LANGUAGE_KEY"]
+project_name = "support-ticket-classifier"
+deployment_name = "production"
+
+client = TextAnalyticsClient(
+    endpoint=endpoint,
+    credential=AzureKeyCredential(key)
+)
+
+documents = [
+    "My laptop screen flickers when connected to the charger.",
+    "The invoice for September has incorrect tax calculations."
+]
+
+# Custom text classification uses the begin_* pattern
+poller = client.begin_multi_label_classify(
+    documents,
+    project_name=project_name,
+    deployment_name=deployment_name
+)
+results = list(poller.result())
+
+for i, doc in enumerate(results):
+    if not doc.is_error:
+        print(f"Document {i+1} classifications:")
+        for classification in doc.classifications:
+            print(f"  {classification.category}: {classification.confidence_score:.2%}")
+    else:
+        print(f"Error: {doc.error}")</code></pre>
+
+<p>For custom NER, the API call is similar but uses the <code>begin_recognize_custom_entities</code> method:</p>
+
+<pre><code>poller = client.begin_recognize_custom_entities(
+    documents,
+    project_name=project_name,
+    deployment_name=deployment_name
+)
+results = list(poller.result())
+
+for i, doc in enumerate(results):
+    if not doc.is_error:
+        print(f"Document {i+1} entities:")
+        for entity in doc.entities:
+            print(f"  {entity.text} -> {entity.category} "
+                  f"({entity.confidence_score:.2%})")
+    else:
+        print(f"Error: {doc.error}")</code></pre>
+
+<div class="note">
+<p>Custom model endpoints use the same authentication as prebuilt Language APIs. You can use key-based authentication or Azure AD tokens via managed identity. The endpoint URL for custom models differs from the prebuilt endpoint — it includes the project and deployment names as URL parameters. Each deployment slot consumes prediction transactions at the same rate as the prebuilt API.</p>
+</div>
+
+<h2>Iterative Improvement</h2>
+<p>Building a high-quality custom NLP model is an iterative process. You rarely get excellent results on the first training run. The typical improvement cycle involves analyzing prediction failures on the test set, identifying patterns in the errors, collecting additional labeled examples that address those patterns, retraining the model, and comparing the new evaluation metrics against the previous version.</p>
+<p>Common improvement strategies include: adding more documents for classes with low recall (the model is not finding all instances), tightening label boundaries for entities with low precision (the model is including extra words in entity spans), removing ambiguous documents that contradict each other, adding negative examples (documents that belong to no class) for classification models, and checking for labeling inconsistencies where similar text is labeled differently across documents.</p>
+<p>Language Studio's test set evaluation page provides a detailed breakdown of predictions versus ground truth. For each misclassified document, you can see what the model predicted and what the correct label was. This visibility helps you identify specific gaps in your training data.</p>
+
+<h2>Exporting and Sharing Custom Models</h2>
+<p>Custom models trained in Language Studio are tied to the Language resource in which they were created. You cannot directly export a model to another resource. However, you can export the training data and project configuration as a JSON file, then import it into another Language resource in a different region or subscription. The exported file contains the project schema, all labeled documents, and model configuration but not the trained model weights themselves. After importing, you must retrain the model in the new resource.</p>
+
+<div class="exercise">
+<h3>Exercise: Build a Custom NER Model for Medical Terms</h3>
+<p>Create a custom NER model in Language Studio that extracts medical information from clinical notes. Use the following sample data to create at least 15 documents:</p>
+<pre><code>Patient Smith was prescribed Metformin 500mg twice daily for type 2 diabetes.
+Dr. Johnson noted elevated blood pressure at 140/90 and started Lisinopril 10mg.
+Chest X-ray showed no abnormalities. Patient reports occasional dizziness.</code></pre>
+<ol>
+<li>Create a new Custom NER project in Language Studio named "MedicalEntityExtractor."</li>
+<li>Define entity types: Medication, Dosage, Condition, DoctorName, VitalSign.</li>
+<li>Upload 15-20 clinical note documents (write them yourself covering different medical scenarios).</li>
+<li>Label all entity spans in each document. For example, "Metformin" → Medication, "500mg" → Dosage, "type 2 diabetes" → Condition.</li>
+<li>Train the model and review the evaluation metrics.</li>
+<li>Test the model with three new documents the model has not seen. Note any misclassifications.</li>
+<li>Improve the model by adding 5 more documents focusing on the weakest entity type, then retrain and compare metrics.</li>
+<li>Deploy the model to the staging slot and write a Python script that calls the endpoint with a sample clinical note and prints all detected entities.</li>
+</ol>
+<p>Write a paragraph analyzing the model's performance. Which entity type had the highest F1 score? Which was lowest? Why do you think that is?</p>
+</div>
+
+<h2>Summary</h2>
+<p>Custom text classification and custom NER extend Azure AI Language with domain-specific capabilities. Classification assigns single or multiple labels to documents, while NER extracts specific entity spans. Building a custom model requires creating a project in Language Studio, labeling data with your schema, training the model, evaluating the metrics, and deploying to a prediction endpoint. The API for consuming custom models uses an async polling pattern with project and deployment name parameters. Iterative improvement through error analysis and additional labeling is essential for production-quality results. Custom models cannot replace prebuilt APIs for general NLP tasks, but they dramatically outperform prebuilt models on domain-specific content. The next chapter covers Conversational Language Understanding for building intent and entity models for conversational applications.</p>
+
+<nav>
+<a href="8-nlp-language.html">&larr; Previous: Natural Language Processing</a>
+<a href="10-conversational-language.html">Next: Conversational Language Understanding &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>72. Lab - Agents and Conversations - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 72</span>
+<h1>Lab - Agents and Conversations</h1>
+<p>In this lab you will create an agent and study how it behaves across multiple turns of a conversation. You will see firsthand the difference between a stateless model call and an agent that keeps conversation history, and you will prove that — without any memory features enabled — the agent can only "remember" what appears in the message history you send it. This lab sets the foundation for the next chapter, where you will add persistent memory.</p>
+
+<h2>Objectives</h2>
+<ul>
+<li>Create a prompt agent in the Microsoft Foundry portal.</li>
+<li>Carry out a multi-turn conversation in the agent playground.</li>
+<li>Inspect how conversation history is passed to the model with each turn.</li>
+<li>Call the same model from Python while managing history manually.</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>A Microsoft Foundry project where you have contributor access.</li>
+<li>At least one deployed chat model, such as <code>gpt-4o</code> or <code>gpt-4o-mini</code>.</li>
+<li>Python 3.9 or newer with the <code>openai</code> package installed.</li>
+<li>Your endpoint URL and key available as environment variables.</li>
+</ul>
+
+<h2>Step 1: Create the Agent</h2>
+<p>Start in the Foundry portal, inside your project.</p>
+
+<div class="exercise">
+<h3>Create a prompt agent</h3>
+<ol>
+<li>From the left menu, open <strong>Agents</strong>.</li>
+<li>Click <strong>Create</strong> and choose <strong>Prompt agent</strong>.</li>
+<li>Name the agent <code>convo-demo</code> and select your deployed chat model.</li>
+<li>Paste the following instructions and save:</li>
+</ol>
+<pre><code>You are a helpful assistant. Keep answers short. If the user
+mentions their name or a preference, acknowledge it. Ask one
+clarifying question when a request is ambiguous.
+</code></pre>
+</div>
+
+<h2>Step 2: Have a Multi-Turn Conversation</h2>
+<p>Open the chat panel for your new agent and run a conversation that depends on earlier turns:</p>
+
+<div class="exercise">
+<h3>Chat across several turns</h3>
+<ol>
+<li>Send: <code>My name is Alex and I prefer vegetarian meals.</code></li>
+<li>Send: <code>What was my name again?</code> — the agent answers correctly because the earlier turns are part of the conversation history.</li>
+<li>Send: <code>Suggest a dinner.</code> — the agent should respect the vegetarian preference stated in turn one.</li>
+<li>Send: <code>Actually, I no longer eat vegetarian food.</code> — note how the follow-up answers now reflect the change.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>Inside the playground, history is managed for you. Every message you send is appended to the conversation, and the full transcript is included in each model call. The agent is not remembering anything — it is simply re-reading the transcript each turn. That distinction is the entire point of this lab.</p>
+</div>
+
+<h2>Step 3: Watch What Happens When History Is Dropped</h2>
+<p>Now start a <em>new</em> conversation in the playground (use the <strong>New conversation</strong> button) and send <code>What was my name?</code> first. The agent has no idea, because the previous conversation was never persisted — it existed only inside the old chat session.</p>
+<p>This is the fundamental limitation of conversation-only memory. It works beautifully within a session and evaporates the moment the session ends. Persisting facts beyond the session requires a memory store, which is the topic of the next chapter.</p>
+
+<h2>Step 4: Manage Conversation History from Python</h2>
+<p>When you build real applications you own the history yourself. The pattern is simple: keep a list of messages, append the user's turn, send the whole list to the model, and append the model's reply. Create a file <code>chat_history.py</code> with the following code:</p>
+
+<pre><code>from openai import AzureOpenAI
+import os
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+history = [
+    {"role": "system", "content": "Keep answers short."},
+    {"role": "user", "content": "My name is Alex and I prefer vegetarian meals."},
+]
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=history,
+)
+reply = response.choices[0].message.content
+print("Assistant:", reply)
+
+history.append({"role": "assistant", "content": reply})
+history.append({"role": "user", "content": "What was my name?"})
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=history,
+)
+print("Assistant:", response.choices[0].message.content)
+</code></pre>
+
+<div class="exercise">
+<h3>Run the script</h3>
+<ol>
+<li>Replace <code>YOUR_DEPLOYMENT_NAME</code> with your model deployment's name.</li>
+<li>Confirm your endpoint and key are set in the environment variables <code>AZURE_OPENAI_ENDPOINT</code> and <code>AZURE_OPENAI_KEY</code>.</li>
+<li>Run the script. The second answer should correctly recall the name "Alex" because the full transcript was included in the call.</li>
+<li>Comment out the line that appends the assistant reply, re-run, and observe the behavior change — the model only sees what you deliberately put into <code>history</code>.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>Note that this manual history is still session-scoped. If you restart the script, the name is forgotten again. Moving that transcript — or the important facts inside it — into durable storage is exactly what memory stores do.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You created an agent, verified that multi-turn behavior inside a session comes from re-reading the transcript, and confirmed that closing the session erases everything. You also reproduced the same conversation from Python by managing the message list yourself. The gap you observed — forgetting across sessions — is precisely the gap that persistent memory stores fill in the next lab.</p>
+<nav>
+<a href="71-how-memory-works-the-memory-lifecycle-memory-types-and-scope.html">&larr; Previous: How Memory Works The Memory Lifecycle, Memory Types, and Scope</a><a href="73-lab-giving-the-agent-memory-memory-stores-and-the-memory-search-tool.html">Next: Lab - Giving the Agent Memory Memory Stores and the Memory Search Tool &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

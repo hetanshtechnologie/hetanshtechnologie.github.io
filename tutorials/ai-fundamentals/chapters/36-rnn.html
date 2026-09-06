@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 36: Recurrent Neural Networks | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 36</span>
+    <h1>Recurrent Neural Networks</h1>
+
+    <p>An ANN treats every input as independent, which is fine for tabular data but wrong for language: the word "broke" means different things depending on the words before it. Recurrent neural networks (RNNs) were the first deep learning architecture to give models a memory. This chapter explains how that memory works, why it is fragile, and then walks through a complete sentiment-analysis project from raw movie reviews to a deployed web app.</p>
+
+    <h2>Introduction to NLP in Deep Learning</h2>
+    <p>Classical NLP pipelines relied on hand-built features such as TF-IDF vectors. Deep learning changed the game by learning representations: instead of counting words, a network learns to embed words into dense vectors where similar words sit close together. RNNs extended this further by processing a sequence step by step, keeping a hidden state that summarizes everything seen so far.</p>
+    <div class="note">
+        <strong>Sequence is the point:</strong> reviews, sentences, audio, and time series all share one property — order matters. An RNN is built around that property, which makes it the natural next step after the ANN.
+    </div>
+
+    <h2>Understanding RNN Architecture — RNN vs ANN</h2>
+    <p>In an ANN every input feeds through layers and produces an output; the weights are shared across examples but the network has no notion of one example following another. An RNN processes one token at a time, and at each step it combines the current token with the previous hidden state to produce a new hidden state. Crucially, the same weights are reused at every time step, so the network can handle sequences of any length with a fixed set of parameters.</p>
+    <pre><code>h_t = activation(W_h @ h_prev + W_x @ x_t + b)</code></pre>
+    <p>The hidden state <code>h_t</code> is the RNN's memory: it travels forward through the sequence, carrying context from earlier words into later decisions.</p>
+
+    <h2>Forward Propagation with Time in RNN Training</h2>
+    <p>During the forward pass, the RNN walks through the sequence from first token to last. At each step it computes a hidden state, and for a classification task it uses the final hidden state (or a pooled version) to make the prediction. Because the same weight matrices are applied at every step, the whole sequence is processed by one small set of parameters.</p>
+
+    <h2>Backward Propagation with Time in RNN Training</h2>
+    <p>Errors flow backward through time: the loss depends on the last hidden state, which depends on the second-to-last, and so on all the way to the first token. Backpropagation through time (BPTT) unrolls the RNN into a long feed-forward network and applies the chain rule across every step. This is where the trouble begins, because gradients must now be multiplied across many time steps.</p>
+
+    <h2>Problems with RNNs</h2>
+    <ul>
+        <li><strong>Vanishing gradients:</strong> repeated multiplication of small derivatives makes early time steps stop learning, so long-range context is forgotten.</li>
+        <li><strong>Exploding gradients:</strong> occasionally the products grow instead of shrink, destabilizing training (mitigated with gradient clipping).</li>
+        <li><strong>Sequential bottleneck:</strong> each step depends on the previous one, so RNNs cannot be parallelized the way CNNs can.</li>
+        <li><strong>Long memory is hard:</strong> plain RNNs struggle with dependencies spanning dozens of tokens — the motivation for LSTM and GRU in the next chapter.</li>
+    </ul>
+
+    <h2>A Sentiment Classification Problem Statement</h2>
+    <p>Our project: classify IMDb movie reviews as positive or negative based on their text. This is binary text classification, and the review length varies wildly, which makes it an honest test of sequence models. We will build an RNN with an embedding layer, train it on a fixed-length padded version of the reviews, and expose it through a Streamlit app.</p>
+
+    <h2>Getting Started with Word Embedding Layers</h2>
+    <p>An embedding layer is a lookup table: it maps each integer word index to a dense vector of learned values. Similar words end up with similar vectors because the training process pushes them together when they appear in similar contexts. The embedding dimension (for example 32, 64, or 128) is a hyperparameter that controls how rich the learned representation can be.</p>
+
+    <h2>Implementing Word Embeddings with Keras/TensorFlow</h2>
+    <pre><code>from tensorflow import keras
+
+embedding = keras.layers.Embedding(
+    input_dim=vocab_size,   # number of distinct words kept
+    output_dim=64,          # length of each word vector
+    input_length=max_len    # fixed sequence length after padding
+)</code></pre>
+    <p>Keras handles the lookup internally. The embedding weights are trained like any other parameter, so the network learns word representations that are useful for this specific task.</p>
+
+    <h2>Loading and Understanding the IMDB Dataset and Feature Engineering</h2>
+    <p>The IMDB dataset ships inside Keras as integer-encoded reviews. Every review is a list of word indices, and <code>num_words</code> caps the vocabulary to the most frequent words. Because reviews differ in length, we need to convert them into a rectangular batch: <code>pad_sequences</code> truncates long reviews and appends zeros to short ones so every review has exactly <code>max_len</code> tokens.</p>
+    <pre><code>from tensorflow.keras.datasets import imdb
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+(X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=10000)
+X_train = pad_sequences(X_train, maxlen=200, padding="post", truncating="post")
+X_test = pad_sequences(X_test, maxlen=200, padding="post", truncating="post")</code></pre>
+    <div class="info">
+        <strong>Why pad?</strong> Neural layers expect a fixed-shaped tensor. Padding aligns all reviews to one length while preserving the order of the real words at the front.
+    </div>
+
+    <h2>Training a Simple RNN with an Embedding Layer</h2>
+    <pre><code>model = keras.Sequential([
+    keras.layers.Embedding(10000, 64, input_length=200),
+    keras.layers.SimpleRNN(64),
+    keras.layers.Dense(1, activation="sigmoid"),
+])
+model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+model.fit(X_train, y_train, epochs=5, batch_size=64, validation_split=0.2)</code></pre>
+    <p>Five epochs is enough to see the pattern: training accuracy climbs quickly while validation accuracy rises more slowly, and soon the model stops improving — a sign of the plain RNN's limited capacity.</p>
+
+    <h2>Predictions from a Trained Simple RNN</h2>
+    <p>New text must be encoded exactly like the training data. You need the same word-to-index mapping the dataset used, then padding to the same <code>maxlen</code>. After that, <code>model.predict</code> returns a probability in <code>[0, 1]</code>, where values above 0.5 read as positive sentiment.</p>
+    <pre><code>import numpy as np
+from tensorflow.keras.preprocessing.text import one_hot
+
+def predict_review(model, text, maxlen=200):
+    tokens = [word_index.get(w, 2) for w in text.lower().split()]
+    padded = pad_sequences([tokens], maxlen=maxlen, padding="post")
+    p = float(model.predict(padded)[0, 0])
+    return "Positive" if p &gt;= 0.5 else "Negative", p</code></pre>
+
+    <h2>An End-to-End Streamlit Web App Integrated with the RNN and Deployment</h2>
+    <p>Wrap the model behind a simple interface so anyone can paste a review and read the verdict:</p>
+    <pre><code>import streamlit as st
+st.title("IMDb Sentiment Analyzer")
+review = st.text_area("Paste a movie review", height=200)
+if st.button("Analyze"):
+    label, p = predict_review(model, review)
+    st.metric("Sentiment", label, f"{p:.1%} confidence")</code></pre>
+    <p>Deploy the same way as the previous project: pin <code>tensorflow</code>, <code>streamlit</code>, and <code>numpy</code> in <code>requirements.txt</code>, push to GitHub, and connect the repository to Streamlit Community Cloud. Note that loading a Keras model takes a few seconds on the free tier, so show a spinner while it loads.</p>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> Train the simple RNN on IMDB and plot training versus validation accuracy. Then change the <code>maxlen</code> from 200 to 1000 and retrain: watch how much slower and less stable training becomes. Replace <code>SimpleRNN</code> with an LSTM layer and note the difference in validation accuracy — this previews the next chapter. Finish by deploying the Streamlit app and testing it with a positive and a negative review of your own.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="35-ann-projects.html">Prev: Neural Network Projects &amp; Tuning</a>
+        <a href="37-lstm-gru.html">Next: LSTM &amp; GRU Networks</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

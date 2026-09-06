@@ -1,0 +1,139 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>119. Lab - Mask-based image modification - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 119</span>
+<h1>Lab - Mask-based image modification</h1>
+<p>Prompt-driven editing works well when the whole image or a large region needs to change. But sometimes you need surgical control: replace only the area a model missed, remove a single object, or fill a gap. Mask-based editing gives you that control. You provide a black-and-white mask alongside the image, and the model is only allowed to regenerate the region the mask marks. In this lab you will implement mask-based editing in Python.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li><strong>Python 3.9 or newer</strong> and VS Code.</li>
+<li><strong>An image model deployment that supports masks</strong>, such as <code>gpt-image-1</code>.</li>
+<li>Your <strong>endpoint URL</strong> and <strong>API key</strong> as environment variables.</li>
+<li>An input image, for example <code>sample_background.png</code>, and a mask image, for example <code>mask_region.png</code>, both from the section download.</li>
+</ul>
+
+<h2>Understanding the Mask</h2>
+<p>A mask is a second image the same size as the original. Its pixels tell the model which areas are locked and which are free to be redrawn:</p>
+<ul>
+<li><strong>Black (or transparent) pixels</strong> protect the original content — the model must leave them unchanged.</li>
+<li><strong>White pixels</strong> mark the region the model regenerates based on your prompt.</li>
+</ul>
+<p>For the lab, <code>mask_region.png</code> marks a blank region of <code>sample_background.png</code> that you will fill with a new object. The original scene around the mask stays intact, so the new content should blend in naturally.</p>
+
+<div class="note">
+<p>You can create masks yourself with any image editor: open the original image, paint the region you want to change white on a new layer, fill everything else black, and export a PNG. The two images must share the same dimensions.</p>
+</div>
+
+<h2>Run a Mask-Based Edit</h2>
+<div class="exercise">
+<h3>Step 1 - Create the project folder</h3>
+<p>Create a folder named <code>ai103-lab119</code> and open it in VS Code. Create a file called <code>edit_mask.py</code>. Copy <code>sample_background.png</code> and <code>mask_region.png</code> into the folder.</p>
+
+<h3>Step 2 - Set your environment variables</h3>
+<pre><code>$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+
+<h3>Step 3 - Paste the script</h3>
+<p>Paste the following code and replace <code>YOUR_IMAGE_DEPLOYMENT_NAME</code> with your deployment's name. Both the image and the mask are passed as base64 data URIs:</p>
+<pre><code>from openai import AzureOpenAI
+import os
+import base64
+import requests
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+def to_data_uri(file_name):
+    with open(file_name, "rb") as image_file:
+        encoded = base64.b64encode(image_file.read()).decode("utf-8")
+    return f"data:image/png;base64,{encoded}"
+
+result = client.images.generate(
+    model="YOUR_IMAGE_DEPLOYMENT_NAME",
+    prompt="A bright yellow vintage scooter parked in the blank area",
+    image=[{"type": "image_url", "image_url": {"url": to_data_uri("sample_background.png")}}],
+    mask=[{"type": "image_url", "image_url": {"url": to_data_uri("mask_region.png")}}],
+    size="1024x1024",
+)
+
+url = result.data[0].url
+with open("inpainted_result.png", "wb") as out_file:
+    out_file.write(requests.get(url).content)
+
+print("Saved to inpainted_result.png")
+</code></pre>
+
+<h3>Step 4 - Run the script</h3>
+<pre><code>python edit_mask.py
+</code></pre>
+<p>Open <code>inpainted_result.png</code>. The scooter should appear only inside the masked region, and the surrounding background should remain unchanged.</p>
+</div>
+
+<h2>What Good Mask Results Look Like</h2>
+<p>When a mask-based edit works well, you can barely tell the region was regenerated:</p>
+<ul>
+<li>The new content respects the size and shape of the mask — it fills the region without overflowing it.</li>
+<li>Lighting and perspective match the surrounding scene.</li>
+<li>Colors and texture blend across the mask boundary.</li>
+</ul>
+<p>If the output looks pasted on top of the image instead of painted into it, the mask was probably too tight or the prompt described content that does not fit the region's proportions. Enlarge the mask slightly and adjust the prompt.</p>
+
+<h2>Removing an Object with a Mask</h2>
+<p>Masks are also the standard way to remove an unwanted object. Point the prompt at the surrounding scene and let the model rebuild what the object covered:</p>
+<pre><code>result = client.images.generate(
+    model="YOUR_IMAGE_DEPLOYMENT_NAME",
+    prompt="Continue the sidewalk and grass naturally, no object here",
+    image=[{"type": "image_url", "image_url": {"url": to_data_uri("sample_background.png")}}],
+    mask=[{"type": "image_url", "image_url": {"url": to_data_uri("mask_region.png")}}],
+    size="1024x1024",
+)
+</code></pre>
+
+<div class="tip">
+<p>Use PNG for masks. JPEG compression introduces fringing around the black and white boundary, which can cause the model to regenerate pixels outside your intended region.</p>
+</div>
+
+<h2>Comparing Prompt-Driven and Mask-Based Editing</h2>
+<table>
+<tr><th>Factor</th><th>Prompt-driven</th><th>Mask-based</th></tr>
+<tr><td>Region control</td><td>Model decides</td><td>You decide</td></tr>
+<tr><td>Preparation</td><td>None</td><td>Mask image required</td></tr>
+<tr><td>Best for</td><td>Whole-image changes</td><td>Localized edits and object removal</td></tr>
+</table>
+
+<h2>Troubleshooting Common Errors</h2>
+<table>
+<tr><th>Error you may see</th><th>Most likely cause</th><th>Fix</th></tr>
+<tr><td><code>Mask and image sizes differ</code></td><td>The mask is not the same dimensions as the input image.</td><td>Export the mask at the exact resolution of the original.</td></tr>
+<tr><td><code>400 mask is required</code></td><td>The mask argument was omitted.</td><td>Pass the mask list in the call.</td></tr>
+<tr><td>Content bleeds outside the mask</td><td>JPEG mask with soft edges.</td><td>Re-export the mask as a hard-edged PNG.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You have implemented mask-based image editing. You supplied an input image, a black-and-white mask marking the region to regenerate, and a prompt describing the new content, then saved the result. This gives you precise control over where the model is allowed to draw, which is the key technique for object removal and surgical edits. In the next chapter you move from creating images to protecting applications with Prompt Shields.</p>
+<nav>
+<a href="118-lab-prompt-driven-image-modification.html">&larr; Previous: Lab - Prompt-driven image modification</a><a href="120-prompt-shields-for-documents-defending-against-indirect-prompt-injection.html">Next: Prompt Shields for Documents - Defending Against Indirect Prompt Injection &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

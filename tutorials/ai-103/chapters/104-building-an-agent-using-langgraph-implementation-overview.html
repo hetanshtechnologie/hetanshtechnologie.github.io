@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>104. Building an agent using LangGraph - Implementation overview - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 104</span>
+<h1>Building an agent using LangGraph - Implementation overview</h1>
+<p>The previous chapter introduced LangGraph's vocabulary: state, nodes, edges, checkpoints. This chapter walks through the full implementation of a real agent step by step, explaining each design decision. When you reach the lab, you will be assembling parts you have already seen here, rather than copying a mystery script.</p>
+
+<h2>Agent Blueprint</h2>
+<p>The agent you will implement follows a classic two-node cycle:</p>
+<table>
+<tr><th>Node</th><th>Responsibility</th></tr>
+<tr><td><code>agent</code></td><td>Call the LLM with the conversation so far; produce either a final answer or tool calls</td></tr>
+<tr><td><code>tools</code></td><td>Execute any requested tool calls and return the results to the state</td></tr>
+</table>
+<p>A conditional edge leaves the <code>agent</code> node toward <code>tools</code> when the model requested tools, or toward <code>END</code> when it produced a final answer. A fixed edge returns from <code>tools</code> back to <code>agent</code> so the model can interpret the tool results.</p>
+
+<h2>Defining the State</h2>
+<p>State carries the conversation and the agent's working data through every step. The message field uses a reducer so tool results append to the history instead of replacing it:</p>
+
+<pre><code>from typing import Annotated, TypedDict
+from langgraph.graph.message import add_messages
+
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]</code></pre>
+
+<p>Keeping the state minimal has a practical benefit: the same object works with the model, the tools, and the graph — nothing needs translating at node boundaries.</p>
+
+<div class="note">
+<p>You can add any fields your workflow needs — user id, order details, a retry counter, retrieved documents. Every node receives the whole state and returns an update dictionary. Only fields named in the update are changed.</p>
+</div>
+
+<h2>The Agent Node</h2>
+<p>The agent node wraps a model that has tools bound to it. The model returns a message which may contain <code>tool_calls</code>; the node simply places that message into state:</p>
+
+<pre><code>from langchain_openai import AzureChatOpenAI
+from langgraph.graph import StateGraph, START, END
+from langgraph.prebuilt import ToolNode, tools_condition
+
+model = AzureChatOpenAI(
+    azure_endpoint="YOUR_ENDPOINT",
+    api_key="YOUR_KEY",
+    api_version="2024-06-01",
+    deployment_name="ai103-chat-deploy",
+)
+
+def agent_node(state: AgentState) -&gt; dict:
+    response = model_with_tools.invoke(state["messages"])
+    return {"messages": [response]}</code></pre>
+
+<p>Notice the node returns the <em>full message object</em>, tool calls included. The reducer appends it, and the routing step later reads it to decide the next move.</p>
+
+<h2>The Tools Node</h2>
+<p>LangGraph's prebuilt <code>ToolNode</code> executes any tool calls found in the latest message. Give it your list of tools and it handles dispatch, error capture, and result formatting:</p>
+
+<pre><code>from langchain_core.tools import tool
+
+@tool
+def get_weather(city: str) -&gt; str:
+    """Return a sample weather summary for a city."""
+    return f"Sunny, 24 degrees Celsius in {city}."
+
+tools = [get_weather]
+model_with_tools = model.bind_tools(tools)
+tool_node = ToolNode(tools)</code></pre>
+
+<p>The <code>ToolNode</code> returns <em>tool messages</em> — structured results tied to each requested call. When the model next runs, it sees exactly which call produced which result.</p>
+
+<h2>Routing Between Nodes</h2>
+<p>LangGraph ships a ready-made condition, <code>tools_condition</code>, that implements the decision: if the latest message contains tool calls, route to <code>tools</code>; otherwise route to <code>END</code>. Wiring it is a single line:</p>
+
+<pre><code>graph = StateGraph(AgentState)
+graph.add_node("agent", agent_node)
+graph.add_node("tools", tool_node)
+
+graph.add_edge(START, "agent")
+graph.add_conditional_edges("agent", tools_condition)
+graph.add_edge("tools", "agent")
+
+app = graph.compile()</code></pre>
+
+<p>The <code>tools_condition</code> function knows both exit points by convention — <code>tools</code> for the tool node and <code>END</code> for termination — so you do not need to pass an explicit routing map.</p>
+
+<div class="tip">
+<p>If you want a customized decision — for example, logging every route change — write your own condition function. The signature is simple: receive state, inspect the last message, return a node name.</p>
+</div>
+
+<h2>Why the Cycle Terminates</h2>
+<p>A graph with a cycle needs a stopping rule, or it could loop forever. The termination conditions here are the model's own behavior: a well-instructed model calls tools, reads results, and produces a final answer. Two safety nets exist:</p>
+<ul>
+<li><strong>Recursion limit:</strong> the compiler accepts <code>recursion_limit</code> — the maximum number of steps per run. Reaching it raises an error rather than burning tokens silently.</li>
+<li><strong>Model instruction:</strong> the system prompt tells the model to stop calling tools once it can answer. Good prompting is the first line of defense; the limit is the backstop.</li>
+</ul>
+
+<pre><code>app = graph.compile(recursion_limit=25)
+result = app.invoke({"messages": [("user", "What is the weather in Paris?")]})
+print(result["messages"][-1].content)</code></pre>
+
+<h2>Adding a Checkpointer</h2>
+<p>Compiling with a checkpointer makes the graph resumable and gives each conversation durable memory. The in-memory saver is ideal for development; production systems swap in a durable store such as an SQLite or Redis-backed checkpointer:</p>
+
+<pre><code>from langgraph.checkpoint.memory import InMemorySaver
+
+app = graph.compile(checkpointer=InMemorySaver())
+config = {"configurable": {"thread_id": "thread-1"}}
+
+app.invoke({"messages": [("user", "Remind me we are discussing Paris.")]}, config)
+app.invoke({"messages": [("user", "What city were we discussing?")]}, config)</code></pre>
+
+<p>The second call returns the earlier context because both runs share <code>thread-1</code>. Without a checkpointer the second call would start from an empty state and the model would have no memory of the conversation.</p>
+
+<h2>Summary</h2>
+<p>You now understand every piece of the LangGraph agent: a message-based state with a reducer, an agent node that calls the bound model, a prebuilt tool node, a conditional edge that routes on tool-call presence, and a recursion limit that guarantees termination. Adding a checkpointer gives the agent durable conversation memory. In the next chapter you will implement this design end to end in a lab.</p>
+<nav>
+<a href="103-introduction-to-langgraph.html">&larr; Previous: Introduction to LangGraph</a><a href="105-lab-building-an-agent-using-langgraph.html">Next: Lab - Building an agent using LangGraph &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

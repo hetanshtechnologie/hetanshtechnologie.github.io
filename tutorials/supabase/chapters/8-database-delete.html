@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapter 8: Database Delete - Supabase Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+
+    <span class="tag">Chapter 8</span>
+    <h1>Database: Delete</h1>
+
+    <h2>Delete Operations</h2>
+    <p>Deleting data in Supabase uses the <code>.delete()</code> method combined with filters to target the right rows. The most common pattern deletes a single row by its primary key:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .delete()
+  .eq('id', 42)
+  .select();</code></pre>
+    <p>The <code>.eq('id', 42)</code> ensures only the row with that specific ID is deleted. Without a filter, <code>.delete()</code> targets every row in the table — a potentially catastrophic operation in production. Always double-check your filters before running a delete.</p>
+    <p>Adding <code>.select()</code> returns the deleted rows, which is useful for confirmation messages or undoing the deletion on the client side:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .delete()
+  .eq('id', 42)
+  .select();  // data contains the deleted row</code></pre>
+
+    <h2>Deleting with Conditions</h2>
+    <p>You can delete multiple rows by using any filter. For example, deleting all drafts older than a year:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .delete()
+  .eq('status', 'draft')
+  .lt('updated_at', '2025-01-01')
+  .select();</code></pre>
+    <p>To delete a specific set of rows by ID, use <code>.in()</code>:</p>
+    <pre><code>const ids = [1, 2, 3, 4, 5];
+const { data, error } = await supabase
+  .from('posts')
+  .delete()
+  .in('id', ids)
+  .select();</code></pre>
+    <p>This is efficient for bulk cleanup operations like "delete selected" in an admin panel.</p>
+
+    <h2>Cascade Deletes</h2>
+    <p>When you define a foreign key, you can specify what happens to related rows when the parent is deleted. The <code>ON DELETE CASCADE</code> option tells Postgres to automatically delete all child rows. For example, if your comments table references posts:</p>
+    <pre><code>CREATE TABLE comments (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  post_id BIGINT REFERENCES posts(id) ON DELETE CASCADE,
+  body TEXT NOT NULL
+);</code></pre>
+    <p>Now deleting a post automatically deletes all its comments. Without CASCADE, Postgres raises a foreign key violation error if any comments exist — you would have to delete the comments first, then the post. Cascade is convenient but dangerous: a single delete can wipe out thousands of related rows silently. Use it deliberately and only for relationships where child rows have no meaning without the parent.</p>
+
+    <h2>Soft Deletes Pattern</h2>
+    <p>Hard deletes remove data permanently. Once committed, the data is gone (outside of backups or point-in-time recovery). Many production applications prefer <strong>soft deletes</strong> instead: marking a row as deleted without actually removing it. This gives you a safety net and preserves referential integrity.</p>
+    <p>The typical implementation adds two columns:</p>
+    <pre><code>ALTER TABLE posts ADD COLUMN is_deleted BOOLEAN DEFAULT false;
+ALTER TABLE posts ADD COLUMN deleted_at TIMESTAMPTZ;</code></pre>
+    <p>Then "deleting" becomes an update:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .update({ is_deleted: true, deleted_at: new Date().toISOString() })
+  .eq('id', 42)
+  .select();</code></pre>
+    <p>To exclude deleted rows from queries, add a filter everywhere you select:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .select('*')
+  .eq('is_deleted', false);</code></pre>
+    <p>Or, for a more robust approach, create a view that automatically filters out soft-deleted rows and query that view instead of the table.</p>
+
+    <div class="info">
+      <strong>Soft deletes are safer for production.</strong> They let users undo accidental deletions, preserve audit trails, and avoid cascade side effects. Use hard deletes only when you are certain the data has no ongoing value — and even then, consider archiving before deleting.
+    </div>
+
+    <h2>RLS Policies for Delete</h2>
+    <p>Row Level Security applies to delete operations just like any other. A typical policy ensures users can only delete their own rows:</p>
+    <pre><code>CREATE POLICY "Users can delete their own posts"
+ON posts FOR DELETE
+TO authenticated
+USING (auth.uid() = user_id);</code></pre>
+    <p>The <code>USING</code> clause determines which rows the delete can target. If a user tries to delete a row where <code>user_id</code> is not theirs, the operation silently affects zero rows — no error, just nothing happens. Always check the <code>data</code> array length after a delete to confirm rows were actually removed.</p>
+    <p>For admin roles that need to delete any row, create a separate policy:</p>
+    <pre><code>CREATE POLICY "Admins can delete any post"
+ON posts FOR DELETE
+TO authenticated
+USING (auth.jwt() ->> 'role' = 'admin');</code></pre>
+
+    <h2>Data Integrity and Foreign Keys</h2>
+    <p>Foreign key constraints protect your data from orphaned records. If your <code>comments</code> table has <code>post_id</code> referencing <code>posts(id)</code>, Postgres will not let you delete a post that still has comments — unless you use CASCADE or delete the comments first. This is a feature, not a limitation: it forces you to think about what deletion really means for your data model. Always design your foreign key constraints before writing delete logic, and decide per-relationship whether CASCADE, SET NULL, or RESTRICT is the right behavior.</p>
+
+    <h2>Common Pitfalls</h2>
+    <ul>
+      <li><strong>Forgetting RLS.</strong> Without a FOR DELETE policy, the delete is rejected (if RLS is enabled) or allowed for everyone (if RLS is off). Always test with an authenticated user.</li>
+      <li><strong>Accidental bulk delete.</strong> Calling <code>.delete()</code> without any filter removes every row. Always chain at least one filter — and consider adding a safety check in your code that warns if no filter is present.</li>
+      <li><strong>Cascade side effects.</strong> A cascade delete can destroy thousands of rows in related tables. Know your foreign key graph. When in doubt, test with a SELECT first.</li>
+    </ul>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Add <code>is_deleted</code> and <code>deleted_at</code> columns to your <code>posts</code> table. Create a RLS policy that lets users delete (soft-delete) only their own posts. Write two JavaScript functions: one that performs a hard delete via <code>.delete()</code>, and one that performs a soft delete via <code>.update()</code>. Compare the behavior and verify that soft-deleted rows are still visible in the database but excluded from normal queries.
+    </div>
+
+    <nav>
+      <a href="../index.html">Back to Index</a>
+      <a href="7-database-realtime.html">&laquo; Previous: Database Realtime</a>
+      <a href="9-storage-insert.html">Next: Storage Insert &raquo;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

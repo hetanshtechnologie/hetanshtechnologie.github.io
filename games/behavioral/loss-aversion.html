@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loss Aversion Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;border-bottom:1px solid #334155}
+.topbar a{color:#60a5fa;text-decoration:none;font-size:14px}
+.topbar h1{margin-left:16px;font-size:18px;color:#e2e8f0}
+.container{max-width:760px;margin:0 auto;padding:24px}
+.stats{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.stat{background:#1e293b;padding:12px 20px;border-radius:10px;flex:1;min-width:100px;text-align:center}
+.stat .label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px}
+.stat .value{font-size:24px;font-weight:700;color:#60a5fa;margin-top:4px}
+.card{background:#1e293b;border-radius:12px;padding:28px;margin-bottom:20px;border:1px solid #334155}
+.card h2{font-size:16px;color:#94a3b8;margin-bottom:8px;font-weight:500}
+.scenario{font-size:17px;line-height:1.7;margin-bottom:20px;color:#e2e8f0}
+.options{display:flex;flex-direction:column;gap:10px}
+.option{background:#0f172a;border:2px solid #334155;border-radius:10px;padding:14px 18px;cursor:pointer;transition:all .2s;font-size:15px;text-align:left;color:#e2e8f0}
+.option:hover{border-color:#60a5fa;background:#1a2744}
+.option.correct{border-color:#22c55e;background:#052e16;color:#86efac}
+.option.wrong{border-color:#ef4444;background:#450a0a;color:#fca5a5}
+.option.disabled{pointer-events:none}
+.explanation{margin-top:16px;padding:16px;background:#0f172a;border-radius:8px;border-left:4px solid #60a5fa;font-size:14px;line-height:1.6;color:#cbd5e1;display:none}
+.explanation.show{display:block}
+.btn{background:#3b82f6;color:#fff;border:none;padding:12px 28px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;transition:background .2s}
+.btn:hover{background:#2563eb}
+.btn-row{margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.game-over{text-align:center;padding:40px 20px}
+.game-over h2{font-size:28px;margin-bottom:12px;color:#60a5fa}
+.game-over p{font-size:16px;color:#94a3b8;margin-bottom:24px}
+.progress-bar{width:100%;height:6px;background:#334155;border-radius:3px;margin-bottom:24px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:3px;transition:width .3s}
+.hidden{display:none}
+.scale{display:flex;justify-content:center;align-items:center;gap:12px;margin:16px 0;padding:16px;background:#0f172a;border-radius:12px;border:1px solid #334155}
+.scale-item{font-size:24px;font-weight:700;text-align:center}
+.loss{color:#ef4444}
+.gain{color:#22c55e}
+.scale-label{font-size:13px;color:#94a3b8;margin-top:4px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&larr; Back to Games</a><h1>Loss Aversion</h1></div>
+<div class="container">
+<div class="stats">
+<div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
+<div class="stat"><div class="label">Level</div><div class="value" id="level">1</div></div>
+<div class="stat"><div class="label">Streak</div><div class="value" id="streak">0</div></div>
+<div class="stat"><div class="label">Question</div><div class="value" id="qnum">1/10</div></div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+<div id="game-area"></div>
+</div>
+<script>
+const qs=[
+{q:"<div class='scale'><div class='scale-item'><div class='gain'>$100</div><div class='scale-label'>Gain</div></div><div style='font-size:24px;color:#94a3b8'>vs</div><div class='scale-item'><div class='loss'>$100</div><div class='scale-label'>Loss</div></div></div>Research shows losing $100 feels approximately ___ times worse than gaining $100 feels good:",options:["Same intensity","About 1.5x worse","About 2x worse","About 3x worse"],answer:2,explanation:"Loss Aversion (Kahneman & Tversky): Losses feel approximately twice as intense as equivalent gains. This asymmetry is fundamental to Prospect Theory and drives much of human economic behavior."},
+{q:"You find a $50 bill but then lose $50 from your wallet. Net change: $0. How do you feel?",options:["Neutral — no change","Upset — the loss outweighs the gain even though net is zero","Happy about the find","Confused about your wallet"],answer:1,explanation:"Loss Aversion: The pain of losing the $50 overshadows the pleasure of finding it. Even with zero net change, the sequence (gain then loss) feels negative."},
+{q:"Your stock portfolio goes up $10,000 then down $10,000. You feel worse than if nothing happened. This is:",options:["Rational response","Loss Aversion making the loss feel more impactful than the gain","Market manipulation","Normal emotional fluctuation"],answer:1,explanation:"Prospect Theory: The $10K loss carries roughly twice the psychological weight of the $10K gain. The same dollar amount has asymmetric emotional impact."},
+{q:"You're offered: (A) $500 for sure, or (B) 50% chance of $1,100. Most people choose A because:",options:["Rational expected value calculation","Loss Aversion — the guaranteed $500 avoids the pain of potentially getting $0","$1,100 isn't enough","They can't do math"],answer:1,explanation:"Loss aversion makes the sure thing attractive. The potential pain of getting $0 (losing the guaranteed $500 feeling) outweighs the potential pleasure of $1,100."},
+{q:"A store offers 'Free shipping!' instead of 'We've added $8 to the price but shipping is free.' Customers prefer the first even though it's the same. Why?",options:["Free is always good","Loss Aversion — $8 fee feels like a loss, free shipping avoids it","Marketing is deceptive","Customers are irrational"],answer:1,explanation:"Loss Aversion in Framing: A fee is a loss, while free shipping is the absence of a loss. The psychological impact is very different even when the economics are identical."},
+{q:"After upgrading your phone, your old phone (which you were happy with) now feels inadequate. This is:",options:["Planned obsolescence","Loss Aversion / Hedonic Adaptation — the upgrade sets a new reference point","Normal tech feelings","Marketing effect"],answer:1,explanation:"Reference Point Shift: The upgrade creates a new reference point. The old phone, previously satisfactory, now represents a loss of features/experience compared to the new baseline."},
+{q:"You refuse to sell a stock at a loss, hoping it will recover. Even though investing the money elsewhere might be better. This is:",options:["Patient investing","Loss Aversion — selling at a loss makes the loss 'real' and painful","Good strategy","Market timing"],answer:1,explanation:"Disposition Effect: Loss aversion makes people hold losing investments too long (avoiding realizing the loss) and sell winners too quickly (locking in gains to avoid potential loss)."},
+{q:"Negotiators who frame their proposal as 'what you'll gain' get better results than those who say 'what you'll lose if you don't agree.' Surprisingly, loss framing:",options:["Always works better","Sometimes works better — loss framing can motivate action through loss aversion","Never works","Only works on experts"],answer:1,explanation:"Loss Framing Effect: Loss-framed messages ('you'll lose $500') can be MORE motivating than gain-framed messages ('you'll save $500') because losses feel more urgent."},
+{q:"You have a free trial that's about to end. You subscribe even though you've barely used the service. The feeling is:",options:["Smart consumer choice","Loss Aversion — canceling feels like losing access, even to something unused","The service is valuable","Subscription is cheap"],answer:1,explanation:"Free Trial Trap: Companies know that once you 'have' the service, loss aversion kicks in. Canceling feels like a loss, even when you're not using the product."},
+{q:"Your company offers a 'no layoff' policy. Employees value this more than an equivalent salary increase. Why?",options:["Job security is objectively more valuable","Loss Aversion — fear of losing the job is stronger than joy of extra money","Employees are scared","Layoffs are rare"],answer:1,explanation:"Loss Aversion in Benefits: Job security protects against a feared loss (unemployment), which is psychologically more powerful than the pleasure of equivalent additional income."},
+{q:"People who receive a gift card but can't use it feel worse than if they'd received nothing. This is:",options:["Ungratefulness","Loss Aversion — possessing then losing the card feels worse than never having it","Gift card problems","Normal reaction"],answer:1,explanation:"Endowment Effect + Loss Aversion: Owning something (even temporarily) increases its perceived value. Losing it (or having it expire) feels worse than never having it."},
+{q:"A gym charges $50/month but members who go regularly feel they're 'losing money' if they skip a day. This is:",options:["Good motivation","Loss Aversion reframing daily attendance as avoiding waste","Mathematical thinking","Guilt trip"],answer:1,explanation:"Sunk Cost + Loss Aversion: Members reframe each skipped day as money wasted (a loss), which motivates attendance through loss aversion rather than health benefits."},
+{q:"You'd drive 20 minutes to save $10 on a $20 item but not on a $200 item. Why?",options:["Bigger discounts are better","Loss Aversion is proportional — $10 is 50% of $20 but only 5% of $200","You're irrational","Gas costs more than $10"],answer:1,explanation:"Proportional Loss Aversion: The $10 loss feels proportionally larger relative to the smaller purchase. A 50% savings feels like avoiding a bigger loss than a 5% savings."},
+{q:"After inheriting $100K, you become MORE risk-averse with that money than with your earned income. This is:",options:["Smart financial planning","Loss Aversion — inherited money feels like 'house money' but losses would still hurt","Normal behavior","Tax planning"],answer:1,explanation:"Even with 'windfall' money, loss aversion remains. The inherited money becomes a reference point, and potential losses from it feel painful despite its origin."},
+{q:"Insurance companies profit because people overpay for coverage against unlikely events. The key driver is:",options:["People are bad at probability","Loss Aversion — the fear of catastrophic loss outweighs the cost of premium","Insurance is required","People like insurance companies"],answer:1,explanation:"Insurance Premiums: People overpay because the potential loss (catastrophe) feels disproportionately painful. The premium 'buys' freedom from that feared loss feeling."},
+{q:"Your credit card company offers 'price protection' — they'll refund price drops within 90 days. Most people never claim it, but having it makes them happier. This is:",options:["Good customer service","Loss Aversion satisfied — having protection against potential loss brings comfort","Marketing gimmick","Legal requirement"],answer:1,explanation:"Insurance Effect: Knowing you're protected against potential loss (price drop) reduces anxiety. The value is in the feeling of security, not the actual expected payout."},
+{q:"You're more motivated to avoid losing your gym streak (30 days) than to build a new habit. Loss aversion is stronger for:",options:["Gains already achieved — the 'endowment' of progress","Potential gains","Equal for both","Neither"],answer:0,explanation:"Endowment Effect: Once you've built something (a streak, habit, relationship), the prospect of losing it is more motivating than the prospect of gaining something new."},
+{q:"Prospect Theory's value function is steeper for losses than gains. Visually, this means:",options:["Symmetric curve","The loss side of the curve is approximately twice as steep as the gain side","The gain side is steeper","It's a straight line"],answer:1,explanation:"Kahneman & Tversky's Value Function: S-shaped curve that's concave for gains and convex for losses, with the loss side approximately twice as steep, reflecting loss aversion."},
+{q:"In salary negotiations, asking for $90K when you'd accept $80K uses loss aversion because:",options:["Higher numbers are better","The employer fears losing you (a loss) if they don't meet your range","Anchoring","Both B and Anchoring"],answer:3,explanation:"Loss Aversion + Anchoring: The high ask creates fear of loss (losing the candidate) while anchoring the negotiation range upward. Both mechanisms work together."},
+{q:"Organ donation rates are 90%+ in countries where the default is 'opt-out' vs 15% in 'opt-in' countries. This is primarily:",options:["Loss Aversion — changing the default feels like losing an option","Cultural difference","Legal requirement","Public awareness"],answer:0,explanation:"Default Effect: Changing from the default option feels like a loss. Opt-out countries use loss aversion — switching organ status feels like losing something, so people keep the default."}
+];
+let state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:[]};
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function getQ(){return shuffle([...qs]).slice(0,10)}
+function updateStats(){document.getElementById('score').textContent=state.score;document.getElementById('level').textContent=state.level;document.getElementById('streak').textContent=state.streak;document.getElementById('qnum').textContent=`${state.q+1}/${state.questions.length}`;document.getElementById('progress').style.width=`${((state.q)/state.questions.length)*100}%`}
+function renderQ(){if(state.q>=state.questions.length){renderOver();return}const q=state.questions[state.q];state.answered=false;document.getElementById('game-area').innerHTML=`<div class="card"><h2>Loss Aversion Scenario</h2><div class="scenario">${q.q}</div><div class="options" id="options"></div><div class="explanation" id="explanation"></div><div class="btn-row"><button class="btn hidden" id="nextBtn" onclick="nextQ()">Next →</button></div></div>`;const opts=document.getElementById('options');q.options.forEach((o,i)=>{const b=document.createElement('button');b.className='option';b.textContent=o;b.onclick=()=>pick(i,b);opts.appendChild(b)});updateStats()}
+function pick(i,btn){if(state.answered)return;state.answered=true;const q=state.questions[state.q];document.querySelectorAll('.option').forEach(b=>b.classList.add('disabled'));if(i===q.answer){btn.classList.add('correct');state.score+=10+state.streak*5;state.streak++;if(state.streak>state.maxStreak)state.maxStreak=state.streak;if(state.streak>=3)state.level=Math.floor(state.streak/3)+1}else{btn.classList.add('wrong');document.querySelectorAll('.option')[q.answer].classList.add('correct');state.streak=0}document.getElementById('explanation').textContent=q.explanation;document.getElementById('explanation').classList.add('show');document.getElementById('nextBtn').classList.remove('hidden');updateStats()}
+function nextQ(){state.q++;renderQ()}
+function renderOver(){const g=state.maxStreak>=8?'Loss Aversion Expert!':state.maxStreak>=5?'Prospect Theory Pro':state.maxStreak>=3?'Value Asymmetry Aware':'Keep Learning';document.getElementById('game-area').innerHTML=`<div class="card game-over"><h2>Loss Aversion Complete!</h2><p>Score: <strong>${state.score}</strong> | Max Streak: <strong>${state.maxStreak}</strong></p><p style="font-size:20px;color:#60a5fa;margin-bottom:24px">${g}</p><div class="btn-row"><button class="btn" onclick="resetGame()">Play Again</button></div></div>`;document.getElementById('progress').style.width='100%'}
+function resetGame(){state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:getQ()};renderQ()}
+state.questions=getQ();renderQ();
+</script>
+</body>
+</html>

@@ -1,0 +1,115 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>47. Lab - Retrieval Augmented Generation - Azure AI Search - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 47</span>
+<h1>Lab - Retrieval Augmented Generation - Azure AI Search</h1>
+<p>The previous lab produced <code>data/chunks.jsonl</code>, a file of clean text chunks ready to be searched. Now you need somewhere to search them. This lab creates an Azure AI Search resource, which will store the chunks and their vector embeddings and answer retrieval queries. You will also define the index schema, the contract that describes which fields every searchable document has.</p>
+
+<h2>What Azure AI Search Provides</h2>
+<p>Azure AI Search is a managed search service built into Azure. It gives you:</p>
+<ul>
+<li><strong>Indexes:</strong> collections of documents that share a schema.</li>
+<li><strong>Keyword search:</strong> classic full-text matching with scoring.</li>
+<li><strong>Vector search:</strong> similarity search over embedding fields.</li>
+<li><strong>Hybrid search:</strong> keyword and vector results combined and re-ranked.</li>
+<li><strong>Scoring profiles and filters</strong> that shape which results rank highest.</li>
+</ul>
+<p>For RAG, you use it as the retrieval store: the index holds chunks plus their embeddings, and a query returns the chunks most relevant to a question.</p>
+
+<h2>Create the Resource in the Portal</h2>
+<ol>
+<li>In the Azure portal, search for <strong>Azure AI Search</strong> and choose <strong>Create</strong>.</li>
+<li>Pick your subscription, a resource group, and a unique service name such as <code>cloudxeus-search</code>.</li>
+<li>Choose a pricing tier. Prefer <strong>Free</strong> if available, otherwise <strong>Basic</strong>.</li>
+<li>Set a region close to your other resources, review, and create.</li>
+<li>Wait for deployment to finish before continuing.</li>
+</ol>
+
+<div class="note">
+<p>The Free tier is ideal for learning but is limited to a single partition and a smaller document quota. If you plan to index thousands of chunks, use the Basic tier instead.</p>
+</div>
+
+<h2>Create the Resource with the CLI</h2>
+<p>If you prefer automation, the same steps in Azure CLI look like this:</p>
+
+<pre><code>az group create --name cloudxeus-rg --location eastus
+
+az search service create --resource-group cloudxeus-rg --name cloudxeus-search --sku free --location eastus</code></pre>
+
+<p>Record the endpoint URL: it will look like <code>https://cloudxeus-search.search.windows.net</code>.</p>
+
+<h2>Endpoint and Keys</h2>
+<ul>
+<li>Open the search resource in the portal.</li>
+<li>Copy the <strong>Url</strong> from the overview page: this is your <code>YOUR_SEARCH_ENDPOINT</code>.</li>
+<li>Under <strong>Keys</strong>, copy the primary admin key: this is your <code>YOUR_SEARCH_ADMIN_KEY</code>.</li>
+</ul>
+
+<div class="warn">
+<p>The admin key grants full control, including deleting indexes. Use a query key for read-only application code in production, and never commit keys to source control. For this course the admin key is convenient, but treat it as a secret.</p>
+</div>
+
+<h2>Define the Index Schema</h2>
+<p>An index describes the fields of each searchable document. Our schema has a text field per chunk plus a vector field that will hold the chunk's embedding. Save the following as <code>scripts/index_schema.json</code>:</p>
+
+<pre><code>{
+  "name": "cloudxeus-docs",
+  "fields": [
+    {"name": "id", "type": "Edm.String", "key": true, "searchable": false},
+    {"name": "title", "type": "Edm.String", "searchable": true, "filterable": true},
+    {"name": "source", "type": "Edm.String", "searchable": true, "filterable": true},
+    {"name": "content", "type": "Edm.String", "searchable": true},
+    {"name": "content_vector", "type": "Collection(Edm.Single)",
+     "searchable": true, "retrievable": false, "dimensions": 1536,
+     "vectorSearchConfiguration": "vector-config"}
+  ],
+  "vectorSearchConfigurations": [
+    {"name": "vector-config",
+     "kind": "vector",
+     "algorithmConfigurations": [{"name": "hnsw-config", "kind": "hnsw"}]}
+  ]
+}</code></pre>
+
+<h2>Create the Index</h2>
+<div class="exercise">
+<h3>Exercise &mdash; Create the Index</h3>
+<ol>
+<li>From the project root, create the index with Azure CLI:</li>
+</ol>
+<pre><code>az search index create --service-name cloudxeus-search --resource-group cloudxeus-rg --admin-key YOUR_SEARCH_ADMIN_KEY --name cloudxeus-docs --index-json @scripts/index_schema.json</code></pre>
+<ol start="2">
+<li>Verify it exists:</li>
+</ol>
+<pre><code>az search index list --service-name cloudxeus-search --resource-group cloudxeus-rg --admin-key YOUR_SEARCH_ADMIN_KEY</code></pre>
+<ol start="3">
+<li>You should see <code>cloudxeus-docs</code> in the output.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>The <code>dimensions</code> value must match the embedding model you use. A model like text-embedding-ada-002 returns 1536 dimensions; other embedding models differ, so check the model's documentation before you create the index.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You now have an Azure AI Search service, an index schema, and an empty <code>cloudxeus-docs</code> index. The next lab fills that index: it reads the chunk file, generates embeddings, and uploads the documents from Python.</p>
+<nav>
+<a href="46-lab-retrieval-augmented-generation-data-preparation.html">&larr; Previous: Lab - Retrieval Augmented Generation - Data Preparation</a><a href="48-lab-retrieval-augmented-generation-building-the-search-index.html">Next: Lab - Retrieval Augmented Generation - Building the search index &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

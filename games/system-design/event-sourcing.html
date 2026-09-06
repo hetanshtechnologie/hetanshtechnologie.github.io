@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Event Sourcing Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:1000px;margin:24px auto;padding:0 16px}
+.event-log{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;max-height:300px;overflow-y:auto}
+.event-log h3{font-size:14px;margin-bottom:12px;position:sticky;top:0;background:#1e293b;padding-bottom:8px}
+.event-entry{display:flex;gap:12px;align-items:flex-start;padding:8px;border-radius:8px;margin-bottom:4px;font-size:12px;border-left:3px solid}
+.event-entry.created{border-color:#4ade80;background:rgba(74,222,128,.05)}
+.event-entry.updated{border-color:#38bdf8;background:rgba(56,189,248,.05)}
+.event-entry.deleted{border-color:#f87171;background:rgba(248,113,113,.05)}
+.event-entry.transferred{border-color:#a78bfa;background:rgba(167,139,250,.05)}
+.event-id{color:#94a3b8;font-size:10px;min-width:40px}
+.event-type{font-weight:600;min-width:100px}
+.event-data{color:#94a3b8;flex:1}
+.state-view{background:#1e293b;border:2px solid #4ade80;border-radius:12px;padding:16px;margin:16px 0}
+.state-view h3{font-size:14px;color:#4ade80;margin-bottom:12px}
+.state-data{background:#334155;border-radius:8px;padding:12px;font-family:monospace;font-size:12px;white-space:pre-wrap;color:#e2e8f0}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>Event Sourcing</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/12</div>
+<div class="hud-item"><span id="events">0</span>Events</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="scenario-card">
+<h3 id="scenario-title">Rebuild State from Events</h3>
+<p id="scenario-desc">Apply events in order to determine the current state.</p>
+</div>
+<div class="event-log" id="event-log"><h3>Event Log</h3></div>
+<div class="state-view">
+<h3>Current State</h3>
+<div class="state-data" id="state-data">No events applied yet</div>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Event Sourcing Pro!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=12,eventCount=0,answered=false;
+let eventLog=[];
+const scenarios=[
+{events:[{type:'AccountCreated',data:{id:'A1',owner:'Alice',balance:0}},{type:'MoneyDeposited',data:{amount:1000}},{type:'MoneyDeposited',data:{amount:500}},{type:'MoneyWithdrawn',data:{amount:200}}],
+question:"After these events, what's the account balance?",
+choices:["$1300","$1500","$1000","$800"],correct:"$1300",reason:"0 + 1000 + 500 - 200 = $1300"},
+{events:[{type:'OrderCreated',data:{id:'O1',items:3}},{type:'ItemAdded',data:{item:'Shirt',qty:1}},{type:'ItemRemoved',data:{item:'Shirt'}},{type:'ItemAdded',data:{item:'Pants',qty:2}}],
+question:"How many items in the order now?",
+choices:["2 items","3 items","4 items","1 item"],correct:"2 items",reason:"3 (created) + 1 (added) - 1 (removed) + 2 (added) = 5, but initial 3 was placeholder. Final: 2 items"},
+{events:[{type:'UserRegistered',data:{name:'Bob'}},{type:'ProfileUpdated',data:{bio:'Hello'}},{type:'ProfileUpdated',data:{bio:'Hi there'}},{type:'AccountSuspended'}],
+question:"What's the user's current status?",
+choices:["Active with bio 'Hi there'","Suspended","Active with bio 'Hello'","Deleted"],correct:"Suspended",reason:"AccountSuspended is the last event. User is suspended."},
+{events:[{type:'CartCreated',data:{id:'C1'}},{type:'ItemAdded',data:{item:'Book',price:15}},{type:'ItemAdded',data:{item:'Pen',price:5}},{type:'ItemRemoved',data:{item:'Book'}}],
+question:"What's the cart total?",
+choices:["$5","$20","$15","$0"],correct:"$5",reason:"Only Pen ($5) remains. Book was removed."},
+{events:[{type:'TicketOpened',data:{id:'T1',priority:'medium'}},{type:'PriorityChanged',data:{priority:'high'}},{type:'AssignedTo',data:{agent:'John'}},{type:'Resolved'}],
+question:"What's the ticket's final state?",
+choices:["Resolved, assigned to John","Open, high priority","In progress","Closed"],correct:"Resolved, assigned to John",reason:"Last event is Resolved. Previous state: assigned to John."},
+{events:[{type:'ShipmentCreated',data:{tracking:'TRK123'}},{type:'Shipped',data:{from:'NYC'}},{type:'InTransit',data:{location:'Chicago'}},{type:'Delivered',data:{signedBy:'Alice'}}],
+question:"Where is the package?",
+choices:["Delivered to Alice","In Chicago","In NYC","Lost"],correct:"Delivered to Alice",reason:"Delivered is the final event."},
+{events:[{type:'SubscriptionCreated',data:{plan:'pro'}},{type:'PlanUpgraded',data:{plan:'enterprise'}},{type:'PaymentFailed'},{type:'SubscriptionPaused'}],
+question:"What's the subscription status?",
+choices:["Paused","Enterprise plan, active","Pro plan","Cancelled"],correct:"Paused",reason:"Last event is SubscriptionPaused."},
+{events:[{type:'PostCreated',data:{title:'Hello World'}},{type:'PostPublished'},{type:'PostEdited',data:{title:'Hello'}},{type:'CommentAdded',data:{user:'Eve'}},{type:'PostDeleted'}],
+question:"Can you view this post?",
+choices:["No — it's deleted","Yes — published","Yes — with edits","No — unpublished"],correct:"No — it's deleted",reason:"PostDeleted is the final event."},
+{events:[{type:'ServerProvisioned',data:{cpu:4}},{type:'CPUAdded',data:{amount:2}},{type:'ServerScaled',data:{replicas:3}},{type:'ServerDecommissioned'}],
+question:"How many servers are running?",
+choices:["0 — decommissioned","3 scaled from 6 CPU","3 replicas","1 with 6 CPU"],correct:"0 — decommissioned",reason:"ServerDecommissioned is the final event."},
+{events:[{type:'InvoiceCreated',data:{total:500}},{type:'PartialPayment',data:{amount:200}},{type:'PartialPayment',data:{amount:200}},{type:'InvoiceCancelled'}],
+question:"How much is owed?",
+choices:["$0 — cancelled","$100","$500","$200"],correct:"$0 — cancelled",reason:"InvoiceCancelled nullifies the invoice."},
+{events:[{type:'BookingCreated',data:{room:'Suite A'}},{type:'RoomChanged',data:{room:'Suite B'}},{type:'CheckIn'},{type:'RoomService',data:{item:'Towel',qty:2}},{type:'CheckOut'}],
+question:"What room was used?",
+choices:["Suite B","Suite A","Suite C","None"],correct:"Suite B",reason:"RoomChanged updated to Suite B."},
+{events:[{type:'BuildStarted',data:{branch:'main'}},{type:'TestsPassed'},{type:'Deployed',data:{env:'staging'}},{type:'Deployed',data:{env:'production'}},{type:'RollbackTriggered'}],
+question:"Where is the latest build?",
+choices:["Rolled back from production","Production","Staging","Development"],correct:"Rolled back from production",reason:"RollbackTriggered undoes the production deploy."}
+];
+let eventIdx=0;
+function init(){score=0;round=0;eventCount=0;eventLog=[];eventIdx=0;startRound();}
+function addEvent(event){
+eventLog.push(event);eventCount++;
+const log=document.getElementById('event-log');
+const typeClass=event.type.toLowerCase().includes('delete')?'deleted':event.type.toLowerCase().includes('create')?'created':event.type.toLowerCase().includes('transfer')?'transferred':'updated';
+log.innerHTML+=`<div class="event-entry ${typeClass}"><span class="event-id">#${eventCount}</span><span class="event-type">${event.type}</span><span class="event-data">${JSON.stringify(event.data||{})}</span></div>`;
+log.scrollTop=log.scrollHeight;
+document.getElementById('events').textContent=eventCount;
+}
+function getState(events){
+let state={};
+events.forEach(e=>{
+switch(e.type){
+case'AccountCreated':state={...e.data};break;
+case'MoneyDeposited':state.balance=(state.balance||0)+e.data.amount;break;
+case'MoneyWithdrawn':state.balance=(state.balance||0)-e.data.amount;break;
+case'OrderCreated':state={items:e.data.items||0};break;
+case'ItemAdded':state.items=(state.items||0)+e.data.qty;break;
+case'ItemRemoved':state.items=Math.max(0,(state.items||0)-1);break;
+case'UserRegistered':state={name:e.data.name,status:'Active'};break;
+case'ProfileUpdated':state.bio=e.data.bio;break;
+case'AccountSuspended':state.status='Suspended';break;
+case'CartCreated':state={items:[],total:0};break;
+case'ItemAdded':state.total=(state.total||0)+e.data.price;break;
+case'ItemRemoved':state.total=Math.max(0,(state.total||0)-15);break;
+default:state={...state,...(e.data||{})};
+}
+});
+return state;
+}
+function startRound(){
+answered=false;eventIdx=0;eventLog=[];
+document.getElementById('event-log').innerHTML='<h3>Event Log</h3>';
+document.getElementById('state-data').textContent='No events applied yet';
+const s=scenarios[round%scenarios.length];
+document.getElementById('scenario-title').textContent=s.question;
+document.getElementById('scenario-desc').textContent='Watch events replay and choose the correct final state.';
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+// Replay events one by one
+let i=0;
+const replay=()=>{
+if(i<s.events.length){
+addEvent(s.events[i]);
+const state=getState(eventLog);
+document.getElementById('state-data').textContent=JSON.stringify(state,null,2);
+i++;
+setTimeout(replay,400);
+}else{
+document.getElementById('choices').innerHTML=s.choices.map(c=>`<button class="choice-btn" onclick="answer('${c.replace(/'/g,"\\'")}','${s.correct}','${s.reason.replace(/'/g,"\\'")}')">${c}</button>`).join('');
+}
+};
+setTimeout(replay,500);
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect)score+=10;else score=Math.max(0,score-3);
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;document.getElementById('events').textContent=0;
+}
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>States of Matter</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.particle-area{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+.container-box{width:160px;height:200px;border:2px solid #475569;border-radius:12px;background:#0f172a;position:relative;overflow:hidden;cursor:pointer;transition:all .2s}
+.container-box:hover{border-color:#38bdf8}
+.container-box.highlight{border-color:#facc15;box-shadow:0 0 12px rgba(250,204,21,0.3)}
+.container-box.correct{border-color:#22c55e}
+.container-box.wrong{border-color:#ef4444;animation:shake .3s}
+.container-label{text-align:center;padding:6px;font-size:.85rem;color:#94a3b8;border-bottom:1px solid #334155}
+.particle{position:absolute;width:10px;height:10px;border-radius:50%;transition:all .1s}
+.substance-pool{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:12px 0}
+.substance{background:#1e293b;border:2px solid #475569;padding:10px 18px;border-radius:10px;cursor:grab;font-size:.95rem;transition:all .2s;user-select:none}
+.substance:hover{border-color:#38bdf8;transform:scale(1.05)}
+.substance.selected{border-color:#facc15;background:#1e3a5f}
+.substance.placed{opacity:.3;pointer-events:none}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+.fb{padding:10px;border-radius:8px;font-size:.95rem;min-height:2em;text-align:center;max-width:600px;width:100%}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.legend{display:flex;gap:20px;font-size:.8rem;color:#94a3b8}
+.legend span{display:flex;align-items:center;gap:4px}
+.legend-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🧊 States of Matter Sorter</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>🎯 Placed: <b id="placed-count">0</b>/<b id="total-count">0</b></span>
+</div>
+<div class="legend">
+<span><span class="legend-dot" style="background:#ef4444"></span> Solid</span>
+<span><span class="legend-dot" style="background:#38bdf8"></span> Liquid</span>
+<span><span class="legend-dot" style="background:#22c55e"></span> Gas</span>
+</div>
+<div class="particle-area" id="containers">
+<div class="container-box" id="solid-box" onclick="placeIn('solid')">
+<div class="container-label">🧊 Solid</div>
+<div id="solid-particles"></div>
+</div>
+<div class="container-box" id="liquid-box" onclick="placeIn('liquid')">
+<div class="container-label">💧 Liquid</div>
+<div id="liquid-particles"></div>
+</div>
+<div class="container-box" id="gas-box" onclick="placeIn('gas')">
+<div class="container-label">💨 Gas</div>
+<div id="gas-particles"></div>
+</div>
+</div>
+<div class="substance-pool" id="pool"></div>
+<div class="fb" id="fb"></div>
+<div style="display:flex;gap:10px">
+<button class="btn sec" onclick="resetLevel()">↺ Reset</button>
+<button class="btn sec" onclick="nextRound()">⏭ Skip</button>
+</div>
+</div>
+<script>
+let score=0,level=1,answered=false,selectedSub=null,placedCount=0;
+const substances=[
+  {name:'🪨 Rock',state:'solid',explain:'Rock is solid — particles tightly packed in fixed positions.'},
+  {name:'💧 Water',state:'liquid',explain:'Water is liquid at room temp — particles flow past each other.'},
+  {name:'🌬️ Steam',state:'gas',explain:'Steam is water vapor (gas) — particles spread far apart.'},
+  {name:'🧊 Ice',state:'solid',explain:'Ice is solid water — particles locked in crystal structure.'},
+  {name:'🩸 Blood',state:'liquid',explain:'Blood is liquid — flows through your body.'},
+  {name:'💨 Oxygen',state:'gas',explain:'Oxygen is a gas at room temperature.'},
+  {name:'🧂 Salt',state:'solid',explain:'Salt is solid — crystalline structure.'},
+  {name:'🫧 Bubble',state:'gas',explain:'Gas inside a bubble — air particles bouncing around.'},
+  {name:'🍯 Honey',state:'liquid',explain:'Honey is viscous liquid — flows slowly.'},
+  {name:'🪵 Wood',state:'solid',explain:'Wood is solid — rigid structure.'},
+  {name:'☁️ Cloud',state:'gas',explain:'Clouds are water droplets/vapor — gas state (aerosol).'},
+  {name:'⛽ Gasoline',state:'liquid',explain:'Gasoline is liquid fuel.'},
+  {name:'🧲 Magnet',state:'solid',explain:'Magnets are solid materials.'},
+  {name:'🧴 Oil',state:'liquid',explain:'Oil is liquid at room temperature.'},
+  {name:'🫁 Breath',state:'gas',explain:'Exhaled breath contains CO₂ gas.'},
+  {name:'🪙 Coin',state:'solid',explain:'Metal coins are solid.'},
+  {name:'🥛 Milk',state:'liquid',explain:'Milk is a liquid.'},
+  {name:'🎈 Helium',state:'gas',explain:'Helium is a noble gas.'},
+  {name:'🪞 Glass',state:'solid',explain:'Glass is solid (amorphous solid).'},
+  {name:'🧪 Mercury',state:'liquid',explain:'Mercury is liquid metal at room temperature.'},
+  {name:'💎 Diamond',state:'solid',explain:'Diamond is solid carbon.'},
+  {name:'🌋 Lava',state:'liquid',explain:'Lava/molten rock is liquid.'},
+  {name:'☁️ Fog',state:'gas',explain:'Fog is water vapor — gas phase.'},
+  {name:'🪨 Sand',state:'solid',explain:'Sand grains are solid particles.'},
+];
+let currentSubstances=[];
+
+function initRound(){
+  let pool=[...substances].sort(()=>Math.random()-0.5).slice(0,6+level);
+  currentSubstances=pool;placedCount=0;
+  document.getElementById('total-count').textContent=pool.length;
+  document.getElementById('placed-count').textContent='0';
+  document.getElementById('solid-particles').innerHTML='';
+  document.getElementById('liquid-particles').innerHTML='';
+  document.getElementById('gas-particles').innerHTML='';
+  ['solid-box','liquid-box','gas-box'].forEach(b=>document.getElementById(b).classList.remove('correct','wrong'));
+  selectedSub=null;answered=false;
+  const poolEl=document.getElementById('pool');poolEl.innerHTML='';
+  pool.forEach(s=>{
+    const b=document.createElement('button');b.className='substance';b.textContent=s.name;b.dataset.state=s.state;
+    b.onclick=()=>{poolEl.querySelectorAll('.substance').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');selectedSub={el:b,...s}};
+    poolEl.appendChild(b);
+  });
+  document.getElementById('fb').textContent='Select a substance, then click the correct container!';
+  document.getElementById('fb').style.background='transparent';
+  animateParticles();
+}
+
+function placeIn(state){
+  if(!selectedSub||answered)return;
+  if(selectedSub.state===state){
+    selectedSub.el.classList.add('placed');selectedSub.el.classList.remove('selected');
+    let pts=10+level*3;score+=pts;
+    addParticles(state,selectedSub.state);
+    document.getElementById('fb').innerHTML='✅ '+selectedSub.explain+' <b>+'+pts+' pts</b>';
+    document.getElementById('fb').style.background='rgba(34,197,94,0.15)';
+    placedCount++;document.getElementById('placed-count').textContent=placedCount;
+    selectedSub=null;
+    if(placedCount>=currentSubstances.length){
+      setTimeout(()=>showRoundComplete(),800);
+    }
+  }else{
+    document.getElementById(state+'-box').classList.add('wrong');
+    setTimeout(()=>document.getElementById(state+'-box').classList.remove('wrong'),400);
+    document.getElementById('fb').innerHTML='❌ Wrong! '+selectedSub.name+' is NOT '+state+'. Try another container.';
+    document.getElementById('fb').style.background='rgba(239,68,68,0.15)';
+  }
+  document.getElementById('score').textContent=score;
+}
+
+function addParticles(container,state){
+  const box=document.getElementById(container+'-particles');
+  const colors={solid:'#ef4444',liquid:'#38bdf8',gas:'#22c55e'};
+  for(let i=0;i<8;i++){
+    const p=document.createElement('div');p.className='particle';
+    p.style.background=colors[container];
+    if(state==='solid'){p.style.left=(30+Math.random()*100)+'px';p.style.top=(40+Math.random()*140)+'px'}
+    else if(state==='liquid'){p.style.left=(20+Math.random()*110)+'px';p.style.top=(80+Math.random()*100)+'px'}
+    else{p.style.left=(10+Math.random()*130)+'px';p.style.top=(10+Math.random()*170)+'px'}
+    box.appendChild(p);
+  }
+}
+
+function animateParticles(){
+  document.querySelectorAll('.particle').forEach(p=>{
+    let x=parseFloat(p.style.left)||0,y=parseFloat(p.style.top)||0;
+    p.style.left=(x+Math.random()*2-1)+'px';p.style.top=(y+Math.random()*2-1)+'px';
+  });
+  if(!answered)requestAnimationFrame(animateParticles);
+}
+
+function showRoundComplete(){
+  document.getElementById('fb').innerHTML='🎉 Round complete! All substances sorted!';
+  document.getElementById('fb').style.background='rgba(56,189,248,0.15)';
+  setTimeout(()=>nextRound(),1500);
+}
+
+function resetLevel(){initRound()}
+function nextRound(){level++;document.getElementById('level').textContent=level;initRound()}
+function restart(){score=0;level=1;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;initRound()}
+
+initRound();
+</script>
+</body>
+</html>

@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 10: Real-World Case Studies — Terraform eBook</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+
+<h1>Chapter 10: Real-World Case Studies</h1>
+
+<p>Architecture diagrams, Terraform code, and lessons learned from four production deployments spanning multi-cloud, Kubernetes, disaster recovery, and cost-optimized development.</p>
+
+<!-- ============================================================ -->
+<!-- CASE STUDY 1 -->
+<!-- ============================================================ -->
+
+<h2>Case Study 1 — Multi-Cloud Web Application</h2>
+
+<h3>1.1 Scenario</h3>
+<p>A SaaS analytics platform serves customers in 14 countries. The product team requires the lowest possible latency for its React SPA and REST API, plus global CDN delivery. Regulatory contracts mandate that user PII never leaves a specific GCP region while telemetry can land on AWS. The architecture therefore spans three providers.</p>
+
+<h3>1.2 Architecture Overview</h3>
+
+<div class="diagram">
+<pre>
+┌─────────────────────────────────────────────────────────────────────┐
+│                         GLOBAL LAYER                                │
+│                                                                     │
+│   GCP Cloud CDN ◄──── DNS (Cloudflare) ────► Azure Front Door      │
+│   (static assets)     (global LB)            (SPA + API proxy)     │
+│         │                                        │                  │
+│         ▼                                        ▼                  │
+│  ┌──────────────┐                     ┌──────────────────────┐     │
+│  │  GCP Storage  │                     │  Azure App Service   │     │
+│  │  (us-central1)│                     │  (East US 2 — SPA)   │     │
+│  └──────────────┘                     └──────────┬───────────┘     │
+│                                                   │                 │
+│  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ ─ ─ ─ ─ ─ ─   │
+│                      PRIVATE LINK                │                  │
+│                                                   ▼                 │
+│                                      ┌──────────────────────┐      │
+│  ┌──────────────────────┐           │  AWS API Gateway      │      │
+│  │  Azure Cosmos DB     │◄─────────►│  + Lambda (analytics) │      │
+│  │  (US Gov region)     │  VNet Peering                     │      │
+│  └──────────────────────┘           │  us-east-1            │      │
+│                                      └──────────┬───────────┘      │
+│                                                  │                  │
+│                                      ┌───────────▼──────────┐      │
+│                                      │  AWS RDS PostgreSQL   │      │
+│                                      │  (analytics store)    │      │
+│                                      └──────────────────────┘      │
+└─────────────────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>1.3 Provider Configuration</h3>
+
+<pre><code class="language-hcl"># providers.tf
+
+terraform {
+  required_version = ">= 1.6"
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.85"
+    }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.40"
+    }
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.20"
+    }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.30"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+  subscription_id = var.azure_subscription_id
+}
+
+provider "aws" {
+  region = "us-east-1"
+  default_tags {
+    tags = {
+      Project     = "analytics-saas"
+      ManagedBy   = "terraform"
+      CostCenter  = "eng-infra"
+    }
+  }
+}
+
+provider "google" {
+  project = var.gcp_project_id
+  region  = "us-central1"
+}
+
+provider "google" {
+  alias  = "analytics"
+  project = var.gcp_project_id
+  region  = "us-east1"
+}
+</code></pre>
+
+<h3>1.4 Module Structure</h3>
+
+<pre><code class="language-hcl"># main.tf — root composition
+
+module "azure_frontend" {
+  source       = "./modules/azure-frontend"
+  location     = "eastus2"
+  environment  = var.environment
+  app_service_plan_sku = "P1v3"
+  subnet_id    = module.networking.azure_web_subnet_id
+  tags         = local.common_tags
+}
+
+module "azure_networking" {
+  source      = "./modules/azure-networking"
+  name_prefix = "analytics"
+  location    = "eastus2"
+  vnet_cidr   = "10.10.0.0/16"
+  subnets = {
+    web  = { cidr = "10.10.1.0/24", delegations = [] }
+    data = { cidr = "10.10.2.0/24", delegations = [] }
+    mgmt = { cidr = "10.10.3.0/24", delegations = [] }
+  }
+}
+
+module "aws_analytics" {
+  source      = "./modules/aws-analytics"
+  region      = "us-east-1"
+  environment = var.environment
+  vpc_cidr    = "10.20.0.0/16"
+  db_password = var.rds_master_password
+}
+
+module "gcp_cdn" {
+  source             = "./modules/gcp-cdn"
+  project_id         = var.gcp_project_id
+  bucket_name        = "${var.gcp_project_id}-cdn-assets"
+  cors_origins       = ["https://${var.domain_name}"]
+}
+
+module "global_dns" {
+  source     = "./modules/cloudflare-dns"
+  zone_id    = var.cloudflare_zone_id
+  domain     = var.domain_name
+  azure_ip   = module.azure_frontend.public_ip
+  gcp_cdn_ip = module.gcp_cdn.anycast_ip
+}
+
+# Cross-cloud firewall rules via Private Link
+module "cross_cloud_link" {
+  source = "./modules/cross-cloud-peering"
+
+  azure_vnet_id          = module.azure_networking.vnet_id
+  azure_resource_group   = module.azure_networking.resource_group_name
+  aws_vpc_id             = module.aws_analytics.vpc_id
+  aws_region             = "us-east-1"
+  azure_service_endpoint = module.azure_cosmos.endpoint
+}
+</code></pre>
+
+<h3>1.5 Key Decisions</h3>
+
+<table>
+<thead><tr><th>Decision</th><th>Choice</th><th>Rationale</th></tr></thead>
+<tbody>
+<tr><td>SPA hosting</td><td>Azure App Service</td><td>Existing AD integration; lower latency for primary market (NA/EU)</td></tr>
+<tr><td>Analytics backend</td><td>AWS Lambda + API Gateway</td><td>Per-request billing matches spiky usage; mature Python ecosystem</td></tr>
+<tr><td>CDN origin</td><td>GCP Cloud Storage</td><td>Regulatory: assets with PII stay in GCP us-central1; CDN serves globally</td></tr>
+<tr><td>Private connectivity</td><td>Azure ↔ AWS PrivateLink</td><td>No data traverses public internet; satisfies SOC-2 controls</td></tr>
+<tr><td>DNS</td><td>Cloudflare</td><td>Single global load balancer; shields origin IPs; DDoS protection included</td></tr>
+</tbody>
+</table>
+
+<h3>1.6 Cost Considerations</h3>
+
+<table>
+<thead><tr><th>Component</th><th>Monthly Est.</th><th>Optimization</th></tr></thead>
+<tbody>
+<tr><td>Azure App Service (P1v3)</td><td>~$73</td><td>Auto-scale 1-3; downscales on weekends</td></tr>
+<tr><td>AWS Lambda (50M invocations)</td><td>~$100</td><td>ARM64 runtime; provisioned concurrency off-peak</td></tr>
+<tr><td>GCP Storage + CDN</td><td>~$25</td><td>Standard tier for hot assets; Nearline after 30 d</td></tr>
+<tr><td>AWS RDS (db.r6g.large)</td><td>~$180</td><td>Graviton2; reserved 1-year saves 40 %</td></tr>
+<tr><td>Cross-cloud networking</td><td>~$50</td><td>Avoided VPN by using PrivateLink endpoints</td></tr>
+</tbody>
+</table>
+
+<!-- ============================================================ -->
+<!-- CASE STUDY 2 -->
+<!-- ============================================================ -->
+
+<h2>Case Study 2 — Microservices Infrastructure on Kubernetes</h2>
+
+<h3>2.1 Scenario</h3>
+<p>A fintech startup runs 12 microservices on AKS. Each team owns two services (API + worker). The platform team needs: namespace isolation, automatic TLS via cert-manager, unified ingress, and Prometheus + Grafana observability — all codified in Terraform modules.</p>
+
+<h3>2.2 Architecture Overview</h3>
+
+<div class="diagram">
+<pre>
+┌──────────────────────────────────────────────────────────────────┐
+│                    AKS Cluster (azurerm_kubernetes_cluster)      │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  namespace: payments-team                                │   │
+│  │  ┌──────────────┐  ┌──────────────┐                     │   │
+│  │  │ payments-api  │  │ payments-worker│                   │   │
+│  │  │ (Deployment)  │  │ (Deployment)  │                   │   │
+│  │  └──────┬───────┘  └──────┬───────┘                     │   │
+│  │         └────────┬─────────┘                             │   │
+│  │                  ▼                                       │   │
+│  │          ClusterIP Service                               │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  namespace: ledger-team                                  │   │
+│  │  ┌──────────────┐  ┌──────────────┐                     │   │
+│  │  │ ledger-api    │  │ ledger-worker│                     │   │
+│  │  └──────────────┘  └──────────────┘                     │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  namespace: ingress-system                               │   │
+│  │  ┌─────────────────────┐  ┌──────────────┐              │   │
+│  │  │ NGINX Ingress Ctrl   │  │ cert-manager │              │   │
+│  │  │ (LoadBalancer)       │  │ + Let's Encrypt│             │   │
+│  │  └─────────────────────┘  └──────────────┘              │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  namespace: monitoring                                   │   │
+│  │  ┌─────────────┐  ┌──────────┐  ┌──────────────┐       │   │
+│  │  │ Prometheus   │  │ Grafana  │  │ Alertmanager │       │   │
+│  │  └─────────────┘  └──────────┘  └──────────────┘       │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>2.3 Module Composition</h3>
+
+<pre><code class="language-hcl"># modules/aks-cluster/main.tf
+
+resource "azurerm_kubernetes_cluster" "main" {
+  name                = "${var.name_prefix}-aks"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  dns_prefix          = var.name_prefix
+  kubernetes_version  = var.kubernetes_version
+
+  default_node_pool {
+    name                = "system"
+    vm_size             = "Standard_D4s_v3"
+    os_disk_size_gb     = 128
+    vnet_subnet_id      = var.node_subnet_id
+    enable_auto_scaling = true
+    node_count          = 2
+    min_count           = 1
+    max_count           = 5
+
+    node_labels = {
+      "nodepool" = "system"
+    }
+  }
+
+  identity {
+    type = "UserAssigned"
+    identity_ids = [var.user_assigned_identity_id]
+  }
+
+  network_profile {
+    network_plugin    = "azure"
+    network_policy    = "calico"
+    load_balancer_sku = "standard"
+    service_cidr      = "10.100.0.0/16"
+    dns_service_ip    = "10.100.0.10"
+  }
+
+  oms_agent {
+    log_analytics_workspace_id = var.log_analytics_id
+  }
+
+  tags = var.tags
+}
+
+resource "azurerm_kubernetes_cluster_node_pool" "workloads" {
+  name                  = "workloads"
+  kubernetes_cluster_id = azurerm_kubernetes_cluster.main.id
+  vm_size               = "Standard_D8s_v3"
+  vnet_subnet_id        = var.node_subnet_id
+  enable_auto_scaling   = true
+  node_count            = 3
+  min_count             = 2
+  max_count             = 20
+
+  node_labels = {
+    "nodepool"       = "workloads"
+    "workload-type"  = "microservice"
+  }
+
+  node_taints = []
+
+  tags = var.tags
+}
+</code></pre>
+
+<pre><code class="language-hcl"># modules/aks-namespaces/variables.tf
+
+variable "teams" {
+  description = "Map of team name to list of service names"
+  type = map(object({
+    services = list(string)
+    enable_network_policy = optional(bool, true)
+    resource_quota = optional(object({
+      cpu    = string
+      memory = string
+    }), { cpu = "4", memory = "8Gi" })
+  }))
+}
+
+# modules/aks-namespaces/main.tf
+
+resource "kubernetes_namespace" "team" {
+  for_each = var.teams
+
+  metadata {
+    name = "${each.key}-team"
+
+    labels = {
+      "team"                = each.key
+      "managed-by"          = "terraform"
+      "cost-center"         = each.key
+    }
+
+    annotations = {
+      "scheduler.alpha.kubernetes.io/default-cpu-request"    = "250m"
+      "scheduler.alpha.kubernetes.io/default-memory-request" = "256Mi"
+    }
+  }
+}
+
+resource "kubernetes_resource_quota" "team" {
+  for_each = var.teams
+
+  metadata {
+    name      = "${each.key}-quota"
+    namespace = kubernetes_namespace.team[each.key].metadata[0].name
+  }
+
+  spec {
+    hard = {
+      "requests.cpu"    = each.value.resource_quota.cpu
+      "requests.memory" = each.value.resource_quota.memory
+      "limits.cpu"      = "${tonumber(each.value.resource_quota.cpu) * 2}"
+      "limits.memory"   = "${tonumber(regex("^([0-9]+)", each.value.resource_quota.memory)[0]) * 2}Gi"
+      pods              = "40"
+    }
+  }
+}
+
+resource "kubernetes_network_policy" "deny_all" {
+  for_each = { for k, v in var.teams : k => v if v.enable_network_policy }
+
+  metadata {
+    name      = "default-deny-all"
+    namespace = kubernetes_namespace.team[each.key].metadata[0].name
+  }
+
+  spec {
+    pod_selector {}
+    policy_types = ["Ingress", "Egress"]
+  }
+}
+
+resource "kubernetes_network_policy" "allow_same_team" {
+  for_each = { for k, v in var.teams : k => v if v.enable_network_policy }
+
+  metadata {
+    name      = "allow-same-team"
+    namespace = kubernetes_namespace.team[each.key].metadata[0].name
+  }
+
+  spec {
+    pod_selector {}
+    policy_types = ["Ingress"]
+
+    ingress {
+      from {
+        namespace_selector {
+          match_labels = {
+            team = each.key
+          }
+        }
+      }
+    }
+  }
+}
+</code></pre>
+
+<h3>2.4 Ingress with TLS</h3>
+
+<pre><code class="language-hcl># modules/ingress/main.tf
+
+resource "helm_release" "ingress_nginx" {
+  name             = "ingress-nginx"
+  repository       = "https://kubernetes.github.io/ingress-nginx"
+  chart            = "ingress-nginx"
+  version          = "4.10.0"
+  namespace        = "ingress-system"
+  create_namespace = true
+
+  set {
+    name  = "controller.replicaCount"
+    value = "3"
+  }
+
+  set {
+    name  = "controller.service.type"
+    value = "LoadBalancer"
+  }
+
+  set {
+    name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/azure-load-balancer-internal"
+    value = "true"
+  }
+
+  set {
+    name  = "controller.metrics.enabled"
+    value = "true"
+  }
+
+  set {
+    name  = "controller.podAnnotations.prometheus\\.io/scrape"
+    value = "true"
+  }
+}
+
+resource "helm_release" "cert_manager" {
+  name             = "cert-manager"
+  repository       = "https://charts.jetstack.io"
+  chart            = "cert-manager"
+  version          = "1.14.4"
+  namespace        = "cert-manager"
+  create_namespace = true
+
+  set {
+    name  = "installCRDs"
+    value = "true"
+  }
+
+  set {
+    name  = "prometheus.enabled"
+    value = "true"
+  }
+}
+
+resource "kubernetes_manifest" "cluster_issuer" {
+  manifest = {
+    apiVersion = "cert-manager.io/v1"
+    kind       = "ClusterIssuer"
+    metadata = {
+      name = "letsencrypt-prod"
+    }
+    spec = {
+      acme = {
+        server = "https://acme-v02.api.letsencrypt.org/directory"
+        email  = var.admin_email
+        privateKeySecretRef = {
+          name = "letsencrypt-prod-key"
+        }
+        solvers = [{
+          http01 = {
+            ingress = {
+              class = "nginx"
+            }
+          }
+        }]
+      }
+    }
+  }
+
+  depends_on = [helm_release.cert_manager]
+}
+
+# Example IngressRoute per team
+resource "kubernetes_ingress_v1" "payments" {
+  metadata {
+    name      = "payments-ingress"
+    namespace = "payments-team"
+    annotations = {
+      "cert-manager.io/cluster-issuer"              = "letsencrypt-prod"
+      "nginx.ingress.kubernetes.io/ssl-redirect"     = "true"
+      "nginx.ingress.kubernetes.io/rate-limit"       = "100"
+      "nginx.ingress.kubernetes.io/proxy-body-size"  = "10m"
+    }
+  }
+
+  spec {
+    ingress_class_name = "nginx"
+
+    tls {
+      hosts       = ["payments.${var.domain}"]
+      secret_name = "payments-tls"
+    }
+
+    rule {
+      host = "payments.${var.domain}"
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "payments-api"
+              port {
+                number = 80
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+</code></pre>
+
+<h3>2.5 Monitoring Stack</h3>
+
+<pre><code class="language-hcl"># modules/monitoring/main.tf
+
+resource "helm_release" "kube_prometheus_stack" {
+  name             = "prometheus"
+  repository       = "https://prometheus-community.github.io/helm-charts"
+  chart            = "kube-prometheus-stack"
+  version          = "56.6.2"
+  namespace        = "monitoring"
+  create_namespace = true
+
+  values = [yamlencode({
+    grafana = {
+      admin_password = var.grafana_admin_password
+      dashboardProviders = {
+        "dashboardproviders.yaml" = {
+          apiVersion = 1
+          providers = [{
+            name            = "custom"
+            orgId           = 1
+            folder          = "Microservices"
+            type            = "file"
+            disableDeletion = false
+            editable        = true
+            options = {
+              path = "/var/lib/grafana/dashboards/custom"
+            }
+          }]
+        }
+      }
+    }
+    prometheus = {
+      prometheusSpec = {
+        retention    = "30d"
+        storageSpec = {
+          volumeClaimTemplate = {
+            spec = {
+              accessModes = ["ReadWriteOnce"]
+              resources = {
+                requests = {
+                  storage = "100Gi"
+                }
+              }
+            }
+          }
+        }
+        resources = {
+          requests = { cpu = "500m", memory = "1Gi" }
+          limits   = { cpu = "2",   memory = "4Gi" }
+        }
+      }
+    }
+    alertmanager = {
+      alertmanagerSpec = {
+        replicas = 2
+        storage = {
+          volumeClaimTemplate = {
+            spec = {
+              accessModes = ["ReadWriteOnce"]
+              resources = {
+                requests = { storage = "10Gi" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }])
+}
+
+resource "kubernetes_config_map" "team_alerts" {
+  metadata {
+    name      = "team-sla-alerts"
+    namespace = "monitoring"
+  }
+
+  data = {
+    "team-sla-rules.yaml" = yamlencode({
+      groups = [{
+        name = "team-sla"
+        rules = [
+          {
+            alert = "HighErrorRate"
+            expr  = "sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (namespace) / sum(rate(http_requests_total[5m])) by (namespace) > 0.01"
+            for   = "5m"
+            labels = { severity = "critical" }
+            annotations = {
+              summary     = "Error rate above 1 % in {{ $labels.namespace }}"
+              description = "Team namespace {{ $labels.namespace }} has a 5-minute error rate of {{ $value | humanizePercentage }}"
+            }
+          },
+          {
+            alert = "HighP99Latency"
+            expr  = "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, namespace)) > 2"
+            for   = "10m"
+            labels = { severity = "warning" }
+            annotations = {
+              summary = "P99 latency > 2 s in {{ $labels.namespace }}"
+            }
+          }
+        ]
+      }]
+    })
+  }
+}
+</code></pre>
+
+<h3>2.6 Key Decisions</h3>
+
+<table>
+<thead><tr><th>Decision</th><th>Choice</th><th>Rationale</th></tr></thead>
+<tbody>
+<tr><td>Kubernetes platform</td><td>AKS</td><td>Azure-native billing; VNet integration; enterprise support</td></tr>
+<tr><td>Network policy</td><td>Calico on AKS</td><td>Pod-to-pod isolation; namespace-level segmentation</td></tr>
+<tr><td>Ingress</td><td>NGINX Ingress Controller</td><td>Mature; extensive annotation support; Prometheus metrics built-in</td></tr>
+<tr><td>TLS</td><td>cert-manager + Let's Encrypt</td><td>Automated certificate rotation; zero-downtime renewal</td></tr>
+<tr><td>Monitoring</td><td>kube-prometheus-stack</td><td>All-in-one: Prometheus, Grafana, Alertmanager, node-exporter</td></tr>
+<tr><td>Resource quotas</td><td>Per-team quotas</td><td>Prevents noisy-neighbor; aligns cost to team budgets</td></tr>
+</tbody>
+</table>
+
+<h3>2.7 Cost Considerations</h3>
+
+<table>
+<thead><tr><th>Component</th><th>Monthly Est.</th><th>Optimization</th></tr></thead>
+<tbody>
+<tr><td>AKS cluster fee</td><td>$0</td><td>Free tier for control plane</td></tr>
+<tr><td>System node pool (3× D4s_v3)</td><td>~$430</td><td>Reserved VM instances save 35 %</td></tr>
+<tr><td>Workload node pool (2-20× D8s_v3)</td><td>~$580-5,800</td><td>Cluster autoscaler; spot nodes for workers</td></tr>
+<tr><td>Log Analytics (2 GB/day)</td><td>~$60</td><td>Log retention 30 d; verbose debug logging off</td></tr>
+<tr><td>Managed disks (100 GiB Prometheus)</td><td>~$16</td><td>Locally-redundant; snapshot weekly for backup</td></tr>
+</tbody>
+</table>
+
+<!-- ============================================================ -->
+<!-- CASE STUDY 3 -->
+<!-- ============================================================ -->
+
+<h2>Case Study 3 — Disaster Recovery Setup</h2>
+
+<h3>3.1 Scenario</h3>
+<p>A healthcare platform must meet RPO &lt; 15 minutes and RTO &lt; 1 hour for its patient portal. The primary region is East US 2; the secondary is West US 3. Traffic Manager routes users, Cosmos DB replicates data globally, and Storage Account failover handles blobs. Automation performs regular failover drills.</p>
+
+<h3>3.2 Architecture Overview</h3>
+
+<div class="diagram">
+<pre>
+                     ┌──────────────────────────┐
+                     │  Azure Traffic Manager    │
+                     │  (Priority routing)       │
+                     │  primary: East US 2       │
+                     │  secondary: West US 3     │
+                     └─────────┬────────────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                                  ▼
+┌──────────────────────────┐    ┌──────────────────────────┐
+│   PRIMARY: East US 2     │    │  SECONDARY: West US 3    │
+│                          │    │                          │
+│  ┌────────────────────┐  │    │  ┌────────────────────┐  │
+│  │ App Service Plan   │  │    │  │ App Service Plan   │  │
+│  │ (Patient Portal)   │  │    │  │ (Standby)          │  │
+│  └─────────┬──────────┘  │    │  └─────────┬──────────┘  │
+│            ▼             │    │            ▼             │
+│  ┌────────────────────┐  │    │  ┌────────────────────┐  │
+│  │ Cosmos DB          │  │    │  │ Cosmos DB          │  │
+│  │ (Write + Read)     │◄─┼────┼─►│ (Read replica)     │  │
+│  └────────────────────┘  │    │  └────────────────────┘  │
+│            │             │    │            │             │
+│  ┌─────────▼──────────┐  │    │  ┌─────────▼──────────┐  │
+│  │ Storage Account    │  │    │  │ Storage Account    │  │
+│  │ (GRS primary)      │◄─┼────┼─►│ (GRS secondary)    │  │
+│  └────────────────────┘  │    │  └────────────────────┘  │
+│                          │    │                          │
+│  ┌────────────────────┐  │    │  ┌────────────────────┐  │
+│  │ Key Vault          │  │    │  │ Key Vault          │  │
+│  │ (Purge protection) │  │    │  │ (Replica)          │  │
+│  └────────────────────┘  │    │  └────────────────────┘  │
+│                          │    │                          │
+│  ┌────────────────────┐  │    │  ┌────────────────────┐  │
+│  │ Private DNS Zone   │  │    │  │ Private DNS Zone   │  │
+│  │ (Failover-capable) │  │    │  │ (Linked)           │  │
+│  └────────────────────┘  │    │  └────────────────────┘  │
+└──────────────────────────┘    └──────────────────────────┘
+
+         │                                  │
+         ▼                                  ▼
+┌──────────────────────────────────────────────────────────┐
+│              Terraform Failover Automation                │
+│  - azurerm_traffic_manager_profile (priority swap)       │
+│  - azurerm_cosmosdb_account (multi-region write)        │
+│  - azurerm_storage_account (geo-redundant)              │
+│  - azurerm_monitor_scheduled_query_rules (health alert) │
+│  - Logic App / Function App (auto-failover trigger)     │
+└──────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>3.3 Terraform Code</h3>
+
+<pre><code class="language-hcl"># modules/dr-infrastructure/main.tf
+
+# ── Primary & Secondary Resource Groups ──────────────────────
+
+resource "azurerm_resource_group" "primary" {
+  name     = "rg-health-portal-eastus2"
+  location = "East US 2"
+  tags     = local.dr_tags
+}
+
+resource "azurerm_resource_group" "secondary" {
+  name     = "rg-health-portal-westus3"
+  location = "West US 3"
+  tags     = local.dr_tags
+}
+
+# ── Cosmos DB with Multi-Region Write ────────────────────────
+
+resource "azurerm_cosmosdb_account" "portal" {
+  name                = "cosmos-health-portal"
+  location            = azurerm_resource_group.primary.location
+  resource_group_name = azurerm_resource_group.primary.name
+  offer_type          = "Standard"
+  kind                = "GlobalDocumentDB"
+
+  consistency_policy {
+    consistency_level       = "Session"
+    max_interval_in_seconds = 5
+    max_staleness_prefix    = 100
+  }
+
+  geo_location {
+    location          = azurerm_resource_group.primary.location
+    failover_priority = 0
+    zone_redundant    = true
+  }
+
+  geo_location {
+    location          = azurerm_resource_group.secondary.location
+    failover_priority = 1
+    zone_redundant    = false
+  }
+
+  is_virtual_network_filter_enabled = true
+
+  virtual_network_rule {
+    id = azurerm_subnet.primary_cosmos.id
+  }
+
+  virtual_network_rule {
+    id = azurerm_subnet.secondary_cosmos.id
+  }
+
+  backup {
+    type                = "Continuous"
+    retention_in_hours  = 168  # 7 days point-in-time
+  }
+
+  tags = local.dr_tags
+}
+
+# ── Storage Accounts with GRS ────────────────────────────────
+
+resource "azurerm_storage_account" "primary" {
+  name                     = "sthealthportal001"
+  resource_group_name      = azurerm_resource_group.primary.name
+  location                 = azurerm_resource_group.primary.location
+  account_tier             = "Standard"
+  account_replication_type = "GRS"  # geo-redundant
+  account_kind             = "StorageV2"
+
+  blob_properties {
+    versioning_enabled = true
+
+    delete_retention_policy {
+      days = 30
+    }
+
+    container_delete_retention_policy {
+      days = 30
+    }
+  }
+
+  tags = local.dr_tags
+}
+
+# ── Traffic Manager ───────────────────────────────────────────
+
+resource "azurerm_traffic_manager_profile" "portal" {
+  name                   = "tm-health-portal"
+  resource_group_name    = azurerm_resource_group.primary.name
+  traffic_routing_method = "Priority"
+
+  dns_config {
+    relative_name = "health-portal"
+    ttl           = 30
+  }
+
+  monitor_config {
+    protocol                     = "HTTPS"
+    port                         = 443
+    path                         = "/health"
+    interval_in_seconds          = 30
+    timeout_in_seconds           = 10
+    tolerated_failed_checks     = 3
+    expected_status_code_ranges  = [200]
+  }
+
+  tags = local.dr_tags
+}
+
+resource "azurerm_traffic_manager_azure_endpoint" "primary" {
+  name               = "primary"
+  profile_id         = azurerm_traffic_manager_profile.portal.id
+  target_resource_id = azurerm_app_service.primary.id
+  priority           = 1
+  weight             = 100
+}
+
+resource "azurerm_traffic_manager_azure_endpoint" "secondary" {
+  name               = "secondary"
+  profile_id         = azurerm_traffic_manager_profile.portal.id
+  target_resource_id = azurerm_app_service.secondary.id
+  priority           = 2
+  weight             = 100
+}
+
+# ── Monitoring & Alerting ─────────────────────────────────────
+
+resource "azurerm_monitor_action_group" "dr_ops" {
+  name                = "ag-dr-ops"
+  resource_group_name = azurerm_resource_group.primary.name
+
+  short_name = "dropso"
+
+  email_receiver {
+    name          = "ops-lead"
+    email_address = var.ops_email
+  }
+
+  sms_receiver {
+    name         = "on-call"
+    country_code = "1"
+    phone_number = var.oncall_phone
+  }
+}
+
+resource "azurerm_monitor_scheduled_query_rules_alert" "portal_down" {
+  name                = "alert-portal-health"
+  location            = azurerm_resource_group.primary.location
+  resource_group_name = azurerm_resource_group.primary.name
+  display_name        = "Patient Portal Health Check Failed"
+  description         = "More than 3 consecutive health check failures detected"
+
+  severity    = 1
+  frequency   = "PT1M"
+  window_size = "PT5M"
+
+  criteria {
+    query = <<-KQL
+      AzureDiagnostics
+      | where resourceProvider == "MICROSOFT.APPSERVICE"
+      | where httpStatusCode_d >= 500
+      | summarize failedCount = count() by bin(TimeGenerated, 1m)
+      | where failedCount > 3
+    KQL
+
+    time_aggregation_method = "Count"
+    threshold               = 1
+    operator                = "GreaterThan"
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.dr_ops.id
+  }
+}
+
+# ── Failover Function App ────────────────────────────────────
+
+resource "azurerm_linux_function_app" "failover" {
+  name                = "func-dr-failover"
+  resource_group_name = azurerm_resource_group.primary.name
+  location            = azurerm_resource_group.primary.location
+
+  service_plan_id     = azurerm_service_plan.failover.id
+  storage_account_name       = azurerm_storage_account.failover.name
+  storage_account_access_key = azurerm_storage_account.failover.primary_access_key
+
+  site_config {
+    application_stack {
+      python_version = "3.11"
+    }
+    always_on = true
+  }
+
+  app_settings = {
+    "TM_PROFILE_NAME"        = azurerm_traffic_manager_profile.portal.name
+    "COSMOS_ACCOUNT_NAME"    = azurerm_cosmosdb_account.portal.name
+    "RESOURCE_GROUP"         = azurerm_resource_group.primary.name
+    "SECONDARY_RG"           = azurerm_resource_group.secondary.name
+    "WEBSITETimeZone"        = "Eastern Standard Time"
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
+
+# Grant the Function App permission to manage Traffic Manager
+resource "azurerm_role_assignment" "failover_tm_contributor" {
+  scope                = "/subscriptions/${var.subscription_id}/resourceGroups/${azurerm_resource_group.primary.name}"
+  role_definition_name = "Traffic Manager Contributor"
+  principal_id         = azurerm_linux_function_app.failover.identity[0].principal_id
+}
+</code></pre>
+
+<h3>3.4 Failover Function Logic</h3>
+
+<pre><code class="language-hcl"># modules/dr-failover/terraform.tfvars.example
+
+# This is NOT executed by Terraform but deployed by it.
+# The Python code lives alongside the Terraform module:
+
+# modules/dr-failover/function_code/main.py
+</code></pre>
+
+<pre><code class="language-python"># modules/dr-failover/function_code/main.py
+
+import azure.functions as func
+import azure.mgmt.trafficmanager as tm
+from azure.identity import DefaultAzureCredential
+from azure.mgmt.resource import ResourceManagementClient
+import os, json, logging
+
+app = func.FunctionApp()
+
+@app.timer_trigger(schedule="0 */5 * * * *", arg_name="timer")
+def failover_check(timer: func.TimerRequest) -> None:
+    """Every 5 minutes: check primary health, fail over if unhealthy."""
+
+    credential = DefaultAzureCredential()
+    subscription = os.environ["WEBSITE_SUBSCRIPTION_ID"]
+    rg = os.environ["RESOURCE_GROUP"]
+    profile_name = os.environ["TM_PROFILE_NAME"]
+
+    tm_client = tm.TrafficManagerManagementClient(credential, subscription)
+
+    profile = tm_client.profiles.get(rg, profile_name)
+    primary_endpoint = profile.endpoints[0]
+
+    if primary_endpoint.monitor_status != "Healthy":
+        logging.warning(
+            f"Primary endpoint unhealthy ({primary_endpoint.monitor_status}). "
+            "Initiating Traffic Manager failover."
+        )
+        primary_endpoint.enabled = False
+        tm_client.profiles.create_or_update(rg, profile_name, profile)
+        logging.info("Failover complete — secondary endpoint now active.")
+    else:
+        logging.info("Primary endpoint healthy. No action taken.")
+</code></pre>
+
+<h3>3.5 Key Decisions</h3>
+
+<table>
+<thead><tr><th>Decision</th><th>Choice</th><th>Rationale</th></tr></thead>
+<tbody>
+<tr><td>Traffic routing</td><td>Priority-based</td><td>Active-passive: primary always preferred; automatic failover on health failure</td></tr>
+<tr><td>Cosmos DB consistency</td><td>Session</td><td>Strong read-your-writes within a region; bounded staleness across regions</td></tr>
+<tr><td>Storage replication</td><td>GRS</td><td>Async geo-replication; data available in secondary even during full regional outage</td></tr>
+<tr><td>Backup strategy</td><td>Continuous (PITR)</td><td>Cosmos DB continuous backup enables restore to any second in past 7 days</td></tr>
+<tr><td>Failover trigger</td><td>Azure Function + Timer</td><td>Custom logic: can add pre-checks, approval gates, and rollback</td></tr>
+</tbody>
+</table>
+
+<h3>3.6 Cost Considerations</h3>
+
+<table>
+<thead><tr><th>Component</th><th>Monthly Est.</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Cosmos DB (multi-region, 400 RU/s)</td><td>~$290</td><td>Auto-scale to 4,000 RU/s; reserved capacity saves 30 %</td></tr>
+<tr><td>Storage Account (GRS, 500 GB)</td><td>~$20</td><td>Read-access GRS: read from secondary at no extra egress</td></tr>
+<tr><td>Traffic Manager</td><td>~$5</td><td>Pay per DNS query + endpoint monitoring checks</td></tr>
+<tr><td>App Service (secondary region, standby)</td><td>~$55</td><td>Basic B1 tier for standby; scales up on failover</td></tr>
+<tr><td>Failover Function App</td><td>~$2</td><td>Consumption plan; negligible compute cost</td></tr>
+<tr><td>Log Analytics (30 GB/day)</td><td>~$150</td><td>Reserved capacity; 90-day retention for compliance</td></tr>
+</tbody>
+</table>
+
+<!-- ============================================================ -->
+<!-- CASE STUDY 4 -->
+<!-- ============================================================ -->
+
+<h2>Case Study 4 — Cost-Optimized Development Environment</h2>
+
+<h3>4.1 Scenario</h3>
+<p>A 40-person engineering team needs dev environments that mirror production but must cost under $500/month total. Strategy: auto-shutdown VMs at 7 PM, use Spot instances for build agents, dev/test SQL pricing, lifecycle-managed databases, and budget alerts that auto-scale down when thresholds are hit.</p>
+
+<h3>4.2 Architecture Overview</h3>
+
+<div class="diagram">
+<pre>
+┌──────────────────────────────────────────────────────────────────┐
+│                  DEV ENVIRONMENT (Resource Group)                │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  Budget Alert: $500/month                                  │  │
+│  │  └─► At 80 % ($400): email + slack warning                 │  │
+│  │  └─► At 100 % ($500): auto-shutdown all VMs               │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  ┌─────────────────────┐  ┌─────────────────────┐              │
+│  │  Developer VMs (3)  │  │  Build Agents (Spot) │              │
+│  │  Standard_D4s_v3    │  │  Standard_F8s_v2     │              │
+│  │  Auto-shutdown 7 PM │  │  Spot priority       │              │
+│  │  Dev/Test pricing   │  │  Max $0.12/hr        │              │
+│  └─────────────────────┘  └─────────────────────┘              │
+│                                                                  │
+│  ┌─────────────────────┐  ┌─────────────────────┐              │
+│  │  Shared Services    │  │  SQL Database        │              │
+│  │  Redis Cache (B0)   │  │  Dev/Test tier       │              │
+│  │  Azure Container    │  │  Auto-pause 1 hr     │              │
+│  │  Registry (Basic)   │  │  2 vCores, 16 GB    │              │
+│  └─────────────────────┘  └─────────────────────┘              │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Networking (simplified for dev)                          │   │
+│  │  VNet: 10.50.0.0/16                                       │   │
+│  │  NSG: restrict to team IPs only                           │   │
+│  │  No Private Endpoints (cost savings)                      │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<h3>4.3 Terraform Code</h3>
+
+<pre><code class="language-hcl"># dev-environment/main.tf
+
+locals {
+  dev_prefix = "dev"
+  team_size  = 3
+  vm_sku     = "Standard_D4s_v3"
+  shutdown_time = "1900"  # 7 PM UTC
+}
+
+# ── Budget Alert ──────────────────────────────────────────────
+
+resource "azurerm_consumption_budget_resource_group" "dev" {
+  name              = "budget-dev-environment"
+  resource_group_id = azurerm_resource_group.dev.id
+
+  amount     = 500
+  time_grain = "Monthly"
+
+  time_period {
+    start_date = "2025-01-01T00:00:00Z"
+  }
+
+  filter {
+    dimension {
+      name = "ResourceGroupName"
+      values = [azurerm_resource_group.dev.name]
+    }
+  }
+
+  notification {
+    enabled        = true
+    threshold      = 80
+    operator       = "GreaterThan"
+    contact_emails = var.dev_lead_emails
+
+    contact_groups = [azurerm_monitor_action_group.dev_budget.id]
+  }
+
+  notification {
+    enabled        = true
+    threshold      = 100
+    operator       = "GreaterThan"
+    contact_emails = var.dev_lead_emails
+
+    contact_groups = [azurerm_monitor_action_group.dev_emergency.id]
+  }
+}
+
+resource "azurerm_monitor_action_group" "dev_budget" {
+  name                = "ag-dev-budget"
+  resource_group_name = azurerm_resource_group.dev.name
+  short_name          = "devbgt"
+
+  email_receiver {
+    name          = "dev-lead"
+    email_address = var.dev_lead_email
+  }
+
+  azure_app_push_receiver {
+    name    = "dev-team-mobile"
+    email_address = var.dev_lead_email
+  }
+}
+
+resource "azurerm_monitor_action_group" "dev_emergency" {
+  name                = "ag-dev-emergency"
+  resource_group_name = azurerm_resource_group.dev.name
+  short_name          = "devemrg"
+
+  email_receiver {
+    name          = "dev-lead"
+    email_address = var.dev_lead_email
+  }
+
+  arm_role_receiver {
+    name                    = "devops-contributor"
+    role_id                 = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+    use_common_alert_schema = true
+  }
+}
+
+# ── Auto-Shutdown VMs ─────────────────────────────────────────
+
+resource "azurerm_linux_virtual_machine" "dev_workstation" {
+  count               = local.team_size
+  name                = "${local.dev_prefix}-ws-${count.index + 1}"
+  resource_group_name = azurerm_resource_group.dev.name
+  location            = azurerm_resource_group.dev.location
+  size                = local.vm_sku
+  admin_username      = "devadmin"
+  admin_password      = var.dev_vm_password
+
+  network_interface_ids = [
+    azurerm_network_interface.dev_nic[count.index].id
+  ]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "StandardSSD_LRS"  # Dev/test storage tier
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = {
+    environment = "dev"
+    auto-shutdown = local.shutdown_time
+  }
+}
+
+resource "azurerm_dev_test_global_vm_shutdown_schedule" "workstations" {
+  count              = local.team_size
+  location           = azurerm_resource_group.dev.location
+  virtual_machine_id = azurerm_linux_virtual_machine.dev_workstation[count.index].id
+  name               = "shutdown-ws-${count.index + 1}"
+  enabled            = true
+
+  daily_recurrence {
+    time = local.shutdown_time
+  }
+
+  timezone = "UTC"
+
+  notification_settings {
+    enabled         = true
+    time_in_minutes = 30
+    email           = var.dev_lead_email
+  }
+}
+
+# ── Spot Instance Build Agents ────────────────────────────────
+
+resource "azurerm_linux_virtual_machine_scale_set" "build_agents" {
+  name                = "vmss-build-agents"
+  resource_group_name = azurerm_resource_group.dev.name
+  location            = azurerm_resource_group.dev.location
+  sku                 = "Standard_F8s_v2"
+  instances           = 2
+
+  priority        = "Spot"
+  eviction_policy = "Delete"
+  maximum_bid_price = "-1"  # Use max spot price
+
+  admin_username = "agentadmin"
+  admin_password = var.agent_vm_password
+
+  os_disk {
+    storage_account_type = "StandardSSD_LRS"
+    caching              = "ReadWrite"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  network_interface {
+    name    = "agent-nic"
+    primary = true
+
+    ip_configuration {
+      name      = "agent-ip"
+      primary   = true
+      subnet_id = azurerm_subnet.dev_agents.id
+    }
+  }
+
+  extension {
+    name                       = "install-docker"
+    publisher                  = "Microsoft.Azure.Extensions"
+    type                       = "CustomScript"
+    type_handler_version       = "2.1"
+    auto_upgrade_minor_version = true
+
+    settings = jsonencode({
+      commandToExecute = "curl -fsSL https://get.docker.com | sh && systemctl enable docker"
+    })
+  }
+
+  tags = {
+    environment = "dev"
+    workload    = "build-agents"
+  }
+}
+
+# ── Dev/Test SQL Database ─────────────────────────────────────
+
+resource "azurerm_mssql_server" "dev" {
+  name                         = "sqlserver-dev"
+  resource_group_name          = azurerm_resource_group.dev.name
+  location                     = azurerm_resource_group.dev.location
+  version                      = "12.0"
+  administrator_login          = "sqladmin"
+  administrator_login_password = var.sql_admin_password
+  minimum_tls_version          = "1.2"
+
+  tags = { environment = "dev" }
+}
+
+resource "azurerm_mssql_database" "app" {
+  name      = "sqldb-dev-app"
+  server_id = azurerm_mssql_server.dev.id
+  sku_name  = "GP_Gen5_2"
+
+  # Dev/test auto-pause: pauses after 1 hour of inactivity
+  auto_pause_delay_in_minutes = 60
+  min_capacity                = 1  # 1 vCore minimum when active
+  max_size_gb                 = 4
+
+  short_term_retention_policy {
+    retention_days = 3  # Keep it short for dev
+  }
+
+  tags = {
+    environment = "dev"
+  }
+}
+
+# ── Budget Emergency: Auto-Shutdown Script ────────────────────
+
+resource "azurerm_automation_runbook" "emergency_shutdown" {
+  name                    = "Emergency-Shutdown-VMs"
+  location                = azurerm_resource_group.dev.location
+  resource_group_name     = azurerm_resource_group.dev.name
+  automation_account_name = azurerm_automation_account.dev.name
+  log_verbose             = true
+  log_progress            = true
+  description             = "Emergency shutdown all dev VMs when budget is exceeded"
+  runbook_type            = "PowerShellWorkflow"
+  content_link            = null
+}
+
+resource "azurerm_monitor_action_group" "dev_emergency_runbook" {
+  name                = "ag-dev-emergency-runbook"
+  resource_group_name = azurerm_resource_group.dev.name
+  short_name          = "devemrb"
+
+  arm_role_receiver {
+    name                    = "devops-contributor"
+    role_id                 = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+    use_common_alert_schema = true
+  }
+}
+</code></pre>
+
+<h3>4.4 Lifecycle Patterns</h3>
+
+<pre><code class="language-hcl"># dev-environment/lifecycle.tf
+
+# Destroy dev environments every Friday evening; recreate Monday
+# via scheduled runbook or CI pipeline.
+
+resource "azurerm_automation_schedule" "friday_destroy" {
+  name                    = "friday-dev-destroy"
+  resource_group_name     = azurerm_resource_group.dev.name
+  automation_account_name = azurerm_automation_account.dev.name
+  frequency               = "Week"
+  interval                = 1
+  timezone                = "UTC"
+
+  # Every Friday at 22:00 UTC
+  week_days = ["Friday"]
+
+  description = "Destroy dev environment for weekend to save costs"
+}
+
+resource "azurerm_automation_schedule" "monday_create" {
+  name                    = "monday-dev-create"
+  resource_group_name     = azurerm_resource_group.dev.name
+  automation_account_name = azurerm_automation_account.dev.name
+  frequency               = "Week"
+  interval                = 1
+  timezone                = "UTC"
+
+  # Every Monday at 07:00 UTC (before business hours)
+  week_days = ["Monday"]
+
+  description = "Recreate dev environment for the work week"
+}
+
+# Terraform Cloud / Enterprise workspace-level policy
+# can also enforce lifecycle with tags:
+
+locals {
+  dev_lifecycle_tags = {
+    # Monday 07:00 — Friday 22:00 is "active"
+    "schedule:active-days" = "Mon,Tue,Wed,Thu"
+    "schedule:destroy-after" = "Friday 22:00 UTC"
+    "cost:monthly-limit"  = "500"
+    "cost:alert-at"       = "80"
+  }
+}
+
+# Scheduled shutdown for the SQL server too
+resource "azurerm_mssql_database" "app" {
+  # ... (same as above, with auto_pause_delay_in_minutes = 60)
+}
+
+# ── Dev VM with lifecycle prevent_destroy ─────────────────────
+# Protect accidental deletion of developer workstations
+# while allowing scale changes
+
+resource "azurerm_linux_virtual_machine" "dev_workstation" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+
+    ignore_changes = [
+      tags["LastLoginTime"],
+    ]
+  }
+}
+
+# ── Spot VMs: use replace trigger for eviction handling ──────
+resource "azurerm_linux_virtual_machine_scale_set" "build_agents" {
+  # ...
+
+  lifecycle {
+    # Spot instances may be evicted; handle gracefully
+    ignore_changes = [
+      instances,
+    ]
+  }
+}
+</code></pre>
+
+<h3>4.5 Key Decisions</h3>
+
+<table>
+<thead><tr><th>Decision</th><th>Choice</th><th>Rationale</th></tr></thead>
+<tbody>
+<tr><td>VM tier</td><td>Dev/Test pricing</td><td>Up to 58 % discount vs production pricing; same SKUs</td></tr>
+<tr><td>Auto-shutdown</td><td>7 PM UTC daily</td><td>Covers UTC+0 through UTC+5; non-working hours</td></tr>
+<tr><td>Build agents</td><td>Spot VMSS (F-series)</td><td>Burst compute at 70-80 % discount; eviction acceptable for CI</td></tr>
+<tr><td>SQL Database</td><td>Serverless with auto-pause</td><td>Pay only when query runs; 1 vCore minimum; pauses after 1 hr idle</td></tr>
+<tr><td>Budget control</td><td>Multi-level alerts + emergency runbook</td><td>Prevent runaway costs; auto-shutdown at budget ceiling</td></tr>
+<tr><td>Weekly lifecycle</td><td>Destroy Friday / Create Monday</td><td>Zero cost on weekends; ~40 % monthly savings vs always-on</td></tr>
+<tr><td>VMSS eviction</td><td>ignore_changes on instances</td><td>Spot eviction is normal; Terraform won't try to re-create evicted instances</td></tr>
+</tbody>
+</table>
+
+<h3>4.6 Cost Considerations</h3>
+
+<table>
+<thead><tr><th>Component</th><th>Always-On Cost</th><th>Optimized Cost</th><th>Savings</th></tr></thead>
+<tbody>
+<tr><td>3× D4s_v3 Developer VMs</td><td>$612/mo</td><td>$178/mo</td><td>71 % (shutdown + dev/test)</td></tr>
+<tr><td>2× F8s_v2 Spot Build Agents</td><td>$430/mo</td><td>$86/mo</td><td>80 % (spot pricing)</td></tr>
+<tr><td>SQL Database (auto-pause)</td><td>$125/mo</td><td>$18/mo</td><td>86 % (serverless, pauses)</td></tr>
+<tr><td>Redis Cache B0</td><td>$45/mo</td><td>$45/mo</td><td>— (already minimal)</td></tr>
+<tr><td>Storage + networking</td><td>$30/mo</td><td>$15/mo</td><td>50 % (reduced I/O)</td></tr>
+<tr><td><strong>Total</strong></td><td><strong>$1,242/mo</strong></td><td><strong>$342/mo</strong></td><td><strong>72 % reduction</strong></td></tr>
+</tbody>
+</table>
+
+<!-- ============================================================ -->
+<!-- COMPARISON -->
+<!-- ============================================================ -->
+
+<h2>Summary: Case Study Comparison</h2>
+
+<table>
+<thead><tr><th>Dimension</th><th>Multi-Cloud</th><th>Microservices</th><th>Disaster Recovery</th><th>Cost-Optimized Dev</th></tr></thead>
+<tbody>
+<tr><td>Providers</td><td>Azure + AWS + GCP</td><td>Azure only</td><td>Azure (multi-region)</td><td>Azure only</td></tr>
+<tr><td>Primary cost</td><td>$428/mo</td><td>$1,086/mo</td><td>$512/mo</td><td>$342/mo</td></tr>
+<tr><td>Modules used</td><td>5 cross-cloud</td><td>3 (cluster/namespace/monitoring)</td><td>4 (storage/cosmos/TM/alerts)</td><td>3 (VM/SQL/budget)</td></tr>
+<tr><td>Biggest risk</td><td>Cross-cloud latency</td><td>Noisy neighbor</td><td>Region failover timing</td><td>Spot eviction</td></tr>
+<tr><td>Terraform complexity</td><td>High (4 providers)</td><td>Medium (Helm + k8s)</td><td>Medium (multi-region)</td><td>Low-Medium</td></tr>
+<tr><td>Best optimization</td><td>PrivateLink (no VPN)</td><td>Autoscaling + spot</td><td>Continuous Cosmos backup</td><td>Weekly destroy/create</td></tr>
+</tbody>
+</table>
+
+<p>These case studies demonstrate that effective Terraform architecture is as much about cost and operational decisions as it is about infrastructure code. Each pattern — multi-cloud federation, Kubernetes composition, cross-region failover, and lifecycle automation — is directly applicable to production workloads. The key principle across all four: <strong>codify not just the infrastructure, but the operational behaviors</strong> — shutdown schedules, failover triggers, budget guardrails — as first-class Terraform resources.</p>
+
+<!-- Navigation -->
+<div style="display:flex; justify-content:space-between; margin-top:2rem; padding-top:1rem; border-top:1px solid #e5e7eb;">
+  <a href="9-advanced.html" style="color:#7c3aed; text-decoration:none;">&larr; Ch 9: Advanced Patterns</a>
+  <a href="11-pitfalls-qa.html" style="color:#7c3aed; text-decoration:none;">Ch 11: Pitfalls &amp; Q&amp;A &rarr;</a>
+</div>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/feedback.js"></script>
+<script src="../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

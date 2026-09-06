@@ -1,0 +1,271 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cryptogram - Brain Games</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.letter-box { width: 36px; height: 44px; border-bottom: 2px solid #475569; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; margin: 2px; cursor: pointer; transition: all 0.15s; }
+.letter-box.space { border-bottom: none; width: 16px; }
+.letter-box.selected { border-bottom-color: #3b82f6; background: #1e3a5f; }
+.letter-box.hint-letter { border-bottom-color: #22c55e; }
+.letter-box.solved { border-bottom-color: #22c55e; }
+.cipher-letter { font-size: 0.7rem; color: #64748b; height: 16px; }
+.answer-letter { font-size: 1.1rem; font-weight: bold; color: #e2e8f0; height: 22px; }
+.word-group { display: inline-block; margin: 0 6px; }
+</style>
+</head>
+<body class="min-h-screen text-white font-sans">
+<div class="container mx-auto px-4 py-6 max-w-3xl">
+  <div class="flex items-center justify-between mb-6">
+    <a href="index.html" class="text-blue-400 hover:text-blue-300 text-sm">&larr; Back to Games</a>
+    <h1 class="text-2xl font-bold text-blue-400">Cryptogram</h1>
+    <button onclick="newPuzzle()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold">Restart</button>
+  </div>
+
+  <div class="flex gap-4 justify-center mb-6 text-sm bg-gray-800 rounded-lg px-4 py-2 inline-flex mx-auto">
+    <span>⏱ <span id="timer">0:00</span></span>
+    <span>🔄 Attempts: <span id="attempts">0</span></span>
+  </div>
+
+  <div class="flex gap-2 justify-center mb-4">
+    <button onclick="showHintLetter()" class="bg-yellow-600 hover:bg-yellow-700 px-3 py-1 rounded text-sm">💡 Show Hint Letter</button>
+    <button onclick="checkAnswer()" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">✓ Check</button>
+  </div>
+
+  <div class="flex justify-center mb-4">
+    <div id="key" class="text-xs text-gray-500"></div>
+  </div>
+
+  <div id="puzzle" class="text-center bg-gray-800 rounded-xl p-6 mb-4"></div>
+
+  <div class="flex justify-center gap-2 mb-4">
+    <button onclick="clearSelected()" class="bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded text-sm">Clear Letter</button>
+    <button onclick="clearAll()" class="bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded text-sm">Clear All</button>
+  </div>
+
+  <div class="flex justify-center gap-1 flex-wrap mt-4" id="alphabet"></div>
+
+  <div id="winMsg" class="hidden text-center mt-6">
+    <p class="text-green-400 text-xl font-bold">🎉 Puzzle Decoded!</p>
+    <p class="text-gray-400 mt-2">Time: <span id="finalTime"></span> | Attempts: <span id="finalAttempts"></span></p>
+  </div>
+</div>
+
+<script>
+const quotes = [
+  { text: "The only way to do great work is to love what you do", author: "Steve Jobs" },
+  { text: "In the middle of difficulty lies opportunity", author: "Albert Einstein" },
+  { text: "Life is what happens when you are busy making other plans", author: "John Lennon" },
+  { text: "The journey of a thousand miles begins with a single step", author: "Lao Tzu" },
+  { text: "Stay hungry stay foolish", author: "Steve Jobs" },
+  { text: "Simplicity is the ultimate sophistication", author: "Leonardo da Vinci" },
+  { text: "The pen is mightier than the sword", author: "Edward Bulwer-Lytton" },
+  { text: "Actions speak louder than words", author: "Abraham Lincoln" },
+  { text: "Knowledge is power", author: "Francis Bacon" },
+  { text: "Time and tide wait for no man", author: "Geoffrey Chaucer" },
+  { text: "Where there is a will there is a way", author: "John Heywood" },
+  { text: "All that glitters is not gold", author: "William Shakespeare" },
+  { text: "Beauty is in the eye of the beholder", author: "Margaret Wolfe Hungerford" },
+  { text: "Every cloud has a silver lining", author: "John Milton" },
+  { text: "Practice makes perfect", author: "Proverb" },
+];
+
+let phrase, mapping, reverseMapping, playerMapping, selectedIdx, attempts, timer, seconds, gameWon;
+
+function generateCipher() {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const shuffled = letters.split('');
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  mapping = {};
+  reverseMapping = {};
+  for (let i = 0; i < 26; i++) {
+    mapping[letters[i]] = shuffled[i];
+    reverseMapping[shuffled[i]] = letters[i];
+  }
+}
+
+function encrypt(plaintext) {
+  return plaintext.split('').map(ch => {
+    if (ch >= 'A' && ch <= 'Z') return mapping[ch];
+    if (ch >= 'a' && ch <= 'z') return mapping[ch.toUpperCase()].toLowerCase();
+    return ch;
+  }).join('');
+}
+
+function newPuzzle() {
+  clearInterval(timer);
+  seconds = 0; attempts = 0; gameWon = false; selectedIdx = -1;
+  const q = quotes[Math.floor(Math.random() * quotes.length)];
+  phrase = q.text.toUpperCase();
+  generateCipher();
+  const encrypted = encrypt(phrase);
+  playerMapping = {};
+  document.getElementById('attempts').textContent = '0';
+  document.getElementById('timer').textContent = '0:00';
+  document.getElementById('winMsg').classList.add('hidden');
+  renderPuzzle(encrypted);
+  renderAlphabet();
+  timer = setInterval(() => {
+    seconds++;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    document.getElementById('timer').textContent = m + ':' + String(s).padStart(2, '0');
+  }, 1000);
+}
+
+function renderPuzzle(encrypted) {
+  let html = '';
+  let idx = 0;
+  const words = phrase.split(' ');
+  let encIdx = 0;
+
+  for (let w = 0; w < words.length; w++) {
+    html += '<span class="word-group">';
+    for (let i = 0; i < words[w].length; i++) {
+      const ch = words[w][i];
+      const enc = encrypted[encIdx];
+      encIdx++;
+      if (ch >= 'A' && ch <= 'Z') {
+        const solved = playerMapping[enc] || '';
+        const cls = solved ? 'solved' : (selectedIdx === idx ? 'selected' : '');
+        html += '<span class="letter-box ' + cls + '" onclick="selectLetter(' + idx + ')" data-idx="' + idx + '" data-enc="' + enc + '">';
+        html += '<span class="cipher-letter">' + enc + '</span>';
+        html += '<span class="answer-letter">' + (solved || '_') + '</span>';
+        html += '</span>';
+        idx++;
+      }
+      encIdx++;
+    }
+    html += '</span>';
+    if (encIdx < encrypted.length && encrypted[encIdx] === ' ') encIdx++;
+  }
+  document.getElementById('puzzle').innerHTML = html;
+}
+
+function renderAlphabet() {
+  let html = '';
+  for (let i = 0; i < 26; i++) {
+    const ch = String.fromCharCode(65 + i);
+    html += '<button onclick="inputLetter(\'' + ch + '\')" class="bg-gray-700 hover:bg-gray-600 w-8 h-8 rounded text-sm font-bold">' + ch + '</button>';
+  }
+  document.getElementById('alphabet').innerHTML = html;
+}
+
+function selectLetter(idx) {
+  if (gameWon) return;
+  selectedIdx = selectedIdx === idx ? -1 : idx;
+  refreshDisplay();
+}
+
+function inputLetter(ch) {
+  if (gameWon || selectedIdx < 0) return;
+  const box = document.querySelector('[data-idx="' + selectedIdx + '"]');
+  const enc = box.dataset.enc;
+  playerMapping[enc] = ch;
+  attempts++;
+  document.getElementById('attempts').textContent = attempts;
+  if (selectedIdx < phrase.replace(/ /g, '').length - 1) selectedIdx++;
+  refreshDisplay();
+  checkWin();
+}
+
+function clearSelected() {
+  if (selectedIdx < 0) return;
+  const box = document.querySelector('[data-idx="' + selectedIdx + '"]');
+  if (box) {
+    const enc = box.dataset.enc;
+    delete playerMapping[enc];
+  }
+  refreshDisplay();
+}
+
+function clearAll() {
+  playerMapping = {};
+  refreshDisplay();
+}
+
+function refreshDisplay() {
+  document.querySelectorAll('.letter-box[data-idx]').forEach(box => {
+    const idx = parseInt(box.dataset.idx);
+    const enc = box.dataset.enc;
+    const solved = playerMapping[enc] || '';
+    box.className = 'letter-box' + (solved ? ' solved' : '') + (selectedIdx === idx ? ' selected' : '');
+    box.querySelector('.answer-letter').textContent = solved || '_';
+  });
+}
+
+function showHintLetter() {
+  if (gameWon) return;
+  const boxes = document.querySelectorAll('.letter-box[data-idx]');
+  const unsolved = [];
+  boxes.forEach(box => {
+    const enc = box.dataset.enc;
+    if (!playerMapping[enc]) unsolved.push(box);
+  });
+  if (unsolved.length === 0) return;
+  const box = unsolved[Math.floor(Math.random() * unsolved.length)];
+  const enc = box.dataset.enc;
+  const idx = parseInt(box.dataset.idx);
+  playerMapping[enc] = phrase[idx];
+  refreshDisplay();
+  checkWin();
+}
+
+function checkAnswer() {
+  let correct = 0, total = 0;
+  document.querySelectorAll('.letter-box[data-idx]').forEach(box => {
+    const idx = parseInt(box.dataset.idx);
+    const enc = box.dataset.enc;
+    const expected = phrase[idx];
+    const given = playerMapping[enc] || '';
+    total++;
+    if (given === expected) correct++;
+  });
+  alert(correct + '/' + total + ' letters correct');
+}
+
+function checkWin() {
+  let won = true;
+  const boxes = document.querySelectorAll('.letter-box[data-idx]');
+  boxes.forEach(box => {
+    const idx = parseInt(box.dataset.idx);
+    const enc = box.dataset.enc;
+    const expected = phrase[idx];
+    const given = playerMapping[enc] || '';
+    if (given !== expected) won = false;
+  });
+  if (won) {
+    gameWon = true;
+    clearInterval(timer);
+    document.getElementById('finalTime').textContent = document.getElementById('timer').textContent;
+    document.getElementById('finalAttempts').textContent = attempts;
+    document.getElementById('winMsg').classList.remove('hidden');
+  }
+}
+
+newPuzzle();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

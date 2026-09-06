@@ -1,0 +1,151 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>8. Apache Airflow &amp; Orchestration - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>8. Apache Airflow &amp; Orchestration</h1>
+<p class="tag">Chapter 8</p>
+
+<h2>Why Orchestration?</h2>
+<p>A data platform is many jobs: loads, transformations, quality checks, model refreshes. If jobs are run by cron and people, dependencies break silently, retries are ad-hoc, and nothing is auditable. <strong>Workflow orchestration</strong> solves this: it schedules jobs, manages dependencies between them, retries failures, and records what ran when.</p>
+
+<p><strong>Apache Airflow</strong> is the industry-standard open-source orchestrator. It turns workflows into Python code (<strong>DAGs</strong>) with dependencies, schedules, retries, and monitoring. On GCP, Airflow is offered as the managed service <strong>Cloud Composer</strong> (next chapter).</p>
+
+<h2>Core Concepts</h2>
+<table>
+<tr><th>Concept</th><th>Description</th></tr>
+<tr><td>DAG</td><td>Directed Acyclic Graph — the workflow definition in Python: tasks and their dependencies</td></tr>
+<tr><td>Task</td><td>A single unit of work in a DAG (e.g., run one SQL query)</td></tr>
+<tr><td>Operator</td><td>Class that defines what a task does (PythonOperator, BigQueryInsertJobOperator, DataprocSubmitJobOperator, etc.)</td></tr>
+<tr><td>Sensor</td><td>Special task that waits for a condition (e.g., a file to appear in GCS)</td></tr>
+<tr><td>Scheduler</td><td>Component that decides when tasks run based on schedule and dependencies</td></tr>
+<tr><td>Executor</td><td>Runs tasks (local, Celery, Kubernetes executor)</td></tr>
+<tr><td>DAG run</td><td>An execution instance of a DAG for a specific schedule interval</td></tr>
+<tr><td>Task instance</td><td>An execution of one task in a specific DAG run</td></tr>
+</table>
+
+<h2>A Minimal DAG</h2>
+<pre><code># dags/hello_gcp.py
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
+
+def say_hello():
+    print("Hello from Airflow")
+
+with DAG(
+    dag_id="hello_gcp",
+    start_date=datetime(2026, 1, 1),
+    schedule="@daily",
+    catchup=False,
+    default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},
+) as dag:
+    t1 = PythonOperator(task_id="say_hello", python_callable=say_hello)
+
+    t2 = BigQueryInsertJobOperator(
+        task_id="run_query",
+        configuration={
+            "query": {
+                "query": "SELECT COUNT(*) FROM myproj.analytics.orders",
+                "useLegacySql": False,
+            }
+        },
+    )
+
+    t1 >> t2   # t2 depends on t1</code></pre>
+
+<h2>Schedule Semantics: Know Your Catchup</h2>
+<p>Airflow schedules by <em>data interval</em>: a run for day D executes after the interval closes (start at 00:00, runs at 00:05+). The <code>start_date</code> plus <code>schedule</code> defines which intervals run, and <code>catchup</code> determines whether missed past intervals are backfilled. The template variables <code>{{ ds }}</code> (data date) and <code>{{ execution_date }}</code> are the bread and butter for parameterizing jobs per day.</p>
+
+<pre><code># Use the data interval date to build GCS paths
+"gs://my-bucket/raw/orders/{{ ds }}/*.csv"
+"{{ ds_nodash }}"  # e.g. 20260801</code></pre>
+
+<div class="warn">
+<strong>Common gotcha:</strong> <code>catchup=True</code> on a newly created DAG with a distant start_date can fire hundreds of runs at once. Set <code>catchup=False</code> or backfill deliberately. Also remember Airflow's default timezone is UTC — set <code>timezone</code> and <code>start_date</code> explicitly to avoid off-by-one-day surprises.
+</div>
+
+<h2>Operators for GCP</h2>
+<p>The <code>apache-airflow-providers-google</code> package provides operators for almost every GCP service. The ones data engineers use most:</p>
+<ul>
+<li><strong>BigQuery:</strong> BigQueryInsertJobOperator, BigQueryCreateEmptyDatasetOperator, BigQueryDeleteTableOperator.</li>
+<li><strong>Dataproc:</strong> DataprocCreateClusterOperator, DataprocSubmitPySparkJobOperator, DataprocSubmitSparkSqlJobOperator, DataprocDeleteClusterOperator — the ephemeral-cluster pattern.</li>
+<li><strong>Cloud Storage:</strong> GCSCreateBucketOperator, GCSObjectCreateSensor, GCSToBigQueryOperator, GCSToGCSOperator.</li>
+<li><strong>Dataflow:</strong> DataflowStartFlexTemplateOperator, DataflowCreateJavaJobOperator.</li>
+<li><strong>Pub/Sub:</strong> PubSubCreateSubscriptionOperator, PubSubPublishMessageOperator.</li>
+<li><strong>Cloud SQL:</strong> CloudSQLExecuteQueryOperator.</li>
+</ul>
+
+<h2>Sensors: Waiting for Conditions</h2>
+<pre><code>from airflow.providers.google.cloud.sensors.gcs import GCSObjectExistenceSensor
+
+wait_for_file = GCSObjectExistenceSensor(
+    task_id="wait_for_orders_file",
+    bucket="my-bucket",
+    object="raw/orders/{{ ds }}.csv",
+    timeout=6 * 60 * 60,
+    poke_interval=60,
+    mode="reschedule",
+)</code></pre>
+
+<p>Sensors are essential when sources are unpredictable. Use <code>mode="reschedule"</code> to free worker slots while waiting.</p>
+
+<h2>Retries, Timeouts, and Error Handling</h2>
+<ul>
+<li><strong>retries / retry_delay:</strong> per-task default for transient failures.</li>
+<li><strong>execution_timeout:</strong> kill a task that runs too long.</li>
+<li><strong>Branching:</strong> BranchPythonOperator lets the DAG take different paths based on a decision (e.g., skip downstream steps when no data arrived).</li>
+<li><strong>ShortCircuitOperator:</strong> stop downstream tasks conditionally.</li>
+<li><strong>SLAs / alerts:</strong> notify when tasks run too long or DAGs fail.</li>
+</ul>
+
+<div class="note">
+<strong>Design principle:</strong> DAGs should be <em>idempotent</em> — re-running a failed day must be safe. Write to date-partitioned destinations, use overwrite semantics, and make "rerun yesterday" the standard recovery procedure rather than manual patching.
+</div>
+
+<h2>DAG Patterns That Matter</h2>
+<ul>
+<li><strong>Fan-in/fan-out:</strong> one task spawns many (map), they run in parallel, and results merge (reduce).</li>
+<li><strong>Checkpointing:</strong> a data-quality check between load and transform that fails the run early.</li>
+<li><strong>Dynamic DAGs:</strong> generate tasks from a list of configs — powerful but keep it simple; avoid over-engineering.</li>
+<li><strong>TaskGroups and SubDAGs:</strong> group related tasks visually (TaskGroups preferred over SubDAGs).</li>
+<li><strong>External sensors:</strong> wait on DAGs in other environments (ExternalTaskSensor) for cross-team dependencies.</li>
+</ul>
+
+<h2>Environment Isolation and Testing DAGs</h2>
+<ul>
+<li>Keep DAG code in git; <strong>CI tests</strong>: import the DAG (catches syntax/import errors), validate with <code>airflow dags list</code>, and run unit tests on helper functions.</li>
+<li>Test with <code>airflow tasks test &lt;dag_id&gt; &lt;task_id&gt; &lt;date&gt;</code> on a local environment.</li>
+<li>Use per-environment variables and Connections; never hardcode credentials.</li>
+<li>Limit each DAG's blast radius: no monolithic DAGs with a hundred tasks that are hard to reason about.</li>
+</ul>
+
+<h2>Airflow vs Other Orchestrators</h2>
+<table>
+<tr><th>Tool</th><th>Strengths</th><th>Weaknesses</th></tr>
+<tr><td>Airflow</td><td>Ubiquitous, huge operator library, mature, declarative scheduling</td><td>Python-dependent, scheduler semantics can be subtle</td></tr>
+<tr><td>Dagster</td><td>Data-aware, better asset/lineage model</td><td>Smaller community</td></tr>
+<tr><td>Prefect</td><td>Pythonic, easy onboarding, dynamic workflows</td><td>Less mature for large-scale ops</td></tr>
+<tr><td>Dataform (acquired)</td><td>Tight BigQuery/warehouse integration</td><td>Narrower scope (SQL transformation)</td></tr>
+</table>
+
+<p>Airflow remains the default choice on GCP because Cloud Composer is fully managed — you get Airflow without running the infrastructure.</p>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Write a DAG that: (1) waits for today's orders file in GCS, (2) loads it into a BigQuery partitioned table, (3) runs a dbt-style SQL transformation, (4) checks row counts (fail if zero), (5) alerts via email/Cloud Logging on failure. Run it locally (or in Composer) for two data dates and confirm the schedule, retries, and idempotent re-run behavior.
+</div>
+
+<nav>
+  <a href="7-python-data-engineering.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="9-cloud-composer.html">Next: Cloud Composer in Practice &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

@@ -1,0 +1,122 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>171. Lab - Azure AI Search - Queries - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 171</span>
+<h1>Lab - Azure AI Search - Queries</h1>
+<p>The index is populated and searchable. Now you will ask it questions. In this lab you query the <code>docs-index</code> with keyword search, apply filters and selections, read result scores, and then call the same service from Python using the official SDK. By the end you will have reusable query patterns for any RAG application.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>The search service name, admin key, and resource group variables from earlier labs.</li>
+<li>The populated <code>docs-index</code> with a non-zero document count.</li>
+<li>Python 3.9 or later with a virtual environment, and the search package installed: <code>pip install azure-search-documents</code></li>
+</ul>
+
+<h2>Step 1 - Run a Keyword Search</h2>
+<p>The simplest query sends a <code>$search</code> term to the index's search action. Start with a term that appears in your documents:</p>
+<pre><code>az rest --method post `
+  --uri "https://$searchName.search.windows.net/indexes/docs-index/search?api-version=2023-11-01" `
+  --headers "api-key=$adminKey" `
+  --body '{"search": "azure", "top": 5}'
+</code></pre>
+<p>Each hit is a JSON document. Look at the <code>@search.score</code> value on each result — it is a relative measure of how strongly the document matched. Higher is better, and scores are only meaningful within one query, not across different queries.</p>
+
+<div class="note">
+<p>The default query syntax is <em>simple</em>: terms are combined with an implicit OR, phrases can be quoted, and <code>+</code>/<code>-</code> force inclusion or exclusion. The <em>full Lucene</em> syntax adds proximity, wildcards, and regex. Switch with <code>"queryType": "full"</code> when you need that power.</p>
+</div>
+
+<h2>Step 2 - Add Filters and Select Fields</h2>
+<p>Most real queries combine a search term with metadata filters. The example below narrows results to a specific source file and returns only the fields the application needs:</p>
+<pre><code>az rest --method post `
+  --uri "https://$searchName.search.windows.net/indexes/docs-index/search?api-version=2023-11-01" `
+  --headers "api-key=$adminKey" `
+  --body '{
+    "search": "embedding",
+    "filter": "metadata_storage_name eq '\''chapter1.pdf'\''",
+    "select": "id,title,content,metadata_storage_name",
+    "top": 10
+  }'
+</code></pre>
+<p>Because the filter runs before ranking, it is an effective way to restrict a large index to a relevant slice — for example, only documents from one product line or one date range.</p>
+
+<h2>Step 3 - Query from Python</h2>
+<p>Application code should not shell out to <code>az rest</code>. Use the <code>azure-search-documents</code> SDK instead. Save the following as <code>search_docs.py</code> and fill in your own service name and key:</p>
+<pre><code>from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+
+service_name = "YOUR_SEARCH_SERVICE_NAME"
+index_name = "docs-index"
+api_key = "YOUR_ADMIN_KEY"
+
+endpoint = f"https://{service_name}.search.windows.net"
+
+client = SearchClient(
+    endpoint=endpoint,
+    index_name=index_name,
+    credential=AzureKeyCredential(api_key)
+)
+
+query = "how do I reset the device"
+
+results = client.search(
+    search_text=query,
+    top=5,
+    select=["title", "content", "metadata_storage_name"],
+)
+
+for doc in results:
+    print(doc["@search.score"], doc["metadata_storage_name"])
+    print(doc["content"][:200])
+    print("-" * 60)
+</code></pre>
+<p>Run it and you should see a ranked list of matching documents with their source file names and the opening characters of the matching content.</p>
+
+<div class="warn">
+<p>The admin key grants full control of the search service. For application code that only queries, create a <strong>query key</strong> in the Azure portal or via <code>az search query-key create</code> and use that instead. Never ship an admin key in client code.</p>
+</div>
+
+<h2>Step 4 - Use a Query Key</h2>
+<p>Create a query key, then swap it into your Python script to prove read-only access works:</p>
+<pre><code>az search query-key create `
+  --service-name $searchName `
+  --resource-group $rg `
+  --name app-reader
+</code></pre>
+<p>Update the <code>api_key</code> variable in <code>search_docs.py</code> with the returned value and re-run the script. The results are identical, but the credential now only allows reads.</p>
+
+<div class="tip">
+<p>For RAG you will usually query with <code>search_text</code> for the user's question and combine it with a vector query for meaning-based matching. That hybrid pattern is covered in the enrichment section of the course; the keyword patterns here are the foundation it builds on.</p>
+</div>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>403</code> on search</td><td>Wrong key for the operation</td><td>Query keys cannot write; use the admin key for <code>az rest</code> examples.</td></tr>
+<tr><td>Empty result set</td><td>Term not in any document</td><td>Try a broader term or check <code>documentCount</code> on the index.</td></tr>
+<tr><td><code>Invalid filter expression</code></td><td>Mismatched quotes or wrong field name</td><td>Single-quote string literals inside filters and verify the field is <code>filterable</code>.</td></tr>
+<tr><td>Module not found</td><td>SDK not installed</td><td>Run <code>pip install azure-search-documents</code> in the active environment.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You ran keyword searches with the REST API, combined them with metadata filters, and queried the same index from Python with the official SDK using both an admin key and a query key. You can now retrieve ranked results from your own data — the retrieval half of RAG. The next chapter explains how AI enrichment adds meaning-based fields to this index.</p>
+<nav>
+<a href="170-lab-azure-ai-search-creating-the-indexer.html">&larr; Previous: Lab - Azure AI Search - Creating the indexer</a><a href="172-ai-enrichment-and-skillsets.html">Next: AI Enrichment and Skillsets &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

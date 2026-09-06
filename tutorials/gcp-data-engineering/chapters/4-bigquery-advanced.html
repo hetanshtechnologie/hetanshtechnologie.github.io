@@ -1,0 +1,132 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>4. BigQuery Advanced &amp; Optimization - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>4. BigQuery Advanced &amp; Optimization</h1>
+<p class="tag">Chapter 4</p>
+
+<h2>Time Travel and Snapshots</h2>
+<p>BigQuery keeps deleted or overwritten data accessible for a rolling window (7 days by default, configurable). You can query the table as it existed at a point in time:</p>
+
+<pre><code>-- Query a table as of 1 hour ago
+SELECT * FROM myproj.analytics.orders
+FOR SYSTEM_TIME AS OF TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR);</code></pre>
+
+<p><strong>Table snapshots</strong> freeze a table at a point in time as a durable, cheap copy — ideal for disaster recovery, audit, and release management.</p>
+
+<pre><code>CREATE SNAPSHOT TABLE myproj.analytics.orders_snapshot_20260801
+CLONE myproj.analytics.orders;</code></pre>
+
+<p><strong>Cloning</strong> (via CREATE TABLE ... CLONE) creates a zero-copy reference that becomes a real table only when you write to it. This makes staging, dev environments, and "copy for analysis" nearly free until you modify them.</p>
+
+<h2>Streaming and Real-Time Data</h2>
+<p>For near-real-time ingestion BigQuery offers two paths:</p>
+<ul>
+<li><strong>Legacy streaming inserts (tabledata.insertAll):</strong> per-row inserts with 90-day retention of streaming buffer. Simpler but limited (no exactly-once, no automatic retry).</li>
+<li><strong>BigQuery Storage Write API:</strong> the modern path — high throughput, exactly-once semantics, schema auto-detection, and default-on transactionality. Use it for production streaming.</li>
+</ul>
+
+<p>Recommended production architecture: <strong>Pub/Sub → Dataflow (or Dataproc streaming) → Storage Write API → BigQuery</strong>. Dataflow provides exactly-once processing, autoscaling, and backpressure handling.</p>
+
+<h2>External Tables and BigLake</h2>
+<p>BigQuery can query data that lives in <strong>Cloud Storage</strong> without loading it, using external tables. Modern capabilities:</p>
+<ul>
+<li><strong>BigLake tables:</strong> external tables over GCS (or AWS S3 / Azure ADLS) with BigQuery's query engine, row-level security, and fine-grained access. Great for lakehouse patterns and when you can't (or shouldn't) copy data into BigQuery.</li>
+<li><strong>Open table formats:</strong> BigQuery supports Apache Iceberg and Delta Lake tables, unifying lake and warehouse.</li>
+<li><strong>Query federation:</strong> query data in Cloud SQL, Spanner, and other sources without loading.</li>
+</ul>
+
+<pre><code># Create an external table over Parquet files in GCS
+CREATE OR REPLACE EXTERNAL TABLE myproj.analytics.ext_events
+WITH CONNECTION myproj.us.ext_conn
+OPTIONS (
+  format = 'PARQUET',
+  uris = ['gs://my-bucket/events/*.parquet']
+);</code></pre>
+
+<h2>BigQuery ML: ML in SQL</h2>
+<p><strong>BigQuery ML (BQML)</strong> lets you train and run ML models using SQL — no separate ML platform needed for many use cases:</p>
+<pre><code>-- Train a linear regression model predicting order amount
+CREATE OR REPLACE MODEL myproj.analytics.revenue_model
+OPTIONS (model_type = 'LINEAR_REG', input_label_cols = ['total_amount']) AS
+SELECT
+  customer_tenure_days,
+  order_count,
+  total_amount
+FROM myproj.analytics.customer_features;
+
+-- Predict
+SELECT * FROM ML.PREDICT(MODEL myproj.analytics.revenue_model,
+  (SELECT customer_tenure_days, order_count, 0 AS total_amount
+   FROM myproj.analytics.new_customers));</code></pre>
+
+<p>BQML supports linear/logistic regression, classification, clustering (k-means), time series (ARIMA), matrix factorization, and importing external models (TensorFlow, XGBoost). It is the fastest way to get an ML model from a warehouse table to production without leaving SQL.</p>
+
+<h2>Performance Optimization: Slots and Query Shape</h2>
+<p>BigQuery executes queries in stages. Optimization focuses on reducing bytes scanned and avoiding skew:</p>
+<ul>
+<li><strong>Predicate pushdown:</strong> filter as early as possible; the engine pushes filters down to storage.</li>
+<li><strong>Join order:</strong> put the largest table first; the engine chooses join strategy automatically, but skewed keys cause stragglers.</li>
+<li><strong>Avoid cross joins;</strong> use window functions where possible.</li>
+<li><strong>Use approximate aggregates</strong> for huge distinct counts.</li>
+<li><strong>Cache:</strong> BigQuery caches query results (for 24h) — identical queries are free if cached.</li>
+<li><strong>BI Engine:</strong> in-memory acceleration for Looker/dashboard workloads.</li>
+</ul>
+
+<div class="note">
+<strong>Optimization workflow:</strong> (1) dry-run to see bytes scanned, (2) check the query plan's "most expensive stage", (3) eliminate unnecessary columns and filters, (4) verify partitioning/clustering match the filter pattern, (5) consider a materialized view for repeated aggregates.
+</div>
+
+<h2>Cost Optimization Playbook</h2>
+<ul>
+<li>Partition + cluster every large table; expire partitions you don't need.</li>
+<li>Prefer Parquet/Avro over JSON/CSV for loads (smaller, faster).</li>
+<li>Use flat-rate slots for steady heavy workloads; on-demand for spiky.</li>
+<li>Set dataset-level default table expiration for non-production data.</li>
+<li>Monitor with INFORMATION_SCHEMA.JOBS_BY_PROJECT and tag expensive queries.</li>
+<li>Use data governance (Dataplex) to flag unused tables and drop them.</li>
+</ul>
+
+<pre><code># Find your most expensive queries (bytes scanned)
+SELECT
+  query,
+  total_bytes_processed / 1024 / 1024 / 1024 AS gb_scanned,
+  creation_time
+FROM `region-us`.INFORMATION_SCHEMA.JOBS_BY_PROJECT
+WHERE job_type = 'QUERY'
+ORDER BY total_bytes_processed DESC
+LIMIT 20;</code></pre>
+
+<h2>Table Cloning for Development</h2>
+<p>A common production pattern: clone production tables into a dev project (zero-cost until written), develop and test dbt models or queries there, and never pay to store duplicated data.</p>
+
+<pre><code>bq cp --no_clobber \
+  source_project.analytics.orders \
+  dev_project.analytics.orders_clone</code></pre>
+
+<h2>Data Governance and Lineage</h2>
+<ul>
+<li><strong>Data Catalog:</strong> searchable metadata, tags, and lineage (via Dataplex lineage).</li>
+<li><strong>Dataplex:</strong> central data governance — policies, quality checks, lineage, and lifecycle.</li>
+<li><strong>Row-level and column-level security:</strong> apply access policies on BigLake tables.</li>
+<li><strong>Masking rules:</strong> control column exposure by role.</li>
+</ul>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Using the public dataset of your choice: (1) create a clone of a table and run a query on the clone — verify it is zero-cost until written; (2) query a table with FOR SYSTEM_TIME to see a historical version; (3) create a simple BQML linear regression or ARIMA model and run ML.PREDICT; (4) use INFORMATION_SCHEMA to identify the top 3 most expensive queries in your session and propose one optimization for each.
+</div>
+
+<nav>
+  <a href="3-bigquery-fundamentals.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="5-dataproc.html">Next: Dataproc &amp; Managed Spark &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

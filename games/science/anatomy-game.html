@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anatomy Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.body-display{position:relative;width:200px;height:380px;margin:0 auto}
+.body-svg{font-size:16rem;text-align:center;line-height:1}
+.organ-slot{position:absolute;width:120px;height:40px;border:2px dashed #475569;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:.8rem;cursor:pointer;transition:all .2s}
+.organ-slot:hover{border-color:#38bdf8;background:rgba(56,189,248,0.1)}
+.organ-slot.correct{border-color:#22c55e;border-style:solid;background:rgba(34,197,94,0.15)}
+.organ-slot.wrong{border-color:#ef4444;border-style:solid;background:rgba(239,68,68,0.1);animation:shake .3s}
+.card{background:#1e293b;border-radius:16px;padding:20px;max-width:550px;width:100%;text-align:center;border:2px solid #334155}
+.q-text{font-size:1rem;margin:10px 0}
+.organ-tray{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:10px 0}
+.organ-btn{background:#1e293b;border:2px solid #475569;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:.85rem;color:#e2e8f0;transition:all .2s;user-select:none}
+.organ-btn:hover{border-color:#38bdf8}
+.organ-btn.selected{border-color:#facc15;background:#1e3a5f}
+.organ-btn.used{opacity:.3;pointer-events:none}
+.fb{margin-top:8px;padding:8px;border-radius:8px;font-size:.9rem;min-height:2em}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.body-layout{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;justify-content:center}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🫀 Anatomy Game</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>🎯 Placed: <b id="placed">0</b>/<b id="total">0</b></span>
+</div>
+<div class="body-layout">
+<div class="body-display">
+<div class="body-svg">🧍</div>
+<div id="slots"></div>
+</div>
+<div style="flex:1;max-width:350px">
+<div class="card">
+<div class="q-text" id="qtext">Select an organ and place it on the body!</div>
+<div class="organ-tray" id="tray"></div>
+</div>
+</div>
+</div>
+<div class="fb" id="fb"></div>
+<div style="display:flex;gap:10px">
+<button class="btn sec" onclick="resetRound()">↺ Reset</button>
+<button class="btn sec" onclick="nextRound()">⏭ Skip</button>
+</div>
+</div>
+<script>
+let score=0,level=1,placed=0,totalOrgans=0,selectedOrgan=null;
+const organSets=[
+  [
+    {name:'🧠 Brain',pos:{top:'5px',left:'30px'},explain:'Brain controls thoughts, memory, and body functions.'},
+    {name:'❤️ Heart',pos:{top:'120px',left:'55px'},explain:'Heart pumps blood throughout the body.'},
+    {name:'🫁 Lungs',pos:{top:'110px',left:'-5px'},explain:'Lungs exchange oxygen and CO₂.'},
+    {name:'🫀 Stomach',pos:{top:'170px',left:'45px'},explain:'Stomach digests food with acid.'},
+    {name:'🫘 Kidneys',pos:{top:'200px',left:'-10px'},explain:'Kidneys filter blood and produce urine.'},
+    {name:'🦴 Liver',pos:{top:'160px',left:'-5px'},explain:'Liver detoxifies blood and produces bile.'},
+  ],
+  [
+    {name:'🧠 Brain',pos:{top:'5px',left:'30px'},explain:'Brain is the control center of the nervous system.'},
+    {name:'❤️ Heart',pos:{top:'120px',left:'55px'},explain:'Heart is a muscular pump in the chest.'},
+    {name:'🫁 Lungs',pos:{top:'110px',left:'-5px'},explain:'Two lungs facilitate gas exchange.'},
+    {name:'🫀 Stomach',pos:{top:'170px',left:'45px'},explain:'Stomach breaks down food mechanically and chemically.'},
+    {name:'🫘 Intestines',pos:{top:'230px',left:'30px'},explain:'Small intestine absorbs nutrients; large intestine absorbs water.'},
+    {name:'🦴 Pancreas',pos:{top:'190px',left:'-10px'},explain:'Pancreas produces insulin and digestive enzymes.'},
+    {name:'🔵 Spleen',pos:{top:'150px',left:'-15px'},explain:'Spleen filters blood and helps fight infection.'},
+  ],
+  [
+    {name:'🧠 Brain',pos:{top:'5px',left:'30px'},explain:'Brain weighs about 3 pounds and has ~86 billion neurons.'},
+    {name:'❤️ Heart',pos:{top:'120px',left:'55px'},explain:'Heart beats ~100,000 times per day.'},
+    {name:'🫁 Lungs',pos:{top:'110px',left:'-5px'},explain:'You breathe ~20,000 times per day.'},
+    {name:'🫀 Stomach',pos:{top:'170px',left:'45px'},explain:'Stomach pH is ~1.5-3.5 (very acidic).'},
+    {name:'🫘 Kidneys',pos:{top:'200px',left:'-10px'},explain:'Kidneys filter ~180 liters of blood daily.'},
+    {name:'🦴 Liver',pos:{top:'160px',left:'-5px'},explain:'Liver performs over 500 functions.'},
+    {name:'🔵 Gallbladder',pos:{top:'180px',left:'-15px'},explain:'Gallbladder stores bile produced by the liver.'},
+    {name:'🟣 Bladder',pos:{top:'260px',left:'40px'},explain:'Bladder stores urine before excretion.'},
+  ],
+];
+let currentSet=[];
+
+function initRound(){
+  let setIdx=(level-1)%organSets.length;
+  currentSet=[...organSets[setIdx]].sort(()=>Math.random()-0.5);
+  totalOrgans=currentSet.length;placed=0;
+  document.getElementById('total').textContent=totalOrgans;
+  document.getElementById('placed').textContent='0';
+  selectedOrgan=null;
+  // slots
+  const slotsEl=document.getElementById('slots');slotsEl.innerHTML='';
+  currentSet.forEach((org,i)=>{
+    const s=document.createElement('div');s.className='organ-slot';s.style.top=org.pos.top;s.style.left=org.pos.left;
+    s.dataset.idx=i;s.innerHTML='<span style="color:#475569">?</span>';
+    s.onclick=()=>placeOrgan(i);slotsEl.appendChild(s);
+  });
+  // tray
+  const tray=document.getElementById('tray');tray.innerHTML='';
+  let shuffledOrgs=[...currentSet].sort(()=>Math.random()-0.5);
+  shuffledOrgs.forEach(org=>{
+    const b=document.createElement('button');b.className='organ-btn';b.textContent=org.name;
+    b.onclick=()=>{tray.querySelectorAll('.organ-btn').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');selectedOrgan={el:b,...org}};
+    tray.appendChild(b);
+  });
+  document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';
+  document.getElementById('qtext').textContent='Place each organ in the correct position on the body!';
+}
+
+function placeOrgan(idx){
+  if(!selectedOrgan)return;
+  let slot=document.querySelectorAll('.organ-slot')[idx];
+  if(slot.classList.contains('correct'))return;
+  let org=currentSet[idx];
+  if(selectedOrgan.name===org.name){
+    slot.classList.add('correct');slot.innerHTML=org.name;
+    selectedOrgan.el.classList.add('used');selectedOrgan.el.classList.remove('selected');
+    placed++;document.getElementById('placed').textContent=placed;
+    let pts=10+level*5;score+=pts;
+    document.getElementById('fb').innerHTML='✅ '+org.explain+' <b>+'+pts+' pts</b>';
+    document.getElementById('fb').style.background='rgba(34,197,94,0.15)';
+    selectedOrgan=null;
+    document.getElementById('score').textContent=score;
+    if(placed>=totalOrgans){setTimeout(()=>showRoundComplete(),800)}
+  }else{
+    slot.classList.add('wrong');setTimeout(()=>slot.classList.remove('wrong'),400);
+    document.getElementById('fb').innerHTML='❌ That\'s not the right position for '+selectedOrgan.name+'!';
+    document.getElementById('fb').style.background='rgba(239,68,68,0.15)';
+  }
+}
+
+function showRoundComplete(){
+  document.getElementById('fb').innerHTML='🎉 All organs placed correctly!';
+  setTimeout(()=>nextRound(),1200);
+}
+
+function resetRound(){initRound()}
+function nextRound(){level++;document.getElementById('level').textContent=level;initRound()}
+function restart(){score=0;level=1;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;initRound()}
+initRound();
+</script>
+</body>
+</html>

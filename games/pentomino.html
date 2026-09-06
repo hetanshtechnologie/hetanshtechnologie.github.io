@@ -1,0 +1,235 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pentomino - Brain Games</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.board-cell { width: 38px; height: 38px; border: 1px solid #334155; box-sizing: border-box; transition: background 0.15s; }
+.board-cell:hover { background: #1e3a5f; }
+.board-cell.filled { border-color: transparent; }
+.piece-btn { width: 48px; height: 48px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; transition: all 0.15s; border: 2px solid transparent; }
+.piece-btn:hover { transform: scale(1.1); }
+.piece-btn.selected { border-color: #fbbf24; box-shadow: 0 0 10px rgba(251,191,36,0.5); }
+.piece-btn.placed { opacity: 0.3; pointer-events: none; }
+.piece-preview { position: fixed; pointer-events: none; z-index: 100; opacity: 0.8; }
+</style>
+</head>
+<body class="min-h-screen text-white font-sans">
+<div class="container mx-auto px-4 py-6">
+  <div class="flex items-center justify-between mb-4">
+    <a href="index.html" class="text-blue-400 hover:text-blue-300 text-sm">&larr; Back to Games</a>
+    <h1 class="text-2xl font-bold text-blue-400">Pentomino Puzzle</h1>
+    <button onclick="newGame()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold">Restart</button>
+  </div>
+
+  <div class="flex gap-4 justify-center mb-4 text-sm bg-gray-800 rounded-lg px-4 py-2 inline-flex mx-auto">
+    <span>⏱ <span id="timer">0:00</span></span>
+    <span>📦 Placed: <span id="placed">0</span>/12</span>
+  </div>
+
+  <div class="flex gap-2 justify-center mb-4">
+    <button onclick="rotatePiece()" class="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-sm">↻ Rotate</button>
+    <button onclick="flipPiece()" class="bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded text-sm">↔ Flip</button>
+    <button onclick="removePiece()" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm">✕ Remove</button>
+  </div>
+
+  <div class="flex justify-center mb-4 overflow-auto">
+    <div id="board" class="inline-grid gap-0" style="grid-template-columns: repeat(10, 38px);"></div>
+  </div>
+
+  <div class="flex flex-wrap justify-center gap-2 mt-4" id="pieces"></div>
+
+  <div id="winMsg" class="hidden text-center mt-6">
+    <p class="text-green-400 text-xl font-bold">🎉 Puzzle Complete!</p>
+    <p class="text-gray-400 mt-2">Time: <span id="finalTime"></span></p>
+  </div>
+</div>
+
+<script>
+const ROWS = 6;
+const COLS = 10;
+const PIECES = [
+  { name: 'F', cells: [[0,1],[1,0],[1,1],[2,1],[2,2]], color: '#ef4444' },
+  { name: 'I', cells: [[0,0],[0,1],[0,2],[0,3],[0,4]], color: '#3b82f6' },
+  { name: 'L', cells: [[0,0],[1,0],[2,0],[2,1],[2,2]], color: '#22c55e' },
+  { name: 'N', cells: [[0,0],[1,0],[1,1],[2,1],[3,1]], color: '#f59e0b' },
+  { name: 'P', cells: [[0,0],[0,1],[1,0],[1,1],[2,0]], color: '#8b5cf6' },
+  { name: 'T', cells: [[0,0],[0,1],[0,2],[1,1],[2,1]], color: '#ec4899' },
+  { name: 'U', cells: [[0,0],[0,2],[1,0],[1,1],[1,2]], color: '#06b6d4' },
+  { name: 'V', cells: [[0,0],[1,0],[2,0],[2,1],[2,2]], color: '#84cc16' },
+  { name: 'W', cells: [[0,0],[1,0],[1,1],[2,1],[2,2]], color: '#f97316' },
+  { name: 'X', cells: [[0,1],[1,0],[1,1],[1,2],[2,1]], color: '#14b8a6' },
+  { name: 'Y', cells: [[0,1],[1,0],[1,1],[2,1],[3,1]], color: '#a855f7' },
+  { name: 'Z', cells: [[0,0],[0,1],[1,1],[2,1],[2,2]], color: '#e11d48' },
+];
+
+let grid, selectedPiece, selectedIdx, timer, seconds, placedCount, placedPieces, orientations;
+
+function rotateCells(cells) {
+  const maxR = Math.max(...cells.map(c => c[0]));
+  const maxC = Math.max(...cells.map(c => c[1]));
+  return cells.map(([r,c]) => [c, maxR - r]);
+}
+
+function normalize(cells) {
+  const minR = Math.min(...cells.map(c => c[0]));
+  const minC = Math.min(...cells.map(c => c[1]));
+  return cells.map(([r,c]) => [r - minR, c - minC]).sort((a,b) => a[0]-b[0] || a[1]-b[1]);
+}
+
+function generateOrientations(cells) {
+  const orients = new Map();
+  let current = cells.map(c => [...c]);
+  for (let i = 0; i < 4; i++) {
+    const norm = normalize(current);
+    const key = norm.map(c => c.join(',')).join('|');
+    if (!orients.has(key)) orients.set(key, norm);
+    current = rotateCells(current);
+  }
+  current = cells.map(([r,c]) => [r, -c]);
+  current = normalize(current);
+  for (let i = 0; i < 4; i++) {
+    const norm = normalize(current);
+    const key = norm.map(c => c.join(',')).join('|');
+    if (!orients.has(key)) orients.set(key, norm);
+    current = rotateCells(current);
+  }
+  return [...orients.values()];
+}
+
+function newGame() {
+  clearInterval(timer);
+  seconds = 0; placedCount = 0; gameWon = false; selectedIdx = -1;
+  grid = Array.from({length: ROWS}, () => Array(COLS).fill(null));
+  placedPieces = [];
+  document.getElementById('placed').textContent = '0';
+  document.getElementById('timer').textContent = '0:00';
+  document.getElementById('winMsg').classList.add('hidden');
+  orientations = PIECES.map(p => ({ ...p, orientations: generateOrientations(p.cells), currentOrient: 0 }));
+  renderBoard();
+  renderPieces();
+  timer = setInterval(() => {
+    seconds++;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    document.getElementById('timer').textContent = m + ':' + String(s).padStart(2, '0');
+  }, 1000);
+}
+
+function renderBoard() {
+  let html = '';
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const val = grid[r][c];
+      let style = '';
+      if (val !== null) {
+        style = 'background:' + PIECES[val].color + ';';
+      }
+      html += '<div class="board-cell" style="' + style + '" onclick="boardClick(' + r + ',' + c + ')" data-r="' + r + '" data-c="' + c + '"></div>';
+    }
+  }
+  document.getElementById('board').innerHTML = html;
+}
+
+function renderPieces() {
+  let html = '';
+  orientations.forEach((piece, idx) => {
+    const isPlaced = placedPieces.includes(idx);
+    html += '<div class="piece-btn ' + (selectedIdx === idx ? 'selected' : '') + ' ' + (isPlaced ? 'placed' : '') + '" style="background:' + piece.color + '" onclick="selectPiece(' + idx + ')">' + piece.name + '</div>';
+  });
+  document.getElementById('pieces').innerHTML = html;
+}
+
+function selectPiece(idx) {
+  if (placedPieces.includes(idx)) return;
+  selectedIdx = idx;
+  renderPieces();
+}
+
+function rotatePiece() {
+  if (selectedIdx < 0) return;
+  const p = orientations[selectedIdx];
+  p.currentOrient = (p.currentOrient + 1) % p.orientations.length;
+}
+
+function flipPiece() {
+  if (selectedIdx < 0) return;
+  const p = orientations[selectedIdx];
+  const cells = p.orientations[p.currentOrient];
+  const flipped = cells.map(([r,c]) => [r, -c]);
+  const norm = normalize(flipped);
+  const key = norm.map(c => c.join(',')).join('|');
+  for (let i = 0; i < p.orientations.length; i++) {
+    const okey = p.orientations[i].map(c => c.join(',')).join('|');
+    if (okey === key) { p.currentOrient = i; return; }
+  }
+}
+
+function canPlace(cells, r, c) {
+  return cells.every(([dr, dc]) => {
+    const nr = r + dr, nc = c + dc;
+    return nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc] === null;
+  });
+}
+
+function boardClick(r, c) {
+  if (selectedIdx < 0 || gameWon) return;
+  const p = orientations[selectedIdx];
+  const cells = p.orientations[p.currentOrient];
+  if (!canPlace(cells, r, c)) return;
+  cells.forEach(([dr, dc]) => { grid[r + dr][c + dc] = selectedIdx; });
+  placedPieces.push(selectedIdx);
+  placedCount++;
+  document.getElementById('placed').textContent = placedCount;
+  selectedIdx = -1;
+  renderBoard();
+  renderPieces();
+  checkWin();
+}
+
+function removePiece() {
+  if (selectedIdx < 0) return;
+  if (!placedPieces.includes(selectedIdx)) return;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (grid[r][c] === selectedIdx) grid[r][c] = null;
+  placedPieces = placedPieces.filter(p => p !== selectedIdx);
+  placedCount--;
+  document.getElementById('placed').textContent = placedCount;
+  renderBoard();
+}
+
+let gameWon;
+function checkWin() {
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (grid[r][c] === null) return;
+  gameWon = true;
+  clearInterval(timer);
+  document.getElementById('finalTime').textContent = document.getElementById('timer').textContent;
+  document.getElementById('winMsg').classList.remove('hidden');
+}
+
+newGame();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

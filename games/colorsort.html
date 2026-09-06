@@ -1,0 +1,196 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Color Sort Puzzle</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.card { background: #1e293b; }
+.tube {
+  width: 64px; height: 200px; position: relative; cursor: pointer;
+  border: 3px solid #475569; border-top: none; border-radius: 0 0 16px 16px;
+  display: flex; flex-direction: column-reverse; align-items: center;
+  padding: 4px; transition: transform 0.15s, border-color 0.2s;
+  background: rgba(15,23,42,0.8);
+}
+.tube:hover { transform: translateY(-4px); }
+.tube.selected { border-color: #facc15; box-shadow: 0 0 16px rgba(250,204,21,0.3); }
+.tube.won-tube { border-color: #22c55e; }
+.ball {
+  width: 48px; height: 36px; border-radius: 10px; margin: 2px 0;
+  transition: all 0.25s ease; position: relative; z-index: 1;
+}
+.ball.flying {
+  position: fixed; z-index: 100; transition: none;
+}
+.tube-top {
+  width: 70px; height: 6px; background: #64748b; border-radius: 3px; margin-bottom: 2px;
+}
+</style>
+</head>
+<body class="min-h-screen text-white">
+<a href="index.html" class="fixed top-4 left-4 text-blue-400 hover:text-blue-300 text-sm font-semibold z-50">← Back to Games</a>
+<div class="container mx-auto px-4 py-12 max-w-2xl">
+  <h1 class="text-3xl font-bold text-center mb-6">Color Sort</h1>
+  <div class="card rounded-xl p-6 shadow-xl">
+    <div class="flex justify-between items-center mb-6">
+      <span class="text-gray-400 text-sm">⏱ <span id="timer" class="text-white font-mono">0:00</span></span>
+      <span class="text-gray-400 text-sm">Moves: <span id="moves" class="text-yellow-400 font-bold">0</span></span>
+    </div>
+    <div id="tubes-container" class="flex justify-center gap-5 flex-wrap mb-4"></div>
+    <div class="flex gap-3 justify-center mt-6">
+      <button onclick="newGame()" class="px-5 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-semibold transition">🔀 New Game</button>
+      <button onclick="restart()" class="px-5 py-2 bg-green-600 hover:bg-green-500 rounded text-sm font-semibold transition">🔄 Restart</button>
+    </div>
+    <p class="text-center text-gray-500 text-xs mt-3">Click a tube to pick up the top ball, click another to place it.</p>
+  </div>
+</div>
+<script>
+const COLOR_COUNT = 5;
+const BALLS_PER_COLOR = 4;
+const EMPTY_TUBES = 2;
+const COLOR_HEX = ['#ef4444','#3b82f6','#22c55e','#a855f7','#f97316'];
+let tubes, selectedTube, moveCount, timerInterval, seconds, won, savedTubes;
+function init() {
+  const balls = [];
+  for (let c = 0; c < COLOR_COUNT; c++) {
+    for (let i = 0; i < BALLS_PER_COLOR; i++) balls.push(c);
+  }
+  // Shuffle
+  for (let i = balls.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [balls[i], balls[j]] = [balls[j], balls[i]];
+  }
+  // Ensure it's not already solved
+  tubes = [];
+  const totalSlots = COLOR_COUNT * BALLS_PER_COLOR;
+  const perTube = BALLS_PER_COLOR;
+  for (let i = 0; i < COLOR_COUNT; i++) {
+    tubes.push(balls.slice(i*perTube, (i+1)*perTube));
+  }
+  for (let i = 0; i < EMPTY_TUBES; i++) tubes.push([]);
+  // Check if already solved and reshuffle if so
+  if (isSolved()) return init();
+  savedTubes = JSON.parse(JSON.stringify(tubes));
+  selectedTube = -1;
+  moveCount = 0;
+  seconds = 0;
+  won = false;
+  clearInterval(timerInterval);
+  document.getElementById('moves').textContent = '0';
+  document.getElementById('timer').textContent = '0:00';
+  render();
+  timerInterval = setInterval(() => { seconds++; const m=Math.floor(seconds/60); const s=seconds%60; document.getElementById('timer').textContent = m+':'+(s<10?'0':'')+s; }, 1000);
+}
+function render() {
+  const container = document.getElementById('tubes-container');
+  container.innerHTML = '';
+  tubes.forEach((tube, tIdx) => {
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.flexDirection = 'column';
+    wrap.style.alignItems = 'center';
+    const top = document.createElement('div');
+    top.className = 'tube-top';
+    wrap.appendChild(top);
+    const tubeEl = document.createElement('div');
+    tubeEl.className = 'tube' + (selectedTube===tIdx?' selected':'') + (isTubeComplete(tIdx)?' won-tube':'');
+    tubeEl.onclick = () => clickTube(tIdx);
+    tube.forEach(color => {
+      const ball = document.createElement('div');
+      ball.className = 'ball';
+      ball.style.background = COLOR_HEX[color];
+      ball.style.boxShadow = 'inset 0 -3px 6px rgba(0,0,0,0.3), 0 2px 4px rgba(0,0,0,0.3)';
+      tubeEl.appendChild(ball);
+    });
+    wrap.appendChild(tubeEl);
+    container.appendChild(wrap);
+  });
+}
+function isTubeComplete(idx) {
+  const tube = tubes[idx];
+  if (tube.length === 0) return false;
+  return tube.length === BALLS_PER_COLOR && tube.every(b => b === tube[0]);
+}
+function canPlace(tIdx) {
+  const tube = tubes[tIdx];
+  if (tube.length === 0) return true;
+  if (tube.length >= BALLS_PER_COLOR) return false;
+  const topColor = tubes[selectedTube][tubes[selectedTube].length-1];
+  return tube[tube.length-1] === topColor;
+}
+function clickTube(tIdx) {
+  if (won) return;
+  if (selectedTube === -1) {
+    if (tubes[tIdx].length > 0) {
+      selectedTube = tIdx;
+      render();
+    }
+  } else {
+    if (selectedTube === tIdx) { selectedTube = -1; render(); return; }
+    if (canPlace(tIdx)) {
+      const ball = tubes[selectedTube].pop();
+      tubes[tIdx].push(ball);
+      moveCount++;
+      document.getElementById('moves').textContent = moveCount;
+      selectedTube = -1;
+      render();
+      checkWin();
+    } else {
+      // Check if target tube is empty or has same color
+      if (tubes[tIdx].length === 0 || tubes[tIdx][tubes[tIdx].length-1] === tubes[selectedTube][tubes[selectedTube].length-1]) {
+        selectedTube = -1;
+        render();
+      } else {
+        selectedTube = -1;
+        render();
+      }
+    }
+  }
+}
+function isSolved() {
+  return tubes.every(t => t.length === 0 || (t.length === BALLS_PER_COLOR && t.every(b => b === t[0])));
+}
+function checkWin() {
+  if (isSolved()) {
+    won = true;
+    clearInterval(timerInterval);
+    render();
+    setTimeout(() => alert('You solved it in '+moveCount+' moves and '+document.getElementById('timer').textContent+'!'), 100);
+  }
+}
+function newGame() { init(); }
+function restart() {
+  tubes = JSON.parse(JSON.stringify(savedTubes));
+  selectedTube = -1;
+  moveCount = 0;
+  seconds = 0;
+  won = false;
+  clearInterval(timerInterval);
+  document.getElementById('moves').textContent = '0';
+  document.getElementById('timer').textContent = '0:00';
+  render();
+  timerInterval = setInterval(() => { seconds++; const m=Math.floor(seconds/60); const s=seconds%60; document.getElementById('timer').textContent = m+':'+(s<10?'0':'')+s; }, 1000);
+}
+init();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

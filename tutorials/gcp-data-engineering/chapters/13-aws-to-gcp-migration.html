@@ -1,0 +1,146 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>13. AWS to GCP Migration in Practice - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>13. AWS to GCP Migration in Practice</h1>
+<p class="tag">Chapter 13</p>
+
+<h2>Migration Strategies</h2>
+<p>There are four levels of migration, in increasing order of change:</p>
+<table>
+<tr><th>Strategy</th><th>Approach</th><th>Effort</th><th>Benefit</th></tr>
+<tr><td>Lift and shift</td><td>Same architecture, same scripts, GCP services swapped one-for-one</td><td>Low</td><td>Fast; limited cloud-native gains</td></tr>
+<tr><td>Re-platform</td><td>Use managed services (S3→GCS, Redshift→BigQuery) with code translation</td><td>Medium</td><td>Operational simplicity, right tools</td></tr>
+<tr><td>Re-architect</td><td>Redesign pipelines for serverless/ELT (Composer + dbt + BigQuery)</td><td>High</td><td>Full value: cost, scale, speed</td></tr>
+<tr><td>Rebuild</td><td>New data platform from scratch on GCP</td><td>Highest</td><td>Cleanest outcome; most risk</td></tr>
+</table>
+
+<p>Most successful migrations do <strong>re-platform first, re-architect gradually</strong>. Move data and SQL now; optimize architecture in waves.</p>
+
+<h2>Phase 0: Discovery and Inventory</h2>
+<ul>
+<li>Inventory all data sources: S3 buckets (sizes, classes), Redshift tables (row counts, sizes, dependencies), Glue jobs, EMR workloads, streaming streams, and downstream consumers.</li>
+<li>Map dependencies: which tables feed which dashboards, models, and reports.</li>
+<li>Assess data volume and growth; estimate GCP storage and query costs.</li>
+<li>Identify blockers: data residency requirements, encryption keys, third-party tool integrations, existing SLAs.</li>
+</ul>
+
+<h2>Phase 1: Prepare the Target</h2>
+<ul>
+<li>Create GCP project hierarchy with dev/staging/prod isolation.</li>
+<li>Design IAM: service accounts per workload, least privilege.</li>
+<li>Create GCS buckets matching your S3 layout (or better — a bronze/silver/gold design).</li>
+<li>Provision BigQuery datasets with partitioning/clustering plans.</li>
+<li>Set up Cloud Composer (or port MWAA DAGs) and the CI/CD pipeline for DAGs and dbt.</li>
+</ul>
+
+<h2>Phase 2: Move the Data</h2>
+<h3>S3 → GCS</h3>
+<p>Options, in order of preference:</p>
+<ul>
+<li><strong>Storage Transfer Service</strong> — the managed, resumable service for copying S3→GCS (handles huge volumes, scheduling, and progress tracking).</li>
+<li><strong>gsutil rsync</strong> — simple CLI sync for smaller, one-time transfers.</li>
+<li><strong>BigQuery Omni / interop</strong> — read S3 from BigQuery directly when full copy isn't needed yet.</li>
+</ul>
+
+<pre><code># One-time S3→GCS sync
+gsutil -m rsync -r s3://my-bucket/raw gs://my-bucket/raw
+# (or set up Storage Transfer Service with a schedule for ongoing sync)</code></pre>
+
+<h3>Redshift → BigQuery</h3>
+<ol>
+<li>UNLOAD Redshift tables to S3 as Parquet (or CSV for non-Parquet-able types).</li>
+<li>Transfer S3 → GCS.</li>
+<li>Load into BigQuery via <code>bq load</code> or the Data Transfer Service.</li>
+<li>Migrate views/models as BigQuery SQL; replace DISTKEY/SORTKEY with partitioning/clustering.</li>
+</ol>
+
+<pre><code>-- Redshift: unload to Parquet
+UNLOAD ('SELECT * FROM analytics.orders')
+TO 's3://bucket/unload/orders'
+IAM_ROLE 'arn:aws:iam::...:role/UnloadRole'
+FORMAT AS PARQUET PARALLEL OFF;
+
+-- BigQuery: load the Parquet
+bq load --source_format=PARQUET \
+  myproj.analytics.orders \
+  gs://bucket/unload/orders/*.parquet</code></pre>
+
+<h3>Glue / EMR → Dataproc</h3>
+<ul>
+<li>Port Glue PySpark scripts to Dataproc jobs: change <code>s3://</code> → <code>gs://</code>, replace Glue DynamicFrame idioms with standard Spark DataFrames where possible, and submit via Composer's DataprocSubmitPySparkJobOperator.</li>
+<li>Migrate Hive tables/metastore via Dataproc Metastore or re-create schemas in BigQuery.</li>
+<li>Use ephemeral clusters to control cost from day one.</li>
+</ul>
+
+<h2>Phase 3: Migrate the Pipelines and Orchestration</h2>
+<ul>
+<li><strong>MWAA → Cloud Composer:</strong> port DAGs, swap AWS operators for Google providers, move connections to Secret Manager backend.</li>
+<li><strong>Data Pipeline / Step Functions → Composer:</strong> rewrite the orchestration as Airflow DAGs.</li>
+<li><strong>Glue triggers / cron → Composer:</strong> schedule loads and transformations centrally.</li>
+<li><strong>dbt:</strong> switch the adapter from <code>dbt-redshift</code> to <code>dbt-bigquery</code>; most models run unchanged if SQL is portable (watch for Redshift-specific functions).</li>
+</ul>
+
+<h2>Phase 4: Validation and Cutover</h2>
+<ul>
+<li><strong>Parallel run:</strong> run both platforms for a period and reconcile outputs (row counts, sums, freshness) before switching consumers.</li>
+<li><strong>Reconciliation queries:</strong> compare key metrics table-by-table.</li>
+<li><strong>Cutover window:</strong> freeze writes, sync the final delta, flip DNS/consumer connections, and monitor aggressively.</li>
+<li><strong>Rollback plan:</strong> keep the AWS environment alive for 1-2 weeks (or per SLA) with a tested way to flip back.</li>
+</ul>
+
+<h2>SQL Translation: Redshift → BigQuery Cheatsheet</h2>
+<table>
+<tr><th>Redshift pattern</th><th>BigQuery equivalent</th></tr>
+<tr><td>DISTKEY / SORTKEY</td><td>Partitioning + clustering</td></tr>
+<tr><td>SELECT TOP 100</td><td>LIMIT 100</td></tr>
+<tr><td>DATEADD / DATEDIFF</td><td>DATE_ADD / DATE_DIFF (or TIMESTAMP_ADD/SUB)</td></tr>
+<tr><td>GETDATE()</td><td>CURRENT_TIMESTAMP() / CURRENT_DATE</td></tr>
+<tr><td>LEFT/ RIGHT / SUBSTRING</td><td>SUBSTR / LEFT / RIGHT (same)</td></tr>
+<tr><td>NVL / ISNULL</td><td>IFNULL / COALESCE</td></tr>
+<tr><td>LISTAGG</td><td>STRING_AGG</td></tr>
+<tr><td>Regex</td><td>REGEXP_EXTRACT / REGEXP_CONTAINS</td></tr>
+<tr><td>GROUP BY 1,2 (ordinal)</td><td>Not supported by default — use column names</td></tr>
+</table>
+
+<h2>Cost Control During Migration</h2>
+<ul>
+<li>Run parallel platforms only as long as needed — double cost is temporary.</li>
+<li>Archive the old platform after cutover (don't keep paying for idle Redshift).</li>
+<li>Design BigQuery tables with partitioning/clustering to keep query costs low from day one.</li>
+<li>Monitor spend weekly during the transition.</li>
+</ul>
+
+<div class="warn">
+<strong>Top migration mistakes:</strong> (1) copying Redshift's distribution-key design blindly into BigQuery; (2) forgetting data residency/compliance before moving; (3) migrating SQL that uses vendor-specific functions without translation; (4) no reconciliation step — "we think it's the same data"; (5) decommissioning AWS before the GCP pipeline has proven itself under real traffic.
+</div>
+
+<h2>Case Study: A Realistic Migration</h2>
+<ul>
+<li><strong>Before (AWS):</strong> S3 raw files → Glue PySpark jobs → Redshift; MWAA schedules; dbt-redshift models; Tableau reads Redshift.</li>
+<li><strong>Migration:</strong> Storage Transfer Service copies S3→GCS; Glue jobs ported to Dataproc ephemeral clusters; Redshift unloaded to Parquet and loaded into partitioned BigQuery tables; dbt adapter switched to BigQuery; MWAA DAGs moved to Composer; Tableau pointed at BigQuery.</li>
+<li><strong>After (GCP):</strong> GCS bronze lake → Composer-orchestrated Dataproc for heavy transforms + dbt for modeling → BigQuery gold → Looker/Tableau.</li>
+<li><strong>Outcome:</strong> infrastructure removed (no clusters to size), faster ad-hoc analytics, and cost shifted from idle cluster hours to per-use.</li>
+</ul>
+
+<h2>Cloud Migration Framework (Google's 4 R's + T)</h2>
+<p>Google's guidance: <strong>Rehost</strong> (lift-shift), <strong>Replatform</strong> (swap services), <strong>Refactor</strong> (re-architect), <strong>Rebuild</strong>, or <strong>Retire</strong> (decommission) applications — and <strong>Retain</strong> the ones that must stay. Apply it per workload, not to the whole estate at once.</p>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Write a migration plan for a company with: 5 TB of S3 files, a 2 TB Redshift cluster with 40 tables feeding 15 dashboards, 12 Glue jobs, and MWAA with 8 DAGs. Include: a phase plan (0-4), the exact GCP services, a reconciliation SQL for one key metric, a cutover and rollback window, and a cost comparison (rough) of running both platforms during parallel operation.
+</div>
+
+<nav>
+  <a href="12-aws-data-services-mapping.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="14-practice-career.html">Next: Practice, Labs &amp; Career Path &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

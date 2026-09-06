@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 29: End-to-End ML Projects | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 29</span>
+    <h1>End-to-End ML Projects</h1>
+
+    <h2>From Notebook to Production</h2>
+    <p>Until now you have trained models in notebooks where every step runs top to bottom in one session. A production machine learning project is different: it is a <strong>repeatable software system</strong> that others can run, extend, and deploy. This chapter walks through a complete project, from an empty repository to a working prediction service on a cloud platform.</p>
+    <div class="info">
+        <strong>Memory hook:</strong> The goal is to make the pipeline <em>playable again later</em>. If your code needs you to remember manual steps, it is not a pipeline yet. Everything must be automated.
+    </div>
+
+    <h2>GitHub and Code Setup</h2>
+    <p>Start by creating a new repository on GitHub rather than building on your laptop in isolation.</p>
+    <ol>
+        <li>Create a repository on GitHub named after the project (for example, <code>student-performance-project</code>).</li>
+        <li>Clone it locally so you work inside a version-controlled folder.</li>
+        <li>Create a virtual environment for the project and install the core packages: <code>pip install numpy pandas scikit-learn matplotlib seaborn flask</code>.</li>
+        <li>Add a <code>requirements.txt</code> so anyone can reproduce your environment, and a <code>.gitignore</code> to keep datasets and environment files out of Git.</li>
+    </ol>
+    <pre><code>git clone https://github.com/you/student-performance-project.git
+cd student-performance-project
+python -m venv venv
+venv\Scripts\activate
+pip install numpy pandas scikit-learn matplotlib seaborn flask</code></pre>
+    <p>Commit early and often. Every commit is a checkpoint you can return to when a later change goes wrong.</p>
+
+    <h2>Project Structure, Logging and Exception Handling</h2>
+    <p>Organise the code into modules so each responsibility lives in its own file:</p>
+    <pre><code>project/
+  src/           # source code
+    exception.py # custom exception class
+    logger.py    # logging setup
+    components/  # data ingestion, transformation, model training
+    pipelines/   # training and prediction pipelines
+    utils.py     # shared helpers
+  app.py         # Flask prediction web app
+  requirements.txt
+  setup.py</code></pre>
+    <p><strong>Logging</strong> replaces <code>print()</code>. Logs carry timestamps and levels (INFO, WARNING, ERROR), which makes debugging far easier when the project runs unattended:</p>
+    <pre><code>import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("run.log"), logging.StreamHandler()],
+)
+logging.info("Training pipeline started")</code></pre>
+    <p><strong>Exception handling</strong> ensures failures carry context. Define a custom exception class that captures the original traceback so you can see exactly where a job failed and why:</p>
+    <pre><code>import sys
+
+class ProjectException(Exception):
+    def __init__(self, message, error_detail=sys):
+        super().__init__(message)
+        self.message = f"{message} | {sys.exc_info()}"</code></pre>
+    <p>Wrap pipeline sections in try-except blocks that log the failure and re-raise, so a failed stage is never silent.</p>
+
+    <h2>Problem Statement, EDA and Model Training</h2>
+    <p>Before any code, write the problem down. For a running example, imagine predicting student exam scores from attributes like study hours, parent education, and previous grades. The problem statement answers three questions: <em>what</em> are we predicting, <em>why</em> is it useful, and <em>how</em> will we measure success.</p>
+    <p><strong>Exploratory data analysis (EDA)</strong> is the inspection phase. Load the data with Pandas, check the shape and missing values, and visualise distributions with Matplotlib and Seaborn:</p>
+    <pre><code>import pandas as pd
+import seaborn as sns
+
+df = pd.read_csv("data/student.csv")
+print(df.info())
+print(df.isnull().sum())
+sns.histplot(df["scores"])</code></pre>
+    <p>EDA answers whether features are numeric or categorical, how they correlate, and whether outliers exist. The insights here dictate the preprocessing choices later, so never skip this step. A quick benchmark model (a linear regression or random forest with default settings) tells you a reasonable baseline that fancier pipelines must beat.</p>
+
+    <h2>Data Ingestion Implementation</h2>
+    <p><strong>Data ingestion</strong> is the component responsible for locating raw data and making it available to the rest of the pipeline. It separates the "where is the data" concern from everything else, so swapping a CSV for a database later touches only this module.</p>
+    <pre><code>import pandas as pd
+from dataclasses import dataclass
+
+@dataclass
+class DataIngestionConfig:
+    raw_path: str = "data/raw.csv"
+    train_path: str = "data/train.csv"
+    test_path: str = "data/test.csv"
+
+class DataIngestion:
+    def __init__(self, config):
+        self.config = config
+
+    def initiate_ingestion(self):
+        df = pd.read_csv(self.config.raw_path)
+        train = df.sample(frac=0.8, random_state=42)
+        test = df.drop(train.index)
+        train.to_csv(self.config.train_path, index=False)
+        test.to_csv(self.config.test_path, index=False)
+        return self.config.train_path, self.config.test_path</code></pre>
+    <p>A <code>dataclass</code> holds the configuration, and the component class performs the work. Notice the split is reproducible because of the fixed random seed.</p>
+
+    <h2>Data Transformation with Pipelines</h2>
+    <p>Raw data almost never matches what a model expects. <strong>Transformation</strong> encodes categorical columns, scales numerical columns, and fills missing values. scikit-learn <code>Pipeline</code> objects bundle these steps into one reusable unit:</p>
+    <pre><code>from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+num_pipe = Pipeline([("scaler", StandardScaler())])
+cat_pipe = Pipeline([("encoder", OneHotEncoder())])
+
+preprocessor = ColumnTransformer([
+    ("num", num_pipe, numeric_features),
+    ("cat", cat_pipe, categorical_features),
+])</code></pre>
+    <p>Fit the preprocessor only on the training data, then apply it to train and test. This prevents data leakage, where the test set quietly influences the learned statistics and inflates your reported accuracy.</p>
+
+    <h2>Model Trainer Implementation</h2>
+    <p>The <strong>model trainer</strong> loads the transformed data, trains one or more algorithms, and saves the winning model so the prediction pipeline can reuse it without retraining. Keep the trainer focused: fit, evaluate, persist.</p>
+    <pre><code>from sklearn.ensemble import RandomForestRegressor
+import joblib
+
+class ModelTrainer:
+    def __init__(self, model_path="artifacts/model.joblib"):
+        self.model_path = model_path
+
+    def train(self, X_train, y_train, X_test, y_test):
+        model = RandomForestRegressor(n_estimators=200, random_state=42)
+        model.fit(X_train, y_train)
+        score = model.score(X_test, y_test)
+        joblib.dump(model, self.model_path)
+        return score</code></pre>
+    <p>Models are persisted with <code>joblib</code> or <code>pickle</code>. The saved artifact is what the web application loads at startup to make predictions.</p>
+
+    <h2>Hyperparameter Tuning</h2>
+    <p>Default settings rarely give the best model. <strong>Tuning</strong> searches the space of hyperparameters for a better combination. Two practical approaches:</p>
+    <ul>
+        <li><strong>Grid search</strong> (GridSearchCV) tries every combination of a candidate grid; thorough but slow.</li>
+        <li><strong>Random search</strong> (RandomizedSearchCV) samples combinations randomly; faster and often just as good for many parameters.</li>
+    </ul>
+    <pre><code>from sklearn.model_selection import RandomizedSearchCV
+
+param_grid = {
+    "n_estimators": [100, 300, 500],
+    "max_depth": [5, 10, None],
+}
+search = RandomizedSearchCV(
+    RandomForestRegressor(random_state=42), param_grid, cv=5
+)
+search.fit(X_train, y_train)
+best = search.best_estimator_
+print(search.best_params_)</code></pre>
+    <p>Use cross-validation inside the search so the score reflects out-of-sample behaviour rather than memorised training data.</p>
+
+    <h2>Building the Prediction Pipeline</h2>
+    <p>The prediction pipeline packages the trained model into a service. The simplest option is a small web application with Flask that accepts a request, transforms the input with the saved preprocessor, and returns the prediction:</p>
+    <pre><code>from flask import Flask, request, jsonify
+import joblib
+
+app = Flask(__name__)
+model = joblib.load("artifacts/model.joblib")
+preprocessor = joblib.load("artifacts/preprocessor.joblib")
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    data = request.get_json()
+    features = preprocessor.transform([data["features"]])
+    result = model.predict(features)
+    return jsonify({"prediction": float(result[0])})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)</code></pre>
+    <p>Test locally with a JSON request before deployment. A small sanity test that the endpoint returns a number is worth the five minutes it takes.</p>
+    <div class="note">
+        <strong>Heads-up:</strong> Listen on <code>0.0.0.0</code> when deploying, not <code>127.0.0.1</code>. Cloud platforms reach your app through its container, and the container needs to accept connections from outside itself.
+    </div>
+
+    <h2>Deploying on AWS Elastic Beanstalk</h2>
+    <p><strong>AWS Elastic Beanstalk</strong> is the fastest path to a live web app because it manages the servers for you. Beanstalk inspects your code, creates an environment, and runs the app while you stay focused on code, not infrastructure.</p>
+    <ol>
+        <li>Write a <code>requirements.txt</code> and make sure <code>app.py</code> exposes a Flask app (Beanstalk looks for <code>application</code> by convention).</li>
+        <li>Install the EB CLI: <code>pip install awsebcli</code>.</li>
+        <li>Initialize and deploy: <code>eb init</code> then <code>eb create</code>.</li>
+        <li>Monitor the health endpoint until it turns green, then open the app with <code>eb open</code>.</li>
+    </ol>
+    <p>Beanstalk is ideal for first deployments because it hides networking, load balancing, and scaling details. It runs your code on an EC2 instance under the hood, and you can always graduate to controlling that instance directly.</p>
+
+    <h2>Deploying on EC2 with ECR</h2>
+    <p>For more control, run your model yourself on an <strong>EC2 instance</strong>, shipping the container through <strong>Amazon ECR</strong> (Elastic Container Registry). The steps follow a clear pattern:</p>
+    <ol>
+        <li>Build a Docker image locally as shown in the previous chapter.</li>
+        <li>Authenticate Docker to ECR: <code>aws ecr get-login-password | docker login --username AWS --password-stdin &lt;registry-url&gt;</code>.</li>
+        <li>Create a repository, tag the image with its URI, and push it.</li>
+        <li>Launch an EC2 instance, install Docker on it, pull the image, and run it with <code>docker run -p 8080:8080</code>.</li>
+        <li>Open port 8080 in the instance's security group so the public can reach the service.</li>
+    </ol>
+    <pre><code>docker tag my-app:latest 123456789.dkr.ecr.us-east-1.amazonaws.com/my-app
+docker push 123456789.dkr.ecr.us-east-1.amazonaws.com/my-app</code></pre>
+    <p>This approach suits projects that need custom packages, GPU drivers, or unusual runtimes, because the instance is entirely yours.</p>
+
+    <h2>Deploying on Azure with Containers</h2>
+    <p>Azure offers a comparable path. The container is pushed to <strong>Azure Container Registry (ACR)</strong>, then hosted on a service such as App Service or Container Apps:</p>
+    <ol>
+        <li>Create a registry: <code>az acr create --name myregistry --resource-group mygroup --sku Basic</code>.</li>
+        <li>Build and push the image: <code>az acr build --registry myregistry --image my-app:v1 .</code>.</li>
+        <li>Create an App Service plan and a web app for containers, then deploy the image from ACR.</li>
+    </ol>
+    <pre><code>az group create --name mygroup --location eastus
+az appservice plan create --name myplan --resource-group mygroup --is-linux
+az webapp create --resource-group mygroup --plan myplan \
+    --name mymodel-app --deployment-container-image-name \
+    myregistry.azurecr.io/my-app:v1</code></pre>
+    <p>The idea is the same on every cloud: build once, push the container to a registry, and let the platform pull and run it. The skills you learned for Docker carry straight over, which is why packaging matters more than any single cloud vendor.</p>
+    <div class="info">
+        <strong>Tip:</strong> Azure App Service lets you set environment variables from the portal or CLI, which is where your API keys and connection strings belong, never in the image itself.
+    </div>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> Take any model you trained earlier and turn it into a deployable project: structure it with <code>src</code>, <code>components</code>, and <code>pipelines</code> folders, add logging and a custom exception class, build a Flask prediction endpoint, containerise it with a Dockerfile, and deploy it to any one platform (Beanstalk, EC2+ECR, or Azure with ACR). Send yourself a POST request to confirm the endpoint returns a prediction.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="28-docker-git.html">Prev: Docker &amp; Git Essentials</a>
+        <a href="30-mlops-deployment.html">Next: MLOps &amp; Cloud Pipelines</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

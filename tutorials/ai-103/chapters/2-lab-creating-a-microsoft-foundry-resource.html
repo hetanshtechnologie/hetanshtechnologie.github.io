@@ -1,0 +1,117 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2. Lab - Creating a Microsoft Foundry Resource - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 2</span>
+<h1>Lab - Creating a Microsoft Foundry Resource</h1>
+<p>In this lab you will provision a Microsoft Foundry resource in your Azure subscription — the cloud home for every model, project, and deployment you build for the rest of this course. A Foundry resource is the container that holds your Azure AI projects, model deployments, fine-tuned models, and evaluation runs. By the end of the lab you will have a working resource, know where to find its endpoint and keys, and understand the choices you made while creating it.</p>
+
+<h2>Prerequisites</h2>
+<p>Before you begin, confirm you have the following:</p>
+<ul>
+<li>An active Azure account. If you do not have one yet, complete the next chapter on creating an Azure free account first.</li>
+<li>A subscription you are allowed to create resources in. Your free account creates one automatically.</li>
+<li>Permission to create resources in that subscription. On a personal account this is always true; on a corporate account you may need the Contributor role from an administrator.</li>
+<li>A stable internet connection and a modern browser for the Azure portal.</li>
+</ul>
+
+<div class="warn">
+<p>Creating a Microsoft Foundry resource itself does not incur charges. Costs begin when you deploy models, run evaluations, or consume paid inference. Everything in this lab is free to create, so do not worry about surprise bills while you are learning.</p>
+</div>
+
+<h2>What the Resource Provides</h2>
+<p>A Microsoft Foundry resource is a regional, top-level container in Azure. Inside it you can create one or more <em>projects</em>, and each project organizes a unit of work — the models you deploy, the data you connect, the evaluations you run, and the connections to supporting services. Think of the resource as your organization's AI workspace and the project as a specific application or team's sandbox within it.</p>
+<p>Creating the resource also gives you an endpoint URL and a set of keys. Applications authenticate against that endpoint when they call the models you deploy. Some Azure AI resources reuse a single key-and-endpoint pair across everything inside them, which is why keeping those values secret and rotating them regularly is important.</p>
+
+<h2>Step-by-Step: Create the Resource in the Portal</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Create a Foundry resource through the Azure portal</h3>
+<ol>
+<li>Open a browser and go to the Azure portal at <code>https://portal.azure.com</code>. Sign in with the account that owns your subscription.</li>
+<li>Use the search bar at the top of the page and type <strong>Foundry</strong>. Select <strong>AI Foundry</strong> from the results, then click <strong>Create</strong>.</li>
+<li>Choose your subscription from the dropdown, then create a new resource group or select an existing one. A resource group is a logical folder that keeps related resources together. Give it a meaningful name such as <code>rg-ai103-rg</code>.</li>
+<li>Give the resource a globally unique name, for example <code>ai103-workspace-&lt;yourname&gt;</code>. Only letters, numbers, and hyphens are allowed.</li>
+<li>Pick a region that is close to you. Keep in mind that not every region hosts every model; if you later cannot find a model, switching regions is often the fix.</li>
+<li>Choose the pricing tier. For this course the free tier or the lowest standard tier is sufficient. You can upgrade later without recreating the resource.</li>
+<li>Review your selections and click <strong>Review + create</strong>, then <strong>Create</strong>. Azure validates your configuration and deploys the resource. The deployment usually takes less than a minute.</li>
+<li>When the deployment finishes, click <strong>Go to resource</strong>. You should see the resource overview page with an <strong>Explore AI Foundry</strong> or <strong>Launch studio</strong> button that opens the web portal where you manage projects and models.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>The region you choose matters more than most other settings. Model availability varies by region, so if you are building for production, check that the models you plan to use are offered in the region you select before you commit.</p>
+</div>
+
+<h2>Create the Resource with Azure CLI</h2>
+<p>If you prefer automation or you are setting up several environments, the Azure CLI is a faster and repeatable way to create the same resource. First sign in, then create the resource group and the Foundry resource with two commands.</p>
+
+<pre><code># Sign in to Azure
+az login
+
+# Create a resource group (adjust the region if needed)
+az group create --name rg-ai103-rg --location eastus
+
+# Create the Microsoft Foundry resource
+az cognitiveservices account create --resource-group rg-ai103-rg \
+  --name ai103-workspace-demo \
+  --kind AIServices \
+  --sku F0 \
+  --location eastus</code></pre>
+
+<p>The <code>--kind AIServices</code> value creates the multi-service resource that Microsoft Foundry uses. The <code>--sku F0</code> value requests the free tier where available. After the command completes, fetch the endpoint and keys that your code will need later:</p>
+
+<pre><code># List endpoints for the resource
+az cognitiveservices account show --resource-group rg-ai103-rg \
+  --name ai103-workspace-demo --query "properties.endpoint"
+
+# Show the access keys
+az cognitiveservices account keys list --resource-group rg-ai103-rg \
+  --name ai103-workspace-demo --query "[key1, key2]"</code></pre>
+
+<h2>Verify the Resource Is Working</h2>
+<p>Do not move on until you can confirm the resource answers requests. A quick check saves you from debugging connection problems later:</p>
+<ul>
+<li>In the Azure portal, navigate to your resource and open the <strong>Keys and Endpoint</strong> page. Note the endpoint URL and both key values.</li>
+<li>Open the Microsoft Foundry web portal from the resource overview and confirm you can sign in and see an empty project list or a welcome screen.</li>
+<li>Optionally run a health check with a simple API request using your endpoint and key. The example below lists the deployed models in your resource:</li>
+</ul>
+
+<pre><code>curl -H "Api-Key: YOUR_KEY" \
+  "https://YOUR_ENDPOINT/models?api-version=2024-02-01"</code></pre>
+
+<div class="note">
+<p>If you see an empty JSON array <code>[]</code> in the response, the resource is working correctly — it simply has no model deployments yet. Deploying models is the subject of the model deployment lab later in the course.</p>
+</div>
+
+<h2>Clean Up When You Are Done</h2>
+<p>Leaving resources around is harmless while they are free, but a tidy subscription is easier to manage and audit. When you no longer need this resource, delete the whole resource group to remove everything inside it in one step:</p>
+
+<pre><code>az group delete --name rg-ai103-rg --yes --no-wait</code></pre>
+
+<div class="warn">
+<p>Deleting a resource group deletes every resource inside it permanently. Only delete the resource group when you are certain you no longer need any of its contents. There is no undo for this operation.</p>
+</div>
+
+<h2>Summary</h2>
+<p>In this lab you created a Microsoft Foundry resource using both the Azure portal and the Azure CLI, retrieved its endpoint and keys, verified it responds to API requests, and learned how to remove it when finished. The resource is your gateway to every model deployment in this course. In the next chapter you will compare large language models with small language models and learn how to choose between them.</p>
+<nav>
+<a href="1-generative-ai-fundamentals.html">&larr; Previous: Generative AI Fundamentals</a><a href="3-large-language-models-vs-small-language-models.html">Next: Large Language Models vs Small Language Models &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

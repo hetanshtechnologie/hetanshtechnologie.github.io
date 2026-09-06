@@ -1,0 +1,130 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>167. Lab - Ingesting documents from Azure Blob Storage - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 167</span>
+<h1>Lab - Ingesting documents from Azure Blob Storage</h1>
+<p>Every search pipeline starts with a home for the raw documents. In this lab you will create a storage container, upload course documents to it, and provision the Azure AI Search service that will later index them. When you finish, you will have a populated data store and a search service ready for the data-source lab that follows.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>An Azure subscription and the Azure CLI (<code>az</code>) installed and signed in.</li>
+<li>A resource group for this course, or permission to create one.</li>
+<li>Two or three documents to index — PDFs of chapters or articles work well. Keep them plain text-based PDFs for now.</li>
+<li>An environment variable holding your resource group name so the commands stay reusable.</li>
+</ul>
+
+<div class="note">
+<p>Run the commands below from a PowerShell terminal in VS Code. All placeholders in angle brackets, such as <code>&lt;yourname&gt;</code>, must be replaced with your own unique values.</p>
+</div>
+
+<h2>Step 1 - Set Your Resource Group</h2>
+<p>Set a variable for the resource group so later commands can reference it. Use an existing group or create one:</p>
+<pre><code>$rg = "rg-ai103"
+az group create --name $rg --location eastus
+</code></pre>
+
+<h2>Step 2 - Create a Storage Account</h2>
+<p>The storage account holds your documents in blob containers. Names must be globally unique and use only lowercase letters and numbers:</p>
+<pre><code>$storageName = "saai103&lt;yourname&gt;"
+az storage account create `
+  --name $storageName `
+  --resource-group $rg `
+  --location eastus `
+  --sku Standard_LRS
+</code></pre>
+
+<h2>Step 3 - Create a Container and Upload Documents</h2>
+<p>Create a container named <code>docs</code> and upload your PDFs into it. First grab the account's connection string:</p>
+<pre><code>$conn = az storage account show-connection-string `
+  --name $storageName `
+  --resource-group $rg `
+  --query connectionString -o tsv
+
+az storage container create --name docs --connection-string $conn
+
+az storage blob upload-batch `
+  --destination docs `
+  --source ./course-docs `
+  --connection-string $conn
+</code></pre>
+<p>Point <code>--source</code> at the local folder containing your PDFs. When the batch completes, every file is in the <code>docs</code> container.</p>
+
+<div class="tip">
+<p>Verify the upload by listing blobs in the container:</p>
+<pre><code>az storage blob list --container-name docs --connection-string $conn --query "[].{name:name}" -o table
+</code></pre>
+</div>
+
+<h2>Step 4 - Provision Azure AI Search</h2>
+<p>Create the search service that will index and query the documents. The service name must be globally unique:</p>
+<pre><code>$searchName = "srch-ai103-&lt;yourname&gt;"
+az search service create `
+  --name $searchName `
+  --resource-group $rg `
+  --sku Basic `
+  --location eastus
+</code></pre>
+
+<div class="warn">
+<p>The Free tier is fine for learning but cannot run some advanced features and skillsets used later. The Basic tier gives you room for the enrichment steps ahead. Remember which tier you choose — upgrading later requires recreating the service.</p>
+</div>
+
+<h2>Step 5 - Record the Search Service Details</h2>
+<p>Fetch the service's endpoints and admin key. You will need them in the data-source lab:</p>
+<pre><code>$searchHost = az search service show `
+  --name $searchName `
+  --resource-group $rg `
+  --query "properties.endpoints[0]" -o tsv
+
+az search admin-key show --resource-group $rg --service-name $searchName
+
+Write-Output "Search host: $searchHost"
+</code></pre>
+<p>Store the host URL and the admin key somewhere safe, like a local <code>.env</code>-style file that is not committed to source control.</p>
+
+<div class="note">
+<p>The admin key grants full control of the search service. For programmatic clients you will later use a query key or managed identity instead. For the labs ahead the admin key is the simplest way to configure everything.</p>
+</div>
+
+<h2>Step 6 - Review the Flow</h2>
+<p>You now have three resources that fit together:</p>
+<table>
+<tr><th>Resource</th><th>Purpose</th></tr>
+<tr><td>Storage account</td><td>Holds the raw PDFs in the <code>docs</code> container.</td></tr>
+<tr><td>Azure AI Search</td><td>Will store the searchable index and answer queries.</td></tr>
+<tr><td>Your local folder</td><td>Source of the documents you uploaded.</td></tr>
+</table>
+<p>Nothing has been indexed yet — the search service is empty. Creating the connection from the container to the search service is exactly what the next lab does.</p>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td>Storage name already in use</td><td>Name is not unique</td><td>Append more characters to the name and retry.</td></tr>
+<tr><td>Search service name invalid</td><td>Name contains invalid characters</td><td>Use only lowercase letters, numbers, and hyphens.</td></tr>
+<tr><td>Upload-batch finds no files</td><td>Wrong source path</td><td>Check that <code>--source</code> points to a folder containing files.</td></tr>
+<tr><td>Quota exceeded on tier</td><td>Selected SKU not available in region</td><td>Try another region or a different SKU.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You created a storage account, uploaded documents into a <code>docs</code> container, provisioned an Azure AI Search service, and recorded the endpoint and key. Your data is staged and your search service is ready. The next lab connects the two by defining a data source — the first component of the indexing pipeline.</p>
+<nav>
+<a href="166-search-indexes-indexers-and-data-sources.html">&larr; Previous: Search Indexes, Indexers, and Data Sources</a><a href="168-lab-azure-ai-search-data-sources.html">Next: Lab - Azure AI Search - Data sources &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

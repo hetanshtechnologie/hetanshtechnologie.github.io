@@ -1,0 +1,101 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>266. OpenAI - Concept of using Tools - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 266</span>
+<h1>OpenAI - Concept of using Tools</h1>
+<p>A language model on its own can only produce text — it cannot check a database, call an API, or look anything up. Tools (also called function calling) fix this by letting the model request that your application perform an action. This chapter explains the concept: what tools are, how the model requests them, and how the call-and-response loop works.</p>
+
+<h2>The Core Idea</h2>
+<p>Tools extend a model's reach. You define functions that the model is allowed to call, describe them in a machine-readable form, and hand those descriptions to the model. When the model decides it needs data or an action to answer the user, it does not fake the result. Instead it emits a request: <em>"call function get_weather with arguments {location: Seattle, date: tomorrow}"</em>.</p>
+<p>Your application then:</p>
+<ol>
+<li>Receives the tool call.</li>
+<li>Executes the real function.</li>
+<li>Sends the result back to the model.</li>
+<li>Lets the model compose the final answer using the real data.</li>
+</ol>
+<p>This is why tool use powers assistants that can book flights, query databases, and control devices — the model reasons, your code acts.</p>
+
+<h2>Describing a Tool to the Model</h2>
+<p>The model never sees your Python function. It sees a JSON description with a name, a description, and a parameter schema. That schema is what the model uses to fill in valid arguments:</p>
+<pre><code>tools = [
+    {
+        "type": "function",
+        "name": "get_weather",
+        "description": "Get the current or forecast weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"},
+                "date": {"type": "string"}
+            },
+            "required": ["location"]
+        }
+    }
+]</code></pre>
+<p>The description matters: it is the model's only guide to when and how to call the tool, so write it like documentation.</p>
+
+<div class="note">
+<p>The model does not execute anything. It only produces a structured request. This is a deliberate safety boundary — your code stays in control of what actually runs, which lets you add permission checks, logging, and rate limiting around every tool.</p>
+</div>
+
+<h2>The Call Loop in Practice</h2>
+<p>A complete tool interaction has three or more round trips. In the Responses API the loop looks like this in outline:</p>
+<pre><code>from openai import OpenAI
+
+client = OpenAI(api_key="YOUR_API_KEY")
+
+def get_weather(location: str, date: str) -> str:
+    # Real code: query a weather service here.
+    return f"sunny, 22C in {location} on {date}"
+
+response = client.responses.create(
+    model="gpt-4o-mini",
+    input="Is it nice in Seattle tomorrow?",
+    tools=tools,
+)
+
+# The model either answers directly or asks us to call a tool.
+print([item.type for item in response.output])</code></pre>
+<p>If the model produced a <code>function_call</code> item, you extract its arguments, run your real function, and send the result back in the next request as tool output. The model then finishes with a natural-language answer.</p>
+
+<h2>Multiple and Chained Calls</h2>
+<p>One turn can require several tools. The model might check weather and then fetch flight prices, producing two tool calls. Applications loop: while the response still contains pending function calls, keep executing and feeding results back. This chain is how agents solve multi-step problems, and it is the subject of the next chapters.</p>
+
+<div class="tip">
+<p>Keep tool descriptions precise and parameters minimal. A tool with too many optional parameters invites the model to guess values it does not have. Where possible, make parameters required or give them clear default behavior.</p>
+</div>
+
+<h2>Choosing Between Tools and Prompting</h2>
+<table>
+<tr><th>Situation</th><th>Better choice</th></tr>
+<tr><td>The answer needs live data (stock price, DB row)</td><td>Tool call</td></tr>
+<tr><td>The answer needs a calculation or action</td><td>Tool call</td></tr>
+<tr><td>The answer is derivable from knowledge alone</td><td>Plain generation</td></tr>
+<tr><td>You want the model to merely format known facts</td><td>Structured output</td></tr>
+</table>
+<p>Use tools when the model must access something outside its training data or cause a real effect.</p>
+
+<h2>Summary</h2>
+<p>Tools let models request real-world actions through structured calls. You learned how tools are described with a name, description, and parameter schema, how the model emits function-call requests, and how your code executes them and feeds results back. This call-and-response loop is the engine behind every agent you will build in later chapters.</p>
+<nav>
+<a href="265-lab-openai-structured-output-using-the-chat-completions-api.html">&larr; Previous: Lab - OpenAI - Structured Output - Using the Chat Completions API</a><a href="267-openai-tools-image-generation.html">Next: OpenAI - Tools - Image Generation &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

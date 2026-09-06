@@ -1,0 +1,132 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>264. Lab - OpenAI - Structured Output - Trying to use the Responses API - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 264</span>
+<h1>Lab - OpenAI - Structured Output - Trying to use the Responses API</h1>
+<p>Structured outputs are available in both the Responses API and the Chat Completions API, but they work differently in each. This lab focuses on the Responses API: you will attach a JSON schema to a call and verify the model honors it exactly. We will also show the helper-based approach that makes writing schemas simpler.</p>
+
+<h2>Passing a Schema in the Responses API</h2>
+<p>With <code>client.responses.create</code>, structured output is enabled by supplying a <code>text</code> field inside the <code>output</code> array. The <code>text</code> field carries the schema, the request for the model, and how strict the output should be.</p>
+<div class="exercise">
+<h3>Step 1 — Create the script</h3>
+<p>Create a file named <code>structured_response.py</code>:</p>
+<pre><code>from openai import OpenAI
+
+client = OpenAI(api_key="YOUR_API_KEY")
+
+schema = {
+    "type": "object",
+    "properties": {
+        "customer": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "email": {"type": "string"}
+            },
+            "required": ["name", "email"],
+            "additionalProperties": False
+        },
+        "order_number": {"type": "string"},
+        "issue": {"type": "string"}
+    },
+    "required": ["customer", "order_number", "issue"],
+    "additionalProperties": False
+}
+
+email_text = """
+Hi, I am Raj. My email is raj@example.com. Order 77123
+was supposed to arrive on Friday but never showed up.
+"""
+
+response = client.responses.create(
+    model="gpt-4o-mini",
+    input=email_text,
+    output=[
+        {
+            "type": "text",
+            "name": "order_issue",
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "order_issue",
+                    "schema": schema,
+                    "strict": True
+                }
+            }
+        }
+    ],
+)
+
+print(response.output[0].content[0].text)</code></pre>
+
+<h3>Step 2 — Run it</h3>
+<pre><code>python structured_response.py</code></pre>
+<p>The output should be a compact JSON object matching your schema exactly.</p>
+</div>
+
+<h2>Verifying the Contract</h2>
+<p>Now that the schema is enforced, your application can parse the output directly without defensive parsing:</p>
+<pre><code>import json
+
+payload = json.loads(response.output[0].content[0].text)
+print("Customer:", payload["customer"]["name"])
+print("Email:", payload["customer"]["email"])
+print("Order:", payload["order_number"])
+print("Issue:", payload["issue"])</code></pre>
+<p>Because the model was required to produce every key, indexing into the dictionary is safe. Run the script several times and confirm the output never changes shape.</p>
+
+<div class="note">
+<p>Read the response from <code>response.output[0].content[0].text</code>, not <code>output_text</code>. When you request structured output, the answer lives in that content item as raw JSON. Using the wrong accessor yields the plain-text fallback or empty output, which confuses many first attempts.</p>
+</div>
+
+<h2>Enforcing Values with Enums</h2>
+<p>Schemas can restrict fields to a fixed set of allowed values using <code>enum</code>. This is ideal for issue types in a support ticket:</p>
+<pre><code>schema = {
+    "type": "object",
+    "properties": {
+        "issue_type": {
+            "type": "string",
+            "enum": ["shipping", "refund", "product_question", "other"]
+        },
+        "summary": {"type": "string"}
+    },
+    "required": ["issue_type", "summary"],
+    "additionalProperties": False
+}</code></pre>
+<p>Now <code>issue_type</code> can only be one of the four listed values, which makes downstream routing trivial.</p>
+
+<h2>Common Pitfalls</h2>
+<ul>
+<li><strong>Missing <code>additionalProperties: False</code>:</strong> without it, the model may add fields you did not declare.</li>
+<li><strong>Forgotten required fields:</strong> a field listed only in <code>properties</code> is optional unless it also appears in <code>required</code>.</li>
+<li><strong>Wrong response accessor:</strong> remember the structured text sits in <code>output[0].content[0].text</code>.</li>
+<li><strong>Schema too loose:</strong> types like <code>"anyOf"</code> with conflicting shapes can trigger validation errors. Keep each field's type concrete.</li>
+</ul>
+
+<div class="tip">
+<p>Design your schema from the perspective of the consuming code, not the model. Ask: what exact keys and types does my application branch on? Those become the required, typed properties.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You enabled structured output on the Responses API by attaching a strict JSON schema, parsed the guaranteed JSON safely, and added enum constraints. The Responses API gives you schema-enforced output in a single call — the next lab shows the Chat Completions API variant of the same idea.</p>
+<nav>
+<a href="263-lab-openai-extracting-details-as-text.html">&larr; Previous: Lab - OpenAI - Extracting details as text</a><a href="265-lab-openai-structured-output-using-the-chat-completions-api.html">Next: Lab - OpenAI - Structured Output - Using the Chat Completions API &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,236 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nonogram - Brain Games</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.cell { width: 32px; height: 32px; border: 1px solid #334155; cursor: pointer; transition: background 0.1s; user-select: none; }
+.cell.filled { background: #3b82f6; }
+.cell.marked { background: #6b7280; }
+.cell:hover { background: #1e3a5f; }
+.clue-cell { min-width: 32px; text-align: center; font-size: 0.8rem; font-weight: bold; color: #94a3b8; }
+.cell.correct { background: #22c55e; }
+.cell.wrong { background: #ef4444; }
+</style>
+</head>
+<body class="min-h-screen text-white font-sans">
+<div class="container mx-auto px-4 py-6">
+  <div class="flex items-center justify-between mb-6">
+    <a href="index.html" class="text-blue-400 hover:text-blue-300 text-sm">&larr; Back to Games</a>
+    <h1 class="text-2xl font-bold text-blue-400">Nonogram (Picross)</h1>
+    <button onclick="newGame()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold">Restart</button>
+  </div>
+
+  <div class="flex flex-wrap gap-6 justify-center items-start">
+    <div id="stats" class="flex gap-4 text-sm bg-gray-800 rounded-lg px-4 py-2">
+      <span>⏱ <span id="timer">0:00</span></span>
+      <span>❌ Mistakes: <span id="mistakes">0</span></span>
+      <span>💡 Hints: <span id="hintsLeft">3</span></span>
+    </div>
+  </div>
+
+  <div class="flex justify-center mt-4">
+    <button onclick="useHint()" class="bg-yellow-600 hover:bg-yellow-700 px-3 py-1 rounded text-sm mr-2">Use Hint</button>
+    <button onclick="revealAll()" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm">Reveal Solution</button>
+  </div>
+
+  <div class="flex justify-center mt-6 overflow-auto">
+    <div id="board" class="inline-block"></div>
+  </div>
+
+  <div id="winMsg" class="hidden text-center mt-6">
+    <p class="text-green-400 text-xl font-bold">🎉 Puzzle Solved!</p>
+    <p class="text-gray-400 mt-2">Time: <span id="finalTime"></span> | Mistakes: <span id="finalMistakes"></span></p>
+  </div>
+</div>
+
+<script>
+const GRID = 10;
+let solution, player, marked, rowClues, colClues, timer, seconds, mistakes, hintsLeft, gameWon;
+
+function generatePattern() {
+  const p = [];
+  for (let r = 0; r < GRID; r++) {
+    p[r] = [];
+    for (let c = 0; c < GRID; c++) {
+      p[r][c] = Math.random() < 0.45 ? 1 : 0;
+    }
+  }
+  return p;
+}
+
+function getClues(line) {
+  const clues = [];
+  let count = 0;
+  for (const v of line) {
+    if (v === 1) { count++; }
+    else if (count > 0) { clues.push(count); count = 0; }
+  }
+  if (count > 0) clues.push(count);
+  return clues.length ? clues : [0];
+}
+
+function buildClues(sol) {
+  rowClues = [];
+  colClues = [];
+  for (let r = 0; r < GRID; r++) rowClues.push(getClues(sol[r]));
+  for (let c = 0; c < GRID; c++) {
+    const col = [];
+    for (let r = 0; r < GRID; r++) col.push(sol[r][c]);
+    colClues.push(getClues(col));
+  }
+}
+
+function newGame() {
+  clearInterval(timer);
+  seconds = 0; mistakes = 0; hintsLeft = 3; gameWon = false;
+  do { solution = generatePattern(); } while (!isValid());
+  player = Array.from({length: GRID}, () => Array(GRID).fill(0));
+  marked = Array.from({length: GRID}, () => Array(GRID).fill(false));
+  buildClues(solution);
+  document.getElementById('mistakes').textContent = '0';
+  document.getElementById('hintsLeft').textContent = '3';
+  document.getElementById('timer').textContent = '0:00';
+  document.getElementById('winMsg').classList.add('hidden');
+  renderBoard();
+  timer = setInterval(() => {
+    seconds++;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    document.getElementById('timer').textContent = m + ':' + String(s).padStart(2, '0');
+  }, 1000);
+}
+
+function isValid() {
+  for (let r = 0; r < GRID; r++) {
+    if (getClues(solution[r]).length === 1 && getClues(solution[r])[0] === 0) return false;
+  }
+  for (let c = 0; c < GRID; c++) {
+    const col = [];
+    for (let r = 0; r < GRID; r++) col.push(solution[r][c]);
+    if (getClues(col).length === 1 && getClues(col)[0] === 0) return false;
+  }
+  return true;
+}
+
+function renderBoard() {
+  const maxRowClueLen = Math.max(...rowClues.map(c => c.length));
+  const maxColClueLen = Math.max(...colClues.map(c => c.length));
+  let html = '<table style="border-collapse:collapse">';
+
+  html += '<tr><td></td>';
+  for (let c = 0; c < GRID; c++) {
+    let cells = '';
+    for (let i = 0; i < maxColClueLen - colClues[c].length; i++) cells += '<div class="clue-cell" style="height:18px"></div>';
+    for (const v of colClues[c]) cells += '<div class="clue-cell" style="height:18px">' + v + '</div>';
+    html += '<td class="clue-cell" style="padding:0">' + cells + '</td>';
+  }
+  html += '</tr>';
+
+  for (let r = 0; r < GRID; r++) {
+    html += '<tr>';
+    let clueStr = '';
+    for (let i = 0; i < maxRowClueLen - rowClues[r].length; i++) clueStr += '<span style="display:inline-block;width:20px"></span>';
+    for (const v of rowClues[r]) clueStr += '<span style="display:inline-block;width:20px;text-align:right">' + v + '</span>';
+    html += '<td class="clue-cell" style="padding-right:6px;white-space:nowrap">' + clueStr + '</td>';
+    for (let c = 0; c < GRID; c++) {
+      const id = r + '_' + c;
+      let cls = 'cell';
+      if (player[r][c] === 1) cls += ' filled';
+      if (marked[r][c]) cls += ' marked';
+      html += '<td id="c' + id + '" class="' + cls + '" onclick="fillCell(' + r + ',' + c + ')" oncontextmenu="markCell(event,' + r + ',' + c + ')"></td>';
+    }
+    html += '</tr>';
+  }
+  html += '</table>';
+  document.getElementById('board').innerHTML = html;
+}
+
+function fillCell(r, c) {
+  if (gameWon) return;
+  if (player[r][c] === 1) { player[r][c] = 0; updateCell(r, c); checkWin(); return; }
+  if (solution[r][c] === 1) {
+    player[r][c] = 1;
+  } else {
+    mistakes++;
+    document.getElementById('mistakes').textContent = mistakes;
+  }
+  marked[r][c] = false;
+  updateCell(r, c);
+  checkWin();
+}
+
+function markCell(e, r, c) {
+  e.preventDefault();
+  if (gameWon || player[r][c] === 1) return;
+  marked[r][c] = !marked[r][c];
+  updateCell(r, c);
+}
+
+function updateCell(r, c) {
+  const el = document.getElementById('c' + r + '_' + c);
+  el.className = 'cell';
+  if (player[r][c] === 1) el.classList.add('filled');
+  if (marked[r][c]) el.classList.add('marked');
+}
+
+function checkWin() {
+  for (let r = 0; r < GRID; r++)
+    for (let c = 0; c < GRID; c++)
+      if (solution[r][c] === 1 && player[r][c] !== 1) return;
+  gameWon = true;
+  clearInterval(timer);
+  document.getElementById('finalTime').textContent = document.getElementById('timer').textContent;
+  document.getElementById('finalMistakes').textContent = mistakes;
+  document.getElementById('winMsg').classList.remove('hidden');
+}
+
+function useHint() {
+  if (gameWon || hintsLeft <= 0) return;
+  const empty = [];
+  for (let r = 0; r < GRID; r++)
+    for (let c = 0; c < GRID; c++)
+      if (solution[r][c] === 1 && player[r][c] !== 1) empty.push([r, c]);
+  if (empty.length === 0) return;
+  const [r, c] = empty[Math.floor(Math.random() * empty.length)];
+  player[r][c] = 1;
+  marked[r][c] = false;
+  hintsLeft--;
+  document.getElementById('hintsLeft').textContent = hintsLeft;
+  updateCell(r, c);
+  checkWin();
+}
+
+function revealAll() {
+  for (let r = 0; r < GRID; r++)
+    for (let c = 0; c < GRID; c++)
+      player[r][c] = solution[r][c];
+  renderBoard();
+  gameWon = true;
+  clearInterval(timer);
+  document.getElementById('winMsg').classList.add('hidden');
+}
+
+newGame();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

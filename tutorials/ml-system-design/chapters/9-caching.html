@@ -1,0 +1,69 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>9. Caching Strategies — ML System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>9. Caching Strategies</h1>
+<p>Caching is critical for ML system performance. There are three distinct caching opportunities, each with different design considerations.</p>
+<h2>1. Feature Cache</h2>
+<p>Features are computed once and cached for reuse across requests.</p>
+<ul>
+<li><strong>Cache key:</strong> entity_id + feature_name</li>
+<li><strong>Cache store:</strong> Redis, Memcached</li>
+<li><strong>TTL:</strong> Minutes to hours, depending on feature freshness requirements</li>
+<li><strong>Invalidation:</strong> Write-through (update cache when feature source changes) or TTL-based</li>
+</ul>
+<pre><code># Feature cache flow
+def get_features(user_id):
+    cache_key = f"features:{user_id}"
+    features = redis.get(cache_key)
+    if features:
+        return deserialize(features)
+    features = compute_features(user_id)
+    redis.set(cache_key, serialize(features), ttl=300)  # 5 min
+    return features</code></pre>
+<h2>2. Inference (Prediction) Cache</h2>
+<p>Cache entire prediction results for identical requests. Highly effective when the same input is requested repeatedly.</p>
+<table>
+<tr><th>Aspect</th><th>Design Choice</th></tr>
+<tr><td>Cache key</td><td>hash(features + model_version)</td></tr>
+<tr><td>Cache value</td><td>Serialized prediction + confidence score</td></tr>
+<tr><td>Eviction</td><td>LRU + TTL-based expiration</td></tr>
+<tr><td>Effectiveness</td><td>Best for: recommendations, search results, FAQs</td></tr>
+<tr><td>Risk</td><td>Stale predictions if features change — use short TTL or invalidate</td></tr>
+</table>
+<h2>3. Model Cache</h2>
+<p>Keep model weights loaded in GPU/CPU memory to avoid reloading for each request.</p>
+<ul>
+<li><strong>GPU memory:</strong> Load model once, serve many requests. Multiple model versions can coexist.</li>
+<li><strong>LoRA adapter cache:</strong> Cache recently used adapters; evict LRU adapters when GPU memory fills.</li>
+<li><strong>Model warm-up:</strong> Run dummy inference on model load to trigger GPU kernel compilation and memory allocation.</li>
+</ul>
+<h2>Cache Strategy Decision Matrix</h2>
+<table>
+<tr><th>Scenario</th><th>Feature Cache?</th><th>Prediction Cache?</th><th>Model Cache?</th></tr>
+<tr><td>User features (demographics)</td><td>Yes, TTL=1hr</td><td>—</td><td>—</td></tr>
+<tr><td>Real-time features (session clicks)</td><td>No (always compute)</td><td>—</td><td>—</td></tr>
+<tr><td>Identical product recommendations</td><td>—</td><td>Yes, TTL=5min</td><td>—</td></tr>
+<tr><td>Fraud detection (unique transactions)</td><td>—</td><td>No (rarely repeats)</td><td>—</td></tr>
+<tr><td>Multi-model serving</td><td>—</td><td>—</td><td>Yes, LRU eviction</td></tr>
+</table>
+<div class="exercise"><strong>Exercise:</strong> Design caching for a real-time product search ranking system. Three cache types are available. For each: define cache key format, TTL, eviction policy, and invalidation strategy. Describe how the cache hit ratio changes during a flash sale event with 10x traffic.</div>
+<nav><a href="8-serving-architecture.html">&larr; Previous</a><a href="../index.html">Index</a><a href="10-indexing.html">Next: Indexing &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

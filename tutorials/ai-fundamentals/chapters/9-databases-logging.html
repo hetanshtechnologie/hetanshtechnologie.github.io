@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 9: Databases &amp; Logging | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 9</span>
+    <h1>Databases &amp; Logging</h1>
+
+    <p>Real programs store data and leave a trail. This chapter introduces SQLite, the file-based database built into Python, and the <code>logging</code> module, the standard way to record what a program did and why. Together they turn throwaway scripts into systems you can inspect, debug, and trust.</p>
+
+    <h2>CRUD with SQLite3 and Python</h2>
+    <p>CRUD stands for Create, Read, Update, Delete — the four fundamental operations on stored data. SQLite stores a whole database in one ordinary file, needs no server, and ships with Python, so it is perfect for learning and for small applications.</p>
+
+    <h3>Connecting and Creating a Table</h3>
+    <pre><code>import sqlite3
+
+conn = sqlite3.connect("shop.db")
+cur = conn.cursor()
+
+cur.execute("""
+    CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        price REAL,
+        stock INTEGER
+    )
+""")
+conn.commit()</code></pre>
+
+    <h3>Inserting Rows</h3>
+    <pre><code>cur.execute("INSERT INTO products (name, price, stock) VALUES (?, ?, ?)",
+            ("Mug", 12.50, 40))
+cur.execute("INSERT INTO products (name, price, stock) VALUES (?, ?, ?)",
+            ("Notebook", 6.75, 120))
+cur.executemany(
+    "INSERT INTO products (name, price, stock) VALUES (?, ?, ?)",
+    [("Pen", 1.20, 300), ("Bag", 28.00, 15)]
+)
+conn.commit()</code></pre>
+
+    <div class="info">
+      <strong>Parameters prevent injection:</strong> The <code>?</code> placeholders send values separately from the SQL text. Never build SQL with string formatting like <code>f"... VALUES ('{name}')"</code> — a malicious input could alter or delete your data. Placeholders also make quoting easy for you.
+    </div>
+
+    <h3>Selecting, Updating, and Deleting</h3>
+    <pre><code>cur.execute("SELECT * FROM products")
+for row in cur.fetchall():
+    print(row)
+
+cur.execute("SELECT name, price FROM products WHERE stock &lt; 50")
+print(cur.fetchall())
+
+cur.execute("UPDATE products SET stock = stock - 5 WHERE name = 'Mug'")
+cur.execute("DELETE FROM products WHERE name = 'Bag'")
+conn.commit()
+
+cur.execute("SELECT name, stock FROM products")
+print(cur.fetchall())
+conn.close()</code></pre>
+
+    <h2>SQLite Assignments and Solutions</h2>
+    <h3>Exercise A: Build a Bookstore</h3>
+    <ol>
+      <li>Create a table <code>books</code> with columns title, author, and year.</li>
+      <li>Insert five books, update the year of one, and delete another.</li>
+      <li>Print all books published after 2000.</li>
+    </ol>
+    <pre><code>import sqlite3
+
+conn = sqlite3.connect("books.db")
+cur = conn.cursor()
+cur.execute("""CREATE TABLE IF NOT EXISTS books (
+    title TEXT, author TEXT, year INTEGER)""")
+
+books = [
+    ("The Left Hand of Darkness", "Ursula K. Le Guin", 1969),
+    ("Dune", "Frank Herbert", 1965),
+    ("Project Hail Mary", "Andy Weir", 2021),
+    ("Klara and the Sun", "Kazuo Ishiguro", 2021),
+    ("Neuromancer", "William Gibson", 1984),
+]
+cur.executemany("INSERT INTO books VALUES (?, ?, ?)", books)
+
+cur.execute("UPDATE books SET year = 1966 WHERE title = 'Dune'")
+cur.execute("DELETE FROM books WHERE title = 'Neuromancer'")
+
+cur.execute("SELECT * FROM books WHERE year &gt; 2000")
+print(cur.fetchall())
+conn.commit()
+conn.close()</code></pre>
+
+    <h3>Exercise B: Aggregates</h3>
+    <p>Extend Exercise A to answer: how many books exist in the table, and what is the newest year? Use <code>SELECT COUNT(*)</code> and <code>SELECT MAX(year)</code>.</p>
+
+    <h2>Practical Logging in Python</h2>
+    <p><code>print()</code> is fine while you are exploring, but it cannot be turned on and off per severity, written to a file, or filtered at runtime. The <code>logging</code> module gives you all of that.</p>
+
+    <h3>Levels</h3>
+    <p>Messages are ranked by severity. The defaults, from least to most serious:</p>
+    <ul>
+      <li><code>DEBUG</code> — detailed diagnostics, usually only enabled while developing.</li>
+      <li><code>INFO</code> — confirmation that things are working as expected.</li>
+      <li><code>WARNING</code> — something unexpected, but the program continues.</li>
+      <li><code>ERROR</code> — a real problem, though the run may continue.</li>
+      <li><code>CRITICAL</code> — the program cannot continue safely.</li>
+    </ul>
+    <pre><code>import logging
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s | %(levelname)s | %(message)s")
+
+logging.debug("hidden unless DEBUG is enabled")
+logging.info("program started")
+logging.warning("disk space is low")
+logging.error("failed to connect to service")</code></pre>
+
+    <h3>Handlers and Formatters</h3>
+    <p>A <strong>handler</strong> decides where a record goes — the console, a file, or elsewhere — and a <strong>formatter</strong> decides how it is written. Multiple handlers can exist at once.</p>
+    <pre><code>logger = logging.getLogger("app")
+logger.setLevel(logging.DEBUG)
+
+file_handler = logging.FileHandler("app.log")
+stream_handler = logging.StreamHandler()
+formatter = logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+file_handler.setFormatter(formatter)
+stream_handler.setFormatter(formatter)
+
+logger.addHandler(file_handler)
+logger.addHandler(stream_handler)
+
+logger.info("Both handlers received this line")</code></pre>
+
+    <div class="note">
+      <strong>Use <code>__name__</code> as the logger name.</strong> Calling <code>logging.getLogger(__name__)</code> inside a module names the logger after the module. That makes it trivial to enable or silence logging per module later, and it costs nothing.
+    </div>
+
+    <h3>Multiple Loggers</h3>
+    <pre><code># In utils.py
+import logging
+util_logger = logging.getLogger("app.utils")
+
+# In main.py
+import logging
+main_logger = logging.getLogger("app.main")
+
+main_logger.info("starting pipeline")
+util_logger.warning("utils module noticed an odd value")</code></pre>
+    <p>Because loggers form a hierarchy (<code>app.main</code> is a child of <code>app</code>), handlers attached to <code>app</code> receive records from all its children — unless you explicitly stop propagation with <code>logger.propagate = False</code>.</p>
+
+    <h2>A Real-World Logging Example</h2>
+    <p>Here is a miniature data-processing job that logs each phase and any failures.</p>
+    <pre><code>import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    filename="pipeline.log",
+)
+
+log = logging.getLogger("etl")
+
+def clean_row(row: dict) -&gt; dict:
+    try:
+        cleaned = {k: str(v).strip() for k, v in row.items()}
+        log.info("cleaned row for id=%s", row.get("id"))
+        return cleaned
+    except Exception as exc:
+        log.error("failed to clean id=%s: %s", row.get("id"), exc)
+        raise
+
+rows = [{"id": 1, "name": "  Maya "}, {"id": 2, "name": None}]
+for r in rows:
+    clean_row(r)
+
+log.warning("total rows processed: %d", len(rows))</code></pre>
+
+    <h2>Logging Assignments and Solutions</h2>
+    <h3>Exercise A: Level Router</h3>
+    <p>Configure logging so that INFO and above goes to a file <code>app.log</code>, while WARNING and above is also printed to the console. Emit one message of each severity and confirm both destinations receive the expected records.</p>
+    <pre><code>import logging
+
+log = logging.getLogger("router")
+log.setLevel(logging.INFO)
+
+file_h = logging.FileHandler("app.log")
+file_h.setLevel(logging.INFO)
+console_h = logging.StreamHandler()
+console_h.setLevel(logging.WARNING)
+fmt = logging.Formatter("%(levelname)s: %(message)s")
+file_h.setFormatter(fmt)
+console_h.setFormatter(fmt)
+
+log.addHandler(file_h)
+log.addHandler(console_h)
+
+log.info("to file only")
+log.warning("to file and console")</code></pre>
+
+    <h3>Exercise B: Logging the Pipeline</h3>
+    <p>Wrap a numeric function (for example, dividing two numbers) in a try/except that logs the inputs at DEBUG, the result at INFO, and a ZeroDivisionError at ERROR. Run it twice, once successfully and once with a zero denominator, then read <code>pipeline.log</code>.</p>
+
+    <div class="exercise">
+      <strong>Capstone exercise:</strong> Combine both halves of this chapter. Create a SQLite database of 10 transactions, then write a report script that logs each step (connecting, reading rows, computing a total) at INFO level, logs any missing values as WARNINGS, and writes the final total to <code>total.txt</code>. Run it, then read the log file and explain in two sentences what the log reveals about the run.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="8-data-visualization.html">Prev: Data Visualization</a>
+        <a href="10-concurrency-memory.html">Next: Concurrency &amp; Memory Management</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

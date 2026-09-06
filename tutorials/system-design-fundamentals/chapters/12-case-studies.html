@@ -1,0 +1,188 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>12. Case Studies — System Design Fundamentals</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>12. Case Studies</h1>
+<p>Apply the 4-step blueprint to real-world systems. Each study includes requirements, scale estimates, architecture, and key trade-offs.</p>
+
+<h2>1. URL Shortener (e.g., TinyURL, bit.ly)</h2>
+<p><strong>Requirements:</strong> Generate short aliases for long URLs; redirect to original URL on visit; track click count; optional expiration.</p>
+<p><strong>Scale:</strong> 100M URLs/month, 1B redirects/month, read-heavy (10:1 read-to-write).</p>
+<p><strong>Key Design Decisions:</strong></p>
+<ul>
+<li><strong>Encoding:</strong> Base62 (a-z, A-Z, 0-9) for short keys. 7 characters → 62^7 ≈ 3.5 trillion combinations.</li>
+<li><strong>Key generation:</strong> Use a distributed ID generator (Snowflake) or pre-generate keys in a pool to avoid collisions.</li>
+<li><strong>Storage:</strong> SQL database (PostgreSQL) for strong consistency on key uniqueness. Cache in Redis for hot URLs.</li>
+<li><strong>Redirect:</strong> 301 (permanent) for SEO, 302 (temporary) for analytics — use 301 but count clicks before redirect.</li>
+</ul>
+<pre><code># API Design
+POST /shorten { "url": "https://example.com/very-long-url" }
+Response: { "short_url": "https://short.ly/Ab3X9zQ" }
+
+GET /Ab3X9zQ → HTTP 301 redirect to original URL</code></pre>
+
+<h2>2. Ticketing System (e.g., BookMyShow, Ticketmaster)</h2>
+<p><strong>Requirements:</strong> Browse events, select seats, reserve and pay within a time window, handle concurrent booking (no double booking).</p>
+<p><strong>Challenges:</strong> Race conditions on seat selection, payment failures after reservation, high traffic on popular events.</p>
+<p><strong>Key Design Decisions:</strong></p>
+<ul>
+<li><strong>Pessimistic locking:</strong> Lock seats during checkout (row-level lock in SQL).</li>
+<li><strong>Reservation TTL:</strong> Reserve seats for 10 minutes; release if payment not completed.</li>
+<li><strong>Queue:</strong> Use a queue to manage burst traffic for popular events. Show users a "waiting room" page.</li>
+<li><strong>Idempotent payments:</strong> Prevent double-charging with idempotency keys.</li>
+</ul>
+
+<h2>3. News Feed (e.g., Facebook, Twitter, LinkedIn)</h2>
+<p><strong>Requirements:</strong> Users see posts from followed accounts, ordered by recency/relevance, support infinite scroll, low latency (~500ms).</p>
+<p><strong>Approaches:</strong></p>
+<ul>
+<li><strong>Fan-out on write (push):</strong> When a user posts, push the post to all followers' timelines. Good for users with few followers.</li>
+<li><strong>Fan-out on read (pull):</strong> When a user opens their feed, fetch posts from followed users. Good for celebrities with millions of followers.</li>
+<li><strong>Hybrid:</strong> Push to active followers, pull for inactive. Fan-out through a queue (Kafka).</li>
+</ul>
+<pre><code># Hybrid feed approach
+When user A posts:
+  For followers with timeline in cache:
+    Push post to each follower's timeline list (Redis sorted set, score=timestamp)
+  For inactive followers / celebrities:
+    Store post in A's timeline; followers pull on login</code></pre>
+
+<h2>4. Notification System</h2>
+<p><strong>Requirements:</strong> Send push notifications, emails, and SMS to millions of users. Support multiple channels, delivery tracking, rate limiting.</p>
+<p><strong>Architecture:</strong></p>
+<ul>
+<li><strong>Notification service:</strong> Accepts notification requests, stores in DB, enqueues to channel-specific queues.</li>
+<li><strong>Rate limiter:</strong> Per-user, per-channel, per-minute limits. Avoid being flagged as spam.</li>
+<li><strong>Template engine:</strong> Render notifications from templates (e.g., "Your order {order_id} has shipped").</li>
+<li><strong>Delivery workers:</strong> Consume from queues, send via FCM (push), SendGrid (email), Twilio (SMS).</li>
+<li><strong>Dead letter queue:</strong> Failed notifications (invalid device token, bounced email) stored for retry/inspection.</li>
+</ul>
+
+<h2>5. Chat Application (e.g., WhatsApp, Messenger)</h2>
+<p><strong>Requirements:</strong> Real-time messaging, group chats, message delivery status (sent/delivered/read), offline messages, media sharing.</p>
+<p><strong>Key Design Decisions:</strong></p>
+<ul>
+<li><strong>WebSocket:</strong> Persistent connection for real-time message delivery.</li>
+<li><strong>Message store:</strong> Cassandra or similar for high-write throughput. Partition by conversation_id.</li>
+<li><strong>Message ordering:</strong> Use logical clocks or server-assigned sequence numbers per conversation.</li>
+<li><strong>Offline delivery:</strong> Store messages in DB; deliver via push notification when user is offline.</li>
+<li><strong>End-to-end encryption:</strong> Signal protocol for E2E encryption (optional but increasingly expected).</li>
+</ul>
+
+<h2>6. Auction Platform (e.g., eBay)</h2>
+<p><strong>Requirements:</strong> List items, place bids, auto-bidding, auction countdown, outbid notifications.</p>
+<p><strong>Challenges:</strong> Last-second bidding (sniping), concurrent bids on the same item, real-time countdown accuracy.</p>
+<p><strong>Key Decisions:</strong></p>
+<ul>
+<li><strong>Auto-bidding:</strong> Server maintains a maximum bid per user and automatically increments until max is reached.</li>
+<li><strong>Sniping mitigation:</strong> Extend auction by 1 minute if a bid is placed in the last 30 seconds.</li>
+<li><strong>Consistency:</strong> Use optimistic locking (version column) on the bid record to prevent double bids.</li>
+</ul>
+
+<h2>7. Rental Platform (e.g., Airbnb)</h2>
+<p><strong>Requirements:</strong> List properties, search with filters (dates, location, price, amenities), booking calendar, reviews, payments.</p>
+<p><strong>Key Challenges:</strong> Calendar availability (complex date overlap queries), search with geo-indexing, review moderation.</p>
+<ul>
+<li><strong>Search:</strong> Elasticsearch for text + geo queries. Index properties with availability dates.</li>
+<li><strong>Calendar:</strong> Store each booked night as a separate row for simple overlap queries, or use PostgreSQL's daterange with exclusion constraints.</li>
+<li><strong>Pricing engine:</strong> Dynamic pricing based on demand, seasonality, events. Run as a background job (hourly).</li>
+</ul>
+
+<h2>8. Cloud Storage (e.g., Google Drive, Dropbox)</h2>
+<p><strong>Requirements:</strong> Upload/download files, sync across devices, file versioning, sharing with permissions, conflict resolution.</p>
+<p><strong>Architecture:</strong></p>
+<ul>
+<li><strong>File chunking:</strong> Split files into fixed-size chunks (e.g., 4MB). Deduplicate identical chunks across users.</li>
+<li><strong>Delta sync:</strong> Only upload changed chunks, not the entire file.</li>
+<li><strong>Metadata DB:</strong> SQL database for file metadata, folder hierarchy, permissions.</li>
+<li><strong>Object storage:</strong> S3 for raw chunks. Versioning via S3 versioning or separate chunk tables.</li>
+<li><strong>Conflict resolution:</strong> CRDTs (Conflict-Free Replicated Data Types) or last-writer-wins with version history.</li>
+</ul>
+
+<pre><code># File sync flow
+User saves file → Client diffs chunks
+Upload changed chunks to object storage
+Update metadata DB: "file_id=42, version=5, chunk_list=[...]"
+Notify other devices: "File X updated to v5"
+Other devices download changed chunks and merge</code></pre>
+
+<h2>9. Video Sharing (e.g., YouTube)</h2>
+<p><strong>Requirements:</strong> Upload videos (up to 4K, multi-GB), transcoding to multiple resolutions, streaming with adaptive bitrate, search, recommendations, comments.</p>
+<p><strong>Key Components:</strong></p>
+<ul>
+<li><strong>Upload service:</strong> Receives video, stores in blob storage, enqueues transcoding job.</li>
+<li><strong>Transcoder:</strong> Worker pool converts video to HLS format (360p, 720p, 1080p, 4K). Segments video into 4-second chunks.</li>
+<li><strong>CDN:</strong> Serve video chunks from edge locations (Akamai, Cloudflare). Pre-fetch popular content.</li>
+<li><strong>Adaptive bitrate (ABR):</strong> Client selects resolution based on network conditions. HLS manifest (.m3u8) lists available qualities.</li>
+<li><strong>Recommendation engine:</strong> ML pipeline: collaborative filtering + content-based + trending. Pre-computed embeddings stored in Redis.</li>
+</ul>
+
+<h2>10. Search Engine (e.g., Google, Bing)</h2>
+<p><strong>Requirements:</strong> Crawl billions of pages, index content, return relevant results in &lt;500ms, handle typos, support advanced queries (site:, filetype:).</p>
+<p><strong>Architecture:</strong></p>
+<ul>
+<li><strong>Crawler:</strong> Distributed web crawlers download pages. Respect robots.txt. Use URL frontier (priority queue) to manage crawl order.</li>
+<li><strong>Indexer:</strong> Parse pages, extract text, build inverted index: (word → list of doc IDs + positions).</li>
+<li><strong>Inverted index:</strong> Partitioned across multiple servers (shard by term or document range).</li>
+<li><strong>Query processor:</strong> Parse query, find matching terms, compute relevance score (TF-IDF, PageRank, BM25).</li>
+<li><strong>Caching:</strong> Cache top-K results for frequent queries (Redis). Cache popular pages at edge.</li>
+</ul>
+
+<h2>11. E-Commerce Platform (e.g., Amazon)</h2>
+<p><strong>Requirements:</strong> Product catalog, search, cart, checkout, payments, order tracking, inventory management, recommendations.</p>
+<p><strong>Key Services:</strong></p>
+<ul>
+<li><strong>Product service:</strong> Catalog, categories, variants (size/color). Elasticsearch for search.</li>
+<li><strong>Cart service:</strong> In-memory (Redis) with write-back to DB. Handles merge of guest → logged-in cart.</li>
+<li><strong>Order service:</strong> Orchestrates checkout flow. Create order → reserve inventory → process payment → confirm.</li>
+<li><strong>Inventory service:</strong> Real-time stock tracking. Optimistic locks to prevent overselling.</li>
+<li><strong>Payment service:</strong> Integrates with payment gateways. Idempotency, retry, reconciliation.</li>
+<li><strong>Recommendation service:</strong> "Customers who bought this also bought…" — pre-computed on clickstream data.</li>
+</ul>
+
+<h2>12. Taxi Booking (e.g., Uber, Lyft)</h2>
+<p><strong>Requirements:</strong> Real-time driver location updates, rider requests nearby drivers, fare calculation, trip tracking, ETA prediction.</p>
+<p><strong>Challenges:</strong> Updating 10M driver locations every 3 seconds, finding nearest driver in &lt;100ms, surge pricing.</p>
+<p><strong>Key Decisions:</strong></p>
+<ul>
+<li><strong>Driver location:</strong> Store in Redis GEO data structure. Each city/region has a shard. Drivers publish location via WebSocket.</li>
+<li><strong>Rider request:</strong> Dispatch service queries Redis GEO for nearest drivers. Fan-out request to top 5 drivers via push notification.</li>
+<li><strong>Matching:</strong> First driver to accept gets the ride. Idempotency keys prevent double matching.</li>
+<li><strong>ETA:</strong> Pre-compute travel times from historical data + real-time traffic (Google Maps API).</li>
+<li><strong>Surge pricing:</strong> Algorithm runs every 5 minutes per region. High demand + low supply → multiplier applied.</li>
+</ul>
+
+<h2>13. Collaborative Editor (e.g., Google Docs, Notion)</h2>
+<p><strong>Requirements:</strong> Multiple users editing the same document simultaneously, real-time cursor visibility, conflict resolution, version history.</p>
+<p><strong>Key Approaches:</strong></p>
+<ul>
+<li><strong>OT (Operational Transformation):</strong> Each edit is an operation (insert "a" at position 5). Operations are transformed against concurrent operations to converge.</li>
+<li><strong>CRDT (Conflict-Free Replicated Data Types):</strong> Each character has a unique ID. Edits commute and converge without central coordination. Easier to implement at scale.</li>
+<li><strong>WebSocket:</strong> Persistent connection for broadcasting edits and cursors.</li>
+<li><strong>Version history:</strong> Store snapshots + operation log for undo/redo and history browsing.</li>
+</ul>
+<pre><code># CRDT character example (simplified)
+Char { id: "user1:42", value: "a", position: [3, "user1:40"] }
+Insert operation: insert character with ID between two existing positions
+Positions form a linked list; concurrent inserts converge naturally</code></pre>
+
+<div class="exercise"><strong>Exercise:</strong> Pick two case studies from this chapter that interest you most. For each, write the complete 4-step design (Problem → Scale → HLD → Infra Decisions → Final Design). Include trade-off analysis. Aim for 2—3 handwritten pages per study.</div>
+<nav><a href="11-interview-blueprint.html">&larr; Previous</a><a href="../index.html">Index</a><a href="13-wrap-up.html">Next: Wrap-Up &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

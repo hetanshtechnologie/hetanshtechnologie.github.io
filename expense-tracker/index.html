@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Expense Tracker - Hetansh Technologie</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-gray-50">
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <a href="../" class="text-blue-600 font-bold text-lg">HetanshTechnologie</a>
+    <div class="flex items-center gap-3">
+      <span id="greeting" class="text-sm text-gray-500"></span>
+      <button id="theme-toggle" class="text-sm px-3 py-1 rounded border hover:bg-gray-100">🌙</button>
+      <select id="lang-select" class="text-sm border rounded px-2 py-1">
+        <option value="en">English</option>
+        <option value="hi">हिन्दी</option>
+      </select>
+    </div>
+  </nav>
+
+  <div id="login-section" class="max-w-md mx-auto mt-20 p-6 bg-white rounded-xl shadow-lg">
+    <h2 class="text-2xl font-bold text-center mb-6">Daily Expense Tracker</h2>
+    <div id="login-error" class="text-red-600 text-sm mb-3 hidden"></div>
+    <input id="login-email" type="email" placeholder="Email" class="w-full p-3 border rounded-lg mb-3">
+    <input id="login-password" type="password" placeholder="Password" class="w-full p-3 border rounded-lg mb-3">
+    <button onclick="handleLogin()" class="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700">Sign In</button>
+    <p class="text-center text-sm mt-3">Don't have an account? <a href="#" onclick="showSignup()" class="text-blue-600">Sign Up</a></p>
+  </div>
+
+  <div id="app-section" class="hidden max-w-6xl mx-auto p-4">
+    <div class="flex flex-wrap gap-4 mb-6">
+      <div class="stat-card flex-1 min-w-[140px]"><div class="stat-label">💰 Total Expenses</div><div class="stat-value" id="total-expenses">₹0</div></div>
+      <div class="stat-card flex-1 min-w-[140px]"><div class="stat-label">📊 This Month</div><div class="stat-value" id="month-total">₹0</div></div>
+      <div class="stat-card flex-1 min-w-[140px]"><div class="stat-label">📈 Avg/Day</div><div class="stat-value" id="avg-day">₹0</div></div>
+      <div class="stat-card flex-1 min-w-[140px]"><div class="stat-label">🏆 Top Category</div><div class="stat-value text-sm" id="top-cat">-</div></div>
+    </div>
+
+    <div class="flex flex-wrap gap-3 mb-4">
+      <button onclick="showSection('add')" class="btn btn-primary">+ Add Expense</button>
+      <button onclick="showSection('list')" class="btn btn-secondary">📋 All Expenses</button>
+      <button onclick="showSection('analytics')" class="btn btn-secondary">📊 Analytics</button>
+      <button onclick="showSection('budgets')" class="btn btn-secondary">🎯 Budgets</button>
+      <button onclick="showSection('recurring')" class="btn btn-secondary">🔄 Recurring</button>
+      <button onclick="showSection('profile')" class="btn btn-secondary">👤 Profile</button>
+      <button onclick="logout()" class="btn btn-danger">Logout</button>
+    </div>
+
+    <div id="section-add" class="section-panel">
+      <h3 class="text-xl font-bold mb-4">Add Expense</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input id="exp-title" placeholder="Title *" class="p-3 border rounded-lg">
+        <input id="exp-amount" type="number" step="0.01" placeholder="Amount *" class="p-3 border rounded-lg">
+        <select id="exp-category" class="p-3 border rounded-lg"></select>
+        <input id="exp-date" type="date" class="p-3 border rounded-lg">
+        <div class="md:col-span-2 flex gap-4 items-center">
+          <textarea id="exp-notes" placeholder="Notes" class="p-3 border rounded-lg flex-1" rows="2"></textarea>
+        </div>
+        <div class="md:col-span-2 flex gap-4 items-center">
+          <label><input type="checkbox" id="exp-recurring" onchange="toggleRecurring()"> Recurring</label>
+          <select id="exp-recurring-type" class="p-2 border rounded-lg hidden">
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
+        <div class="md:col-span-2">
+          <button onclick="saveExpense()" class="btn btn-primary">Save</button>
+          <button onclick="clearForm()" class="btn btn-secondary ml-2">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="section-list" class="section-panel hidden">
+      <div class="flex flex-wrap gap-3 mb-4">
+        <input id="search-exp" placeholder="Search..." class="p-2 border rounded-lg flex-1 min-w-[200px]">
+        <select id="filter-cat" class="p-2 border rounded-lg"><option value="">All Categories</option></select>
+        <input id="filter-from" type="date" class="p-2 border rounded-lg">
+        <input id="filter-to" type="date" class="p-2 border rounded-lg">
+        <button onclick="loadExpenses()" class="btn btn-sm btn-primary">Filter</button>
+        <button onclick="exportCSV()" class="btn btn-sm btn-secondary">📥 CSV</button>
+        <button onclick="deleteSelected()" class="btn btn-sm btn-danger hidden" id="delete-selected-btn">🗑 Delete Selected</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="bg-gray-50 border-b"><th class="p-3 text-left w-10"><input type="checkbox" id="select-all" onchange="toggleAll()"></th><th class="p-3 text-left">Date</th><th class="p-3 text-left">Title</th><th class="p-3 text-left">Category</th><th class="p-3 text-right">Amount</th><th class="p-3 text-center">Recurring</th><th class="p-3 text-center">Actions</th></tr></thead>
+          <tbody id="expense-table-body"></tbody>
+        </table>
+      </div>
+      <div id="expense-empty" class="hidden p-6 text-center text-gray-400">No expenses found.</div>
+    </div>
+
+    <div id="section-analytics" class="section-panel hidden">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="chart-container"><h4 class="font-bold mb-3">By Category</h4><canvas id="pie-chart" height="250"></canvas></div>
+        <div class="chart-container"><h4 class="font-bold mb-3">Monthly Trend</h4><canvas id="line-chart" height="250"></canvas></div>
+      </div>
+    </div>
+
+    <div id="section-budgets" class="section-panel hidden">
+      <div class="flex gap-3 mb-4">
+        <select id="budget-cat" class="p-2 border rounded-lg"></select>
+        <input id="budget-month" type="month" class="p-2 border rounded-lg">
+        <input id="budget-limit" type="number" step="0.01" placeholder="Limit" class="p-2 border rounded-lg">
+        <button onclick="saveBudget()" class="btn btn-primary btn-sm">Set Budget</button>
+      </div>
+      <div id="budget-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+    </div>
+
+    <div id="section-recurring" class="section-panel hidden">
+      <div id="recurring-list"></div>
+    </div>
+
+    <div id="section-profile" class="section-panel hidden">
+      <div class="max-w-md">
+        <p><strong>Email:</strong> <span id="profile-email"></span></p>
+        <p><strong>Plan:</strong> <span id="profile-plan" class="text-blue-600 font-semibold"></span></p>
+        <p><strong>Records:</strong> <span id="profile-count"></span></p>
+        <div class="mt-4">
+          <label>Currency:
+            <select id="profile-currency" class="p-2 border rounded-lg" onchange="savePrefs()">
+              <option value="INR">₹ INR</option>
+              <option value="USD">$ USD</option>
+              <option value="EUR">€ EUR</option>
+            </select>
+          </label>
+        </div>
+        <div class="mt-4 flex gap-3">
+          <a href="admin.html" class="btn btn-secondary" id="admin-link">⚙️ Admin</a>
+          <button onclick="upgradePlan()" class="btn btn-primary">⬆ Upgrade Plan</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1388 @@
+﻿<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 9: Advanced Topics — Terraform eBook</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+
+<h1>Chapter 9: Advanced Topics</h1>
+<p class="intro">This chapter covers the power-user features of Terraform that separate casual usage from production-grade infrastructure engineering. We will explore provisioners, lifecycle rules, dynamic blocks, advanced <code>for_each</code>, conditional creation, custom providers, Terraform Cloud and Enterprise, and the newer <code>moved</code> and <code>import</code> blocks for refactoring.</p>
+
+<nav class="chapter-nav" style="margin-bottom:24px;padding:12px 16px;background:#f5f3ff;border-radius:8px;">
+  <strong>Contents</strong>
+  <ol style="margin:8px 0 0 20px;columns:2;column-gap:24px;">
+    <li><a href="#provisioners">Provisioners</a></li>
+    <li><a href="#lifecycle">Lifecycle Rules Deep Dive</a></li>
+    <li><a href="#dynamic-blocks">Dynamic Blocks</a></li>
+    <li><a href="#foreach-maps-sets">for_each with Maps and Sets</a></li>
+    <li><a href="#conditional-creation">Conditional Resource Creation</a></li>
+    <li><a href="#custom-providers">Custom Provider Development Basics</a></li>
+    <li><a href="#cloud-enterprise">Terraform Cloud &amp; Enterprise</a></li>
+    <li><a href="#moved-block">The moved Block</a></li>
+    <li><a href="#import-block">The import Block</a></li>
+    <li><a href="#summary">Summary &amp; Checklist</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="provisioners">1. Provisioners</h2>
+<p>Provisioners execute actions on the local machine or on a remote resource during creation or destruction. Terraform's documentation explicitly warns: <em>&quot;Provisioners are a last resort.&quot;</em> Prefer user-data, cloud-init, or configuration management tools whenever possible.</p>
+
+<div class="diagram">
+<pre>
++--------------------------------------------------------------+
+|                    Provisioner Types                          |
++--------------+------------------+----------------------------+
+|  local-exec  |  remote-exec     |  file                       |
+|  Runs a      |  SSH/WinRM into  |  Copies files to or from    |
+|  command on  |  the target and  |  a remote resource           |
+|  the machine |  runs commands   |                              |
+|  running     |                  |                              |
+|  Terraform   |                  |                              |
++--------------+------------------+----------------------------+
+</pre>
+</div>
+
+<h3>1.1 local-exec</h3>
+<p><code>local-exec</code> invokes a local executable after a resource is created. Common use cases include calling Ansible, triggering a script, or writing to a local file.</p>
+
+<pre><code>resource &quot;azurerm_linux_web_app&quot; &quot;example&quot; {
+  name                = &quot;my-webapp&quot;
+  resource_group_name = azurerm_resource_group.example.name
+  location            = azurerm_resource_group.example.location
+  service_plan_id     = azurerm_service_plan.example.id
+
+  site_config {}
+
+  provisioner &quot;local-exec&quot; {
+    command = &quot;az webapp deploy --resource-group  --name  --src-path ./app.zip&quot;
+    environment = {
+      ARM_SUBSCRIPTION_ID = data.azurerm_client_config.current.subscription_id
+    }
+  }
+
+  provisioner &quot;local-exec&quot; {
+    when    = destroy
+    command = &quot;echo 'WebApp  is being destroyed' &gt;&gt; destroy-log.txt&quot;
+  }
+}</code></pre>
+
+<p><strong>Key points:</strong></p>
+<ul>
+  <li><code>self</code> references the resource being provisioned &mdash; available inside <code>provisioner</code> and <code>connection</code> blocks.</li>
+  <li><code>when = destroy</code> runs the provisioner only when the resource is destroyed.</li>
+  <li><code>interpreter</code> defaults to <code> [&quot;/bin/sh&quot;, &quot;-c&quot;]</code> &mdash; override for PowerShell or other shells.</li>
+  <li><code>environment</code> sets environment variables for the command.</li>
+</ul>
+
+<h3>1.2 remote-exec</h3>
+<p><code>remote-exec</code> connects to a remote resource over SSH or WinRM and executes commands inline.</p>
+
+<pre><code>resource &quot;aws_instance&quot; &quot;web&quot; {
+  ami           = &quot;ami-0c55b159cbfafe1f0&quot;
+  instance_type = &quot;t3.micro&quot;
+  key_name      = aws_key_pair.deployer.key_name
+
+  provisioner &quot;remote-exec&quot; {
+    inline = [
+      &quot;sudo apt-get update -y&quot;,
+      &quot;sudo apt-get install -y nginx&quot;,
+      &quot;sudo systemctl enable nginx&quot;,
+      &quot;sudo systemctl start nginx&quot;,
+      &quot;echo 'Nginx installed and running' &gt; /tmp/setup-complete&quot;,
+    ]
+
+    connection {
+      type        = &quot;ssh&quot;
+      host        = self.public_ip
+      user        = &quot;ubuntu&quot;
+      private_key = file(&quot;~/.ssh/id_rsa&quot;)
+      timeout     = &quot;5m&quot;
+    }
+  }
+}</code></pre>
+
+<h3>1.3 file provisioner</h3>
+<p>The <code>file</code> provisioner uploads or downloads files between the Terraform machine and the resource.</p>
+
+<pre><code>resource &quot;aws_instance&quot; &quot;app&quot; {
+  ami           = &quot;ami-0c55b159cbfafe1f0&quot;
+  instance_type = &quot;t3.micro&quot;
+
+  provisioner &quot;file&quot; {
+    source      = &quot;scripts/init.sh&quot;
+    destination = &quot;/tmp/init.sh&quot;
+
+    connection {
+      type        = &quot;ssh&quot;
+      host        = self.public_ip
+      user        = &quot;ubuntu&quot;
+      private_key = file(&quot;~/.ssh/id_rsa&quot;)
+    }
+  }
+
+  provisioner &quot;file&quot; {
+    content     = templatefile(&quot;templates/nginx.conf.tpl&quot;, { port = 8080 })
+    destination = &quot;/etc/nginx/nginx.conf&quot;
+
+    connection {
+      type        = &quot;ssh&quot;
+      host        = self.public_ip
+      user        = &quot;ubuntu&quot;
+      private_key = file(&quot;~/.ssh/id_rsa&quot;)
+    }
+  }
+}</code></pre>
+
+<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;">
+  <strong>Warning:</strong> Provisioners make Terraform graphs less predictable. If a provisioner fails, the resource may be left in a half-configured state. Prefer <code>user_data</code>, <code>cloud-init</code>, Ansible, or Packer for configuration management.
+</div><!-- ============================================================ -->
+<h2 id="lifecycle">2. Lifecycle Rules Deep Dive</h2>
+<p>The <code>lifecycle</code> block modifies how Terraform creates, updates, and destroys individual resources. Mastering lifecycle rules is essential for zero-downtime deployments and safe infrastructure changes.</p>
+
+<h3>2.1 create_before_destroy</h3>
+<p>Creates the new resource before destroying the old one &mdash; critical for load balancers, DNS records, and any resource that must remain available during replacement.</p>
+
+<pre><code>resource &quot;aws_launch_template&quot; &quot;app&quot; {
+  name_prefix   = &quot;app-&quot;
+  image_id      = data.aws_ami.ubuntu.id
+  instance_type = &quot;t3.medium&quot;
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}</code></pre>
+
+<h3>2.2 prevent_destroy</h3>
+<p>Prevents Terraform from destroying the resource. If a <code>terraform destroy</code> or a recreate would destroy this resource, Terraform errors out. Ideal for databases, S3 buckets with data, and critical shared infrastructure.</p>
+
+<pre><code>resource &quot;aws_db_instance&quot; &quot;production&quot; {
+  identifier     = &quot;prod-db&quot;
+  engine         = &quot;mysql&quot;
+  instance_class = &quot;db.r5.large&quot;
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}</code></pre>
+
+<h3>2.3 ignore_changes</h3>
+<p>Tells Terraform to ignore specific attributes when calculating a diff. This prevents Terraform from reverting external changes (e.g., autoscaling, manual console edits, or values managed by another tool).</p>
+
+<pre><code>resource &quot;aws_autoscaling_group&quot; &quot;web&quot; {
+  desired_capacity = 2
+  min_size         = 1
+  max_size         = 5
+
+  lifecycle {
+    ignore_changes = [
+      desired_capacity,   # Autoscaler manages this
+      load_balancers,     # Managed externally
+    ]
+  }
+}
+
+# Ignore all tags (e.g., when tags are injected by a pipeline)
+resource &quot;azurerm_linux_virtual_machine&quot; &quot;example&quot; {
+  # ... config ...
+
+  lifecycle {
+    ignore_changes = [
+      tags,          # Ignore all tag changes
+      tags[&quot;Team&quot;],  # Ignore only a specific tag
+    ]
+  }
+}</code></pre>
+
+<h3>2.4 replace_triggered_by</h3>
+<p>Triggers replacement of the resource when the specified resource or attribute changes. Introduced in Terraform 1.2. This is cleaner than using <code>null_resource</code> with <code>triggers</code>.</p>
+
+<pre><code>resource &quot;aws_instance&quot; &quot;web&quot; {
+  ami           = data.aws_ami.latest.id
+  instance_type = &quot;t3.micro&quot;
+
+  lifecycle {
+    replace_triggered_by = [
+      aws_launch_template.app,              # Replace when the whole resource changes
+      aws_launch_template.app.image_id,     # Replace when only image_id changes
+    ]
+  }
+}
+
+resource &quot;aws_launch_template&quot; &quot;app&quot; {
+  name_prefix   = &quot;app-&quot;
+  image_id      = data.aws_ami.ubuntu.id
+  instance_type = &quot;t3.medium&quot;
+}</code></pre>
+
+<h3>2.5 precondition and postcondition</h3>
+<p>Conditionals that run custom validation logic before and after the resource is planned/applied. If the condition fails, Terraform halts the operation. Use these to enforce invariants that variable validation cannot express.</p>
+
+<pre><code>resource &quot;azurerm_linux_web_app&quot; &quot;api&quot; {
+  name                = &quot;api-&quot;
+  resource_group_name = azurerm_resource_group.example.name
+  location            = azurerm_resource_group.example.location
+  service_plan_id     = azurerm_service_plan.example.id
+
+  site_config {}
+
+  lifecycle {
+    precondition {
+      condition     = var.environment != &quot;production&quot; || var.instance_sku != &quot;B1&quot;
+      error_message = &quot;Production environments must use at least an S1 App Service Plan.&quot;
+    }
+
+    postcondition {
+      condition     = self.default_site_hostname != null
+      error_message = &quot;Web app created but default_site_hostname is null &mdash; deployment may have failed.&quot;
+    }
+  }
+}</code></pre>
+
+<div class="diagram">
+<pre>
++------------------------------------------------------+
+|                Lifecycle Decision Flow                |
++------------------------------------------------------+
+|                                                      |
+|  Plan phase:                                         |
+|    |-- Has config changed?                           |
+|    |    |-- Yes --> check ignore_changes --> diff?    |
+|    |    |              |-- ignored --> no change      |
+|    |    |              |-- not ignored --> update/rep |
+|    |    +-- No --> no change                         |
+|    |-- replace_triggered_by?                         |
+|    |    +-- trigger changed? --> force replacement   |
+|    +-- prevent_destroy + destroying? --> ERROR        |
+|                                                      |
+|  Apply phase:                                        |
+|    |-- create_before_destroy?                        |
+|    |    +-- create new --> verify new --> destroy old |
+|    |-- precondition fails? --> ERROR                 |
+|    +-- postcondition fails? --> ERROR                |
++------------------------------------------------------+
+</pre>
+</div>
+
+<h3>2.6 Combining Multiple Lifecycle Rules</h3>
+<p>You can combine multiple lifecycle arguments in a single block. Here is a production database example:</p>
+
+<pre><code>resource &quot;aws_db_instance&quot; &quot;main&quot; {
+  identifier           = &quot;main-db&quot;
+  engine               = &quot;postgres&quot;
+  engine_version       = &quot;14.9&quot;
+  instance_class       = &quot;db.r6g.xlarge&quot;
+  allocated_storage    = 100
+  skip_final_snapshot  = false
+  final_snapshot_identifier = &quot;main-db-final-&quot;
+
+  lifecycle {
+    prevent_destroy = true
+
+    ignore_changes = [
+      allocated_storage,  # Auto-scaling handles this
+    ]
+
+    precondition {
+      condition     = var.environment == &quot;production&quot;
+      error_message = &quot;This database should only be created in production.&quot;
+    }
+
+    postcondition {
+      condition     = self.status == &quot;available&quot;
+      error_message = &quot;Database did not reach 'available' status.&quot;
+    }
+  }
+}</code></pre>
+
+<h3>2.7 Lifecycle Rules Reference Table</h3>
+
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+  <thead>
+    <tr style="background:#7c3aed;color:#fff;">
+      <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Rule</th>
+      <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Description</th>
+      <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Use Case</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;"><code>create_before_destroy</code></td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Create replacement before destroying original</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Zero-downtime replacements, ASG launch configs</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;"><code>prevent_destroy</code></td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Error if destroy is attempted</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Databases, critical storage, shared resources</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;"><code>ignore_changes</code></td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Skip specific attributes during diff</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">External scaling, manual tags, user_data</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;"><code>replace_triggered_by</code></td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Force replacement when dependency changes</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Instance refresh on AMI change</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;"><code>precondition</code></td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Validate before plan/apply</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Environment-specific constraints</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;"><code>postcondition</code></td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Validate after create/update</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Verify resource reached expected state</td>
+    </tr>
+  </tbody>
+</table>
+<!-- ============================================================ -->
+<h2 id="dynamic-blocks">3. Dynamic Blocks</h2>
+<p>Dynamic blocks generate repetitive nested blocks from a list or map, eliminating copy-paste boilerplate. They are especially useful for security groups, ingress/egress rules, and complex provider-specific nested attributes.</p>
+
+<h3>3.1 Basic Syntax</h3>
+
+<pre><code>dynamic &quot;ingress&quot; {
+  for_each = var.ingress_rules
+  content {
+    description = ingress.value.description
+    from_port   = ingress.value.port
+    to_port     = ingress.value.port
+    protocol    = ingress.value.protocol
+    cidr_blocks = ingress.value.cidr_blocks
+  }
+}</code></pre>
+
+<h3>3.2 Full Example &mdash; Security Group with Dynamic Rules</h3>
+
+<pre><code>variable &quot;ingress_rules&quot; {
+  description = &quot;Map of ingress rule configurations&quot;
+  type = map(object({
+    port        = number
+    protocol    = string
+    cidr_blocks = list(string)
+    description = string
+  }))
+  default = {
+    http = {
+      port        = 80
+      protocol    = &quot;tcp&quot;
+      cidr_blocks = [&quot;0.0.0.0/0&quot;]
+      description = &quot;HTTP from anywhere&quot;
+    }
+    https = {
+      port        = 443
+      protocol    = &quot;tcp&quot;
+      cidr_blocks = [&quot;0.0.0.0/0&quot;]
+      description = &quot;HTTPS from anywhere&quot;
+    }
+    ssh = {
+      port        = 22
+      protocol    = &quot;tcp&quot;
+      cidr_blocks = [&quot;10.0.0.0/8&quot;]
+      description = &quot;SSH from internal network&quot;
+    }
+  }
+}
+
+resource &quot;aws_security_group&quot; &quot;web&quot; {
+  name        = &quot;web-sg&quot;
+  description = &quot;Security group for web servers&quot;
+  vpc_id      = aws_vpc.main.id
+
+  dynamic &quot;ingress&quot; {
+    for_each = var.ingress_rules
+    content {
+      description = ingress.value.description
+      from_port   = ingress.value.port
+      to_port     = ingress.value.port
+      protocol    = ingress.value.protocol
+      cidr_blocks = ingress.value.cidr_blocks
+    }
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = &quot;-1&quot;
+    cidr_blocks = [&quot;0.0.0.0/0&quot;]
+    description = &quot;Allow all outbound&quot;
+  }
+
+  tags = {
+    Name = &quot;web-sg&quot;
+  }
+}</code></pre>
+
+<h3>3.3 Filtering with Conditional Expressions</h3>
+<p>You can use <code>for_each</code> with a filtered expression inside a dynamic block to conditionally include blocks:</p>
+
+<pre><code>variable &quot;enable_monitoring&quot; { type = bool }
+variable &quot;allowed_cidrs&quot;     { type = list(string) }
+
+resource &quot;azurerm_network_security_group&quot; &quot;example&quot; {
+  name                = &quot;example-nsg&quot;
+  location            = azurerm_resource_group.example.location
+  resource_group_name = azurerm_resource_group.example.name
+
+  # Always included
+  security_rule {
+    name                       = &quot;allow-https&quot;
+    priority                   = 100
+    direction                  = &quot;Inbound&quot;
+    access                     = &quot;Allow&quot;
+    protocol                   = &quot;Tcp&quot;
+    source_port_range          = &quot;*&quot;
+    destination_port_range     = &quot;443&quot;
+    source_address_prefixes    = var.allowed_cidrs
+    destination_address_prefix = &quot;*&quot;
+  }
+
+  # Conditionally included
+  dynamic &quot;security_rule&quot; {
+    for_each = var.enable_monitoring ? [1] : []
+    content {
+      name                       = &quot;allow-monitoring&quot;
+      priority                   = 200
+      direction                  = &quot;Inbound&quot;
+      access                     = &quot;Allow&quot;
+      protocol                   = &quot;Tcp&quot;
+      source_port_range          = &quot;*&quot;
+      destination_port_range     = &quot;9090&quot;
+      source_address_prefix      = &quot;10.0.0.0/8&quot;
+      destination_address_prefix = &quot;*&quot;
+    }
+  }
+
+  tags = { Environment = &quot;production&quot; }
+}</code></pre>
+
+<h3>3.4 Multiple Dynamic Blocks</h3>
+<p>You can have multiple <code>dynamic</code> blocks in the same resource, each iterating over different collections:</p>
+
+<pre><code>variable &quot;ingress_rules&quot; { type = list(map(any)) }
+variable &quot;egress_rules&quot;  { type = list(map(any)) }
+
+resource &quot;aws_security_group&quot; &quot;multi&quot; {
+  name   = &quot;multi-sg&quot;
+  vpc_id = aws_vpc.main.id
+
+  dynamic &quot;ingress&quot; {
+    for_each = var.ingress_rules
+    content {
+      from_port   = ingress.value[&quot;from_port&quot;]
+      to_port     = ingress.value[&quot;to_port&quot;]
+      protocol    = ingress.value[&quot;protocol&quot;]
+      cidr_blocks = ingress.value[&quot;cidr_blocks&quot;]
+    }
+  }
+
+  dynamic &quot;egress&quot; {
+    for_each = var.egress_rules
+    content {
+      from_port   = egress.value[&quot;from_port&quot;]
+      to_port     = egress.value[&quot;to_port&quot;]
+      protocol    = egress.value[&quot;protocol&quot;]
+      cidr_blocks = egress.value[&quot;cidr_blocks&quot;]
+    }
+  }
+}</code></pre>
+
+<div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;">
+  <strong>Tip:</strong> <code>dynamic</code> blocks can hurt readability when overused. If your configuration has more than 3-4 dynamic blocks in a resource, consider extracting the logic into a module or using a map-of-objects variable with a single <code>for_each</code> on the resource itself.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="foreach-maps-sets">4. for_each with Maps and Sets</h2>
+<p>The <code>for_each</code> meta-argument lets you create multiple instances of a resource or module from a map or set. It is more flexible than <code>count</code> because each instance has a stable, unique key.</p>
+
+<h3>4.1 Basic for_each with a Map</h3>
+
+<pre><code>variable &quot;regions&quot; {
+  type = map(object({
+    location          = string
+    sku_name          = string
+    zone_redundant    = bool
+  }))
+  default = {
+    east = {
+      location       = &quot;eastus&quot;
+      sku_name       = &quot;B1&quot;
+      zone_redundant = false
+    }
+    west = {
+      location       = &quot;westus2&quot;
+      sku_name       = &quot;S1&quot;
+      zone_redundant = true
+    }
+  }
+}
+
+resource &quot;azurerm_service_plan&quot; &quot;multi_region&quot; {
+  for_each = var.regions
+
+  name                = &quot;asp-&quot;
+  resource_group_name = azurerm_resource_group.example.name
+  location            = each.value.location
+  os_type             = &quot;Linux&quot;
+  sku_name            = each.value.sku_name
+  zone_redundant      = each.value.zone_redundant
+
+  tags = {
+    Environment = var.environment
+    Region      = each.key
+  }
+}
+
+output &quot;service_plan_ids&quot; {
+  value = { for k, v in azurerm_service_plan.multi_region : k => v.id }
+}</code></pre>
+
+<h3>4.2 for_each with a Set</h3>
+<p>When using a set, each element becomes the key. Sets are unordered and best used when you only need a simple list of values:</p>
+
+<pre><code>variable &quot;subnets&quot; {
+  type    = set(string)
+  default = [&quot;10.0.1.0/24&quot;, &quot;10.0.2.0/24&quot;, &quot;10.0.3.0/24&quot;]
+}
+
+resource &quot;aws_subnet&quot; &quot;private&quot; {
+  for_each = var.subnets
+
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = each.value
+  availability_zone = &quot;&quot;
+
+  tags = {
+    Name = &quot;private-&quot;
+  }
+}</code></pre>
+
+<h3>4.3 for_each with a Transformed Collection</h3>
+<p>Use a <code>for</code> expression to transform or filter collections before passing them to <code>for_each</code>:</p>
+
+<pre><code>resource &quot;azurerm_resource_group&quot; &quot;env&quot; {
+  for_each = { for env in var.environments : env.name => env if env.enabled }
+
+  name     = &quot;rg--&quot;
+  location = each.value.location
+
+  tags = {
+    Environment = each.key
+    Project     = var.project
+  }
+}</code></pre>
+
+<h3>4.4 for_each vs count</h3>
+
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+  <thead>
+    <tr style="background:#7c3aed;color:#fff;">
+      <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Feature</th>
+      <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">count</th>
+      <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">for_each</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Indexing</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Numeric (0, 1, 2&hellip;)</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">String key (stable identity)</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Remove from middle</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Shifts all subsequent indices (destroys)</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Other instances unaffected</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Input type</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Number or list</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Map or set of strings</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Conditional creation</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;"><code>count = var.enabled ? 1 : 0</code></td>
+      <td style="padding:8px 12px;border:1px solid #ddd;"><code>for_each = var.enabled ? {x = 1} : {}</code></td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Recommended</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Simple conditionals only</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Prefer for most multi-instance patterns</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>4.5 Referencing for_each Instances</h3>
+
+<pre><code># Single instance
+azurerm_service_plan.multi_region[&quot;east&quot;]
+
+# All instances (splat)
+azurerm_service_plan.multi_region[*].id
+
+# In a for expression
+[ for k, v in azurerm_service_plan.multi_region : v.id ]</code></pre>
+<!-- ============================================================ -->
+<h2 id="conditional-creation">5. Conditional Resource Creation</h2>
+<p>Terraform does not have an <code>if</code> statement at the resource level. Instead, you use a few established patterns to conditionally create resources.</p>
+
+<h3>5.1 Pattern 1 &mdash; count with ternary</h3>
+<p>The simplest approach: set <code>count</code> to 0 or 1 based on a condition.</p>
+
+<pre><code>variable &quot;create_database&quot; {
+  type    = bool
+  default = true
+}
+
+resource &quot;aws_db_instance&quot; &quot;main&quot; {
+  count = var.create_database ? 1 : 0
+
+  identifier     = &quot;main-db&quot;
+  engine         = &quot;postgres&quot;
+  instance_class = &quot;db.t3.micro&quot;
+  allocated_storage = 20
+
+  skip_final_snapshot = true
+}
+
+# Reference with index
+output &quot;db_endpoint&quot; {
+  value = var.create_database ? aws_db_instance.main[0].endpoint : &quot;N/A&quot;
+}</code></pre>
+
+<h3>5.2 Pattern 2 &mdash; for_each with conditional map</h3>
+<p>Better than <code>count</code> when the resource might be combined with other <code>for_each</code> patterns. This avoids the index-shifting problem.</p>
+
+<pre><code>variable &quot;environments&quot; {
+  type = map(object({
+    enabled = bool
+    sku     = string
+  }))
+}
+
+resource &quot;azurerm_service_plan&quot; &quot;env&quot; {
+  for_each = { for k, v in var.environments : k => v if v.enabled }
+
+  name                = &quot;asp-&quot;
+  resource_group_name = azurerm_resource_group.example.name
+  location            = var.location
+  os_type             = &quot;Linux&quot;
+  sku_name            = each.value.sku
+}</code></pre>
+
+<h3>5.3 Pattern 3 &mdash; for_each on a filtered list</h3>
+
+<pre><code>variable &quot;features&quot; {
+  type = list(object({
+    name    = string
+    enabled = bool
+  }))
+}
+
+resource &quot;azurerm_app_service_slot&quot; &quot;staging&quot; {
+  for_each = { for f in var.features : f.name => f if f.enabled }
+
+  name           = &quot;staging-&quot;
+  app_service_id = azurerm_linux_web_app.main.id
+  site_config {}
+}</code></pre>
+
+<h3>5.4 Pattern 4 &mdash; count on modules</h3>
+
+<pre><code>module &quot;staging&quot; {
+  source   = &quot;./modules/web-app&quot;
+  count    = var.deploy_staging ? 1 : 0
+
+  app_name = &quot;myapp-staging&quot;
+  sku      = &quot;B1&quot;
+}
+
+module &quot;production&quot; {
+  source   = &quot;./modules/web-app&quot;
+  count    = var.deploy_production ? 1 : 0
+
+  app_name = &quot;myapp-prod&quot;
+  sku      = &quot;S1&quot;
+}</code></pre>
+
+<h3>5.5 Pattern 5 &mdash; one() for single-instance resources</h3>
+<p>The <code>one()</code> function safely unwraps a single-element list or returns null if empty, avoiding the verbosity of index references:</p>
+
+<pre><code>output &quot;db_endpoint&quot; {
+  value = one(aws_db_instance.main[*].endpoint)
+}
+
+output &quot;db_port&quot; {
+  value = one(aws_db_instance.main[*].port)
+}</code></pre>
+
+<div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;">
+  <strong>Best Practice:</strong> Prefer <code>for_each</code> over <code>count</code> for conditional resources. With <code>count</code>, removing an item from the middle of a list shifts all subsequent indices, causing Terraform to destroy and recreate resources unnecessarily.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="custom-providers">6. Custom Provider Development Basics</h2>
+<p>When no existing provider meets your needs, you can build your own. Terraform providers are written in Go and use the HashiCorp Terraform Plugin SDK (or the newer Terraform Plugin Framework).</p>
+
+<div class="diagram">
+<pre>
++-------------------------------------------------------------+
+|              Custom Provider Architecture                    |
++-------------------------------------------------------------+
+|                                                              |
+|  Terraform CLI                                               |
+|    |                                                         |
+|    +-- gRPC communication (plugin protocol)                  |
+|    |                                                         |
+|  Custom Provider Binary                                      |
+|    +-- Provider Server                                       |
+|    |     +-- Configure()  (auth, client setup)               |
+|    |     +-- Resource CRUD operations:                       |
+|    |           Create(), Read(), Update(), Delete()          |
+|    |     +-- DataSource CRUD (optional)                      |
+|    |                                                         |
+|    +-- Schema Definitions                                    |
+|          +-- Provider schema                                 |
+|          +-- Resource schemas                                |
+|          +-- DataSource schemas                              |
++-------------------------------------------------------------+
+</pre>
+</div>
+
+<h3>6.1 Project Structure</h3>
+
+<pre><code>terraform-provider-example/
+  main.go
+  go.mod
+  go.sum
+  internal/
+    provider/
+      provider.go          # Provider configuration
+    resource_example.go    # Resource CRUD logic
+    datasource_example.go  # DataSource read logic
+  examples/
+    main.tf               # Example usage
+  docs/                    # Documentation
+  GNUmakefile              # Build targets</code></pre>
+
+<h3>6.2 main.go &mdash; Entry Point</h3>
+
+<pre><code>package main
+
+import (
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/plugin&quot;
+    &quot;example.com/myprovider/internal/provider&quot;
+)
+
+func main() {
+    plugin.Serve(&amp;plugin.ServeOpts{
+        ProviderFunc: func() *schema.Provider {
+            return provider.New()
+        },
+    })
+}</code></pre>
+
+<h3>6.3 provider.go &mdash; Provider Definition</h3>
+
+<pre><code>package provider
+
+import (
+    &quot;context&quot;
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/diag&quot;
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema&quot;
+)
+
+func New() *schema.Provider {
+    return &amp;schema.Provider{
+        Schema: map[string]*schema.Schema{
+            &quot;api_key&quot;: {
+                Type:        schema.TypeString,
+                Required:    true,
+                DefaultFunc: schema.EnvDefaultFunc(&quot;EXAMPLE_API_KEY&quot;, nil),
+                Description: &quot;API key for the Example service&quot;,
+                Sensitive:   true,
+            },
+            &quot;base_url&quot;: {
+                Type:        schema.TypeString,
+                Optional:    true,
+                Default:     &quot;https://api.example.com/v1&quot;,
+                Description: &quot;Base URL for the API&quot;,
+            },
+        },
+        ResourcesMap: map[string]*schema.Schema{
+            &quot;example_widget&quot;: resourceWidget(),
+        },
+        DataSourcesMap: map[string]*schema.Schema{
+            &quot;example_widget&quot;: dataSourceWidget(),
+        },
+        ConfigureContextFunc: providerConfigure,
+    }
+}
+
+func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
+    apiKey := d.Get(&quot;api_key&quot;).(string)
+    baseURL := d.Get(&quot;base_url&quot;).(string)
+
+    client, err := newClient(apiKey, baseURL)
+    if err != nil {
+        return nil, diag.FromErr(err)
+    }
+    return client, nil
+}</code></pre>
+
+<h3>6.4 resource_example.go &mdash; CRUD Operations</h3>
+
+<pre><code>package provider
+
+import (
+    &quot;context&quot;
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/diag&quot;
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema&quot;
+)
+
+func resourceWidget() *schema.Resource {
+    return &amp;schema.Resource{
+        Description:   &quot;Manages a Widget in the Example service&quot;,
+        CreateContext: resourceWidgetCreate,
+        ReadContext:   resourceWidgetRead,
+        UpdateContext: resourceWidgetUpdate,
+        DeleteContext: resourceWidgetDelete,
+
+        Schema: map[string]*schema.Schema{
+            &quot;name&quot;: {
+                Type:        schema.TypeString,
+                Required:    true,
+                Description: &quot;Name of the widget&quot;,
+            },
+            &quot;size&quot;: {
+                Type:        schema.TypeString,
+                Optional:    true,
+                Default:     &quot;medium&quot;,
+                Description: &quot;Size: small, medium, or large&quot;,
+            },
+            &quot;arn&quot;: {
+                Type:        schema.TypeString,
+                Computed:    true,
+                Description: &quot;ARN of the widget&quot;,
+            },
+        },
+    }
+}
+
+func resourceWidgetCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*ExampleClient)
+    name := d.Get(&quot;name&quot;).(string)
+    size := d.Get(&quot;size&quot;).(string)
+
+    widget, err := client.CreateWidget(name, size)
+    if err != nil {
+        return diag.FromErr(err)
+    }
+
+    d.SetId(widget.ID)
+    d.Set(&quot;arn&quot;, widget.ARN)
+    return resourceWidgetRead(ctx, d, meta)
+}
+
+func resourceWidgetRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*ExampleClient)
+    widget, err := client.GetWidget(d.Id())
+    if err != nil {
+        d.SetId(&quot;&quot;)
+        return nil  // Resource removed outside Terraform
+    }
+    d.Set(&quot;name&quot;, widget.Name)
+    d.Set(&quot;size&quot;, widget.Size)
+    d.Set(&quot;arn&quot;, widget.ARN)
+    return nil
+}
+
+func resourceWidgetUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*ExampleClient)
+    if d.HasChange(&quot;size&quot;) {
+        err := client.UpdateWidget(d.Id(), d.Get(&quot;size&quot;).(string))
+        if err != nil {
+            return diag.FromErr(err)
+        }
+    }
+    return resourceWidgetRead(ctx, d, meta)
+}
+
+func resourceWidgetDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*ExampleClient)
+    err := client.DeleteWidget(d.Id())
+    if err != nil {
+        return diag.FromErr(err)
+    }
+    return nil
+}</code></pre>
+
+<h3>6.5 Build and Install</h3>
+
+<pre><code># Build
+go build -o terraform-provider-example
+
+# Install locally (Terraform 0.13+)
+mkdir -p ~/.terraform.d/plugins/registry.terraform.io/example.com/myprovider/1.0.0/_
+cp terraform-provider-example ~/.terraform.d/plugins/registry.terraform.io/example.com/myprovider/1.0.0/_/</code></pre>
+
+<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;">
+  <strong>Note:</strong> HashiCorp now recommends the <strong>Terraform Plugin Framework</strong> over the older Plugin SDK. It provides better type-safety, built-in validation, and plan modification capabilities. For new providers, use <code>github.com/hashicorp/terraform-plugin-framework</code> instead.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="cloud-enterprise">7. Terraform Cloud and Terraform Enterprise</h2>
+<p>Terraform Cloud (SaaS) and Terraform Enterprise (self-hosted) provide a collaborative platform for managing infrastructure at scale.</p>
+
+<div class="diagram">
+<pre>
++------------------------------------------------------------------+
+|                   Terraform Cloud Architecture                     |
++------------------------------------------------------------------+
+|                                                                    |
+|  Developer Workstations                                           |
+|    +-- terraform plan/apply (CLI)                                  |
+|    +-- VCS integration (GitHub, GitLab, Bitbucket)                |
+|    |                                                              |
+|  Terraform Cloud                                                   |
+|    +-- Workspace (per project/env)                                |
+|    |     +-- State storage (remote, versioned, locked)            |
+|    |     +-- Run triggers                                         |
+|    |     +-- Sentinel policies (Opa / Sentinel)                   |
+|    |     +-- VCS-driven or API-driven runs                        |
+|    |                                                              |
+|    +-- Private Registry                                           |
+|    |     +-- Module registry                                      |
+|    |     +-- Provider registry                                    |
+|    |                                                              |
+|    +-- Agent Pools (private infrastructure)                       |
+|    |                                                              |
+|    +-- Audit Logs                                                 |
+|    +-- Cost Estimation                                            |
+|    +-- Task drivers (pre/post-run hooks)                          |
++------------------------------------------------------------------+
+</pre>
+</div>
+
+<h3>7.1 Key Differences</h3>
+
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+  <thead>
+    <tr style="background:#7c3aed;color:#fff;">
+      <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Feature</th>
+      <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Terraform Cloud</th>
+      <th style="padding:8px 12px;text-align:left;border:1px solid #ddd;">Terraform Enterprise</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Hosting</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">HashiCorp SaaS</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Self-hosted (VM, Kubernetes)</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Authentication</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">SSO, API tokens</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">SAML, OIDC, LDAP, API tokens</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Policy as Code</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Sentinel (Business tier)</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Sentinel (full features)</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Private Registry</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Yes</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Yes</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Agent Pools</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Yes (HCP agents)</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Yes (self-managed)</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Audit Logging</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Yes (Business tier)</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Yes</td>
+    </tr>
+    <tr>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Pricing</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">Free (2 users) / Business</td>
+      <td style="padding:8px 12px;border:1px solid #ddd;">License-based</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>7.2 Configuring a Workspace for Terraform Cloud</h3>
+
+<pre><code># In your Terraform configuration:
+terraform {
+  cloud {
+    organization = &quot;my-company&quot;
+
+    workspaces {
+      name = &quot;my-app-prod&quot;
+    }
+  }
+
+  required_providers {
+    azurerm = {
+      source  = &quot;hashicorp/azurerm&quot;
+      version = &quot;~&gt; 3.0&quot;
+    }
+  }
+}</code></pre>
+
+<h3>7.3 Workspace Variables and Sensitive Values</h3>
+<p>Set environment and Terraform variables in the Terraform Cloud UI or via the API. Sensitive variables are encrypted at rest and masked in logs.</p>
+
+<pre><code># Via the Terraform Cloud API:
+curl -X POST \
+  -H &quot;Authorization: Bearer &quot; \
+  -H &quot;Content-Type: application/vnd.api+json&quot; \
+  -d '{
+    &quot;data&quot;: {
+      &quot;type&quot;: &quot;vars&quot;,
+      &quot;attributes&quot;: {
+        &quot;key&quot;: &quot;ARM_CLIENT_SECRET&quot;,
+        &quot;value&quot;: &quot;my-secret-value&quot;,
+        &quot;category&quot;: &quot;env&quot;,
+        &quot;sensitive&quot;: true
+      }
+    }
+  }' \
+  https://app.terraform.io/api/v2/workspaces/ws-abc123/vars</code></pre>
+
+<h3>7.4 Run Triggers</h3>
+<p>Configure workspaces to automatically start a plan/apply when another workspace completes a run or when VCS changes are pushed.</p>
+
+<div class="diagram">
+<pre>
+  Workspace A (networking)
+       |
+       | run trigger
+       v
+  Workspace B (compute)
+       |
+       | run trigger
+       v
+  Workspace C (monitoring)
+
+  Changes to networking automatically
+  cascade through dependent workspaces.
+</pre>
+</div>
+<!-- ============================================================ -->
+<h2 id="conditional-creation">5. Conditional Resource Creation</h2>
+<p>Terraform does not have an <code>if</code> statement at the resource level. Instead, you use a few established patterns to conditionally create resources.</p>
+
+<h3>5.1 Pattern 1 &mdash; count with ternary</h3>
+<p>The simplest approach: set <code>count</code> to 0 or 1 based on a condition.</p>
+
+<pre><code>variable &quot;create_database&quot; {
+  type    = bool
+  default = true
+}
+
+resource &quot;aws_db_instance&quot; &quot;main&quot; {
+  count = var.create_database ? 1 : 0
+
+  identifier     = &quot;main-db&quot;
+  engine         = &quot;postgres&quot;
+  instance_class = &quot;db.t3.micro&quot;
+  allocated_storage = 20
+
+  skip_final_snapshot = true
+}
+
+# Reference with index
+output &quot;db_endpoint&quot; {
+  value = var.create_database ? aws_db_instance.main[0].endpoint : &quot;N/A&quot;
+}</code></pre>
+
+<h3>5.2 Pattern 2 &mdash; for_each with conditional map</h3>
+<p>Better than <code>count</code> when the resource might be combined with other <code>for_each</code> patterns. This avoids the index-shifting problem.</p>
+
+<pre><code>variable &quot;environments&quot; {
+  type = map(object({
+    enabled = bool
+    sku     = string
+  }))
+}
+
+resource &quot;azurerm_service_plan&quot; &quot;env&quot; {
+  for_each = { for k, v in var.environments : k => v if v.enabled }
+
+  name                = &quot;asp-&quot;
+  resource_group_name = azurerm_resource_group.example.name
+  location            = var.location
+  os_type             = &quot;Linux&quot;
+  sku_name            = each.value.sku
+}</code></pre>
+
+<h3>5.3 Pattern 3 &mdash; for_each on a filtered list</h3>
+
+<pre><code>variable &quot;features&quot; {
+  type = list(object({
+    name    = string
+    enabled = bool
+  }))
+}
+
+resource &quot;azurerm_app_service_slot&quot; &quot;staging&quot; {
+  for_each = { for f in var.features : f.name => f if f.enabled }
+
+  name           = &quot;staging-&quot;
+  app_service_id = azurerm_linux_web_app.main.id
+  site_config {}
+}</code></pre>
+
+<h3>5.4 Pattern 4 &mdash; count on modules</h3>
+
+<pre><code>module &quot;staging&quot; {
+  source   = &quot;./modules/web-app&quot;
+  count    = var.deploy_staging ? 1 : 0
+
+  app_name = &quot;myapp-staging&quot;
+  sku      = &quot;B1&quot;
+}
+
+module &quot;production&quot; {
+  source   = &quot;./modules/web-app&quot;
+  count    = var.deploy_production ? 1 : 0
+
+  app_name = &quot;myapp-prod&quot;
+  sku      = &quot;S1&quot;
+}</code></pre>
+
+<h3>5.5 Pattern 5 &mdash; one() for single-instance resources</h3>
+<p>The <code>one()</code> function safely unwraps a single-element list or returns null if empty, avoiding the verbosity of index references:</p>
+
+<pre><code>output &quot;db_endpoint&quot; {
+  value = one(aws_db_instance.main[*].endpoint)
+}
+
+output &quot;db_port&quot; {
+  value = one(aws_db_instance.main[*].port)
+}</code></pre>
+
+<div style="background:#ede9fe;border-left:4px solid #7c3aed;padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;">
+  <strong>Best Practice:</strong> Prefer <code>for_each</code> over <code>count</code> for conditional resources. With <code>count</code>, removing an item from the middle of a list shifts all subsequent indices, causing Terraform to destroy and recreate resources unnecessarily.
+</div>
+<!-- ============================================================ -->
+<h2 id="custom-providers">6. Custom Provider Development Basics</h2>
+<p>When no existing provider meets your needs, you can build your own. Terraform providers are written in Go and use the HashiCorp Terraform Plugin SDK (or the newer Terraform Plugin Framework).</p>
+
+<div class="diagram">
+<pre>
++-------------------------------------------------------------+
+|              Custom Provider Architecture                    |
++-------------------------------------------------------------+
+|                                                              |
+|  Terraform CLI                                               |
+|    |                                                         |
+|    +-- gRPC communication (plugin protocol)                  |
+|    |                                                         |
+|  Custom Provider Binary                                      |
+|    +-- Provider Server                                       |
+|    |     +-- Configure()  (auth, client setup)               |
+|    |     +-- Resource CRUD operations:                       |
+|    |           Create(), Read(), Update(), Delete()          |
+|    |     +-- DataSource CRUD (optional)                      |
+|    |                                                         |
+|    +-- Schema Definitions                                    |
+|          +-- Provider schema                                 |
+|          +-- Resource schemas                                |
+|          +-- DataSource schemas                              |
++-------------------------------------------------------------+
+</pre>
+</div>
+
+<h3>6.1 Project Structure</h3>
+
+<pre><code>terraform-provider-example/
+  main.go
+  go.mod
+  go.sum
+  internal/
+    provider/
+      provider.go          # Provider configuration
+    resource_example.go    # Resource CRUD logic
+    datasource_example.go  # DataSource read logic
+  examples/
+    main.tf               # Example usage
+  docs/                    # Documentation
+  GNUmakefile              # Build targets</code></pre>
+
+<h3>6.2 main.go &mdash; Entry Point</h3>
+
+<pre><code>package main
+
+import (
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/plugin&quot;
+    &quot;example.com/myprovider/internal/provider&quot;
+)
+
+func main() {
+    plugin.Serve(&amp;plugin.ServeOpts{
+        ProviderFunc: func() *schema.Provider {
+            return provider.New()
+        },
+    })
+}</code></pre>
+
+<h3>6.3 provider.go &mdash; Provider Definition</h3>
+
+<pre><code>package provider
+
+import (
+    &quot;context&quot;
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/diag&quot;
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema&quot;
+)
+
+func New() *schema.Provider {
+    return &amp;schema.Provider{
+        Schema: map[string]*schema.Schema{
+            &quot;api_key&quot;: {
+                Type:        schema.TypeString,
+                Required:    true,
+                DefaultFunc: schema.EnvDefaultFunc(&quot;EXAMPLE_API_KEY&quot;, nil),
+                Description: &quot;API key for the Example service&quot;,
+                Sensitive:   true,
+            },
+            &quot;base_url&quot;: {
+                Type:        schema.TypeString,
+                Optional:    true,
+                Default:     &quot;https://api.example.com/v1&quot;,
+                Description: &quot;Base URL for the API&quot;,
+            },
+        },
+        ResourcesMap: map[string]*schema.Schema{
+            &quot;example_widget&quot;: resourceWidget(),
+        },
+        DataSourcesMap: map[string]*schema.Schema{
+            &quot;example_widget&quot;: dataSourceWidget(),
+        },
+        ConfigureContextFunc: providerConfigure,
+    }
+}
+
+func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
+    apiKey := d.Get(&quot;api_key&quot;).(string)
+    baseURL := d.Get(&quot;base_url&quot;).(string)
+
+    client, err := newClient(apiKey, baseURL)
+    if err != nil {
+        return nil, diag.FromErr(err)
+    }
+    return client, nil
+}</code></pre>
+
+<h3>6.4 resource_example.go &mdash; CRUD Operations</h3>
+
+<pre><code>package provider
+
+import (
+    &quot;context&quot;
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/diag&quot;
+    &quot;github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema&quot;
+)
+
+func resourceWidget() *schema.Resource {
+    return &amp;schema.Resource{
+        Description:   &quot;Manages a Widget in the Example service&quot;,
+        CreateContext: resourceWidgetCreate,
+        ReadContext:   resourceWidgetRead,
+        UpdateContext: resourceWidgetUpdate,
+        DeleteContext: resourceWidgetDelete,
+
+        Schema: map[string]*schema.Schema{
+            &quot;name&quot;: {
+                Type:        schema.TypeString,
+                Required:    true,
+                Description: &quot;Name of the widget&quot;,
+            },
+            &quot;size&quot;: {
+                Type:        schema.TypeString,
+                Optional:    true,
+                Default:     &quot;medium&quot;,
+                Description: &quot;Size: small, medium, or large&quot;,
+            },
+            &quot;arn&quot;: {
+                Type:        schema.TypeString,
+                Computed:    true,
+                Description: &quot;ARN of the widget&quot;,
+            },
+        },
+    }
+}
+
+func resourceWidgetCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*ExampleClient)
+    name := d.Get(&quot;name&quot;).(string)
+    size := d.Get(&quot;size&quot;).(string)
+
+    widget, err := client.CreateWidget(name, size)
+    if err != nil {
+        return diag.FromErr(err)
+    }
+
+    d.SetId(widget.ID)
+    d.Set(&quot;arn&quot;, widget.ARN)
+    return resourceWidgetRead(ctx, d, meta)
+}
+
+func resourceWidgetRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*ExampleClient)
+    widget, err := client.GetWidget(d.Id())
+    if err != nil {
+        d.SetId(&quot;&quot;)
+        return nil  # Resource removed outside Terraform
+    }
+    d.Set(&quot;name&quot;, widget.Name)
+    d.Set(&quot;size&quot;, widget.Size)
+    d.Set(&quot;arn&quot;, widget.ARN)
+    return nil
+}
+
+func resourceWidgetUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*ExampleClient)
+    if d.HasChange(&quot;size&quot;) {
+        err := client.UpdateWidget(d.Id(), d.Get(&quot;size&quot;).(string))
+        if err != nil {
+            return diag.FromErr(err)
+        }
+    }
+    return resourceWidgetRead(ctx, d, meta)
+}
+
+func resourceWidgetDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
+    client := meta.(*ExampleClient)
+    err := client.DeleteWidget(d.Id())
+    if err != nil {
+        return diag.FromErr(err)
+    }
+    return nil
+}</code></pre>
+
+<h3>6.5 Build and Install</h3>
+
+<pre><code># Build
+go build -o terraform-provider-example
+
+# Create local directory structure
+# Replace $OS and $ARCH with your platform values (e.g., linux, amd64)
+PLUGIN_DIR="~/.terraform.d/plugins/registry.terraform.io/example.com/myprovider/1.0.0/OS/ARCH"
+mkdir -p $PLUGIN_DIR
+
+# Install
+cp terraform-provider-example $PLUGIN_DIR/</code></pre>
+
+<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;">
+  <strong>Note:</strong> HashiCorp now recommends the <strong>Terraform Plugin Framework</strong> over the older Plugin SDK. It provides better type-safety, built-in validation, and plan modification capabilities. For new providers, use the plugin framework instead.
+</div>

@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>193. Using the CloudXeus Invoice Intelligence Agent - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 193</span>
+<h1>Using the CloudXeus Invoice Intelligence Agent</h1>
+<p>An agent is only worth what it does in practice. This chapter puts the CloudXeus Invoice Intelligence Agent to work: you will run realistic requests against it, read the traces to see exactly how it reached its answers, and handle the failures that surface. By the end you will have a repeatable test script and a shortlist of improvements grounded in observed behavior.</p>
+
+<h2>Testing with Realistic Requests</h2>
+<p>Start with a set of requests that cover the agent's three jobs: extraction, explanation, and knowledge-based answers.</p>
+
+<table>
+<tr><th>Request</th><th>What it tests</th></tr>
+<tr><td>"Here is an invoice. What is the total amount?"</td><td>Tool call and field extraction</td></tr>
+<tr><td>"Summarize this invoice in two lines."</td><td>Tool call plus summarization</td></tr>
+<tr><td>"What is our invoice approval policy?"</td><td>Knowledge base retrieval</td></tr>
+<tr><td>"Which of these two invoices is larger?"</td><td>Multiple tool calls and comparison</td></tr>
+<tr><td>"What is the due date?" (document has no due date)</td><td>Honest refusal instead of invention</td></tr>
+</table>
+
+<div class="exercise">
+<h3>Exercise 1: Drive the agent from Python</h3>
+<p>Create a file named <code>use_agent.py</code> that sends messages to the agent through the project client and prints the reply:</p>
+
+<pre><code>import os
+
+from azure.ai.projects import AIProjectClient
+from azure.identity import DefaultAzureCredential
+
+project = AIProjectClient.from_connection_string(
+    conn_str=os.environ["PROJECT_CONNECTION_STRING"],
+    credential=DefaultAzureCredential(),
+)
+
+AGENT_ID = "YOUR_AGENT_ID"
+
+thread = project.agents.create_thread()
+project.agents.create_message(
+    thread_id=thread.id,
+    role="user",
+    content="Here is an invoice. What is the total amount?",
+    attachments=[],
+)
+
+run = project.agents.create_run(
+    thread_id=thread.id,
+    agent_id=AGENT_ID,
+)
+
+while project.agents.get_run(thread.id, run.id).status in (
+    "queued", "in_progress", "requires_action"
+):
+    import time
+    time.sleep(2)
+
+messages = project.agents.list_messages(thread_id=thread.id)
+for message in messages.data:
+    if message.role == "assistant":
+        for part in message.content:
+            if part.type == "text":
+                print(part.text.value)</code></pre>
+
+<p>Run it, then repeat with each request from the table. Record what the agent got right and where it struggled.</p>
+</div>
+
+<h2>Inspecting the Trace</h2>
+<p>Tracing shows you the reasoning path behind every answer. When you open a run in the portal, look for four checkpoints:</p>
+<ul>
+<li><strong>The model input:</strong> what the agent actually saw, including the tool description.</li>
+<li><strong>The tool call:</strong> which tool was invoked, with what arguments.</li>
+<li><strong>The tool result:</strong> the JSON returned by the extraction endpoint.</li>
+<li><strong>The final answer:</strong> how the model used that result in its reply.</li>
+</ul>
+
+<div class="tip">
+<p>When an answer is wrong, the trace tells you which layer is at fault. If the tool returned the wrong value, the problem is extraction — check Document Intelligence or the tool logic. If the tool returned a good value but the agent stated it wrongly, the problem is the model or the prompt.</p>
+</div>
+
+<h2>Handling Edge Cases and Errors</h2>
+<p>Real usage surfaces cases the happy path never touches. Test and handle these deliberately:</p>
+<ul>
+<li><strong>Not an invoice:</strong> the tool should return an error the agent can restate honestly, such as "this document could not be read as an invoice."</li>
+<li><strong>Empty extraction:</strong> when a field is missing, the agent must say so rather than guess.</li>
+<li><strong>Low confidence:</strong> the extraction result includes confidence scores; the prompt instructs the agent to flag values below the threshold.</li>
+<li><strong>Timeout:</strong> large documents take time; the tool and the run both need timeouts that produce a friendly response.</li>
+<li><strong>Multiple documents:</strong> if the tool accepts only one file per call, the agent should loop or the tool should support batches.</li>
+</ul>
+
+<div class="warn">
+<p>Do not train a model to lie gracefully. If a document cannot be processed, the agent should say exactly that. Covering up a failed extraction with a plausible-sounding guess is the failure mode most damaging to trust.</p>
+</div>
+
+<h2>Refining the System Prompt</h2>
+<p>After a test round, refine the prompt based on what you observed. Common adjustments:</p>
+<ul>
+<li>If the agent answers policy questions from memory instead of retrieval, strengthen the retrieval rule: "For any question about invoice policy, retrieve from the knowledge base first and answer only from what you retrieve."</li>
+<li>If the agent rounds totals, state the precision rule explicitly: "Report amounts exactly as extracted, with two decimal places."</li>
+<li>If the agent invents a missing due date, add a concrete fallback: "If due_date is null, answer: the invoice does not list a due date."</li>
+</ul>
+
+<p>Each change is one rule, tested the same way, measured against the same request table.</p>
+
+<h2>Automating the Test Round</h2>
+<p>Once the request set stabilizes, turn it into a repeatable script that runs all requests, collects the replies, and flags any answer containing an invented field. This becomes your regression harness: run it after every prompt change, tool change, or model update — including the model updates you learned to manage in an earlier chapter.</p>
+
+<h2>Summary</h2>
+<p>You tested the CloudXeus Invoice Intelligence Agent across extraction, summarization, retrieval, comparison, and refusal cases, read the traces to locate faults, and refined the system prompt one rule at a time. The agent is now exercised and inspectable. The remaining chapters of this section add the safety and orchestration layers around it, starting with Azure AI Content Safety.</p>
+<nav>
+<a href="192-building-the-cloudxeus-invoice-intelligence-agent.html">&larr; Previous: Building the CloudXeus Invoice Intelligence Agent</a><a href="194-using-azure-ai-content-safety.html">Next: Using Azure AI Content Safety &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

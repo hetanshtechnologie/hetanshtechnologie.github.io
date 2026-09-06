@@ -1,0 +1,829 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 11: Pitfalls &amp; Troubleshooting — Terraform eBook</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+
+<h1>Chapter 11: Common Pitfalls, Troubleshooting &amp; Q&amp;A</h1>
+<p class="lead">Even experienced engineers trip over the same Terraform landmines. This chapter catalogues the top 15 mistakes, teaches you how to diagnose and fix the most common error messages, and prepares you for interview questions with 15+ Q&amp;A pairs.</p>
+
+<!-- ============================================================ -->
+<!-- SECTION 1: TOP 15 COMMON MISTAKES                             -->
+<!-- ============================================================ -->
+
+<h2 id="mistakes">11.1 — Top 15 Common Terraform Mistakes &amp; How to Fix Them</h2>
+
+<table>
+<thead>
+<tr><th>#</th><th>Mistake</th><th>Impact</th><th>Fix</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>State file in version control</td><td>Secrets leaked; merge conflicts</td><td>Use remote backend</td></tr>
+<tr><td>2</td><td>No remote backend</td><td>State lost; no team collaboration</td><td>Configure S3 / GCS / Azure Blob</td></tr>
+<tr><td>3</td><td>Hardcoded secrets</td><td>Credentials in plain text</td><td>Use <code>sensitive = true</code> + Vault</td></tr>
+<tr><td>4</td><td>Not using variables</td><td>DRY violations; fragile code</td><td>Extract into <code>variables.tf</code></td></tr>
+<tr><td>5</td><td>Missing provider version pinning</td><td>Breaking changes on upgrade</td><td><code>required_providers</code> block</td></tr>
+<tr><td>6</td><td>Resource drift not detected</td><td>Config diverges from reality</td><td>Run <code>terraform plan</code> in CI</td></tr>
+<tr><td>7</td><td>Using latest AMI/image</td><td>Non-reproducible builds</td><td>Pin by ID or use <code>data</code> + filter</td></tr>
+<tr><td>8</td><td>Not using modules</td><td>Copy-paste sprawl</td><td>Refactor into reusable modules</td></tr>
+<tr><td>9</td><td>Ignoring <code>terraform plan</code></td><td>Unexpected destroy / create</td><td>Always review plan output</td></tr>
+<tr><td>10</td><td>Not using <code>.gitignore</code></td><td><code>.terraform/</code> committed</td><td>Add standard ignores</td></tr>
+<tr><td>11</td><td>Using <code>count</code> when <code>for_each</code> is better</td><td>Index-shift bugs</td><td>Prefer <code>for_each</code> with sets/maps</td></tr>
+<tr><td>12</td><td>Not handling state locking</td><td>Corrupt state on concurrent edits</td><td>Enable DynamoDB / native locking</td></tr>
+<tr><td>13</td><td><code>terraform destroy</code> in production</td><td>Everything gone</td><td>Use targeted removes; gate behind approvals</td></tr>
+<tr><td>14</td><td>Not using sensitive variables</td><td>Plan output shows secrets</td><td>Mark variables as <code>sensitive</code></td></tr>
+<tr><td>15</td><td>Circular module dependencies</td><td>Provider / plan errors</td><td>Flatten dependency graph</td></tr>
+</tbody>
+</table>
+
+<!-- Mistake 1 -->
+<h3 id="mistake-1">Mistake 1: State File in Version Control</h3>
+
+<p>Committing <code>terraform.tfstate</code> to Git exposes secrets (database passwords, API keys) stored by providers and creates merge conflicts when multiple engineers apply concurrently.</p>
+
+<pre><code># NEVER do this
+git add terraform.tfstate        # secrets in plain text
+git add terraform.tfstate.backup # same problem</code></pre>
+
+<div class="tip"><strong>Fix:</strong> Add the state file to <code>.gitignore</code> and configure a remote backend immediately.</div>
+
+<pre><code># .gitignore
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl</code></pre>
+
+<!-- Mistake 2 -->
+<h3 id="mistake-2">Mistake 2: No Remote Backend</h3>
+
+<p>Local state means only one person can work at a time, and the state file lives on a single machine. A laptop failure means total state loss.</p>
+
+<pre><code>terraform {
+  backend "s3" {
+    bucket         = "mycompany-terraform-state"
+    key            = "prod/network/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}</code></pre>
+
+<div class="warning"><strong>Warning:</strong> You must run <code>terraform init -migrate-state</code> to move existing local state to the remote backend. This is a one-time operation per workspace.</div>
+
+<!-- Mistake 3 -->
+<h3 id="mistake-3">Mistake 3: Hardcoded Secrets</h3>
+
+<p>Embedding secrets directly in <code>.tf</code> files is a critical security violation. They appear in plan output, state, and version history.</p>
+
+<pre><code># BAD
+resource "aws_db_instance" "main" {
+  password = "SuperSecret123!"   # visible in plan output
+}</code></pre>
+
+<pre><code># GOOD — use a sensitive variable + secrets manager
+variable "db_password" {
+  type      = string
+  sensitive = true  # redacted from plan output
+}
+
+resource "aws_db_instance" "main" {
+  password = var.db_password
+}
+
+# Reference from a secrets manager at apply time
+data "aws_secretsmanager_secret_version" "db" {
+  secret_id = "prod/database/password"
+}</code></pre>
+
+<!-- Mistake 4 -->
+<h3 id="mistake-4">Mistake 4: Not Using Variables</h3>
+
+<p>Without variables every environment requires editing source files directly, eliminating any chance of reuse.</p>
+
+<pre><code># BAD
+resource "aws_instance" "web" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t3.micro"
+  tags = { Name = "web-prod" }
+}
+
+# GOOD — variables.tf
+variable "environment" {
+  type = string
+}
+
+variable "instance_type" {
+  type    = string
+  default = "t3.micro"
+}
+
+resource "aws_instance" "web" {
+  ami           = data.aws_ami.amazon_linux.id
+  instance_type = var.instance_type
+  tags = { Name = "web-${var.environment}" }
+}</code></pre>
+
+<!-- Mistake 5 -->
+<h3 id="mistake-5">Mistake 5: Missing Provider Version Pinning</h3>
+
+<p>Without version constraints a <code>terraform init</code> may pull a major version with breaking changes, causing failures in CI at the worst possible time.</p>
+
+<pre><code>terraform {
+  required_version = "&gt;= 1.5.0, &lt; 2.0.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 5.0"  # accepts 5.x, rejects 6.0
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.6.2"   # exact pin
+    }
+  }
+}</code></pre>
+
+<div class="tip"><strong>Tip:</strong> Run <code>terraform providers lock -platform=linux_amd64 -platform=darwin_arm64</code> to lock transitive dependencies across platforms.</div>
+
+<!-- Mistake 6 -->
+<h3 id="mistake-6">Mistake 6: Resource Drift Not Detected</h3>
+
+<p>If someone manually changes a resource in the console (adds a tag, resizes an instance), Terraform won't know until you run <code>plan</code>. Without periodic drift detection, your state and reality silently diverge.</p>
+
+<pre><code># CI pipeline drift check (runs every night)
+terraform plan -detailed-exitcode -out=drift.tfplan
+
+# Exit codes:
+#   0 = no changes
+#   1 = error
+#   2 = changes detected (drift!)</code></pre>
+
+<div class="warning"><strong>Warning:</strong> <code>-detailed-exitcode</code> returns 2 when drift is found. Use this in CI to create an alert ticket automatically.</div>
+
+<!-- Mistake 7 -->
+<h3 id="mistake-7">Mistake 7: Using Latest AMI/Image Without Pinning</h3>
+
+<p>Using <code>latest</code> for container images or a dynamic AMI lookup without pinning means every <code>apply</code> may deploy different software versions.</p>
+
+<pre><code># BAD — non-reproducible
+resource "aws_instance" "web" {
+  ami = "ami-latest"  # doesn't exist, but conceptually wrong
+}
+
+# GOOD — pin a specific AMI or use data source with explicit filters
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.6.*"]   # pin to a known release
+  }
+}
+
+# Then use the result
+resource "aws_instance" "web" {
+  ami = data.aws_ami.amazon_linux.id
+}</code></pre>
+
+<!-- Mistake 8 -->
+<h3 id="mistake-8">Mistake 8: Not Using Modules</h3>
+
+<p>Copy-pasting resource blocks across projects leads to inconsistent configurations and makes updates a nightmare.</p>
+
+<pre><code># modules/vpc/main.tf
+variable "cidr_block" { type = string }
+variable "azs"        { type = list(string) }
+
+resource "aws_vpc" "this" {
+  cidr_block = var.cidr_block
+}
+
+resource "aws_subnet" "public" {
+  for_each          = toset(var.azs)
+  vpc_id            = aws_vpc.this.id
+  cidr_block        = cidrsubnet(var.cidr_block, 4, index(var.azs, each.value))
+  availability_zone = each.value
+}
+
+output "vpc_id"    { value = aws_vpc.this.id }
+output "subnet_ids" { value = [for s in aws_subnet.public : s.id] }
+
+# modules/vpc/versions.tf
+terraform {
+  required_version = "&gt;= 1.5"
+  required_providers {
+    aws = { source = "hashicorp/aws"; version = "~&gt; 5.0" }
+  }
+}</code></pre>
+
+<pre><code># Root main.tf — use the module
+module "vpc" {
+  source     = "./modules/vpc"
+  cidr_block = "10.0.0.0/16"
+  azs        = ["us-east-1a", "us-east-1b", "us-east-1c"]
+}
+
+resource "aws_instance" "web" {
+  subnet_id = module.vpc.subnet_ids[0]
+}</code></pre>
+
+<!-- Mistake 9 -->
+<h3 id="mistake-9">Mistake 9: Ignoring terraform plan Output</h3>
+
+<p>The <code>terraform plan</code> output is your last line of defence. Skipping it means you might accidentally destroy a production database.</p>
+
+<pre><code># Always review the summary at the bottom of plan output:
+# Plan: 3 to add, 1 to change, 2 to destroy.
+#
+# Pay special attention to "destroy" lines — they mean data loss.</code></pre>
+
+<div class="warning"><strong>Warning:</strong> In CI, always gate <code>apply</code> behind a manual approval step that requires reviewing the plan diff. Never auto-apply to production.</div>
+
+<!-- Mistake 10 -->
+<h3 id="mistake-10">Mistake 10: Not Using .gitignore</h3>
+
+<p>Without <code>.gitignore</code>, the <code>.terraform/</code> directory (potentially hundreds of MB of provider binaries) and state files get committed.</p>
+
+<pre><code># Recommended .gitignore for Terraform projects
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfplan
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc</code></pre>
+
+<!-- Mistake 11 -->
+<h3 id="mistake-11">Mistake 11: Using count When for_each Is Better</h3>
+
+<p><code>count</code> assigns resources by numeric index. Removing an item shifts all higher indices, causing resources to be destroyed and recreated.</p>
+
+<pre><code># BAD — removing item at index 1 shifts index 2 → 1
+variable "environments" {
+  default = ["dev", "staging", "prod"]
+}
+
+resource "aws_s3_bucket" "env" {
+  count  = length(var.environments)
+  bucket = "myapp-${var.environments[count.index]}"
+}
+
+# GOOD — for_each keyed by name, no shifting
+resource "aws_s3_bucket" "env" {
+  for_each = toset(var.environments)
+  bucket   = "myapp-${each.value}"
+}</code></pre>
+
+<div class="tip"><strong>Rule of thumb:</strong> If you need to delete items from a list without destroying others, use <code>for_each</code> with a set or map.</div>
+
+<!-- Mistake 12 -->
+<h3 id="mistake-12">Mistake 12: Not Handling State Locking</h3>
+
+<p>Without state locking, two concurrent <code>terraform apply</code> commands can corrupt the state file, leading to orphaned resources and expensive debugging sessions.</p>
+
+<pre><code># S3 backend with DynamoDB locking
+terraform {
+  backend "s3" {
+    bucket         = "my-terraform-state"
+    key            = "prod/main.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"  # creates the lock entry
+    encrypt        = true
+  }
+}</code></pre>
+
+<div class="tip"><strong>Tip:</strong> If you get stuck, <code>terraform force-unlock &lt;LOCK_ID&gt;</code> manually releases the lock. Only do this when you are certain no other process is running.</div>
+
+<!-- Mistake 13 -->
+<h3 id="mistake-13">Mistake 13: Destroying Everything with terraform destroy</h3>
+
+<p><code>terraform destroy</code> removes every resource in the state — including databases with production data. Use targeted removal instead.</p>
+
+<pre><code># SAFE — destroy only a specific resource
+terraform destroy -target=aws_instance.legacy_server
+
+# BETTER — remove from config, then plan
+# 1. Delete the resource block from main.tf
+# 2. Run terraform plan (shows what will be destroyed)
+# 3. Approve and apply</code></pre>
+
+<div class="warning"><strong>Warning:</strong> Always use <code>-target</code> or remove individual resources from your code. Running <code>destroy</code> on a shared workspace is catastrophic.</div>
+
+<!-- Mistake 14 -->
+<h3 id="mistake-14">Mistake 14: Not Using Sensitive Variables</h3>
+
+<p>Without <code>sensitive = true</code>, passwords and API keys appear in <code>terraform plan</code> output and CI logs.</p>
+
+<pre><code>variable "api_key" {
+  type      = string
+  sensitive = true   # plan output will show (sensitive value)
+}
+
+# Also mark outputs as sensitive
+output "db_password" {
+  value     = random_password.db.result
+  sensitive = true
+}</code></pre>
+
+<!-- Mistake 15 -->
+<h3 id="mistake-15">Mistake 15: Circular Module Dependencies</h3>
+
+<p>When Module A depends on Module B and Module B depends on Module A, Terraform cannot resolve the dependency graph.</p>
+
+<pre><code># BAD — circular
+module "vpc" {
+  source      = "./modules/vpc"
+  db_endpoint = module.database.endpoint  # module database also uses vpc_id
+}
+
+module "database" {
+  source  = "./modules/database"
+  vpc_id  = module.vpc.vpc_id  # circular!
+}
+
+# GOOD — extract shared data to root, inject into modules
+resource "aws_vpc" "main" {
+  cidr_block = "10.0.0.0/16"
+}
+
+module "database" {
+  source = "./modules/database"
+  vpc_id = aws_vpc.main.id    # passed in, not looked up
+}
+
+module "vpc" {
+  source      = "./modules/vpc"
+  db_endpoint = module.database.endpoint  # database already has vpc_id
+}</code></pre>
+
+<div class="tip"><strong>Tip:</strong> Keep data flowing in one direction. Pass dependencies down, never up. If you need a bidirectional relationship, flatten it into the root module.</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 2: TROUBLESHOOTING GUIDE                             -->
+<!-- ============================================================ -->
+
+<h2 id="troubleshooting">11.2 — Troubleshooting Guide</h2>
+
+<p>Below are the most common error messages you will encounter and step-by-step fixes for each.</p>
+
+<!-- Error 1 -->
+<h3 id="error-1">Error: "Provider produced inconsistent result"</h3>
+
+<p>This occurs when the provider returns a different value for an attribute than what was planned. It usually means a provider bug or a race condition.</p>
+
+<pre><code># Full error:
+# Error: Provider produced inconsistent result after apply
+# After applying the action, the provider returned an unknown value
+# for attribute "arn".
+
+# COMMON CAUSES:
+# 1. Provider version bug — upgrade the provider
+# 2. AWS eventual consistency — add a retry
+# 3. Race condition with async resource creation
+
+# FIX 1: Upgrade provider
+terraform init -upgrade
+
+# FIX 2: Add lifecycle rule to retry
+resource "aws_instance" "web" {
+  # ...
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# FIX 3: For data sources, add a depends_on or time_sleep
+resource "time_sleep" "wait" {
+  depends_on      = [aws_iam_role.example]
+  create_duration = "10s"
+}</code></pre>
+
+<!-- Error 2 -->
+<h3 id="error-2">Error: "Backend initialization required"</h3>
+
+<p>You see this when the backend configuration has changed since the last <code>init</code>.</p>
+
+<pre><code># Error: Backend initialization required
+# The currently selected backend requires a reinitialization.
+
+# FIX:
+terraform init -migrate-state
+
+# If you changed from local to remote:
+terraform init -migrate-state
+
+# If the backend type changed entirely:
+terraform state pull > backup.tfstate    # backup first!
+terraform init -migrate-state</code></pre>
+
+<div class="warning"><strong>Warning:</strong> Always back up your state file before migrating backends. A failed migration can leave you without any state.</div>
+
+<!-- Error 3 -->
+<h3 id="error-3">Error: "Resource already managed"</h3>
+
+<p>This error appears when you import a resource that Terraform is already tracking, or when you add a resource that was created outside Terraform.</p>
+
+<pre><code># Error: resource already managed by Terraform
+# aws_s3_bucket.existing is already managed by Terraform
+
+# FIX: Remove the resource from state first, then import
+terraform state rm aws_s3_bucket.existing
+terraform import aws_s3_bucket.existing my-existing-bucket-name
+
+# OR: If the resource was created manually and you want Terraform
+# to manage it, use import directly
+terraform import aws_s3_bucket.existing my-existing-bucket-name</code></pre>
+
+<!-- Error 4 -->
+<h3 id="error-4">Error: "Cycle in resource dependencies"</h3>
+
+<p>A circular dependency exists between two or more resources.</p>
+
+<pre><code># Error: Cycle: aws_security_group.web, aws_security_group.db
+
+# DIAGNOSE — see the cycle details:
+terraform graph 2>/dev/null | dot -Tpng > graph.png
+
+# FIX: Break the cycle by extracting shared resources
+# or using separate security group rules
+
+# BAD — circular
+resource "aws_security_group" "web" {
+  ingress {
+    security_groups = [aws_security_group.db.id]
+  }
+}
+resource "aws_security_group" "db" {
+  ingress {
+    security_groups = [aws_security_group.web.id]
+  }
+}
+
+# GOOD — use separate rule resources
+resource "aws_security_group" "web" {
+  # no ingress referencing db
+}
+
+resource "aws_security_group" "db" {
+  # no ingress referencing web
+}
+
+resource "aws_security_group_rule" "web_to_db" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.db.id
+  source_security_group_id = aws_security_group.web.id
+}
+
+resource "aws_security_group_rule" "db_from_web" {
+  type                     = "ingress"
+  from_port                = 80
+  to_port                  = 80
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.web.id
+  source_security_group_id = aws_security_group.db.id
+}</code></pre>
+
+<!-- Error 5 -->
+<h3 id="error-5">Error: "Invalid for_each argument"</h3>
+
+<p>The value passed to <code>for_each</code> is known only at apply time (it depends on another resource).</p>
+
+<pre><code># Error: Invalid for_each argument
+# The given "for_each" argument value is unsuitable: must be known
+# before apply time.
+
+# COMMON CAUSES:
+# 1. Using a data source output that isn't known at plan time
+# 2. Using a resource attribute that isn't known until apply
+
+# FIX 1: Use a known-at-plan-time value
+variable "environments" {
+  default = ["dev", "staging", "prod"]
+}
+
+resource "aws_s3_bucket" "env" {
+  for_each = toset(var.environments)  # known at plan time ✓
+  bucket   = "myapp-${each.value}"
+}
+
+# FIX 2: If using a data source, use -target or depends_on
+data "aws_ami" "latest" {
+  most_recent = true
+  owners      = ["amazon"]
+}
+
+# If data source isn't available at plan time, try:
+# terraform apply -target=data.aws_ami.latest
+# Then run terraform apply again</code></pre>
+
+<!-- Error 6 -->
+<h3 id="error-6">Error: "Error acquiring the state lock"</h3>
+
+<p>Another Terraform process is currently modifying state, or a previous run crashed without releasing the lock.</p>
+
+<pre><code># Error: Error acquiring the state lock
+# Error message: ConditionalCheckFailedException: The conditional
+# request failed
+
+# FIX 1: Check if another process is running
+# Look for running terraform processes in your terminal / CI
+
+# FIX 2: Force-unlock (only if you're certain no other process is running)
+terraform force-unlock LOCK_ID
+
+# To find the LOCK_ID, look at the error message — it contains the ID
+
+# FIX 3: For S3 backend, check DynamoDB
+aws dynamodb scan \
+  --table-name terraform-locks \
+  --filter-expression "LockID = :id" \
+  --expression-attribute-values '{":id":{"S":"my-terraform-state/prod/main.tfstate"}}'</code></pre>
+
+<div class="warning"><strong>Warning:</strong> Only force-unlock if you are 100% certain no other Terraform process is running. Force-unlocking while another process is active can corrupt your state.</div>
+
+<!-- TF_LOG -->
+<h3 id="tf-log">How to Debug with TF_LOG</h3>
+
+<p>Terraform's built-in logging reveals exactly what the provider is doing, including raw API calls.</p>
+
+<pre><code># Basic logging levels (most to least verbose):
+# TRACE, DEBUG, INFO, WARN, ERROR
+
+# Enable logging to a file
+export TF_LOG=DEBUG
+export TF_LOG_PATH="./terraform-debug.log"
+terraform plan
+
+# Or enable for a single run
+TF_LOG=TRACE terraform apply
+
+# Log to stderr (default)
+export TF_LOG=DEBUG
+terraform plan 2> debug.log
+
+# Provider-specific debug
+export TF_LOG=TRACE
+export TF_LOG_PATH="./debug.log"
+terraform plan</code></pre>
+
+<table>
+<thead>
+<tr><th>Level</th><th>Use When</th><th>Volume</th></tr>
+</thead>
+<tbody>
+<tr><td><code>TRACE</code></td><td>Deep provider debugging; seeing raw HTTP calls</td><td>Very high</td></tr>
+<tr><td><code>DEBUG</code></td><td>Understanding plan/apply flow; provider behaviour</td><td>High</td></tr>
+<tr><td><code>INFO</code></td><td>General operational information</td><td>Moderate</td></tr>
+<tr><td><code>WARN</code></td><td>Potential issues that don't block execution</td><td>Low</td></tr>
+<tr><td><code>ERROR</code></td><td>Failures requiring attention</td><td>Minimal</td></tr>
+</tbody>
+</table>
+
+<div class="tip"><strong>Tip:</strong> For most debugging, <code>TF_LOG=DEBUG</code> gives the best balance of detail and readability. Use <code>TRACE</code> only when you need to see raw API payloads.</div>
+
+<!-- terraform console -->
+<h3 id="console">terraform console for Debugging Expressions</h3>
+
+<p><code>terraform console</code> opens an interactive REPL for evaluating Terraform expressions against your current state.</p>
+
+<pre><code># Start the console
+terraform console
+
+# List all resources in state
+> ls
+
+# Check a specific attribute
+> aws_instance.web.public_ip
+
+# Evaluate a complex expression
+> [for s in module.vpc.subnet_ids : upper(s)]
+
+# Test a function
+> cidrsubnet("10.0.0.0/16", 4, 1)
+
+# Check a local value
+> local.common_tags
+
+# Exit
+> exit</code></pre>
+
+<div class="tip"><strong>Tip:</strong> <code>terraform console</code> is invaluable for testing expressions before putting them in your configuration. It prevents syntax errors and logic bugs.</div>
+
+<!-- ============================================================ -->
+<!-- SECTION 3: INTERVIEW-STYLE Q&A                               -->
+<!-- ============================================================ -->
+
+<h2 id="interview-qa">11.3 — Interview-Style Q&amp;A</h2>
+
+<p>These 15+ questions and answers cover the most frequently asked Terraform topics in interviews and team discussions.</p>
+
+<!-- Q1 -->
+<h3 id="qa-1">Q1: What is the Terraform state file and why is it important?</h3>
+<p><strong>Answer:</strong> The state file (<code>terraform.tfstate</code>) is a JSON mapping of your configuration to real infrastructure. It tracks resource IDs, attribute values, dependencies, and metadata. Terraform uses it to determine what to create, update, or destroy on the next <code>apply</code>. Losing the state file means Terraform loses track of all managed resources, requiring manual import.</p>
+
+<!-- Q2 -->
+<h3 id="qa-2">Q2: How do you handle Terraform state in a team environment?</h3>
+<p><strong>Answer:</strong> Use a remote backend (S3 + DynamoDB, GCS + Cloud Storage, or Azure Blob + native locking) so the state is shared, versioned, and locked during operations. Every team member runs against the same state, and the lock prevents concurrent corruption.</p>
+
+<!-- Q3 -->
+<h3 id="qa-3">Q3: Explain the difference between <code>count</code> and <code>for_each</code>.</h3>
+<p><strong>Answer:</strong> <code>count</code> creates resources by numeric index — removing an item shifts all higher indices, causing unnecessary destroys and recreates. <code>for_each</code> creates resources by a map or set key, so removing an item only destroys that specific resource without affecting others. Prefer <code>for_each</code> for any list that might change.</p>
+
+<!-- Q4 -->
+<h3 id="qa-4">Q4: What are Terraform workspaces and when should you use them?</h3>
+<p><strong>Answer:</strong> Workspaces let you manage multiple state files for the same configuration. Use them for dev/staging/prod environments with identical infrastructure but different variable values. For larger differences, separate directories or Terragrunt are preferred because workspaces share the same configuration and can lead to accidental cross-environment changes.</p>
+
+<!-- Q5 -->
+<h3 id="qa-5">Q5: How do you handle secrets in Terraform?</h3>
+<p><strong>Answer:</strong> Never hardcode secrets in <code>.tf</code> files. Use a secrets manager (Vault, AWS Secrets Manager, Azure Key Vault) as a data source, mark variables as <code>sensitive = true</code>, and avoid logging plan output. For CI/CD, inject secrets via environment variables and ensure plan output is never saved to unencrypted logs.</p>
+
+<pre><code># Vault approach
+data "vault_generic_secret" "db" {
+  path = "secret/data/prod/database"
+}
+
+resource "aws_db_instance" "main" {
+  password = data.vault_generic_secret.db.data["password"]
+}</code></pre>
+
+<!-- Q6 -->
+<h3 id="qa-6">Q6: What is Terraform drift and how do you detect it?</h3>
+<p><strong>Answer:</strong> Drift is when real infrastructure diverges from the Terraform configuration (e.g., someone manually changes an instance size). Detect it by running <code>terraform plan</code> regularly. Use <code>-detailed-exitcode</code> in CI to get a non-zero exit code when drift is found, and set up alerts.</p>
+
+<!-- Q7 -->
+<h3 id="qa-7">Q7: How do modules work and why should you use them?</h3>
+<p><strong>Answer:</strong> Modules are containers of Terraform configuration that encapsulate resources, variables, and outputs. They promote reuse (write once, use everywhere), enforce consistency, and simplify large configurations by breaking them into composable units. Published modules can be shared across teams via a module registry.</p>
+
+<!-- Q8 -->
+<h3 id="qa-8">Q8: Explain <code>terraform import</code> and when you would use it.</h3>
+<p><strong>Answer:</strong> <code>terraform import</code> brings existing infrastructure under Terraform management. Use it when you create resources manually or via another tool and want Terraform to track them. After import, you must write the corresponding <code>.tf</code> resource block to match the imported resource's configuration.</p>
+
+<pre><code># Import an existing S3 bucket
+terraform import aws_s3_bucket.my_bucket my-existing-bucket
+
+# Then write the matching config
+resource "aws_s3_bucket" "my_bucket" {
+  bucket = "my-existing-bucket"
+}</code></pre>
+
+<!-- Q9 -->
+<h3 id="qa-9">Q9: What is <code>terraform plan</code> and why is it important?</h3>
+<p><strong>Answer:</strong> <code>terraform plan</code> shows exactly what Terraform will do without making any changes — resources to create, modify, or destroy. It's your safety net: always review the plan output before <code>apply</code>, especially the "destroy" count. In CI/CD, gate <code>apply</code> behind a manual review of the plan diff.</p>
+
+<!-- Q10 -->
+<h3 id="qa-10">Q10: How do you handle provider version upgrades safely?</h3>
+<p><strong>Answer:</strong> Pin provider versions with <code>~&gt;</code> constraints, run <code>terraform init -upgrade</code> in a test environment first, review the changelog, run a full plan in staging, and only then upgrade production. Use the <code>.terraform.lock.hcl</code> file to lock dependencies across environments.</p>
+
+<!-- Q11 -->
+<h3 id="qa-11">Q11: What is the difference between <code>terraform apply</code> and <code>terraform destroy</code>?</h3>
+<p><strong>Answer:</strong> <code>terraform apply</code> creates, updates, or deletes resources to match the configuration. <code>terraform destroy</code> removes ALL resources managed by the state file, regardless of the current configuration. Never run <code>destroy</code> on a shared workspace without explicit approval.</p>
+
+<!-- Q12 -->
+<h3 id="qa-12">Q12: How do you structure Terraform for a multi-environment setup?</h3>
+<p><strong>Answer:</strong> Use separate directories per environment (<code>envs/dev/</code>, <code>envs/prod/</code>) with shared modules. Each directory has its own <code>backend.tf</code> pointing to a separate state file. Use Terragrunt or a CI/CD pipeline to manage the directory hierarchy. Avoid workspaces for large differences.</p>
+
+<pre><code># Directory structure
+terraform/
+├── modules/
+│   ├── vpc/
+│   ├── database/
+│   └── compute/
+├── envs/
+│   ├── dev/
+│   │   ├── main.tf
+│   │   ├── backend.tf
+│   │   └── variables.tf
+│   └── prod/
+│       ├── main.tf
+│       ├── backend.tf
+│       └── variables.tf</code></pre>
+
+<!-- Q13 -->
+<h3 id="qa-13">Q13: What are Terraform data sources?</h3>
+<p><strong>Answer:</strong> Data sources (<code>data "..." ""</code>) query existing infrastructure or external data without creating anything. They're used to look up AMIs, VPC IDs, account details, or external API responses. Data sources are read-only and evaluated during <code>plan</code>.</p>
+
+<!-- Q14 -->
+<h3 id="qa-14">Q14: How do you handle Terraform in CI/CD pipelines?</h3>
+<p><strong>Answer:</strong> Automate <code>fmt -check</code>, <code>validate</code>, <code>init</code>, and <code>plan</code> in a pipeline. Gate <code>apply</code> behind manual approval. Store the plan output as a build artifact and apply that exact artifact to avoid drift between plan and apply. Use a remote backend with locking for team safety.</p>
+
+<pre><code># Example CI/CD pipeline stages
+# Stage 1: Validate
+terraform fmt -check -recursive
+terraform validate
+
+# Stage 2: Plan
+terraform plan -out=plan.tfplan -detailed-exitcode
+
+# Stage 3: Apply (manual gate)
+terraform apply plan.tfplan</code></pre>
+
+<!-- Q15 -->
+<h3 id="qa-15">Q15: What are provisioners and why are they discouraged?</h3>
+<p><strong>Answer:</strong> Provisioners (<code>local-exec</code>, <code>remote-exec</code>, <code>file</code>) run commands on resources after creation. They're discouraged because they create untracked state, have no rollback on failure, and break the declarative model. Use them only as a last resort (e.g., bootstrapping a VM when no better option exists).</p>
+
+<!-- Q16 -->
+<h3 id="qa-16">Q16: How do you handle resource imports and state manipulation safely?</h3>
+<p><strong>Answer:</strong> Back up state first (<code>terraform state pull > backup.tfstate</code>), then use <code>terraform state mv</code> or <code>terraform state rm</code> to adjust state. For imports, write the matching <code>.tf</code> block first, then run <code>terraform import</code>. Always validate with <code>terraform plan</code> after manipulation to confirm no unintended changes.</p>
+
+<!-- Q17 -->
+<h3 id="qa-17">Q17: What is the purpose of <code>lifecycle</code> blocks?</h3>
+<p><strong>Answer:</strong> <code>lifecycle</code> controls resource behaviour:</p>
+<ul>
+<li><code>create_before_destroy</code>: Create a replacement before destroying the old one (zero-downtime).</li>
+<li><code>prevent_destroy</code>: Block accidental destroy (safety for databases).</li>
+<li><code>ignore_changes</code>: Ignore specific attributes that change outside Terraform.</li>
+<li><code>replace_triggered_by</code>: Force recreation when another resource changes.</li>
+</ul>
+<pre><code>resource "aws_db_instance" "main" {
+  # ...
+  lifecycle {
+    prevent_destroy = true  # never destroy this database
+    ignore_changes  = [tags] # ignore tag drift
+  }
+}</code></pre>
+
+<!-- ============================================================ -->
+<!-- SECTION 4: BEST PRACTICES CHECKLIST                          -->
+<!-- ============================================================ -->
+
+<h2 id="checklist">11.4 — Final Best Practices Checklist</h2>
+
+<p>Print this checklist and review it before every production deployment.</p>
+
+<h3>Security</h3>
+<table>
+<thead><tr><th>Practice</th><th>How</th></tr></thead>
+<tbody>
+<tr><td>State file encrypted at rest</td><td>S3 <code>encrypt = true</code>, GCS default encryption</td></tr>
+<tr><td>No secrets in source code</td><td>Use Vault, AWS Secrets Manager, or environment variables</td></tr>
+<tr><td>Remote state with locking</td><td>DynamoDB (S3), native locking (GCS/Azure)</td></tr>
+<tr><td>Sensitive variables marked</td><td><code>sensitive = true</code> on variables and outputs</td></tr>
+<tr><td>Least-privilege IAM for state</td><td>Separate IAM roles for plan vs. apply</td></tr>
+<tr><td>Provider versions pinned</td><td><code>required_providers</code> with <code>~&gt;</code> or exact version</td></tr>
+<tr><td>State access audited</td><td>CloudTrail / Azure Monitor on state bucket access</td></tr>
+</tbody>
+</table>
+
+<h3>Scalability</h3>
+<table>
+<thead><tr><th>Practice</th><th>How</th></tr></thead>
+<tbody>
+<tr><td>Use modules for reuse</td><td>Shared modules in a private registry</td></tr>
+<tr><td>Separate state per component</td><td>Network, compute, database in separate state files</td></tr>
+<tr><td>Use <code>for_each</code> over <code>count</code></td><td>Prevents index-shift bugs on list changes</td></tr>
+<tr><td>Workspaces or directories</td><td>Separate state per environment</td></tr>
+<tr><td>DRY with <code>locals</code></td><td>Compute values once, reference everywhere</td></tr>
+</tbody>
+</table>
+
+<h3>Cost</h3>
+<table>
+<thead><tr><th>Practice</th><th>How</th></tr></thead>
+<tbody>
+<tr><td>Plan before apply</td><td>Review costs in plan output; use <code>-target</code> for testing</td></tr>
+<tr><td>Tag resources</td><td>Cost allocation tags for billing reports</td></tr>
+<tr><td>Destroy unused resources</td><td>Review state periodically; remove orphaned resources</td></tr>
+<tr><td>Use spot/preemptible where possible</td><td>Lower cost for fault-tolerant workloads</td></tr>
+<tr><td>Schedule non-production shutdowns</td><td>Terraform + Lambda/Function to stop dev VMs at night</td></tr>
+</tbody>
+</table>
+
+<h3>Operations</h3>
+<table>
+<thead><tr><th>Practice</th><th>How</th></tr></thead>
+<tbody>
+<tr><td>Always run <code>terraform fmt</code></td><td>Automate in pre-commit hooks and CI</td></tr>
+<tr><td>Run <code>terraform validate</code> in CI</td><td>Catches syntax errors before plan</td></tr>
+<tr><td>Store plan output as artifact</td><td>Apply the exact plan to avoid drift</td></tr>
+<tr><td>Drift detection in CI</td><td><code>-detailed-exitcode</code> + alerting</td></tr>
+<tr><td>Back up state before operations</td><td><code>terraform state pull > backup.tfstate</code></td></tr>
+<tr><td>Use <code>-target</code> sparingly</td><td>Only for debugging; avoid in regular workflow</td></tr>
+<tr><td>Document runbooks</td><td>How to apply, rollback, force-unlock, import</td></tr>
+</tbody>
+</table>
+
+<!-- Navigation -->
+<nav style="margin-top:48px;padding-top:24px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;">
+  <a href="10-case-studies.html" style="color:#7c3aed;text-decoration:none;font-size:.95rem;">&larr; Chapter 10: Case Studies</a>
+  <a href="12-future.html" style="color:#7c3aed;text-decoration:none;font-size:.95rem;">Chapter 12: Future of Terraform &rarr;</a>
+</nav>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/feedback.js"></script>
+<script src="../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

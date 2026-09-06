@@ -1,0 +1,160 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>237. Lab - Python - GPT 5 - Chat Completion API - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 237</span>
+<h1>Lab - Python - GPT 5 - Chat Completion API</h1>
+<p>The REST lab showed you the raw protocol; now you will call the same endpoint from Python using the official <code>openai</code> SDK. The SDK hides the HTTP plumbing behind a friendly client object, but the request it builds is identical to the one you sent with curl. By the end of this lab you will have a reusable Python script that sends a chat message to your GPT deployment and prints the reply.</p>
+
+<h2>What You Will Need</h2>
+<ul>
+<li>Python 3.9 or newer with the <code>openai</code> package installed (<code>python -m pip install openai</code>).</li>
+<li>Your deployment's endpoint URL and key.</li>
+<li>The <code>ai103-lab</code> workspace folder in VS Code.</li>
+</ul>
+
+<h2>The AzureOpenAI Client</h2>
+<p>Two client classes exist in the SDK: <code>OpenAI</code> for OpenAI's own service and <code>AzureOpenAI</code> for deployments in Azure AI Foundry. The Azure client differs in the URL it targets and the authentication it uses:</p>
+
+<pre><code>from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint="https://YOUR_ENDPOINT",
+    api_key="YOUR_KEY",
+    api_version="2024-06-01",
+)</code></pre>
+
+<div class="note">
+<p>Note that the deployment name is passed as the <code>model</code> argument when you call the API — the URL from the REST lab is built for you internally. This is the single most common source of confusion when moving from curl to the SDK.</p>
+</div>
+
+<h2>Step 1: Write the Script</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Send a chat completion from Python</h3>
+<ol>
+<li>Create a file named <code>chat.py</code> in <code>ai103-lab</code>.</li>
+<li>Type the program below.</li>
+<li>Substitute your endpoint and deployment name; read the key from an environment variable rather than typing it into the file.</li>
+</ol>
+</div>
+
+<pre><code>import os
+from openai import AzureOpenAI
+
+ENDPOINT = "https://YOUR_ENDPOINT"
+DEPLOYMENT = "ai103-chat-deploy"
+API_KEY = os.environ["AZURE_OPENAI_KEY"]
+
+client = AzureOpenAI(
+    azure_endpoint=ENDPOINT,
+    api_key=API_KEY,
+    api_version="2024-06-01",
+)
+
+messages = [
+    {"role": "system", "content": "You are a concise study assistant."},
+    {"role": "user", "content": "Explain in one sentence what an API does."},
+]
+
+response = client.chat.completions.create(
+    model=DEPLOYMENT,
+    messages=messages,
+    temperature=0.3,
+    max_tokens=120,
+)
+
+print(response.choices[0].message.content)</code></pre>
+
+<div class="warn">
+<p>Notice the key comes from an environment variable, never from the source file. Reading secrets from the environment keeps them out of git history and out of screenshots — set <code>AZURE_OPENAI_KEY</code> once per terminal session.</p>
+</div>
+
+<h2>Step 2: Set the Key and Run</h2>
+<p>Set the environment variable, then run the script:</p>
+
+<pre><code># Windows PowerShell
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+python chat.py</code></pre>
+
+<pre><code># macOS / Linux
+export AZURE_OPENAI_KEY="YOUR_KEY"
+python chat.py</code></pre>
+
+<p>The script prints the model's answer to the terminal. If you see an authentication error, the key variable is wrong; a 404 points at the endpoint or deployment name.</p>
+
+<div class="tip">
+<p>If a second terminal does not recognize <code>AZURE_OPENAI_KEY</code>, that is expected — environment variables set in one shell do not leak into another. Set the variable in every new terminal, or move it into a <code>.env</code> file you load explicitly.</p>
+</div>
+
+<h2>Step 3: Inspect the Full Response Object</h2>
+<p>Change the final <code>print</code> to dump the whole response and see what the SDK gives you:</p>
+
+<pre><code>import json
+
+full = response.model_dump()
+print(json.dumps(full, indent=2))</code></pre>
+
+<p>You will see the same fields curl returned: <code>id</code>, <code>object</code>, <code>created</code>, <code>model</code>, <code>choices</code>, and <code>usage</code>. The SDK parses that JSON into typed objects, which is why <code>response.choices[0].message.content</code> works without any manual parsing.</p>
+
+<div class="note">
+<p><code>model_dump()</code> converts the SDK object back into a plain dictionary for printing. It is the modern replacement for the older <code>__dict__</code> tricks and is the easiest way to inspect any response while you learn.</p>
+</div>
+
+<h2>Step 4: Turn the Script into a Reusable Function</h2>
+<p>Refactor <code>chat.py</code> so any message list can be passed in. This is the shape every later lab reuses:</p>
+
+<pre><code>import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2024-06-01",
+)
+
+
+def ask(messages, deployment="ai103-chat-deploy", temperature=0.5, max_tokens=200):
+    response = client.chat.completions.create(
+        model=deployment,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    return response.choices[0].message.content
+
+
+if __name__ == "__main__":
+    print(ask([
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "What is machine learning?"},
+    ]))</code></pre>
+
+<p>Set both <code>AZURE_OPENAI_ENDPOINT</code> and <code>AZURE_OPENAI_KEY</code>, then run the file. The same <code>ask()</code> function will appear, extended, in the remaining labs.</p>
+
+<div class="tip">
+<p>Putting the call inside a function keeps your code testable and your experiments clean: each lab changes only the messages and parameters passed in, not the networking code.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You created an <code>AzureOpenAI</code> client, sent a chat-completion request with the SDK, printed the full response object, and refactored the call into a reusable <code>ask()</code> function with credentials read from environment variables. This is the calling pattern you will use for the rest of the course. Next you will add system messages and watch them steer the model's behavior from Python.</p>
+<nav>
+<a href="236-lab-gpt-5-rest-api.html">&larr; Previous: Lab - GPT 5 - REST API</a><a href="238-lab-python-gpt-5-system-messages.html">Next: Lab - Python - GPT 5 - System Messages &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

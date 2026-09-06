@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Optics Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+canvas{border:2px solid #334155;border-radius:12px;display:block;max-width:100%}
+.options{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px}
+.opt{background:#1e293b;border:2px solid #475569;padding:10px 18px;border-radius:8px;cursor:pointer;font-size:.95rem;color:#e2e8f0;transition:all .2s}
+.opt:hover{border-color:#38bdf8}
+.opt.correct{border-color:#22c55e;background:rgba(34,197,94,0.15)}
+.opt.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15)}
+.feedback{padding:10px;border-radius:8px;font-size:.95rem;min-height:2em;text-align:center;max-width:600px;width:100%}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.secondary{background:#475569;color:#e2e8f0}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🔬 Optics Game</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/8</span>
+</div>
+<canvas id="gc" width="600" height="280"></canvas>
+<div class="options" id="opts"></div>
+<div class="feedback" id="fb"></div>
+<div style="display:flex;gap:12px">
+<button class="btn" id="next-btn" style="display:none" onclick="nextQ()">Next ➡️</button>
+</div>
+</div>
+<script>
+const c=document.getElementById('gc'),ctx=c.getContext('2d');
+let score=0,level=1,qNum=0,answered=false;
+
+const scenarios=[
+  {draw:drawMirror,desc:'A ray of light hits a flat mirror at 45°. Which path does it follow?',opts:['Bounces at 45° upward','Passes through','Bends downward','Absorbed'],ans:0,explain:'Law of reflection: angle of incidence = angle of reflection.'},
+  {draw:drawMirror,desc:'Light hits a mirror at 30° from the normal. What is the angle of reflection?',opts:['30°','60°','45°','90°'],ans:0,explain:'Angle of reflection equals angle of incidence: 30°.'},
+  {draw:drawRefraction,desc:'Light passes from air into water. What happens?',opts:['Bends toward normal','Bends away from normal','No change','Reflects back'],ans:0,explain:'Light slows in water, bending toward the normal line.'},
+  {draw:drawRefraction,desc:'Light passes from water into air. What happens?',opts:['Bends toward normal','Bends away from normal','No change','Goes straight'],ans:1,explain:'Light speeds up in air, bending away from normal.'},
+  {draw:drawPrism,desc:'White light passes through a prism. What emerges?',opts:['Rainbow spectrum','Only red','Only white','Black light'],ans:0,explain:'Dispersion separates white light into colors by wavelength.'},
+  {draw:drawConvex,desc:'Parallel rays hit a convex lens. Where do they converge?',opts:['At focal point','Diverge','Parallel','Behind lens'],ans:0,explain:'Convex (converging) lenses focus parallel rays at the focal point.'},
+  {draw:drawConcave,desc:'Parallel rays hit a concave mirror. What happens?',opts:['Converge to focus','Diverge away','Absorbed','Go straight'],ans:0,explain:'Concave mirrors converge parallel rays to a focal point.'},
+  {draw:drawFiber,desc:'Light enters a fiber optic cable. What keeps it inside?',opts:['Total internal reflection','Magnetic force','Gravity','Diffraction'],ans:0,explain:'Total internal reflection traps light when angle exceeds critical angle.'},
+  {draw:drawRainbow,desc:'How is a rainbow formed?',opts:['Refraction + reflection in droplets','Direct sunlight','Sound waves','Magnetic fields'],ans:0,explain:'Sunlight refracts, reflects inside droplets, and refracts again on exit.'},
+  {draw:drawMirror,desc:'A plane mirror creates what type of image?',opts:['Virtual, upright, same size','Real, inverted','Real, same size','Virtual, inverted'],ans:0,explain:'Plane mirrors create virtual, upright images the same size as the object.'},
+];
+
+let shuffled=[...scenarios].sort(()=>Math.random()-0.5);
+
+function drawScene(s){
+  ctx.clearRect(0,0,c.width,c.height);
+  ctx.fillStyle='#0f172a';ctx.fillRect(0,0,c.width,c.height);
+  s.draw();
+}
+
+function drawMirror(){
+  // mirror
+  ctx.fillStyle='#94a3b8';ctx.fillRect(300,30,8,220);
+  ctx.fillStyle='#64748b';ctx.fillRect(296,30,4,220);
+  // rays
+  ctx.strokeStyle='#facc15';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(100,80);ctx.lineTo(304,140);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(304,140);ctx.lineTo(500,80);ctx.stroke();
+  // normal
+  ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(304,140);ctx.lineTo(304,40);ctx.stroke();ctx.setLineDash([]);
+  // labels
+  ctx.fillStyle='#e2e8f0';ctx.font='12px sans-serif';
+  ctx.fillText('Source 💡',60,70);ctx.fillText('Mirror 🪞',280,20);
+  ctx.fillStyle='#facc15';ctx.fillText('Ray of light',150,95);
+  ctx.fillStyle='#38bdf8';ctx.fillText('Angle i = Angle r',350,140);
+}
+
+function drawRefraction(){
+  // water surface
+  ctx.fillStyle='rgba(56,189,248,0.15)';ctx.fillRect(0,140,600,140);
+  ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,140);ctx.lineTo(600,140);ctx.stroke();
+  // normal
+  ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(300,30);ctx.lineTo(300,250);ctx.stroke();ctx.setLineDash([]);
+  // incident ray
+  ctx.strokeStyle='#facc15';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(180,50);ctx.lineTo(300,140);ctx.stroke();
+  // refracted ray (bends toward normal)
+  ctx.strokeStyle='#22c55e';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(300,140);ctx.lineTo(340,240);ctx.stroke();
+  ctx.fillStyle='#e2e8f0';ctx.font='12px sans-serif';
+  ctx.fillText('Air 💨',50,80);ctx.fillText('Water 💧',50,200);
+  ctx.fillStyle='#facc15';ctx.fillText('Incident',180,45);
+  ctx.fillStyle='#22c55e';ctx.fillText('Refracted',345,220);
+}
+
+function drawPrism(){
+  // prism
+  ctx.fillStyle='rgba(168,85,247,0.2)';ctx.strokeStyle='#a855f7';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(250,40);ctx.lineTo(350,220);ctx.lineTo(150,220);ctx.closePath();ctx.fill();ctx.stroke();
+  // white ray in
+  ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(50,120);ctx.lineTo(250,120);ctx.stroke();
+  // rainbow out
+  const colors=['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#6366f1','#a855f7'];
+  colors.forEach((col,i)=>{
+    ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();
+    ctx.moveTo(330,100+i*18);ctx.lineTo(550,60+i*22);ctx.stroke();
+  });
+  ctx.fillStyle='#e2e8f0';ctx.font='12px sans-serif';
+  ctx.fillText('White light ⬜',30,115);ctx.fillText('🌈 Spectrum',480,60);
+}
+
+function drawConvex(){
+  // lens
+  ctx.strokeStyle='#38bdf8';ctx.lineWidth=3;ctx.beginPath();
+  ctx.moveTo(290,30);ctx.quadraticCurveTo(330,140,290,250);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(310,30);ctx.quadraticCurveTo(270,140,310,250);ctx.stroke();
+  // parallel rays
+  [60,100,140,180,220].forEach(y=>{
+    ctx.strokeStyle='#facc15';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(30,y);ctx.lineTo(290,y);ctx.stroke();
+    ctx.strokeStyle='#22c55e';ctx.beginPath();ctx.moveTo(310,y);ctx.lineTo(500,140);ctx.stroke();
+  });
+  // focal point
+  ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(500,140,6,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#e2e8f0';ctx.font='12px sans-serif';
+  ctx.fillText('Convex lens',270,260);ctx.fillText('Focal point F',470,130);
+}
+
+function drawConcave(){
+  ctx.strokeStyle='#f59e0b';ctx.lineWidth=3;ctx.beginPath();
+  ctx.moveTo(300,30);ctx.quadraticCurveTo(260,140,300,250);ctx.stroke();
+  [70,110,140,170,210].forEach(y=>{
+    ctx.strokeStyle='#facc15';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(40,y);ctx.lineTo(300,y);ctx.stroke();
+    ctx.strokeStyle='#ef4444';ctx.beginPath();ctx.moveTo(300,y);ctx.lineTo(100,y>140?y+40:y-40);ctx.stroke();
+  });
+  ctx.fillStyle='#e2e8f0';ctx.font='12px sans-serif';ctx.fillText('Concave mirror 🪞',270,270);
+}
+
+function drawFiber(){
+  ctx.fillStyle='rgba(56,189,248,0.1)';ctx.fillRect(200,80,300,120);
+  ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.strokeRect(200,80,300,120);
+  // zigzag light
+  ctx.strokeStyle='#facc15';ctx.lineWidth=2;ctx.beginPath();
+  ctx.moveTo(100,100);ctx.lineTo(250,100);
+  let x=250,y=100;
+  while(x<480){ctx.lineTo(x+30,y===100?180:100);x+=30;y=y===100?180:100}
+  ctx.stroke();
+  ctx.fillStyle='#e2e8f0';ctx.font='12px sans-serif';
+  ctx.fillText('Fiber optic 💡',210,75);ctx.fillText('Total internal reflection',220,210);
+}
+
+function drawRainbow(){
+  ctx.fillStyle='rgba(56,189,248,0.15)';ctx.beginPath();ctx.arc(400,250,80,Math.PI,0);ctx.fill();
+  ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.beginPath();ctx.arc(400,250,80,Math.PI,0);ctx.stroke();
+  ctx.strokeStyle='#facc15';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(100,200);ctx.lineTo(340,220);ctx.stroke();
+  const cols=['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#6366f1','#a855f7'];
+  cols.forEach((col,i)=>{
+    ctx.strokeStyle=col;ctx.lineWidth=2.5;ctx.beginPath();
+    ctx.moveTo(340,215-i*5);ctx.lineTo(200,30+i*12);ctx.stroke();
+  });
+  ctx.fillStyle='#e2e8f0';ctx.font='12px sans-serif';
+  ctx.fillText('☀️ Sunlight',50,195);ctx.fillText('💧 Water droplet',350,280);ctx.fillText('🌈 Rainbow',180,25);
+}
+
+function showQ(){
+  if(qNum>=8){showResults();return}
+  answered=false;
+  document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';
+  document.getElementById('next-btn').style.display='none';
+  document.getElementById('qnum').textContent=qNum+1;
+  let s=shuffled[qNum];drawScene(s);
+  const opts=document.getElementById('opts');opts.innerHTML='';
+  s.opts.forEach((o,i)=>{
+    const b=document.createElement('button');b.className='opt';b.textContent=o;
+    b.onclick=()=>checkAns(i);opts.appendChild(b);
+  });
+}
+
+function checkAns(i){
+  if(answered)return;answered=true;
+  let s=shuffled[qNum];
+  document.querySelectorAll('.opt').forEach((b,j)=>{
+    if(j===s.ans)b.classList.add('correct');if(j===i&&i!==s.ans)b.classList.add('wrong');
+  });
+  let fb=document.getElementById('fb');
+  if(i===s.ans){let pts=10+level*5;score+=pts;fb.innerHTML='✅ '+s.explain+' <b>+'+pts+' pts</b>';fb.style.background='rgba(34,197,94,0.15)'}
+  else{fb.innerHTML='❌ '+s.explain;fb.style.background='rgba(239,68,68,0.15)'}
+  document.getElementById('score').textContent=score;
+  document.getElementById('next-btn').style.display='inline-block';
+}
+
+function nextQ(){qNum++;showQ()}
+function showResults(){
+  document.getElementById('opts').innerHTML=`<div style="text-align:center"><div style="font-size:2rem;margin-bottom:8px">🏆</div><div>Level ${level} Complete! Score: ${score}</div></div>
+  <button class="btn" onclick="nextLevel()">Next Level ⬆️</button> <button class="btn secondary" onclick="restart()">↺ Restart</button>`;
+  document.getElementById('fb').textContent='';document.getElementById('next-btn').style.display='none';
+}
+function nextLevel(){level++;qNum=0;shuffled=[...scenarios].sort(()=>Math.random()-0.5);document.getElementById('level').textContent=level;showQ()}
+function restart(){score=0;level=1;qNum=0;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;shuffled=[...scenarios].sort(()=>Math.random()-0.5);showQ()}
+
+showQ();
+</script>
+</body>
+</html>

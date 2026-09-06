@@ -1,0 +1,191 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>42. Lab - Function Tool Calling - Defining the application - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 42</span>
+<h1>Lab - Function Tool Calling - Defining the application</h1>
+<p>In the previous lab the agent stopped mid-run at <code>requires_action</code> with a function call it could not execute itself. This lab is the missing half: an application that implements the functions, dispatches the model's calls, submits the results back, and lets the run continue to a final answer. When you finish, you will have a complete agent application — model planning, your code acting.</p>
+
+<h2>Objectives</h2>
+<ul>
+<li>Implement the two functions the agent declares.</li>
+<li>Dispatch a model's tool calls to the right function.</li>
+<li>Submit tool outputs, resume the run, and read the final answer.</li>
+</ul>
+
+<h2>The Tool-Call Cycle</h2>
+<p>The full cycle has five stages, and each is visible in the code below:</p>
+<ol>
+<li>Start a run; the model emits a tool call and the run enters <code>requires_action</code>.</li>
+<li>Read the requested function names and arguments from the run.</li>
+<li>Execute the matching local functions.</li>
+<li>Submit the outputs back to the run.</li>
+<li>Poll until the run completes and the agent writes its final answer.</li>
+</ol>
+
+<h2>Step 1: Implement the functions</h2>
+<p>Write the two functions as plain Python. In a real system these would call a weather API and a booking service; here they return simple, clearly fake estimates so you can see the flow end to end.</p>
+
+<div class="exercise">
+<h3>Add the function implementations</h3>
+<pre><code>def get_weather(city: str) -> dict:
+    return {
+        "city": city,
+        "conditions": "sunny with light clouds",
+        "high_c": 24,
+        "low_c": 17,
+        "rain_chance_pct": 10,
+    }
+
+def get_hotel_rate(city: str, nights: int) -> dict:
+    base = 140 if city.lower() == "paris" else 95
+    return {
+        "city": city,
+        "nights": nights,
+        "nightly_rate_usd": base,
+        "total_estimate_usd": base * nights,
+    }
+</code></pre>
+</div>
+
+<div class="tip">
+<p>Return JSON-serializable values — dicts, lists, strings, numbers. The tool output is text that gets fed back to the model, so keep it structured and complete rather than pretty-printed prose.</p>
+</div>
+
+<h2>Step 2: Dispatch tool calls to functions</h2>
+<p>The model's call gives you a function name and arguments. Write a dispatcher that maps names to implementations, catches unknown names, and returns results in the form the run expects.</p>
+
+<div class="exercise">
+<h3>Create the dispatcher</h3>
+<pre><code>FUNCTION_IMPL = {
+    "get_weather": get_weather,
+    "get_hotel_rate": get_hotel_rate,
+}
+
+def dispatch_tool_call(name: str, arguments: dict):
+    implementation = FUNCTION_IMPL.get(name)
+    if implementation is None:
+        return {"error": f"Unknown function: {name}"}
+    return implementation(**arguments)
+</code></pre>
+</div>
+
+<h2>Step 3: Build the complete client</h2>
+<p>Now assemble everything into one script. The run loop watches for <code>requires_action</code>, executes every requested call, submits the outputs, and then keeps polling. The loop is short because the agent in this lab needs only one round of tool calls before it can answer.</p>
+
+<div class="exercise">
+<h3>Create <code>run_agent_with_tools.py</code></h3>
+<pre><code>import json
+import os
+import time
+from dotenv import load_dotenv
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+
+load_dotenv()
+
+project_client = AIProjectClient.from_connection_string(
+    credential=DefaultAzureCredential(),
+    conn_str=os.getenv("PROJECT_CONNECTION_STRING"),
+)
+
+agent = next(
+    a for a in project_client.agents.list_agents().data
+    if a.name == "trip-planner-functions"
+)
+
+thread = project_client.agents.create_thread()
+project_client.agents.create_message(
+    thread_id=thread.id,
+    role="user",
+    content="We want 3 nights in Paris. What should we pack and roughly "
+            "what will the hotel cost?",
+)
+
+run = project_client.agents.create_run(
+    thread_id=thread.id, agent_id=agent.id
+)
+
+while run.status in ("queued", "in_progress", "requires_action"):
+    if run.status == "requires_action":
+        tool_calls = (
+            run.required_action.submit_tool_outputs.tool_calls
+        )
+        outputs = []
+        for call in tool_calls:
+            arguments = json.loads(call.function.arguments)
+            result = dispatch_tool_call(call.function.name, arguments)
+            outputs.append(
+                {
+                    "tool_call_id": call.id,
+                    "output": json.dumps(result),
+                }
+            )
+        run = project_client.agents.submit_tool_outputs(
+            thread_id=thread.id,
+            run_id=run.id,
+            tool_outputs=outputs,
+        )
+    run = project_client.agents.get_run(
+        thread_id=thread.id, run_id=run.id
+    )
+    time.sleep(1)
+
+messages = project_client.agents.list_messages(thread_id=thread.id)
+for item in reversed(messages.data):
+    if item.role == "assistant" and item.content:
+        for part in item.content:
+            if hasattr(part, "text"):
+                print(part.text.value)
+</code></pre>
+</div>
+
+<div class="note">
+<p>The <code>submit_tool_outputs</code> call is what changes <code>requires_action</code> back into <code>in_progress</code>. Until the outputs are submitted, the run cannot continue — this is the moment your application actually performs the work the model requested.</p>
+</div>
+
+<h2>Step 4: Run and inspect</h2>
+<p>Execute the script and watch for two things in the output:</p>
+<ul>
+<li>The run loop goes through <code>requires_action</code> once or twice, proving the tool cycle executed.</li>
+<li>The final answer includes both the weather-based packing advice and a hotel cost estimate grounded in your function's numbers.</li>
+</ul>
+
+<pre><code>python run_agent_with_tools.py
+</code></pre>
+
+<div class="exercise">
+<h3>Challenge: force two calls</h3>
+<ol>
+<li>Change the user message to ask only about the hotel rate.</li>
+<li>Confirm the agent calls <code>get_hotel_rate</code> and nothing else.</li>
+<li>Add a third function to the schema and implementation, such as <code>get_flight_time</code>, and watch the agent decide when to use it.</li>
+</ol>
+</div>
+
+<div class="warn">
+<p>Your functions here are safe simulations, but real function tools can mutate real systems — send emails, place orders, or update records. Before exposing any function to a model, ask: what is the worst reasonable call the model could make, and is that call reversible?</p>
+</div>
+
+<h2>Summary</h2>
+<p>You completed the full function-calling contract: the agent declares functions and plans calls, and your application executes them and returns results. The dispatcher pattern — mapping names to implementations, running them, and submitting outputs — is the exact skeleton you will reuse for real integrations with booking systems, databases, and internal APIs. Your agent now acts, not just talks.</p>
+<nav>
+<a href="41-lab-function-tool-calling-defining-the-agent.html">&larr; Previous: Lab - Function Tool Calling - Defining the agent</a><a href="43-hosted-agents.html">Next: Hosted agents &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

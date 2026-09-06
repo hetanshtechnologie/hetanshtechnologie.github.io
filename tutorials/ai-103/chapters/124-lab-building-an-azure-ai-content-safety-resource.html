@@ -1,0 +1,130 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>124. Lab - Building an Azure AI Content Safety resource - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 124</span>
+<h1>Lab - Building an Azure AI Content Safety resource</h1>
+<p>Every Content Safety API call in this section needs a resource to talk to. An Azure AI Content Safety resource is a paid Azure service that hosts the moderation endpoints — text analysis, image analysis, and Prompt Shields. In this lab you will create that resource, first walking through the Azure portal and then using the Azure CLI so the whole process is repeatable from the command line.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li><strong>An Azure subscription</strong> with permission to create resources. The free account you set up in earlier chapters works.</li>
+<li>Either the <strong>Azure portal</strong> in a browser or the <strong>Azure CLI</strong> installed locally.</li>
+<li>A naming scheme so your resource is easy to find later — this lab uses <code>ai103-content-safety</code>.</li>
+</ul>
+
+<h2>Create the Resource in the Portal</h2>
+<p>If you prefer the portal, this is the fastest path:</p>
+<ol>
+<li>Sign in to the Azure portal and click <strong>Create a resource</strong>.</li>
+<li>Search for <strong>Azure AI Content Safety</strong> and select it.</li>
+<li>On the create blade, fill in the basics:
+<ul>
+<li><strong>Subscription:</strong> your active subscription.</li>
+<li><strong>Resource group:</strong> create a new one, for example <code>ai103-content-safety-rg</code>.</li>
+<li><strong>Region:</strong> a region where Content Safety is available.</li>
+<li><strong>Name:</strong> <code>ai103-content-safety</code>.</li>
+<li><strong>Pricing tier:</strong> <code>F0</code> (free) for this course.</li>
+</ul>
+</li>
+<li>Click <strong>Review + create</strong>, then <strong>Create</strong>.</li>
+<li>Wait for the deployment to finish, then open the new resource.</li>
+</ol>
+
+<div class="note">
+<p>The free tier <code>F0</code> is enough for every lab in this course. If it is not available in your region, choose the cheapest standard tier and remember to clean the resource up afterwards.</p>
+</div>
+
+<h2>Create the Resource with the Azure CLI</h2>
+<p>The portal is fine for a one-off, but the CLI is scriptable and documents your setup. Run the whole lab from a terminal.</p>
+
+<div class="exercise">
+<h3>Step 1 - Sign in and set your subscription</h3>
+<pre><code>az login
+</code></pre>
+<p>A browser window opens. Sign in with your Azure account, then verify the subscription you want to use:</p>
+<pre><code>az account show --query name
+</code></pre>
+
+<h3>Step 2 - Create the resource group</h3>
+<pre><code>az group create --name ai103-content-safety-rg --location eastus
+</code></pre>
+
+<h3>Step 3 - Create the Content Safety resource</h3>
+<p>Create the resource inside the group with the <code>ContentSafety</code> kind and the free tier:</p>
+<pre><code>az cognitiveservices account create `
+    --name ai103-content-safety `
+    --resource-group ai103-content-safety-rg `
+    --kind ContentSafety `
+    --sku F0 `
+    --location eastus
+</code></pre>
+<p>The backtick character continues the command across lines in PowerShell. On other shells, replace it with the shell's line-continuation character.</p>
+
+<h3>Step 4 - Confirm the deployment</h3>
+<p>List the resources in the group to confirm the account exists:</p>
+<pre><code>az cognitiveservices account show `
+    --name ai103-content-safety `
+    --resource-group ai103-content-safety-rg `
+    --query "properties.provisioningState"
+</code></pre>
+<p>The output should read <code>Succeeded</code>.</p>
+</div>
+
+<h2>Collect the Endpoint and Key</h2>
+<p>Your code needs two values from this resource: the endpoint URL and an API key. Fetch both with the CLI:</p>
+<pre><code>az cognitiveservices account show `
+    --name ai103-content-safety `
+    --resource-group ai103-content-safety-rg `
+    --query "properties.endpoint"
+</code></pre>
+
+<pre><code>az cognitiveservices account keys list `
+    --name ai103-content-safety `
+    --resource-group ai103-content-safety-rg `
+    --query "key1"
+</code></pre>
+<p>In the portal you can find the same values on the resource's <strong>Keys and Endpoint</strong> page.</p>
+
+<div class="warn">
+<p>Treat the key like a password. The labs read it from environment variables, and you should never commit it to source control or paste it into shared documents.</p>
+</div>
+
+<h2>Store the Values as Environment Variables</h2>
+<p>Set the two values so your moderation scripts can pick them up:</p>
+<pre><code>$env:CONTENT_SAFETY_ENDPOINT = "https://YOUR_CONTENT_SAFETY.cognitiveservices.azure.com/"
+$env:CONTENT_SAFETY_KEY = "YOUR_KEY"
+</code></pre>
+<p>Keep the endpoint and key handy: the text moderation lab and the image moderation lab both depend on them.</p>
+
+<h2>Cleaning Up Later</h2>
+<p>When you finish the course section, delete the resource group to avoid ongoing charges. This deletes the resource and everything in the group:</p>
+<pre><code>az group delete --name ai103-content-safety-rg --yes
+</code></pre>
+
+<div class="tip">
+<p>Write the <code>az` group create</code> and <code>az` cognitiveservices account create</code> commands into a shell script or a notebook cell. If you need to rebuild the environment in another subscription or region, you can rerun the whole setup in seconds.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You have created an Azure AI Content Safety resource, both through the portal and with the Azure CLI. You confirmed its provisioning state, collected its endpoint and key, stored them as environment variables, and noted how to delete everything when the course is over. In the final lab of this section you will put the resource to work by moderating images.</p>
+<nav>
+<a href="123-trying-to-moderate-image-content.html">&larr; Previous: Trying to moderate image content</a><a href="125-lab-moderating-images-using-azure-ai-content-safety.html">Next: Lab - Moderating images using Azure AI Content Safety &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

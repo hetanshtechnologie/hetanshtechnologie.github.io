@@ -1,0 +1,142 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>276. Lab - Computer Vision - Python - Optical Character Recognition - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 276</span>
+<h1>Lab - Computer Vision - Python - Optical Character Recognition</h1>
+<p>So far the images you analyzed contained objects and scenes. Many real images are mostly <em>text</em>: photographed documents, whiteboards, receipts, screenshots, and signs. Optical character recognition (OCR) extracts that text so it can be searched, indexed, or fed into another AI model. In this lab you will pull the text out of an image with the <code>read</code> feature and print every detected line and word.</p>
+
+<h2>What You Need</h2>
+<ul>
+<li>Your Computer Vision endpoint and key.</li>
+<li>Python 3 with the <code>requests</code> package installed.</li>
+<li>A test image containing text — a screenshot, a photo of a sign, or a scanned page — saved as <code>test.jpg</code>.</li>
+</ul>
+
+<h2>Write the OCR Code</h2>
+
+<pre><code>import os
+import requests
+
+ENDPOINT = os.environ["COMPUTER_VISION_ENDPOINT"]
+KEY = os.environ["COMPUTER_VISION_KEY"]
+
+ANALYZE_URL = ENDPOINT.rstrip("/") + "/computervision/imageanalysis:analyze"
+params = {
+    "api-version": "2024-02-01",
+    "features": "read",
+}
+
+with open("test.jpg", "rb") as f:
+    image_data = f.read()
+
+headers = {
+    "Content-Type": "application/octet-stream",
+    "Ocp-Apim-Subscription-Key": KEY,
+}
+
+response = requests.post(ANALYZE_URL, params=params, headers=headers, data=image_data)
+response.raise_for_status()
+
+read = response.json()["readResult"]["blocks"]
+for block in read:
+    for line in block["lines"]:
+        text = line["text"]
+        words = [word["text"] for word in line["words"]]
+        print(f"{text:<40} | words: {', '.join(words)}")</code></pre>
+
+<h2>Run and Observe</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Extract text from an image</h3>
+<ol>
+<li>Save the script as <code>vision_ocr.py</code>.</li>
+<li>Set the environment variables and run <code>python vision_ocr.py</code>.</li>
+<li>Read the printed output. Each line shows the detected line of text and the individual words that make it up.</li>
+<li>Test with a clean screenshot first, then a photo of a sign, then a page of handwritten notes. Notice how accuracy drops as the text gets messier or the lighting worsens.</li>
+<li>Print the <code>boundingPolygon</code> of a line as well, and compare it with the line's actual position in the image.</li>
+</ol>
+</div>
+
+<h2>How the OCR Response Is Structured</h2>
+<p>The OCR result has three nesting levels, each with position information:</p>
+<ul>
+<li><strong>Blocks</strong> — the top level, usually one per text region in the image.</li>
+<li><strong>Lines</strong> — a horizontal grouping of words, with the <code>text</code> of the whole line.</li>
+<li><strong>Words</strong> — each individual word, with its own <code>boundingPolygon</code> coordinates.</li>
+</ul>
+
+<pre><code>{
+  "readResult": {
+    "blocks": [
+      {
+        "lines": [
+          {
+            "text": "WELCOME TO AI-103",
+            "boundingPolygon": [{"x": 120, "y": 80}, {"x": 520, "y": 80}, {"x": 520, "y": 120}, {"x": 120, "y": 120}],
+            "words": [
+              {"text": "WELCOME", "confidence": 0.99},
+              {"text": "TO", "confidence": 0.99},
+              {"text": "AI-103", "confidence": 0.98}
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}</code></pre>
+
+<div class="note">
+<p>Note that word and line positions use a <code>boundingPolygon</code> — a list of corner points — rather than the <code>boundingBox</code> you saw in object detection. A polygon handles rotated text more honestly than a straight rectangle.</p>
+</div>
+
+<h2>Turning OCR Output into Usable Text</h2>
+<p>Most applications want a plain string rather than a tree of blocks. Joining the lines in reading order gives you a full text document you can search or store:</p>
+
+<pre><code>full_text = "\n".join(
+    line["text"]
+    for block in read
+    for line in block["lines"]
+)
+print(full_text)</code></pre>
+
+<div class="tip">
+<p>For document-style images, joining lines with newlines preserves the page layout well enough for most downstream use. If you need true reading order across columns, use a document analysis service tuned for layouts rather than simple line joining.</p>
+</div>
+
+<h2>The Dedicated Read API</h2>
+<p>The <code>read</code> feature we used returns results in a single synchronous response. Azure also offers a separate <em>Read API</em> designed for large documents: you submit the image, receive an operation ID, and poll until the analysis finishes. That asynchronous pattern is the right choice for multi-page scans and big files. For the small images in this course, the synchronous <code>read</code> feature keeps the code simple.</p>
+
+<div class="warn">
+<p>OCR output can contain personal information. A photo of a document may expose names, addresses, or account numbers in the extracted text. Store and transmit that text with the same care you would give the original document.</p>
+</div>
+
+<h2>Common Issues</h2>
+<ul>
+<li><strong>Blank or partial output:</strong> the text is too small, blurred, or rotated in the image. Crop and straighten the region first.</li>
+<li><strong>Unsupported language:</strong> confirm the text language is supported by the service, or use an OCR service with the language you need.</li>
+<li><strong>No text found:</strong> the image genuinely contains no readable text, or the text is part of a stylized graphic rather than a real scene.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>You used the <code>read</code> feature to extract text from an image, walked the blocks, lines, and words hierarchy, and converted the structured result into plain text. OCR is the bridge between the physical world of printed text and the searchable digital world, and it will reappear throughout the rest of the course.</p>
+<nav>
+<a href="275-lab-computer-vision-python-object-detection.html">&larr; Previous: Lab - Computer Vision - Python - Object Detection</a><a href="277-lab-computer-vision-python-brand-detection.html">Next: Lab - Computer Vision - Python - Brand Detection &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

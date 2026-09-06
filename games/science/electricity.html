@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Complete the Circuit</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:16px}
+.stats{display:flex;gap:24px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 16px;border-radius:8px;border:1px solid #334155;font-size:.95rem}
+.circuit-board{position:relative;width:650px;height:350px;border:2px solid #475569;border-radius:12px;background:#0f172a;overflow:hidden}
+.slot{position:absolute;width:80px;height:80px;border:2px dashed #475569;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:2rem;cursor:pointer;transition:all .2s}
+.slot:hover{border-color:#38bdf8;background:rgba(56,189,248,0.1)}
+.slot.filled{border-color:#22c55e;background:rgba(34,197,94,0.15);border-style:solid}
+.slot.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15);animation:shake .3s}
+.wire{position:absolute;height:4px;background:#475569;border-radius:2px}
+.wire.active{background:#facc15;box-shadow:0 0 8px #facc15}
+.component-tray{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;min-height:60px}
+.component{background:#1e293b;padding:10px 16px;border-radius:8px;border:2px solid #334155;cursor:grab;font-size:1rem;transition:all .2s;user-select:none}
+.component:hover{border-color:#38bdf8;transform:scale(1.05)}
+.component.selected{border-color:#facc15;background:#1e3a5f;box-shadow:0 0 12px rgba(250,204,21,0.3)}
+.component.used{opacity:0.3;pointer-events:none}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.secondary{background:#475569;color:#e2e8f0}
+.message{font-size:1rem;text-align:center;padding:10px;background:#1e293b;border-radius:8px;max-width:650px;min-height:2.5em}
+.circuit-label{position:absolute;color:#94a3b8;font-size:.75rem;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>⚡ Complete the Circuit</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>💡 Circuit: <b id="circuit-name">Battery + Bulb</b></span>
+</div>
+<div class="circuit-board" id="board">
+<div class="wire" style="left:70px;top:85px;width:100px"></div>
+<div class="wire" style="left:170px;top:85px;height:180px;width:4px;position:absolute"></div>
+<div class="wire" style="left:170px;top:265px;width:300px"></div>
+<div class="wire" id="wire-return" style="left:470px;top:85px;height:180px;width:4px;position:absolute"></div>
+</div>
+<div class="component-tray" id="tray"></div>
+<div class="message" id="msg">Select a component, then click an empty slot to place it!</div>
+<div class="controls" style="display:flex;gap:12px">
+<button class="btn secondary" onclick="resetLevel()">↺ Reset</button>
+<button class="btn secondary" onclick="nextCircuit()">⏭ Skip</button>
+</div>
+</div>
+<script>
+let score=0,level=1,selectedComp=null;
+const circuits=[
+  {name:'Battery + Bulb',slots:[{x:80,y:85,accept:'🔋',label:'Power'},{x:410,y:85,accept:'💡',label:'Load'}],components:['🔋','💡','🧲','🔧']},
+  {name:'Battery + Resistor + LED',slots:[{x:80,y:85,accept:'🔋',label:'Power'},{x:230,y:85,accept:'Ω',label:'Resistor'},{x:410,y:85,accept:'💡',label:'LED'}],components:['🔋','💡','Ω','🧲','🔌']},
+  {name:'Full Circuit',slots:[{x:80,y:85,accept:'🔋',label:'Power'},{x:230,y:85,accept:'🔌',label:'Switch'},{x:350,y:85,accept:'Ω',label:'Resistor'},{x:470,y:85,accept:'💡',label:'Bulb'}],components:['🔋','💡','Ω','🔌','🧲','🔧']},
+  {name:'Series Circuit',slots:[{x:80,y:85,accept:'🔋',label:'Power'},{x:200,y:85,accept:'💡',label:'Bulb 1'},{x:330,y:85,accept:'💡',label:'Bulb 2'},{x:460,y:85,accept:'🔌',label:'Switch'}],components:['🔋','💡','💡','🔌','🧲','🔧']},
+  {name:'Parallel Circuit',slots:[{x:80,y:85,accept:'🔋',label:'Power'},{x:200,y:45,accept:'💡',label:'Bulb 1'},{x:200,y:145,accept:'💡',label:'Bulb 2'},{x:460,y:85,accept:'🔌',label:'Switch'}],components:['🔋','💡','💡','🔌','🔧','🧲']},
+  {name:'Motor Circuit',slots:[{x:80,y:85,accept:'🔋',label:'Power'},{x:230,y:85,accept:'⚙️',label:'Motor'},{x:410,y:85,accept:'🔌',label:'Switch'}],components:['🔋','⚙️','🔌','💡','🧲']},
+  {name:'Complex Circuit',slots:[{x:80,y:85,accept:'🔋',label:'Power'},{x:180,y:85,accept:'Ω',label:'R1'},{x:280,y:85,accept:'💡',label:'LED'},{x:380,y:85,accept:'Ω',label:'R2'},{x:480,y:85,accept:'🔌',label:'Switch'}],components:['🔋','💡','Ω','Ω','🔌','⚙️','🧲']},
+];
+let currentCircuit,slots=[],placed={};
+
+function initBoard(){
+  const board=document.getElementById('board');
+  board.querySelectorAll('.slot,.circuit-label').forEach(e=>e.remove());
+  slots=[];placed={};selectedComp=null;
+  currentCircuit=circuits[(level-1)%circuits.length];
+  document.getElementById('circuit-name').textContent=currentCircuit.name;
+  currentCircuit.slots.forEach((s,i)=>{
+    const el=document.createElement('div');
+    el.className='slot';el.style.left=s.x+'px';el.style.top=s.y+'px';
+    el.dataset.idx=i;el.innerHTML='<span style="color:#475569">'+s.label+'</span>';
+    el.onclick=()=>placeComponent(i);
+    board.appendChild(el);slots.push({el,accept:s.accept,filled:false});
+    const lb=document.createElement('div');
+    lb.className='circuit-label';lb.style.left=s.x+'px';lb.style.top=(s.y+85)+'px';
+    lb.textContent=s.label;board.appendChild(lb);
+  });
+  setupTray();
+}
+
+function setupTray(){
+  const tray=document.getElementById('tray');
+  tray.innerHTML='';
+  let comps=[...currentCircuit.components];
+  comps.sort(()=>Math.random()-0.5);
+  comps.forEach(c=>{
+    const el=document.createElement('div');
+    el.className='component';el.textContent=c;
+    el.onclick=()=>{
+      if(el.classList.contains('used'))return;
+      tray.querySelectorAll('.component').forEach(x=>x.classList.remove('selected'));
+      el.classList.add('selected');selectedComp=c;
+    };
+    tray.appendChild(el);
+  });
+}
+
+function placeComponent(idx){
+  if(!selectedComp)return;
+  const slot=slots[idx];
+  if(slot.filled)return;
+  const board=document.getElementById('board');
+  if(selectedComp===slot.accept){
+    slot.filled=true;slot.el.classList.add('filled');
+    slot.el.innerHTML='<span>'+selectedComp+'</span>';
+    placed[idx]=selectedComp;
+    document.querySelectorAll('.component').forEach(c=>{
+      if(c.textContent===selectedComp&&!c.classList.contains('used')){
+        c.classList.add('used');c.classList.remove('selected');
+      }
+    });
+    selectedComp=null;
+    document.getElementById('msg').textContent='✅ Correct! '+getComponentName(selectedComp||slot.accept)+' placed.';
+    if(Object.keys(placed).length===currentCircuit.slots.length){
+      score+=level*25;
+      activateWires();
+      document.getElementById('msg').innerHTML='🎉 Circuit complete! <b>+'+level*25+' pts</b> — The circuit works!';
+      document.getElementById('score').textContent=score;
+    }
+  }else{
+    slot.el.classList.add('wrong');
+    setTimeout(()=>slot.el.classList.remove('wrong'),400);
+    document.getElementById('msg').textContent='❌ '+getComponentName(selectedComp)+' doesn\'t go there! Try another slot.';
+  }
+}
+
+function getComponentName(c){
+  const n={'🔋':'Battery','💡':'Light Bulb','🔌':'Switch','Ω':'Resistor','⚙️':'Motor','🧲':'Magnet','🔧':'Fuse'};
+  return n[c]||c;
+}
+
+function activateWires(){
+  document.querySelectorAll('.wire').forEach(w=>w.classList.add('active'));
+}
+
+function resetLevel(){
+  initBoard();
+  document.getElementById('msg').textContent='↺ Reset! Place the correct components.';
+}
+
+function nextCircuit(){
+  level++;document.getElementById('level').textContent=level;
+  initBoard();
+  document.getElementById('msg').textContent='⏭ New circuit: '+currentCircuit.name+'!';
+}
+
+initBoard();
+</script>
+</body>
+</html>

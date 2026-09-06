@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Bias Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;border-bottom:1px solid #334155}
+.topbar a{color:#60a5fa;text-decoration:none;font-size:14px}
+.topbar h1{margin-left:16px;font-size:18px;color:#e2e8f0}
+.container{max-width:760px;margin:0 auto;padding:24px}
+.stats{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.stat{background:#1e293b;padding:12px 20px;border-radius:10px;flex:1;min-width:100px;text-align:center}
+.stat .label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px}
+.stat .value{font-size:24px;font-weight:700;color:#60a5fa;margin-top:4px}
+.card{background:#1e293b;border-radius:12px;padding:28px;margin-bottom:20px;border:1px solid #334155}
+.card h2{font-size:16px;color:#94a3b8;margin-bottom:8px;font-weight:500}
+.scenario{font-size:17px;line-height:1.7;margin-bottom:20px;color:#e2e8f0}
+.options{display:flex;flex-direction:column;gap:10px}
+.option{background:#0f172a;border:2px solid #334155;border-radius:10px;padding:14px 18px;cursor:pointer;transition:all .2s;font-size:15px;text-align:left;color:#e2e8f0}
+.option:hover{border-color:#60a5fa;background:#1a2744}
+.option.correct{border-color:#22c55e;background:#052e16;color:#86efac}
+.option.wrong{border-color:#ef4444;background:#450a0a;color:#fca5a5}
+.option.disabled{pointer-events:none}
+.explanation{margin-top:16px;padding:16px;background:#0f172a;border-radius:8px;border-left:4px solid #60a5fa;font-size:14px;line-height:1.6;color:#cbd5e1;display:none}
+.explanation.show{display:block}
+.btn{background:#3b82f6;color:#fff;border:none;padding:12px 28px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;transition:background .2s}
+.btn:hover{background:#2563eb}
+.btn-row{margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.game-over{text-align:center;padding:40px 20px}
+.game-over h2{font-size:28px;margin-bottom:12px;color:#60a5fa}
+.game-over p{font-size:16px;color:#94a3b8;margin-bottom:24px}
+.progress-bar{width:100%;height:6px;background:#334155;border-radius:3px;margin-bottom:24px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:3px;transition:width .3s}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&larr; Back to Games</a><h1>Memory Bias</h1></div>
+<div class="container">
+<div class="stats">
+<div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
+<div class="stat"><div class="label">Level</div><div class="value" id="level">1</div></div>
+<div class="stat"><div class="label">Streak</div><div class="value" id="streak">0</div></div>
+<div class="stat"><div class="label">Question</div><div class="value" id="qnum">1/10</div></div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+<div id="game-area"></div>
+</div>
+<script>
+const qs=[
+{q:"You remember the first and last items on a grocery list but forget the middle ones. This is:",options:["Recency Effect","Serial Position Effect (Primacy + Recency)","Tip of the Tongue","Misinformation Effect"],answer:1,explanation:"Serial Position Effect: Items at the beginning (primacy — rehearsed into long-term memory) and end (recency — still in working memory) are remembered best. Middle items suffer."},
+{q:"After a car accident, witnesses give conflicting accounts of what the driver was wearing. Later, some 'remember' details suggested by police. This is:",options:["Flashbulb Memory","Misinformation Effect","Tip of the Tongue","Spacing Effect"],answer:1,explanation:"Misinformation Effect (Loftus): Post-event information (suggested details) can alter memories. Eyewitness testimony is surprisingly unreliable when contaminated by subsequent information."},
+{q:"You vividly remember where you were on 9/11 but have forgotten your last birthday. Flashbulb memories feel certain but:",options:["Are always 100% accurate","Feel vivid and certain but can still contain errors","Only form for traumatic events","Are stored differently in the brain"],answer:1,explanation:"Flashbulb Memories: Emotionally significant events create vivid, confident memories — but they're not more accurate than ordinary memories. The feeling of certainty is misleading."},
+{q:"You can't recall a word that's 'on the tip of your tongue.' This phenomenon is called:",options:["Amnesia","Tip of the Tongue (TOT) state","Freudian Slip","Déjà Vu"],answer:1,explanation:"TOT State: Partial memory retrieval where you know the word exists and may recall some features (first letter, syllable count) but can't access the full word. Common with age."},
+{q:"After a concert, you mainly remember the last song and the encore, not the first hour. This is the:",options:["Primacy Effect","Recency Effect","Peak-End Rule","Spacing Effect"],answer:2,explanation:"Peak-End Rule (Kahneman): Memories are disproportionately influenced by the peak (most intense moment) and the ending. Duration is largely ignored in memory evaluation."},
+{q:"You're sure you locked the door this morning but can't actually remember doing it. Later, you realize you didn't. This is:",options:["Déjà Vu","Source Monitoring Error — confusing imagination with reality","Confabulation","Repression"],answer:1,explanation:"Source Monitoring Error: The brain confuses imagined or intended actions with actually performed ones. You intended to lock the door, so your brain created a false memory of doing it."},
+{q:"After hearing a list of words, you remember 'sleep' even though it wasn't on the list because all listed words related to sleep. This is the:",options:["Recency Effect","DRM Paradigm — False Memory via Semantic Association","Misinformation Effect","Ebbinghaus Forgetting Curve"],answer:1,explanation:"DRM (Deese-Roediger-McDermott) Paradigm: Semantically related words activate associated concepts, causing people to falsely 'remember' the critical lure word."},
+{q:"You remember your childhood home as larger than it actually was. This demonstrates:",options:["Childhood memory is always accurate","Schema-Driven Memory — schemas fill in and distort details","Amnesia","Repressed memory"],answer:1,explanation:"Schemas (mental frameworks) influence memory reconstruction. Childhood schemas of 'big house' may exaggerate spatial memories. Memory is reconstructive, not reproductive."},
+{q:"A witness confidently identifies a suspect in a lineup even though they only saw the attacker for 2 seconds in the dark. This involves:",options:["Perfect photographic memory","Overconfidence in eyewitness identification + weapon focus effect","Good lighting","CCTV footage"],answer:1,explanation:"Weapon Focus Effect: Stress and weapon presence narrow attention, reducing memory for other details. Combined with overconfidence in identification, leading to wrongful convictions."},
+{q:"After repeating a false story multiple times, you start believing it actually happened. This is:",options:["Confabulation","Illusory Truth Effect — repetition increases perceived truth","Hypnosis","Dissociation"],answer:1,explanation:"Illusory Truth Effect: Repeated exposure to a statement increases its perceived truthfulness, even when initially identified as false. Repetition creates familiarity, which feels like truth."},
+{q:"You remember your first kiss vividly but forget what you had for lunch yesterday. This is because:",options:["Lunch is less important","Emotional arousal enhances memory consolidation (amygdala-hippocampus interaction)","You have a bad memory","First kisses are special"],answer:1,explanation:"Emotional events activate the amygdala, which modulates hippocampal consolidation. Emotional memories are encoded more strongly, explaining why significant events are remembered better."},
+{q:"A therapist asks about your childhood and you 'recover' memories of events that never happened. This is:",options:["Accurate repressed memory recovery","False memory creation through suggestion and leading questions","Normal memory process","Déjà Vu"],answer:1,explanation:"Recovered Memories Controversy: Therapeutic suggestion, leading questions, and guided imagery can create false memories. Many 'recovered memories' of events that never occurred have been documented."},
+{q:"You meet someone and feel you've met before (déjà vu). Neurologically this is likely:",options:["Time travel","A neural misfiring where current experience is incorrectly flagged as a memory","A spiritual experience","Predicting the future"],answer:1,explanation:"Déjà Vu: Likely caused by a delay in signal transmission between brain regions. The same experience is processed twice — once normally and once with a slight delay, creating a 'memory' feeling."},
+{q:"After a group event, you and friends remember it differently, each emphasizing different aspects. This is:",options:["Someone is lying","Collaborative Memory — different schemas and attention create different memories","Memory is broken","None of you were paying attention"],answer:1,explanation:"Collaborative Memory: Each person encodes different aspects based on their schemas, attention, and emotional state. Social discussion can either improve or distort individual memories."},
+{q:"Ebbinghaus found that forgetting follows a predictable curve. The best strategy to combat it is:",options:["Cramming all at once","Spaced Repetition — reviewing at increasing intervals","Never reviewing","Only studying once"],answer:1,explanation:"Spacing Effect: Distributing learning over time produces stronger, longer-lasting memories than massed practice (cramming). Each review interval should increase as memory strengthens."},
+{q:"After a traumatic event, you can't remember the event itself but have physical anxiety reactions. This is:",options:["Normal — trauma is always forgotten","Dissociative Amnesia — memory suppression as a defense mechanism","Amnesia from brain damage","Selective attention failure"],answer:1,explanation:"Dissociative Amnesia: Psychological trauma can trigger memory suppression as a protective mechanism. The emotional/physical responses persist even when explicit memory is blocked."},
+{q:"A student studies the same material 10 times in one day for an exam. This is LESS effective than studying once a day for 10 days because:",options:["Study quality decreases","The spacing effect — distributed practice creates stronger memories","Repetition is bad","10 times is too many"],answer:1,explanation:"Massed vs Distributed Practice: Spacing allows for some forgetting between sessions, which paradoxically strengthens retrieval pathways. Cramming creates fragile, short-term memories."},
+{q:"You misremember your high school grades as higher than they actually were. This is the:",options:["Rosy Retrospection Bias —美化 past memories","Recency Effect","Primacy Effect","Tip of the Tongue"],answer:0,explanation:"Rosy Retrospection: People tend to remember past experiences more positively than they were. This serves a psychological function — maintaining a positive self-image."},
+{q:"A crime scene photo shown to a witness influences their memory of what the criminal looked like. This demonstrates:",options:["Perfect memory","Post-event Information Effect — external information alters stored memories","Photographic memory","Good policing"],answer:1,explanation:"Post-Event Information: External cues (photos, questions, other witnesses' accounts) can modify original memories. This is why lineup procedures must minimize suggestive information."},
+{q:"You remember your most embarrassing moment in vivid detail but can't recall your daily commute. This illustrates:",options:["Only embarrassing events are stored","Emotional intensity > routine — memory prioritizes novel, emotional events over repetitive ones","You have a bad memory","Commuting is stored differently"],answer:1,explanation:"Memory prioritizes novel, emotional, and significant events over routine ones. The brain allocates more encoding resources to events that are important for survival or self-concept."}
+];
+let state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:[]};
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function getQ(){return shuffle([...qs]).slice(0,10)}
+function updateStats(){document.getElementById('score').textContent=state.score;document.getElementById('level').textContent=state.level;document.getElementById('streak').textContent=state.streak;document.getElementById('qnum').textContent=`${state.q+1}/${state.questions.length}`;document.getElementById('progress').style.width=`${((state.q)/state.questions.length)*100}%`}
+function renderQ(){if(state.q>=state.questions.length){renderOver();return}const q=state.questions[state.q];state.answered=false;document.getElementById('game-area').innerHTML=`<div class="card"><h2>Memory Bias Scenario</h2><div class="scenario">${q.q}</div><div class="options" id="options"></div><div class="explanation" id="explanation"></div><div class="btn-row"><button class="btn hidden" id="nextBtn" onclick="nextQ()">Next →</button></div></div>`;const opts=document.getElementById('options');q.options.forEach((o,i)=>{const b=document.createElement('button');b.className='option';b.textContent=o;b.onclick=()=>pick(i,b);opts.appendChild(b)});updateStats()}
+function pick(i,btn){if(state.answered)return;state.answered=true;const q=state.questions[state.q];document.querySelectorAll('.option').forEach(b=>b.classList.add('disabled'));if(i===q.answer){btn.classList.add('correct');state.score+=10+state.streak*5;state.streak++;if(state.streak>state.maxStreak)state.maxStreak=state.streak;if(state.streak>=3)state.level=Math.floor(state.streak/3)+1}else{btn.classList.add('wrong');document.querySelectorAll('.option')[q.answer].classList.add('correct');state.streak=0}document.getElementById('explanation').textContent=q.explanation;document.getElementById('explanation').classList.add('show');document.getElementById('nextBtn').classList.remove('hidden');updateStats()}
+function nextQ(){state.q++;renderQ()}
+function renderOver(){const g=state.maxStreak>=8?'Memory Expert!':state.maxStreak>=5?'Memory Wise':state.maxStreak>=3?'Remember This':'Keep Learning';document.getElementById('game-area').innerHTML=`<div class="card game-over"><h2>Memory Complete!</h2><p>Score: <strong>${state.score}</strong> | Max Streak: <strong>${state.maxStreak}</strong></p><p style="font-size:20px;color:#60a5fa;margin-bottom:24px">${g}</p><div class="btn-row"><button class="btn" onclick="resetGame()">Play Again</button></div></div>`;document.getElementById('progress').style.width='100%'}
+function resetGame(){state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:getQ()};renderQ()}
+state.questions=getQ();renderQ();
+</script>
+</body>
+</html>

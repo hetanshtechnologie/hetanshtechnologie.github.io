@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Service Workers - PWA Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 6</span>
+    <h1>Service Workers</h1>
+
+    <h2>What is a Service Worker?</h2>
+    <p>A Service Worker is a JavaScript file that runs in the background, separate from the web page. It acts as a programmable network proxy, intercepting network requests and enabling offline functionality.</p>
+
+    <div class="info">
+      <strong>Key Characteristics:</strong> Runs on its own thread, has no DOM access, works offline, and is only active when needed (event-driven).
+    </div>
+
+    <h2>Service Worker Lifecycle</h2>
+    <img src="../images/service-worker-flow.svg" alt="Service Worker lifecycle: Register, Install, Activate, Fetch">
+
+    <ol>
+      <li><strong>Registration:</strong> The page registers the Service Worker file.</li>
+      <li><strong>Install:</strong> Fired when the browser installs the SW. Ideal for precaching assets.</li>
+      <li><strong>Activate:</strong> Fired after installation. Used for cleanup and claiming clients.</li>
+      <li><strong>Fetch/Message:</strong> The SW intercepts network requests and listens for messages.</li>
+    </ol>
+
+    <h2>Registration</h2>
+    <pre><code>// Register the Service Worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      const registration = await navigator.serviceWorker.register('/sw.js', {
+        scope: '/'  // Controls which pages the SW controls
+      });
+      console.log('SW registered:', registration.scope);
+
+      // Check for updates
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        console.log('New SW found:', newWorker);
+      });
+    } catch (err) {
+      console.error('SW registration failed:', err);
+    }
+  });
+}</code></pre>
+
+    <h2>Event Handling</h2>
+    <pre><code>// sw.js - Full lifecycle example
+const CACHE = 'my-pwa-v1';
+
+// Install event
+self.addEventListener('install', (event) => {
+  console.log('SW: Installing...');
+  event.waitUntil(
+    caches.open(CACHE).then(cache => {
+      return cache.addAll([
+        '/',
+        '/index.html',
+        '/css/styles.css',
+        '/js/app.js',
+        '/offline.html'
+      ]);
+    })
+  );
+  self.skipWaiting();
+});
+
+// Activate event
+self.addEventListener('activate', (event) => {
+  console.log('SW: Activating...');
+  event.waitUntil(
+    caches.keys().then(keys => {
+      return Promise.all(
+        keys.filter(key => key !== CACHE)
+          .map(key => caches.delete(key))
+      );
+    })
+  );
+  self.clients.claim();
+});
+
+// Fetch event - intercept network requests
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.match(event.request)
+      .then(cached => {
+        // Return cached response or fetch from network
+        const fetchPromise = fetch(event.request).then(response => {
+          // Cache the new response
+          return caches.open(CACHE).then(cache => {
+            cache.put(event.request, response.clone());
+            return response;
+          });
+        });
+        return cached || fetchPromise;
+      })
+  );
+});
+
+// Message event - listen for messages from the page
+self.addEventListener('message', (event) => {
+  if (event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});</code></pre>
+
+    <h2>Scope and Control</h2>
+    <p>The <code>scope</code> option in registration defines which pages the Service Worker controls. By default, the scope is the directory containing the SW file. To expand scope, set the <code>Service-Worker-Allowed</code> HTTP header.</p>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create a Service Worker that logs all fetch events. Register it on a simple HTML page, open DevTools > Application > Service Workers, and observe the lifecycle events as you reload the page.
+    </div>
+
+    <nav>
+      <a href="5-assets-data.html">&larr; Previous: Assets &amp; Data</a>
+      <a href="../">Back to Index</a>
+      <a href="7-caching.html">Next: Caching Strategies &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

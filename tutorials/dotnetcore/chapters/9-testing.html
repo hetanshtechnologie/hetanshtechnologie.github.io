@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Testing - .NET Core Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 9</span>
+    <h1>Testing</h1>
+    <p>Testing is a critical part of any professional .NET Core application. This chapter covers the most popular testing frameworks, how to write unit tests, mocking dependencies, and adopting a test-driven development workflow.</p>
+
+    <h2>Creating a Test Project</h2>
+    <p>The .NET SDK includes built-in templates for xUnit, NUnit, and MSTest projects. The most popular choice is xUnit.</p>
+    <pre><code>dotnet new xunit -n MyApp.Tests
+cd MyApp.Tests
+dotnet add reference ../MyApp/MyApp.csproj</code></pre>
+    <p>This creates a test project with xUnit pre-configured. Add a reference to the project you want to test.</p>
+
+    <h2>Writing Tests with xUnit</h2>
+    <p>xUnit uses the <code>[Fact]</code> attribute for parameterless test methods and <code>[Theory]</code> for data-driven tests.</p>
+    <pre><code>public class CalculatorTests
+{
+    [Fact]
+    public void Add_ReturnsSum()
+    {
+        var calc = new Calculator();
+        var result = calc.Add(2, 3);
+        Assert.Equal(5, result);
+    }
+
+    [Theory]
+    [InlineData(1, 2, 3)]
+    [InlineData(-1, -1, -2)]
+    [InlineData(0, 0, 0)]
+    public void Add_WithMultipleInputs_ReturnsExpected(int a, int b, int expected)
+    {
+        var calc = new Calculator();
+        var result = calc.Add(a, b);
+        Assert.Equal(expected, result);
+    }
+}</code></pre>
+
+    <h3>Assert Class</h3>
+    <p>The <code>Assert</code> class provides a rich set of static methods: <code>Equal</code>, <code>NotEqual</code>, <code>True</code>, <code>False</code>, <code>Null</code>, <code>NotNull</code>, <code>Throws</code>, <code>InRange</code>, and collection assertions like <code>Contains</code> and <code>All</code>.</p>
+
+    <h3>Live-Dependency Testing with Moq</h3>
+    <p>Moq is the most widely used mocking library for .NET. It lets you create fake implementations of interfaces.</p>
+    <pre><code>public interface IUserRepository
+{
+    User GetById(int id);
+}
+
+[Fact]
+public void GetUser_ReturnsUser_WhenExists()
+{
+    var mockRepo = new Mock&lt;IUserRepository&gt;();
+    mockRepo.Setup(r => r.GetById(1))
+            .Returns(new User { Id = 1, Name = "Alice" });
+
+    var service = new UserService(mockRepo.Object);
+    var user = service.GetUser(1);
+
+    Assert.Equal("Alice", user.Name);
+    mockRepo.Verify(r => r.GetById(1), Times.Once);
+}</code></pre>
+
+    <div class="info">Moq is available via <code>dotnet add package Moq</code>. Consider <strong>NSubstitute</strong> or <strong>FakeItEasy</strong> as lightweight alternatives.</div>
+
+    <h2>NUnit and MSTest Alternatives</h2>
+    <p><strong>NUnit</strong> uses <code>[Test]</code> and <code>[TestCase]</code>. It supports setup/teardown via <code>[SetUp]</code> and <code>[TearDown]</code>. <strong>MSTest</strong> uses <code>[TestMethod]</code> and <code>[DataTestMethod]</code> with <code>[DataRow]</code>. All three frameworks integrate seamlessly with <code>dotnet test</code>.</p>
+
+    <h2>Test-Driven Development (TDD) Workflow</h2>
+    <p>TDD follows a simple red-green-refactor cycle:</p>
+    <ol>
+      <li><strong>Red:</strong> Write a failing test for the desired behavior.</li>
+      <li><strong>Green:</strong> Write the minimum code to make the test pass.</li>
+      <li><strong>Refactor:</strong> Improve the code while keeping tests green.</li>
+    </ol>
+    <p>This process produces well-tested, clean, and maintainable code.</p>
+
+    <img src="../images/dotnetcore-build-process.svg" alt=".NET Core testing">
+
+    <h2>Running Tests</h2>
+    <p>Use the CLI or Visual Studio's Test Explorer:</p>
+    <pre><code>dotnet test                               # Run all tests
+dotnet test --filter "Category=Unit"      # Filter by trait
+dotnet test --logger "trx;LogFileName=results.trx"  # Export results</code></pre>
+    <p>Test Explorer in VS/VS Code provides a graphical view of passed, failed, and skipped tests with inline diagnostics.</p>
+
+    <h2>Code Coverage</h2>
+    <p>Use <code>dotnet-coverage</code> or <code>Coverlet</code> to measure code coverage:</p>
+    <pre><code>dotnet add package coverlet.msbuild
+dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=opencover</code></pre>
+
+    <div class="note">Aim for at least 70-80% coverage on business logic. Focus on testing behavior, not implementation details.</div>
+
+    <h2>Integration Testing</h2>
+    <p>For ASP.NET Core apps, use <code>Microsoft.AspNetCore.Mvc.Testing</code> with a <code>WebApplicationFactory</code> to spin up an in-memory test server:</p>
+    <pre><code>public class ApiTests : IClassFixture&lt;WebApplicationFactory&lt;Program&gt;&gt;
+{
+    private readonly HttpClient _client;
+
+    public ApiTests(WebApplicationFactory&lt;Program&gt; factory)
+    {
+        _client = factory.CreateClient();
+    }
+
+    [Fact]
+    public async Task Get_Endpoint_ReturnsOk()
+    {
+        var response = await _client.GetAsync("/api/values");
+        response.EnsureSuccessStatusCode();
+    }
+}</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create an xUnit test project for a simple <code>StringUtils</code> class that has methods <code>Reverse(string)</code>, <code>IsPalindrome(string)</code>, and <code>CountWords(string)</code>. Write at least 5 <code>[Fact]</code> and 2 <code>[Theory]</code> tests, then run <code>dotnet test</code> to verify all pass.
+    </div>
+
+    <nav>
+      <a href="8-libraries.html">&larr; Previous: Libraries &amp; Extensions</a>
+      <a href="../index.html">Back to Index</a>
+      <a href="10-sdk.html">Next: SDK &amp; CLI &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

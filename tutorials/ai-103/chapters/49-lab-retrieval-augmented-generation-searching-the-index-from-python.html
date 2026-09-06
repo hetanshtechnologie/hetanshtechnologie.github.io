@@ -1,0 +1,109 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>49. Lab - Retrieval Augmented Generation - Searching the index from Python - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 49</span>
+<h1>Lab - Retrieval Augmented Generation - Searching the index from Python</h1>
+<p>The index now holds all the CloudXeus chunks and their vectors. This lab shows how to query it from Python: plain keyword search, vector search, and the hybrid combination that most RAG systems rely on. You will also learn to read the score that tells you how strongly each chunk matched.</p>
+
+<h2>The Three Search Modes</h2>
+<ul>
+<li><strong>Keyword search</strong> matches the query terms against the text fields and scores by relevance. Great for exact names and codes.</li>
+<li><strong>Vector search</strong> embeds the query and returns chunks whose embeddings are nearest. Great when the question uses different words than the document.</li>
+<li><strong>Hybrid search</strong> runs both and merges the results. This is the usual default for RAG.</li>
+</ul>
+
+<h2>Set Up the Search Client</h2>
+
+<pre><code>import os
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+from azure.search.documents.models import RawVectorQuery
+from openai import AzureOpenAI
+
+SEARCH_ENDPOINT = os.getenv("SEARCH_ENDPOINT", "https://YOUR_SEARCH_ENDPOINT.search.windows.net")
+SEARCH_KEY = os.getenv("SEARCH_KEY", "YOUR_SEARCH_ADMIN_KEY")
+INDEX_NAME = "cloudxeus-docs"
+
+client = SearchClient(SEARCH_ENDPOINT, INDEX_NAME, AzureKeyCredential(SEARCH_KEY))
+
+embedding_client = AzureOpenAI(
+    api_key=os.getenv("AZURE_OPENAI_KEY", "YOUR_KEY"),
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", "YOUR_ENDPOINT"),
+    api_version="2024-06-01",
+)
+EMBEDDING_DEPLOYMENT = "text-embedding-3-small"
+
+def embed_query(text: str) -&gt; list[float]:
+    response = embedding_client.embeddings.create(model=EMBEDDING_DEPLOYMENT, input=text)
+    return response.data[0].embedding</code></pre>
+
+<h2>Keyword Search</h2>
+
+<pre><code>def keyword_search(query: str, top: int = 3):
+    results = client.search(search_text=query, top=top)
+    for r in results:
+        print(r["score"], "-", r["title"], "-", r["content"][:120], "...")</code></pre>
+
+<h2>Vector Search</h2>
+<p>Vector search builds a <code>RawVectorQuery</code> from the query embedding and asks the service to compare it against the stored <code>content_vector</code> field:</p>
+
+<pre><code>def vector_search(query: str, top: int = 3):
+    vector_query = RawVectorQuery(vector=embed_query(query), k=top, fields="content_vector")
+    results = client.search(search_text=None, vector_queries=[vector_query], top=top)
+    for r in results:
+        print(r["score"], "-", r["title"], "-", r["content"][:120], "...")</code></pre>
+
+<div class="note">
+<p>The same embedding model must produce both the stored vectors and the query vector. Mixing models corrupts the similarity comparison, so keep <code>EMBEDDING_DEPLOYMENT</code> identical to the one used during indexing.</p>
+</div>
+
+<h2>Hybrid Search</h2>
+<p>Hybrid search supplies both the keyword text and the vector query in one request, and the service fuses the two result sets:</p>
+
+<pre><code>def hybrid_search(query: str, top: int = 3):
+    vector_query = RawVectorQuery(vector=embed_query(query), k=top, fields="content_vector")
+    results = client.search(search_text=query, vector_queries=[vector_query], top=top)
+    for r in results:
+        print(r["score"], "-", r["title"], "-", r["content"][:120], "...")</code></pre>
+
+<h2>Reading the Results</h2>
+<p>Every result has a score and the retrievable fields: title, source, and content. The score measures match strength; higher is better, but scores are only comparable within a single query, not across queries.</p>
+<p>Two tuning knobs matter most:</p>
+<ul>
+<li><strong>top:</strong> how many chunks you return. Three to five is a common default for feeding an LLM.</li>
+<li><strong>Filters:</strong> you can narrow results, for example to one product or document family, using the filterable fields like <code>source</code>.</li>
+</ul>
+
+<div class="exercise">
+<h3>Exercise &mdash; Query the Index</h3>
+<ol>
+<li>Create <code>scripts/search_index.py</code> with the code from this chapter.</li>
+<li>Add a small test block that runs keyword, vector, and hybrid search for the same question, for example <code>How do I reset the EdgeCam 300 camera?</code>.</li>
+<li>Run it with <code>python scripts/search_index.py</code>.</li>
+<li>Compare the results: hybrid search usually returns the most relevant chunk on top.</li>
+</ol>
+</div>
+
+<h2>Summary</h2>
+<p>You can now query the CloudXeus index three ways. Keyword search handles exact terms, vector search captures meaning, and hybrid search combines both. Retrieval is the heart of RAG, so the next lab plugs this search into a chat model to build the full retrieve-and-answer loop.</p>
+<nav>
+<a href="48-lab-retrieval-augmented-generation-building-the-search-index.html">&larr; Previous: Lab - Retrieval Augmented Generation - Building the search index</a><a href="50-lab-retrieval-augmented-generation-the-full-loop.html">Next: Lab - Retrieval Augmented Generation - The Full Loop &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

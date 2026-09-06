@@ -1,0 +1,193 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>238. Lab - Python - GPT 5 - System Messages - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 238</span>
+<h1>Lab - Python - GPT 5 - System Messages</h1>
+<p>The playground labs let you type a system prompt into a box. In a real application, that system prompt is the first element of the <code>messages</code> array your Python code sends. This lab moves system messages into code: you will build a chat client that applies a fixed system message, tests how different system messages change the same question, and handles a multi-turn conversation.</p>
+
+<h2>What You Will Need</h2>
+<ul>
+<li>The reusable <code>ask()</code> function (or the <code>AzureOpenAI</code> client) from the previous lab.</li>
+<li>Your endpoint URL, key, and deployment name.</li>
+<li>An understanding of roles: <code>system</code> for instructions, <code>user</code> for input, <code>assistant</code> for model replies.</li>
+</ul>
+
+<h2>Where the System Message Goes</h2>
+<p>The system message is just a message with the role <code>system</code> placed at the front of the array. Everything after it — user questions and assistant answers — plays out under its rules:</p>
+
+<pre><code>messages = [
+    {"role": "system", "content": "You are a concise assistant. Never exceed 40 words."},
+    {"role": "user", "content": "Explain what a token is."},
+]</code></pre>
+
+<div class="note">
+<p>There is no separate field for the system prompt in the chat-completions API — it travels inside the <code>messages</code> array exactly like everything else. When you saw a "System prompt" box in the playground, the playground was building this array for you.</p>
+</div>
+
+<h2>Step 1: Write a System-Message Script</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Build a fixed-role assistant</h3>
+<ol>
+<li>Create <code>system_chat.py</code> in <code>ai103-lab</code>.</li>
+<li>Reuse the client setup from the previous lab, but drive the conversation with a function that always prefixes the same system message.</li>
+<li>Run it and compare two questions under one system message.</li>
+</ol>
+</div>
+
+<pre><code>import os
+from openai import AzureOpenAI
+
+SYSTEM_PROMPT = (
+    "You are a strict technical writer for a software manual. "
+    "Use simple words. Never write more than three sentences. "
+    "Never mention pricing."
+)
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2024-06-01",
+)
+
+
+def ask(question, deployment="ai103-chat-deploy"):
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
+    response = client.chat.completions.create(
+        model=deployment,
+        messages=messages,
+        temperature=0.3,
+        max_tokens=150,
+    )
+    return response.choices[0].message.content
+
+
+if __name__ == "__main__":
+    print(ask("What is a database?"))
+    print()
+    print(ask("How much does a database cost?"))</code></pre>
+
+<p>The second question tests the "never mention pricing" rule: even though the user directly asks about cost, the system message should steer the answer away from figures.</p>
+
+<div class="warn">
+<p>System messages shape behavior but are not enforcement. A user who rephrases the same question cleverly might still get a pricing answer. That is exactly why later chapters add explicit guardrails on top of prompting.</p>
+</div>
+
+<h2>Step 2: Compare System Prompts Head to Head</h2>
+<p>The same question answered under two different system messages proves how much the system text matters. Update the script to loop over system prompts:</p>
+
+<pre><code>def ask_with_system(system_prompt, question, deployment="ai103-chat-deploy"):
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": question},
+    ]
+    response = client.chat.completions.create(
+        model=deployment,
+        messages=messages,
+        temperature=0.0,
+        max_tokens=150,
+    )
+    return response.choices[0].message.content
+
+
+prompts = {
+    "tutor": "You are a patient tutor for a 10-year-old. Keep it friendly and simple.",
+    "executive": "You are a CEO writing to investors. Be formal and concise.",
+}
+
+question = "Explain cloud computing."
+for name, prompt in prompts.items():
+    print(f"--- system: {name} ---")
+    print(ask_with_system(prompt, question))
+    print()</code></pre>
+
+<div class="tip">
+<p>Set <code>temperature=0.0</code> in this experiment so any differences between the two outputs come from the system message alone, not from random sampling.</p>
+</div>
+
+<h2>Step 3: Carry a Multi-Turn Conversation</h2>
+<p>A system message applies to the whole conversation, which only matters if you keep the history. Build a loop that appends each exchange to the array:</p>
+
+<pre><code>messages = [
+    {"role": "system", "content": "You are a friendly travel guide. Keep answers short."},
+]
+
+while True:
+    user_text = input("You: ")
+    if user_text.lower() in ("quit", "exit"):
+        break
+
+    messages.append({"role": "user", "content": user_text})
+
+    response = client.chat.completions.create(
+        model="ai103-chat-deploy",
+        messages=messages,
+        temperature=0.5,
+        max_tokens=120,
+    )
+
+    assistant_text = response.choices[0].message.content
+    print("Bot:", assistant_text)
+
+    messages.append({"role": "assistant", "content": assistant_text})</code></pre>
+
+<ol>
+<li>Run the script and ask <em>"What should I eat in Paris?"</em></li>
+<li>Then ask <em>"And where should I stay?"</em> — the model answers using context from the first exchange.</li>
+<li>Type <code>quit</code> to stop the loop.</li>
+</ol>
+
+<div class="note">
+<p>The conversation history grows with every turn, which also grows the token cost. Production apps cap the history to a sliding window — keeping the newest N messages and dropping the oldest — to control cost and stay inside the model's context window.</p>
+</div>
+
+<h2>Step 4: Enforce a Structured Output</h2>
+<p>Finish by having the system message force JSON, exactly as you did in the playground but now from Python:</p>
+
+<pre><code>system_json = (
+    "You extract flight details into JSON with exactly these fields: "
+    'airline, origin, destination, price. '
+    "Respond with the JSON object only, no extra text."
+)
+
+reply = ask_with_system(
+    system_json,
+    "Please book the Delta flight from Seattle to Chicago that costs $189.",
+)
+print(reply)</code></pre>
+
+<p>The output should be a parseable JSON object that your code could feed straight to <code>json.loads()</code>:</p>
+
+<pre><code>{"airline": "Delta", "origin": "Seattle",
+ "destination": "Chicago", "price": 189}</code></pre>
+
+<div class="tip">
+<p>When parsing model output, wrap <code>json.loads</code> in a try/except and retry once or twice before failing. A tiny formatting slip is common, and a one-line retry handles most of them without showing the user an error.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You moved the system prompt into Python code, proved how different system messages change the same question, ran a multi-turn conversation that maintains history, and forced structured JSON output from code. The system message is now a first-class part of your program rather than a box in the portal. Next you will work with the complete response object — reading usage, finish reasons, and the other metadata your application needs.</p>
+<nav>
+<a href="237-lab-python-gpt-5-chat-completion-api.html">&larr; Previous: Lab - Python - GPT 5 - Chat Completion API</a><a href="239-lab-python-gpt-5-getting-the-entire-response.html">Next: Lab - Python - GPT 5 - Getting the entire response &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

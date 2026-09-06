@@ -1,0 +1,116 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>19. Lab - Multi-modal models - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 19</span>
+<h1>Lab - Multi-modal models</h1>
+<p>In this lab you will work with a multi-modal model: one that can accept images alongside text and answer questions about what it sees. You will send a local image to your deployment as base64 data, ask for a description, and then ask follow-up questions about details in the image.</p>
+
+<h2>What You Need</h2>
+<ul>
+<li>A <strong>vision-capable model deployed</strong> in Foundry, for example <code>gpt-4o-mini</code> or <code>gpt-4o</code>. Models that accept image input are usually described as vision or multimodal in the catalogue.</li>
+<li>The endpoint and key environment variables from the earlier labs.</li>
+<li>An image file on your machine, for example a photo you took or a screenshot. PNG and JPEG both work.</li>
+</ul>
+
+<div class="warn">
+<p>Not every chat model accepts images. If the request fails with a <code>400</code> error, check that the model you deployed is advertised as supporting image input.</p>
+</div>
+
+<h2>How Images Travel to the Model</h2>
+<p>Images are not uploaded as separate files in the chat API. Instead they are embedded in the message as a data URI: a base64-encoded copy of the image bytes prefixed with a MIME type such as <code>data:image/png;base64,...</code>. The user message then becomes a list of parts — one for text and one for the image — instead of a plain string.</p>
+
+<h2>Prepare a Small Image</h2>
+<p>Large photos increase latency and cost because the model processes many image tokens. It helps to resize or crop to something like 1024 pixels on the longest side before sending. Most photo apps and even simple code can do this; for this lab a normal photo is fine, but keep it under a few megabytes.</p>
+
+<div class="exercise">
+<h3>Step 1 - Create the vision script</h3>
+<p>Create a folder <code>ai103-lab19</code> and add a file <code>vision.py</code>:</p>
+<pre><code>from openai import AzureOpenAI
+import base64
+import os
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+with open("YOUR_IMAGE.png", "rb") as f:
+    image_bytes = f.read()
+
+data_uri = "data:image/png;base64," + base64.b64encode(image_bytes).decode("utf-8")
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {"role": "system", "content": "You describe images accurately and in a few sentences."},
+        {"role": "user", "content": [
+            {"type": "text", "text": "Describe what you see in this image."},
+            {"type": "image_url", "image_url": {"url": data_uri}},
+        ]},
+    ],
+)
+print(response.choices[0].message.content)
+</code></pre>
+
+<h3>Step 2 - Run it</h3>
+<pre><code>python vision.py
+</code></pre>
+<p>The model should describe the contents of the image. If the file is a JPEG, change the extension in <code>open(...)</code> and the MIME type to <code>image/jpeg</code>.</p>
+</div>
+
+<h2>Asking Targeted Questions</h2>
+<p>You can combine the image with precise questions to turn the model into an extraction engine. Try asking about specific details:</p>
+<pre><code>{"role": "user", "content": [
+    {"type": "text", "text": "Count the number of people in the image. Then describe what the person in the centre is wearing."},
+    {"type": "image_url", "image_url": {"url": data_uri}},
+]}
+</code></pre>
+
+<h2>Reading Text from Images</h2>
+<p>Vision models can also read text embedded in images, which makes them useful for screenshots, signs, and receipts. Replace the question text with:</p>
+<pre><code>{"type": "text", "text": "Transcribe all of the text you can see in this image, keeping the layout and order."}
+</code></pre>
+
+<h2>One Message, Many Images</h2>
+<p>The content list can contain several image parts. This lets you ask a model to compare two screenshots or photos side by side:</p>
+<pre><code>{"role": "user", "content": [
+    {"type": "text", "text": "Compare these two charts. Which one shows higher growth?"},
+    {"type": "image_url", "image_url": {"url": chart_one_uri}},
+    {"type": "image_url", "image_url": {"url": chart_two_uri}},
+]}
+</code></pre>
+<p>Build the second data URI with the same <code>base64</code> approach used for the first image.</p>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Problem</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>400</code> error on request</td><td>The deployment does not support image input.</td><td>Deploy a vision-capable model.</td></tr>
+<tr><td>Very slow response</td><td>The image is extremely large.</td><td>Resize to about 1024 px on the long edge.</td></tr>
+<tr><td>Wrong MIME type error</td><td>The <code>data:image/...</code> prefix does not match the file.</td><td>Use <code>image/jpeg</code> for <code>.jpg</code> files.</td></tr>
+<tr><td>Garbled text in the answer</td><td>Low resolution or a very small font.</td><td>Crop or zoom before sending.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You have sent an image to a vision-capable model and asked questions about it. You learned that images travel as base64 data URIs inside the message, that the model can describe, count, transcribe, and compare image content, and that the same chat pattern extends to multiple images per request. This multimodal capability will return later when you build document-analysis agents.</p>
+<nav>
+<a href="18-reasoning-effort-thinking-before-answering.html">&larr; Previous: Reasoning Effort Thinking Before Answering</a><a href="20-tools-and-models.html">Next: Tools and Models &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

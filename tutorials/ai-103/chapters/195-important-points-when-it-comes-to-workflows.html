@@ -1,0 +1,105 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>195. Important points when it comes to workflows - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 195</span>
+<h1>Important points when it comes to workflows</h1>
+<p>Workflows are where agents stop being demos and become processes. A workflow turns a multi-step job — triage an invoice, extract its data, check it against policy, approve or reject — into a defined sequence of steps with explicit inputs, outputs, and failure handling. This chapter gathers the important points you need to keep in mind when designing, building, and operating such workflows, drawing on the patterns used throughout the CloudXeus project.</p>
+
+<h2>What a Workflow Is</h2>
+<p>A workflow is a chain of steps where each step consumes the previous step's output and produces the next step's input. Each step can be an LLM call, a tool invocation, a retrieval, a condition, or plain code. Unlike a single prompt, a workflow makes the process inspectable: you can see which step ran, what it decided, and where it failed.</p>
+
+<div class="note">
+<p>The difference between an agent and a workflow is control. An agent decides its own path at runtime, which is flexible but harder to audit. A workflow fixes the path, which is predictable and auditable. Use agents when the path is unknowable in advance; use workflows when the steps are stable and must be controlled.</p>
+</div>
+
+<h2>Design with Single-Purpose Steps</h2>
+<p>The most important design rule is to keep steps small and single-purpose. A step that extracts fields does one thing; a step that checks policy does another. Single-purpose steps give you three benefits:</p>
+<ul>
+<li><strong>Reuse:</strong> the same extraction step can serve other workflows.</li>
+<li><strong>Testing:</strong> each step is testable in isolation with its own fixtures.</li>
+<li><strong>Debugging:</strong> when output is wrong, the failing step is the one that produced it.</li>
+</ul>
+
+<h2>Define the Data Contract Between Steps</h2>
+<p>Every step needs a clear interface: a defined input shape and a defined output shape. For the invoice workflow, the extraction step always outputs a JSON object with fields like <code>invoice_number</code> and <code>total_amount</code> — never free-form text. Consequences of a good contract:</p>
+<ul>
+<li>Steps compose without guesswork; the policy check reads <code>total_amount</code> because it is guaranteed to exist.</li>
+<li>You can validate each step's output and fail fast instead of propagating garbage.</li>
+<li>You can swap an LLM step for a code step without changing the rest of the chain.</li>
+</ul>
+
+<div class="tip">
+<p>Validate at the boundaries. After the extraction step, check that the required fields are present and that amounts are numbers. Catching a bad shape here is far cheaper than discovering it three steps downstream.</p>
+</div>
+
+<h2>Plan for Errors, Retries, and Timeouts</h2>
+<p>Every step can fail, and most failures are transient. Decide per step:</p>
+<ul>
+<li><strong>Retry policy:</strong> network blips and throttling usually recover on retry — retry with backoff.</li>
+<li><strong>Max attempts:</strong> cap retries so a stuck step does not burn budget forever.</li>
+<li><strong>Timeouts:</strong> LLM calls and long document analyses should have explicit limits.</li>
+<li><strong>Fallback output:</strong> define what a step emits on terminal failure — often an error payload that later steps understand, rather than an exception that crashes the whole flow.</li>
+</ul>
+
+<div class="warn">
+<p>Do not let an error surface as a hallucinated answer. If the policy-check step fails, the workflow must end in an explicit "needs manual review" state — not quietly emit a decision nobody can trust.</p>
+</div>
+
+<h2>Use Conditionals for Branching</h2>
+<p>Not every document follows the same path. Conditionals route based on step output: if the extraction confidence is low, send the document to human review; if the total exceeds a threshold, escalate for approval; if the document was not an invoice, terminate. Each branch is a first-class path with its own outcome, so the workflow produces clear, inspectable results for every input class.</p>
+
+<h2>Make the Flow Observable</h2>
+<p>A workflow you cannot inspect is a workflow you cannot trust. Log the essentials for each run:</p>
+<ul>
+<li>The input and output of every step.</li>
+<li>The decision taken at every conditional.</li>
+<li>Token usage and latency per LLM call.</li>
+<li>The final outcome and any manual-review flags.</li>
+</ul>
+<p>Foundry tracing shows this automatically for agent runs; apply the same discipline to hand-built workflows so every execution has a story you can replay.</p>
+
+<h2>Watch Cost and Performance</h2>
+<p>Workflows multiply costs: a six-step flow calls a model several times per document. Keep the economics visible:</p>
+<ul>
+<li>Use small models for simple steps and large models only where reasoning demands them.</li>
+<li>Short-circuit: if a step's output makes later steps unnecessary, branch out early.</li>
+<li>Cache stable results — a policy decision that does not change should not be recomputed for every document.</li>
+<li>Monitor per-step latency; a slow step hides the real cost center of your flow.</li>
+</ul>
+
+<h2>Review the Important Points</h2>
+<p>When you design a workflow, check it against this list:</p>
+<ul>
+<li>Is each step single-purpose and reusable?</li>
+<li>Does every step have a defined input and output contract?</li>
+<li>Are outputs validated at step boundaries?</li>
+<li>Does every step have retries, a cap, and a timeout?</li>
+<li>Is every failure path an explicit outcome, not a crash?</li>
+<li>Do conditionals cover every document class you expect?</li>
+<li>Is the whole flow traceable and logged?</li>
+<li>Are model choices and costs deliberate per step?</li>
+</ul>
+
+<h2>Summary</h2>
+<p>Workflows turn multi-step jobs into inspectable processes. The important points are consistent: keep steps single-purpose, define contracts between them, plan for failure explicitly, branch with conditionals, log everything, and watch cost per step. You now have both the guardrail layer and the orchestration principles for the CloudXeus project. The next chapter checks what you have learned with the first practice test.</p>
+<nav>
+<a href="194-using-azure-ai-content-safety.html">&larr; Previous: Using Azure AI Content Safety</a><a href="196-practice-test-01.html">Next: Practice Test 01 &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

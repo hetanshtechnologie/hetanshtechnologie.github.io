@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Article - Hetansh Technologie Blog</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="blog-nav">
+    <div class="container">
+      <a href="../" class="logo">HetanshTechnologie</a>
+      <div class="nav-links">
+        <a href="../">Home</a>
+        <a href="index.html" class="btn">Blog</a>
+        <a href="login.html" id="nav-auth">Login</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container" style="padding:32px 20px;">
+    <div id="alert-container"></div>
+    <div id="article-container">
+      <div class="empty-state"><h3>Loading...</h3></div>
+    </div>
+
+    <section style="margin-top:40px;" id="replies-section">
+      <h2 style="font-size:1.3rem;margin-bottom:16px;">Questions &amp; Discussion</h2>
+      <div id="reply-form-container"></div>
+      <div id="replies-container"></div>
+    </section>
+  </main>
+
+  <footer style="text-align:center;padding:24px;color:#888;font-size:.85rem;border-top:1px solid #e0e0e0;">
+    &copy; 2026 Hetansh Technologie. All rights reserved. | <span id="site-version"></span>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/blog.js"></script>
+  <script src="../js/version.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await getCurrentUser();
+      const navAuth = document.getElementById('nav-auth');
+      if (user) {
+        navAuth.textContent = 'Logout';
+        navAuth.href = '#';
+        navAuth.addEventListener('click', async (e) => {
+          e.preventDefault();
+          await signOut();
+          window.location.reload();
+        });
+      } else {
+        navAuth.textContent = 'Login';
+        navAuth.href = 'login.html';
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const slug = urlParams.get('slug');
+      if (!slug) {
+        document.getElementById('article-container').innerHTML = '<div class="alert alert-error">No article specified.</div>';
+        return;
+      }
+
+      let article;
+      try {
+        article = await getArticleBySlug(slug);
+      } catch (err) {
+        document.getElementById('article-container').innerHTML = '<div class="alert alert-error">Article not found.</div>';
+        return;
+      }
+
+      const avatar = article.blog_profiles?.username?.[0]?.toUpperCase() || '?';
+      const isBlogAdmin = user && user.email === ADMIN_EMAIL;
+      document.getElementById('article-container').innerHTML = `
+        <div class="card" style="padding:32px;">
+          <div class="article-header">
+            <div class="card-meta">
+              <span class="topic-badge">${escapeHtml(article.blog_topics?.name || 'Uncategorized')}</span>
+              <span class="user-badge"><span class="avatar">${avatar}</span> ${escapeHtml(article.blog_profiles?.username || 'Anonymous')}</span>
+              <span>${new Date(article.created_at).toLocaleDateString()}</span>
+            </div>
+            <h1>${escapeHtml(article.title)}</h1>
+          </div>
+          <div class="article-content">${article.content}</div>
+          <div style="margin-top:20px;padding-top:16px;border-top:1px solid #e0e0e0;">
+            ${isBlogAdmin ? `
+            <a href="../admin/blog-edit-article.html?id=${article.id}" class="btn btn-primary btn-sm">Edit Article</a>
+            <button class="btn btn-danger btn-sm" id="delete-article-btn" style="margin-left:4px;">Delete Article</button>
+            ` : ''}
+            <a href="index.html" class="btn btn-secondary btn-sm">&larr; Back to Blog</a>
+            <a href="index.html?topic=${article.blog_topics?.slug || ''}" class="btn btn-secondary btn-sm" style="margin-left:4px;">More in ${escapeHtml(article.blog_topics?.name || '')}</a>
+          </div>
+        </div>
+      `;
+
+      const deleteArticleBtn = document.getElementById('delete-article-btn');
+      if (deleteArticleBtn) {
+        deleteArticleBtn.addEventListener('click', async function() {
+          if (!confirm(`Delete article "${article.title}"?\n\nThis cannot be undone.`)) return;
+          this.disabled = true;
+          this.textContent = 'Deleting...';
+          try {
+            await deleteArticle(article.id);
+            window.location.href = 'index.html';
+          } catch (err) {
+            alert('Failed to delete: ' + err.message);
+            this.disabled = false;
+            this.textContent = 'Delete Article';
+          }
+        });
+      }
+
+      // Reply form
+      const replyContainer = document.getElementById('reply-form-container');
+      if (user) {
+        replyContainer.innerHTML = `
+          <div class="card" style="margin-bottom:16px;">
+            <form id="main-reply-form">
+              <div class="form-group">
+                <label for="reply-content">Ask a question or leave a comment</label>
+                <textarea id="reply-content" placeholder="Write your question or comment..." required></textarea>
+              </div>
+              <button type="submit" class="btn btn-primary">Post Reply</button>
+            </form>
+          </div>
+        `;
+      } else {
+        replyContainer.innerHTML = `<p style="color:#888;font-size:.9rem;margin-bottom:16px;"><a href="login.html">Log in</a> to ask a question or leave a comment.</p>`;
+      }
+
+      // Load and render replies
+      async function loadReplies() {
+        try {
+          const replies = await getReplies(article.id);
+          const html = renderReplyTree(replies, article.id, user);
+          document.getElementById('replies-container').innerHTML = html || '<div class="empty-state" style="padding:30px;"><h3>No discussion yet</h3><p>Be the first to ask a question!</p></div>';
+
+          // Wire up reply toggle buttons
+          document.querySelectorAll('.reply-toggle').forEach(btn => {
+            btn.addEventListener('click', function() {
+              const form = this.closest('.reply').querySelector('.reply-form');
+              if (form) {
+                const isVisible = form.style.display !== 'none';
+                document.querySelectorAll('.reply-form').forEach(f => f.style.display = 'none');
+                form.style.display = isVisible ? 'none' : 'block';
+                if (!isVisible) form.querySelector('.reply-textarea')?.focus();
+              }
+            });
+          });
+
+          // Wire up reply submit buttons
+          document.querySelectorAll('.reply-submit').forEach(btn => {
+            btn.addEventListener('click', async function() {
+              const form = this.closest('.reply-form');
+              const textarea = form.querySelector('.reply-textarea');
+              const parentId = form.dataset.parent;
+              const content = textarea.value.trim();
+              if (!content) { alert('Please write something.'); return; }
+              this.disabled = true;
+              this.textContent = 'Posting...';
+              try {
+                await createReply(article.id, content, parentId);
+                textarea.value = '';
+                form.style.display = 'none';
+                await loadReplies();
+              } catch (err) {
+                alert(err.message);
+              }
+              this.disabled = false;
+              this.textContent = 'Reply';
+            });
+          });
+
+          // Wire up cancel buttons
+          document.querySelectorAll('.reply-cancel').forEach(btn => {
+            btn.addEventListener('click', function() {
+              const form = this.closest('.reply-form');
+              form.querySelector('.reply-textarea').value = '';
+              form.style.display = 'none';
+            });
+          });
+        } catch (err) {
+          document.getElementById('replies-container').innerHTML = `<div class="alert alert-error">Failed to load replies: ${err.message}</div>`;
+        }
+      }
+
+      await loadReplies();
+
+      // Main reply form submit
+      const mainForm = document.getElementById('main-reply-form');
+      if (mainForm) {
+        mainForm.addEventListener('submit', async function(e) {
+          e.preventDefault();
+          const textarea = document.getElementById('reply-content');
+          const content = textarea.value.trim();
+          if (!content) { alert('Please write something.'); return; }
+          const btn = this.querySelector('button[type="submit"]');
+          btn.disabled = true;
+          btn.textContent = 'Posting...';
+          try {
+            await createReply(article.id, content, null);
+            textarea.value = '';
+            await loadReplies();
+          } catch (err) {
+            alert(err.message);
+          }
+          btn.disabled = false;
+          btn.textContent = 'Post Reply';
+        });
+      }
+    });
+  </script>
+<script src="../js/analytics-tracker.js" defer></script>
+</body>
+</html>

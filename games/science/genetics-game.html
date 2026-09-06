@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Genetics - Punnett Squares</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.punnett{display:grid;grid-template-columns:80px repeat(2,1fr);grid-template-rows:60px repeat(2,80px);gap:2px;max-width:300px;margin:0 auto}
+.punnett-cell{background:#1e293b;border:1px solid #334155;display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:700;border-radius:4px}
+.punnett-header{background:#0f172a;border:1px solid #334155;display:flex;align-items:center;justify-content:center;font-size:1rem;color:#f59e0b;border-radius:4px}
+.punnett-corner{background:#0f172a;border:1px solid #334155;border-radius:4px}
+.card{background:#1e293b;border-radius:16px;padding:24px;max-width:500px;width:100%;text-align:center;border:2px solid #334155}
+.q-text{font-size:1rem;margin:12px 0;line-height:1.5}
+.scenario{font-size:2.5rem;margin:8px 0}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.opt{background:#0f172a;color:#e2e8f0;border:2px solid #475569;padding:12px;border-radius:10px;font-size:.9rem;cursor:pointer;transition:all .2s}
+.opt:hover{border-color:#38bdf8}
+.opt.correct{border-color:#22c55e;background:rgba(34,197,94,0.15)}
+.opt.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15)}
+.opt.disabled{pointer-events:none;opacity:.7}
+.fb{margin-top:12px;padding:10px;border-radius:8px;font-size:.9rem;min-height:2em}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+.emoji-trait{font-size:2rem;margin:4px}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🧬 Genetics — Punnett Squares</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/8</span>
+</div>
+<div id="punnett-area" style="margin:8px 0"></div>
+<div class="card">
+<div class="scenario" id="scenario">👨‍👩‍👧</div>
+<div class="q-text" id="qtext"></div>
+<div class="opts" id="opts"></div>
+<div class="fb" id="fb"></div>
+</div>
+<button class="btn" id="next-btn" style="display:none" onclick="nextQ()">Next ➡️</button>
+</div>
+<script>
+let score=0,level=1,qNum=0,answered=false;
+const questions=[
+  {parent1:'Tt',parent2:'Tt',trait:'Height (T=tall, t=short)',q:'What fraction of offspring can be tt (short)?',opts:['1/4','1/2','3/4','All'],ans:0,explain:'Tt × Tt gives 1/4 TT, 1/2 Tt, 1/4 tt. So 1/4 are short.'},
+  {parent1:'BB',parent2:'bb',trait:'Eye color (B=brown, b=blue)',q:'What is the genotype of ALL offspring?',opts:['BB','Bb','bb','1/2 Bb, 1/2 bb'],ans:1,explain:'BB × bb: each parent gives one allele → all Bb (heterozygous).'},
+  {parent1:'Rr',parent2:'rr',trait:'Flower color (R=red, r=white)',q:'What fraction of offspring show red flowers?',opts:['1/4','1/2','3/4','All'],ans:1,explain:'Rr × rr gives 1/2 Rr (red) and 1/2 rr (white).'},
+  {parent1:'Aa',parent2:'Aa',trait:'Fur color (A=black, a=white)',q:'What fraction of offspring are heterozygous?',opts:['1/4','1/2','3/4','All'],ans:1,explain:'Aa × Aa gives 1/4 AA, 1/2 Aa, 1/4 aa. Half are heterozygous.'},
+  {parent1:'TT',parent2:'tt',trait:'Stem height (T=tall, t=short)',q:'What is the phenotypic ratio of offspring?',opts:['3 tall : 1 short','All tall','1 tall : 1 short','2 tall : 1 short'],ans:1,explain:'TT × tt gives all Tt = all tall offspring.'},
+  {parent1:'Cc',parent2:'Cc',trait:'Coat color (C=black, c=white)',q:'What fraction of offspring can be white (cc)?',opts:['0','1/4','1/2','3/4'],ans:1,explain:'Cc × Cc gives 1/4 cc (white).'},
+  {parent1:'Gg',parent2:'gg',trait:'Pea shape (G=round, g=wrinkled)',q:'What phenotype ratio results?',opts:['All round','3:1','1:1 round:wrinkled','All wrinkled'],ans:2,explain:'Gg × gg gives 1/2 Gg (round) and 1/2 gg (wrinkled) = 1:1.'},
+  {parent1:'Dd',parent2:'Dd',trait:'Seed color (D=yellow, d=green)',q:'What is the probability of yellow offspring (D_)?',opts:['1/4','1/2','3/4','All'],ans:2,explain:'Dd × Dd gives 1/4 DD, 1/2 Dd (all yellow), 1/4 dd (green) = 3/4 yellow.'},
+  {parent1:'Ff',parent2:'FF',trait:'Feather type (F=smooth, f=frizzy)',q:'What fraction of offspring can be frizzy (ff)?',opts:['0','1/4','1/2','All'],ans:0,explain:'FF × Ff: all get at least one F → 0 ff offspring. No frizzy possible.'},
+  {parent1:'Ss',parent2:'Ss',trait:'Shell pattern (S=spotted, s=solid)',q:'What is the expected phenotypic ratio?',opts:['1:1','3 spotted : 1 solid','All spotted','2:1'],ans:1,explain:'Ss × Ss: 3/4 S_ (spotted) : 1/4 ss (solid) = 3:1 ratio.'},
+  {parent1:'Ww',parent2:'Ww',trait:'Wing size (W=long, w=short)',q:'Among offspring with long wings, what fraction are Ww?',opts:['1/3','2/3','1/2','All'],ans:1,explain:'Long wing offspring are WW, Ww, Ww. 2/3 of long-wing are Ww.'},
+  {parent1:'Pp',parent2:'pp',trait:'Plant height (P=tall, p=dwarf)',q:'What is the genotypic ratio?',opts:['All Pp','1:1 Pp:pp','3:1','All pp'],ans:1,explain:'Pp × pp gives 1/2 Pp, 1/2 pp.'},
+];
+let shuffled=[...questions].sort(()=>Math.random()-0.5);
+
+function buildPunnett(p1,p2){
+  let a1=p1[0],a2=p1[1],b1=p2[0],b2=p2[1];
+  let cells=[[a1+b1,a1+b2],[a2+b1,a2+b2]];
+  return {a1,a2,b1,b2,cells};
+}
+
+function showQ(){
+  if(qNum>=8){showResults();return}
+  answered=false;
+  document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';
+  document.getElementById('next-btn').style.display='none';
+  document.getElementById('qnum').textContent=qNum+1;
+  let q=shuffled[qNum];
+  let p=buildPunnett(q.parent1,q.parent2);
+  document.getElementById('scenario').innerHTML='<div class="emoji-trait">🧬 '+q.trait+'</div>';
+  document.getElementById('qtext').textContent='Cross: '+q.parent1+' × '+q.parent2+' — '+q.q;
+  // build punnett
+  let html='<div class="punnett">';
+  html+='<div class="punnett-corner"></div><div class="punnett-header">'+p.a1+'</div><div class="punnett-header">'+p.a2+'</div>';
+  html+='<div class="punnett-header">'+p.b1+'</div>';
+  p.cells[0].forEach(c=>html+='<div class="punnett-cell">'+c+'</div>');
+  html+='<div class="punnett-header">'+p.b2+'</div>';
+  p.cells[1].forEach(c=>html+='<div class="punnett-cell">'+c+'</div>');
+  html+='</div>';
+  document.getElementById('punnett-area').innerHTML=html;
+  const opts=document.getElementById('opts');opts.innerHTML='';
+  q.opts.forEach((o,i)=>{
+    const b=document.createElement('button');b.className='opt';b.textContent=o;
+    b.onclick=()=>check(i);opts.appendChild(b);
+  });
+}
+
+function check(i){
+  if(answered)return;answered=true;
+  let q=shuffled[qNum];
+  document.querySelectorAll('.opt').forEach((b,j)=>{if(j===q.ans)b.classList.add('correct');if(j===i&&i!==q.ans)b.classList.add('wrong')});
+  let fb=document.getElementById('fb');
+  if(i===q.ans){let pts=15+level*5;score+=pts;fb.innerHTML='✅ '+q.explain+' <b>+'+pts+' pts</b>';fb.style.background='rgba(34,197,94,0.15)'}
+  else{fb.innerHTML='❌ '+q.explain;fb.style.background='rgba(239,68,68,0.15)'}
+  document.getElementById('score').textContent=score;document.getElementById('next-btn').style.display='inline-block';
+}
+
+function nextQ(){qNum++;showQ()}
+function showResults(){
+  document.getElementById('punnett-area').innerHTML='';
+  document.getElementById('scenario').innerHTML='<div style="font-size:3rem">🏆</div>';
+  document.getElementById('qtext').innerHTML='Level '+level+' Complete! Score: '+score;
+  document.getElementById('opts').innerHTML='<button class="btn" onclick="nextLevel()">Next Level ⬆️</button> <button class="btn sec" onclick="restart()">↺ Restart</button>';
+  document.getElementById('fb').textContent='';document.getElementById('next-btn').style.display='none';
+}
+function nextLevel(){level++;qNum=0;shuffled=[...questions].sort(()=>Math.random()-0.5);document.getElementById('level').textContent=level;showQ()}
+function restart(){score=0;level=1;qNum=0;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;shuffled=[...questions].sort(()=>Math.random()-0.5);showQ()}
+showQ();
+</script>
+</body>
+</html>

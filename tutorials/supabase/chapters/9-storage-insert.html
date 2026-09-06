@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapter 9: Storage Insert and File Upload - Supabase Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+
+    <span class="tag">Chapter 9</span>
+    <h1>Storage: Insert and File Upload</h1>
+
+    <h2>Supabase Storage Overview</h2>
+    <p>Supabase Storage provides S3-compatible object storage backed by your Postgres database. Every file you upload is stored as an object in a storage bucket, with metadata tracked in the <code>storage.objects</code> table. Storage integrates directly with Supabase's built-in CDN, so files are served from edge locations worldwide. This means you get fast uploads and downloads without managing any additional infrastructure — just create a bucket, upload files, and retrieve them with public or signed URLs.</p>
+
+    <h2>Storage Buckets</h2>
+    <p>Buckets are the top-level containers for your files. You create them through the Supabase Dashboard or programmatically via the API. Each bucket has a visibility setting: <strong>public</strong> buckets allow anyone with the URL to read files, while <strong>private</strong> buckets require signed URLs or RLS policies for access. Choose public for assets like avatars and product images that should be visible to everyone. Use private for user-specific documents, receipts, or any file with access restrictions.</p>
+    <p>Bucket names must follow S3 conventions — lowercase alphanumeric characters and hyphens only, no underscores or spaces. A good naming pattern uses the purpose and environment: <code>avatars</code>, <code>product-images-prod</code>, <code>documents-dev</code>. Create a bucket through the dashboard by navigating to Storage &rarr; New Bucket, or use the API:</p>
+    <pre><code>const { data, error } = await supabase
+  .storage
+  .createBucket('avatars', { public: true });</code></pre>
+
+    <h2>File Upload</h2>
+    <p>Uploading a file uses the <code>upload</code> method on a storage bucket reference. The path is relative to the bucket root and should include a filename:</p>
+    <pre><code>const { data, error } = await supabase
+  .storage
+  .from('avatars')
+  .upload('user-123/profile.png', file, {
+    upsert: false,
+    contentType: 'image/png'
+  });</code></pre>
+    <p>The second argument is a <code>File</code>, <code>Blob</code>, or <code>ArrayBuffer</code>. The <code>upsert</code> option controls whether an existing file at the same path is overwritten — set it to <code>true</code> if you want to replace files. Always set the <code>contentType</code> explicitly; otherwise Supabase tries to infer it, which can result in incorrect MIME types and broken downloads.</p>
+    <p>To upload from a browser file input:</p>
+    <pre><code>&lt;input type="file" id="fileInput" accept="image/*" /&gt;
+
+&lt;script&gt;
+  const fileInput = document.getElementById('fileInput');
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const filePath = `${user.id}/${file.name}`;
+    const { data, error } = await supabase
+      .storage
+      .from('avatars')
+      .upload(filePath, file, { upsert: true });
+
+    if (error) {
+      console.error('Upload failed:', error.message);
+    } else {
+      console.log('Uploaded:', data.path);
+    }
+  });
+&lt;/script&gt;</code></pre>
+
+    <h2>Listing Files</h2>
+    <p>To list files in a folder within a bucket, use the <code>list</code> method. It returns an array of file objects with name, id, size, and metadata:</p>
+    <pre><code>const { data, error } = await supabase
+  .storage
+  .from('avatars')
+  .list('user-123', {
+    limit: 100,
+    offset: 0,
+    sortBy: { column: 'name', order: 'asc' }
+  });
+
+data.forEach(file => {
+  console.log(file.name, file.metadata.size);
+});</code></pre>
+    <p>The <code>list</code> method does not recurse into subfolders. Each "folder" is a logical prefix — objects in subpaths appear as separate entries.</p>
+
+    <h2>Public URLs vs Signed URLs</h2>
+    <p>For public buckets, use <code>getPublicUrl</code> to generate a URL anyone can use to view or download a file:</p>
+    <pre><code>const { data } = supabase
+  .storage
+  .from('avatars')
+  .getPublicUrl('user-123/profile.png');
+
+// data.publicUrl -> "https://&lt;project&gt;.supabase.co/storage/v1/object/public/avatars/user-123/profile.png"</code></pre>
+    <p>For private buckets or files that need time-limited access, use <code>createSignedUrl</code>. The URL expires after the specified number of seconds:</p>
+    <pre><code>const { data, error } = await supabase
+  .storage
+  .from('documents')
+  .createSignedUrl('receipt-2024.pdf', 60); // expires in 60 seconds
+
+// data.signedUrl -> temporary signed URL</code></pre>
+    <p>Signed URLs are perfect for serving private user documents like invoices, medical records, or any content that should not be publicly accessible. For public assets like profile pictures or blog images, stick with <code>getPublicUrl</code> — it requires no network request and works instantly.</p>
+
+    <h2>File Types and Size Limits</h2>
+    <p>Supabase accepts any file type, but the default maximum file size is <strong>5 GB</strong> per upload when using the S3 protocol directly. When uploading through the Supabase JavaScript client library, the effective limit depends on your network and the multipart upload configuration. For very large files, consider using the S3-compatible API with multipart upload chunks. Common web file types — images, PDFs, audio, video — all work without special configuration.</p>
+
+    <div class="note">
+      <strong>Note:</strong> The 5 GB file size limit applies to individual uploads. For larger files, use multipart upload through the S3 API or split the file before uploading. Also, the browser's own memory constraints may limit how large a file you can upload via <code>&lt;input type="file"&gt;</code> — for files over 100 MB, consider chunked uploads.
+    </div>
+
+    <h2>Image Optimization with Transformations</h2>
+    <p>Supabase Storage supports server-side image transformations. You can resize, crop, and convert images on the fly by adding query parameters to the public or signed URL:</p>
+    <pre><code>const { data } = supabase
+  .storage
+  .from('avatars')
+  .getPublicUrl('user-123/profile.png', {
+    transform: {
+      width: 200,
+      height: 200,
+      quality: 80,
+      format: 'webp'
+    }
+  });</code></pre>
+    <p>Supported parameters include <code>width</code>, <code>height</code>, <code>quality</code> (0–100), <code>resize</code> (cover, contain, fill), and <code>format</code> (origin, avif, webp, jpeg). Transformations happen on the CDN edge, so the original file stays untouched. Use this to serve thumbnails, responsive images, or to convert to modern formats like WebP for smaller file sizes and faster page loads. Combine transformations with signed URLs to deliver optimized private images securely.</p>
+
+    <h2>Common Pitfalls</h2>
+    <ul>
+      <li><strong>Bucket not public when expected.</strong> Double-check the bucket's public setting in the dashboard. A public URL will not work on a private bucket unless you use a signed URL.</li>
+      <li><strong>CORS issues.</strong> When uploading from a browser, ensure your Supabase project's CORS configuration includes your domain. Go to Project Settings &rarr; API &rarr; CORS and add your site origin.</li>
+      <li><strong>File size limits.</strong> The client-side upload has a default timeout. For larger files, increase the timeout or use the S3 multipart API.</li>
+      <li><strong>Incorrect content type.</strong> Always set <code>contentType</code> explicitly. An incorrect MIME type causes browsers to download files instead of displaying them.</li>
+      <li><strong>Path collisions.</strong> Without <code>upsert: true</code>, uploading to an existing path returns an error. Decide per use case whether to overwrite or version by appending a timestamp to the path.</li>
+    </ul>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Build a simple file upload page that lets users upload a profile picture and displays it. Create a public bucket called <code>avatars</code>, use a file input and Supabase JS SDK to upload the selected file, then retrieve and display it using <code>getPublicUrl</code> with a 150x150 transformation. Handle upload progress and error states in the UI.
+    </div>
+
+    <nav>
+      <a href="../index.html">Back to Index</a>
+      <a href="8-database-delete.html">&laquo; Previous: Database Delete</a>
+      <a href="10-storage-delete-rls.html">Next: Storage Delete and RLS &raquo;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gravity Simulator</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:16px}
+.stats{display:flex;gap:24px;font-size:1rem}
+.stats span{background:#1e293b;padding:8px 16px;border-radius:8px;border:1px solid #334155}
+.canvas-wrap{position:relative;border:2px solid #475569;border-radius:12px;overflow:hidden}
+canvas{display:block}
+.controls{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.secondary{background:#475569;color:#e2e8f0}
+.btn.secondary:hover{background:#64748b}
+.message{font-size:1.1rem;min-height:2em;text-align:center;padding:8px;background:#1e293b;border-radius:8px;max-width:600px}
+.hidden{display:none}
+.prediction-line{position:absolute;pointer-events:none}
+.level-info{color:#94a3b8;font-size:.9rem}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🌍 Gravity Simulator</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>🎯 Target: <b id="target-x">0</b>m</span>
+</div>
+<div class="canvas-wrap">
+<canvas id="gc" width="700" height="400"></canvas>
+</div>
+<div class="message" id="msg">Click on the canvas to launch an object! Get it as close to the target 🎯 as possible.</div>
+<div class="controls">
+<button class="btn" onclick="launch()">🚀 Launch</button>
+<button class="btn secondary" onclick="resetLevel()">↺ Reset</button>
+<button class="btn secondary" onclick="newChallenge()">⏭ Next</button>
+</div>
+<div class="level-info">Height adjusts per level. Gravity: 9.8 m/s² | Air resistance: Low</div>
+</div>
+<script>
+const c=document.getElementById('gc'),ctx=c.getContext('2d');
+let score=0,level=1,targetX=500,launchY=80,launchX=60;
+let objects=[],aiming=true,aimAngle=45,aimPower=50,dragging=false;
+let groundY=370,animFrame=null;
+
+function newChallenge(){
+  level++;
+  launchX=60+Math.random()*20;
+  launchY=60+Math.random()*80;
+  targetX=300+Math.random()*350;
+  objects=[];
+  aiming=true;
+  draw();
+  updateUI();
+  document.getElementById('msg').textContent='🎯 Launch your object! Adjust angle and power, then click Launch.';
+}
+
+function resetLevel(){
+  objects=[];
+  aiming=true;
+  draw();
+  document.getElementById('msg').textContent='↺ Reset! Click Launch to try again.';
+}
+
+function updateUI(){
+  document.getElementById('score').textContent=score;
+  document.getElementById('level').textContent=level;
+  document.getElementById('target-x').textContent=Math.round(targetX)+'m';
+}
+
+function draw(){
+  ctx.clearRect(0,0,c.width,c.height);
+  // sky gradient
+  let g=ctx.createLinearGradient(0,0,0,c.height);
+  g.addColorStop(0,'#0f172a');g.addColorStop(1,'#1e293b');
+  ctx.fillStyle=g;ctx.fillRect(0,0,c.width,c.height);
+  // ground
+  ctx.fillStyle='#334155';ctx.fillRect(0,groundY,c.width,c.height-groundY);
+  ctx.fillStyle='#475569';ctx.fillRect(0,groundY,c.width,3);
+  // stars
+  for(let i=0;i<20;i++){ctx.fillStyle='#e2e8f0';ctx.globalAlpha=0.3;ctx.fillRect(i*37+5,i*19%groundY+2,2,2)}
+  ctx.globalAlpha=1;
+  // target
+  ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(targetX,groundY-8,12,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font='16px sans-serif';ctx.fillText('🎯',targetX-10,groundY-1);
+  // launcher
+  ctx.fillStyle='#f59e0b';
+  ctx.save();ctx.translate(launchX,launchY);ctx.rotate(-aimAngle*Math.PI/180);
+  ctx.fillRect(0,-6,40,12);ctx.restore();
+  ctx.fillStyle='#64748b';ctx.beginPath();ctx.arc(launchX,launchY,14,0,Math.PI*2);ctx.fill();
+  // aim preview
+  if(aiming){
+    let rad=-aimAngle*Math.PI/180;
+    let vx=Math.cos(rad)*aimPower*0.4;
+    let vy=-Math.sin(rad)*aimPower*0.4;
+    ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.setLineDash([5,5]);ctx.beginPath();
+    ctx.moveTo(launchX,launchY);
+    let px=launchX,py=launchY;
+    for(let t=0;t<60;t++){
+      px+=vx;py+=vy;vy+=9.8*0.016;
+      if(py>groundY)break;
+      ctx.lineTo(px,py);
+    }
+    ctx.stroke();ctx.setLineDash([]);
+  }
+  // objects
+  objects.forEach(o=>{
+    ctx.fillStyle=o.color;
+    ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='14px sans-serif';
+    ctx.fillText(o.emoji,o.x-7,o.y+5);
+  });
+  // power/angle display
+  ctx.fillStyle='#e2e8f0';ctx.font='bold 14px monospace';
+  ctx.fillText('Angle: '+aimAngle+'°  Power: '+aimPower,10,25);
+  // height label
+  ctx.fillStyle='#94a3b8';ctx.font='12px sans-serif';
+  ctx.fillText('⬆ Height: '+Math.round((groundY-launchY)*0.5)+'m',launchX+20,launchY-10);
+}
+
+function launch(){
+  if(!aiming)return;
+  aiming=false;
+  let rad=-aimAngle*Math.PI/180;
+  let vx=Math.cos(rad)*aimPower*0.4;
+  let vy=-Math.sin(rad)*aimPower*0.4;
+  let h=(groundY-launchY)*0.5;
+  objects.push({x:launchX,y:launchY,vx,vy,r:8,color:'#38bdf8',emoji:'🪨',landed:false,landX:0});
+  animFrame=requestAnimationFrame(animate);
+}
+
+function animate(){
+  let allLanded=true;
+  objects.forEach(o=>{
+    if(o.landed)return;
+    o.x+=o.vx;o.y+=o.vy;o.vy+=9.8*0.016;
+    o.vx*=0.999;
+    if(o.y>=groundY){
+      o.y=groundY;o.landed=true;o.landX=o.x;
+      let dist=Math.abs(o.x-targetX);
+      let pts=Math.max(0,Math.round(100-dist*0.3));
+      score+=pts;
+      document.getElementById('msg').innerHTML=
+        dist<20?'🎉 Perfect! +'+pts+' pts (off by '+Math.round(dist)+'m)!':
+        dist<60?'👍 Good! +'+pts+' pts (off by '+Math.round(dist)+'m)':
+        '😅 Missed! +'+pts+' pts (off by '+Math.round(dist)+'m). Try again!';
+      updateUI();
+    }else{allLanded=false;}
+  });
+  draw();
+  if(!allLanded)animFrame=requestAnimationFrame(animate);
+}
+
+c.addEventListener('mousemove',e=>{
+  if(!aiming)return;
+  let rect=c.getBoundingClientRect();
+  let mx=(e.clientX-rect.left)*(c.width/rect.width);
+  let my=(e.clientY-rect.top)*(c.height/rect.height);
+  let dx=mx-launchX,dy=launchY-my;
+  if(dy<0)dy=0;
+  aimAngle=Math.round(Math.max(5,Math.min(85,Math.atan2(dy,dx)*180/Math.PI)));
+  let dist=Math.sqrt(dx*dx+dy*dy);
+  aimPower=Math.round(Math.max(10,Math.min(100,dist*0.5)));
+  draw();
+});
+
+draw();updateUI();
+</script>
+</body>
+</html>

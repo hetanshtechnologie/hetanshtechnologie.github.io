@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 24: Decision Trees | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 24</span>
+    <h1>Decision Trees</h1>
+
+    <p>Every model we have seen so far — linear regression, logistic regression, support vector machines — draws a smooth mathematical boundary. Decision trees take a completely different route: instead of fitting an equation, they ask a sequence of yes/no questions until the answers lead to a decision. A tree is the machine-learning cousin of a flowchart, and because every question is human-readable, trees are among the easiest models to explain to a non-technical colleague.</p>
+
+    <h2>Introduction to Decision Trees</h2>
+    <p>A decision tree is built from three kinds of components: a <strong>root node</strong> at the top, <strong>internal nodes</strong> in the middle, and <strong>leaf nodes</strong> at the bottom. Every node except the root has one parent, and every internal node asks a single question about one feature.</p>
+    <ul>
+        <li><strong>Root node:</strong> the first question, chosen because it separates the data best.</li>
+        <li><strong>Internal nodes:</strong> follow-up questions along each path.</li>
+        <li><strong>Leaf nodes:</strong> hold a prediction — a class label for classification or a constant number for regression.</li>
+    </ul>
+    <p>Imagine predicting whether a shopper will buy a product. The root might ask "is annual income above 50,000?", a child node might ask "has this user visited the site this month?", and the leaves output "will buy" or "will not buy". To predict for a new person you simply walk down the tree, answering each question with their feature values. Because each question examines only one feature at a time, trees make no assumption that the data is linearly separable — a single tree can carve the feature space into rectangles using only horizontal and vertical boundaries.</p>
+
+    <h2>Entropy and Gini Impurity</h2>
+    <p>To pick a good question, the tree needs a way to measure how mixed a group of labels is. That measure is called <strong>impurity</strong>, and the two most common impurity functions are entropy and the Gini index.</p>
+    <p>Entropy, borrowed from information theory, measures the average amount of surprise in a set. For classes with probabilities <code>p1, p2, ..., pk</code>, entropy is:</p>
+    <pre><code>H = -sum( pi * log2(pi) )   for each class i</code></pre>
+    <p>If all samples belong to one class, one <code>pi</code> equals 1 and its log is 0, so H = 0 — the node is perfectly pure. If two classes are split 50/50, then H = -(0.5 * -1 + 0.5 * -1) = 1 — maximum uncertainty. Entropy is measured in bits and always lands between 0 and <code>log2(number of classes)</code>.</p>
+    <p>Gini impurity asks a simpler question: what is the probability that two items drawn at random from the node belong to different classes?</p>
+    <pre><code>G = 1 - sum( pi^2 )   for each class i</code></pre>
+    <p>A pure node has G = 0. A 50/50 two-class node has G = 0.5. Both functions are at their minimum when the node is pure and grow as the labels become more evenly spread.</p>
+
+    <h2>Information Gain</h2>
+    <p>Information gain measures how much a split reduces impurity. The tree picks the question that offers the largest drop, because a big drop means the children are much cleaner than the parent. For a classification tree built on entropy:</p>
+    <pre><code>IG = H(parent) - sum( (n_child / n_parent) * H(child) )</code></pre>
+    <p>Work through a concrete example:</p>
+    <ul>
+        <li>The parent has 100 samples, 50 of each class, so H(parent) = 1.</li>
+        <li>A candidate split yields two children, each with 50 samples and each holding 40 of one class and 10 of the other.</li>
+        <li>Each child has H = -(0.8 * log2(0.8) + 0.2 * log2(0.2)) &#8776; 0.722.</li>
+        <li>The weighted child entropy is (50/100)*0.722 + (50/100)*0.722 = 0.722.</li>
+        <li>So IG = 1 - 0.722 = 0.278. The larger the gain, the better the question.</li>
+    </ul>
+    <p>The algorithm computes the information gain of every candidate question and greedily picks the winner, then repeats the process inside each child until a stopping rule fires.</p>
+
+    <h2>Entropy vs Gini Impurity</h2>
+    <ul>
+        <li><strong>Speed:</strong> Gini involves only squares, while entropy requires logarithms, so Gini is cheaper to compute on large datasets.</li>
+        <li><strong>Similar results:</strong> in practice the two usually build near-identical trees, though the exact boundaries can differ.</li>
+        <li><strong>sklearn defaults:</strong> <code>DecisionTreeClassifier</code> uses <code>gini</code> by default; pass <code>criterion="entropy"</code> to switch.</li>
+        <li><strong>Behavior:</strong> Gini tends to isolate the largest class fastest, while entropy behaves a little more evenly when many small classes are present.</li>
+    </ul>
+    <div class="note">
+        <strong>Rule of thumb:</strong> start with Gini because it is cheap and usually works well. Try entropy only when you want to compare — the difference is rarely what decides a project.
+    </div>
+
+    <h2>Decision Tree Splits for Numerical Features</h2>
+    <p>A continuous feature has infinitely many possible split points, so the tree needs a practical strategy:</p>
+    <ol>
+        <li>Sort the unique values of the feature.</li>
+        <li>Consider each midpoint between consecutive values as a candidate threshold.</li>
+        <li>Compute the impurity drop for every candidate and keep the threshold with the highest gain.</li>
+    </ol>
+    <p>For an age column holding [18, 25, 34, 41, 55], the candidates are the midpoints 21.5, 29.5, 37.5 and 48. The tree evaluates all of them and picks the best. Because thresholds are chosen greedily, a deep tree on one numerical feature behaves like a staircase function made of many parallel cuts.</p>
+
+    <h2>Post-Pruning and Pre-Pruning</h2>
+    <p>Trees are eager learners: give them enough depth and they will memorize the training set, noise included. That is overfitting, and two families of remedies exist.</p>
+    <p><strong>Pre-pruning</strong> stops the tree from growing too large in the first place:</p>
+    <ul>
+        <li><code>max_depth</code>: limit the number of levels.</li>
+        <li><code>min_samples_split</code>: require at least this many samples before a node may split.</li>
+        <li><code>min_samples_leaf</code>: every leaf must hold at least this many samples.</li>
+        <li><code>max_features</code>: consider only a random subset of features at each split.</li>
+    </ul>
+    <p><strong>Post-pruning</strong> lets the tree grow fully and then cuts branches back. The common approach is cost-complexity pruning, where each branch pays a penalty proportional to the leaves it adds; branches that do not improve validation performance enough are removed. In scikit-learn you can read the candidate alphas with <code>cost_complexity_pruning_path</code>, then train a tree for each alpha and keep the one with the best test score.</p>
+
+    <h2>Decision Tree Regression</h2>
+    <p>Regression trees predict a number rather than a class. A leaf's prediction is simply the mean of the target values inside that region, and the impurity measure is replaced by variance or mean squared error. Information gain becomes <strong>variance reduction</strong>:</p>
+    <pre><code>VR = Var(parent) - sum( (n_child / n_parent) * Var(child) )</code></pre>
+    <p>The tree keeps choosing the split that most reduces the variance of the target in its children. The result is a piecewise-constant function — a staircase — which is why deep regression trees look jagged and shallow ones look smooth.</p>
+
+    <h2>Decision Tree Implementation</h2>
+    <p>Implementing a tree in scikit-learn takes a few lines:</p>
+    <pre><code>from sklearn.tree import DecisionTreeClassifier
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+
+iris = load_iris()
+X, y = iris.data, iris.target
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+
+clf = DecisionTreeClassifier(random_state=42)
+clf.fit(X_train, y_train)
+print(clf.score(X_test, y_test))</code></pre>
+    <p>Visualize the learned rules with <code>sklearn.tree.plot_tree</code>, or print them as text with <code>export_text</code>. A rule looks like "petal width &lt;= 0.8 &#8594; class 0", which you can read as a plain sentence.</p>
+
+    <h2>Decision Tree Pre-Pruning in Practice</h2>
+    <p>Pre-pruning is where you steer the bias-variance trade-off. A tree with no limits memorizes the training data; a tree with <code>max_depth=1</code> (a single stump) is barely better than guessing on some problems. A quick experiment:</p>
+    <pre><code>from sklearn.tree import DecisionTreeRegressor
+
+for depth in [1, 3, 5, None]:
+    tree = DecisionTreeRegressor(max_depth=depth, random_state=42)
+    tree.fit(X_train, y_train)
+    print(depth, round(tree.score(X_train, y_train), 3),
+          round(tree.score(X_test, y_test), 3))</code></pre>
+    <p>Typical output shows the training score climbing as depth grows while the test score peaks somewhere in the middle — that peak is your sweet spot. Use <code>GridSearchCV</code> over <code>max_depth</code>, <code>min_samples_leaf</code> and <code>min_samples_split</code> to find it systematically.</p>
+
+    <h2>Diabetes Prediction Using a Decision Tree Regressor</h2>
+    <p>We finish with a small project. The <code>diabetes</code> dataset bundled with scikit-learn contains ten medical measurements per patient and a target that is a quantitative measure of disease progression one year after baseline.</p>
+    <ol>
+        <li><strong>Problem statement:</strong> given ten baseline measurements (age, BMI, blood pressure, and several blood serum readings), predict the progression score.</li>
+        <li><strong>Load and split:</strong> separate the features from the target and make a train/test split.</li>
+        <li><strong>Train:</strong> fit a regression tree, pre-pruned to keep it honest.</li>
+        <li><strong>Evaluate:</strong> compare R-squared and mean absolute error on both splits.</li>
+    </ol>
+    <pre><code>from sklearn.datasets import load_diabetes
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error
+
+data = load_diabetes()
+X, y = data.data, data.target
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+tree = DecisionTreeRegressor(max_depth=4, min_samples_leaf=5, random_state=42)
+tree.fit(X_train, y_train)
+
+y_pred = tree.predict(X_test)
+print("R2 on train:", round(tree.score(X_train, y_train), 3))
+print("R2 on test :", round(tree.score(X_test, y_test), 3))
+print("MAE        :", round(mean_absolute_error(y_test, y_pred), 2))</code></pre>
+    <div class="info">
+        <strong>What to look for:</strong> the single tree's test R-squared will be modest. Trees are excellent explainers, but a lone tree rarely wins accuracy contests — that is exactly the motivation for the next chapter, where we combine many trees into random forests and boosting ensembles.
+    </div>
+
+    <div class="exercise">
+        <strong>Practice:</strong> using the same diabetes dataset, compare three regression trees — one fully grown, one pre-pruned with <code>max_depth=3</code>, and one post-pruned with cost-complexity pruning. Report the train and test MAE of each and explain which generalizes best. Extra credit: use <code>export_text</code> to print the rules of the best tree and describe, in plain English, what its first two splits mean.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="23-naive-bayes-knn.html">Prev: Naive Bayes &amp; K-Nearest Neighbors</a>
+        <a href="25-ensembles.html">Next: Ensemble Methods: Bagging &amp; Boosting</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

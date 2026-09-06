@@ -1,0 +1,150 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>17. Lab - Controlling Model Behaviour - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 17</span>
+<h1>Lab - Controlling Model Behaviour</h1>
+<p>In this lab you will take the theory from the previous chapter and apply it to a real deployment. You will run four short experiments that change the system prompt, the temperature, the token limit, and the output format, and observe how each lever changes what the model returns.</p>
+
+<h2>What You Need</h2>
+<ul>
+<li>The working <code>chat.py</code> script from the first API lab.</li>
+<li>Your endpoint and key set as environment variables.</li>
+<li>A deployed chat model, such as <code>gpt-4o-mini</code>.</li>
+</ul>
+
+<div class="exercise">
+<h3>Experiment 1 - The system prompt changes the role</h3>
+<p>Create <code>roleplay.py</code> with the following code. Run it twice, once with each system prompt by editing the file between runs:</p>
+<pre><code>from openai import AzureOpenAI
+import os
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+prompt = "You are a pirate. Answer every question in pirate style."
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": "How do I cook pasta?"},
+    ],
+)
+print(response.choices[0].message.content)
+</code></pre>
+<p>Now change <code>prompt</code> to <code>"You are a professional nutritionist. Answer briefly with exact measurements."</code> and run again. Notice how the same question produces completely different answers.</p>
+</div>
+
+<div class="exercise">
+<h3>Experiment 2 - Temperature controls variability</h3>
+<p>Create <code>temperature.py</code>. This script asks the model to invent a tagline ten times and shows the difference between a low and a high temperature:</p>
+<pre><code>from openai import AzureOpenAI
+import os
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+def taglines(temp):
+    print(f"--- temperature = {temp} ---")
+    for _ in range(5):
+        response = client.chat.completions.create(
+            model="YOUR_DEPLOYMENT_NAME",
+            temperature=temp,
+            messages=[
+                {"role": "user", "content": "Invent a short tagline for a coffee shop."}
+            ],
+        )
+        print(response.choices[0].message.content)
+
+taglines(0.0)
+taglines(1.0)
+</code></pre>
+<p>At <code>temperature = 0.0</code> the five answers are nearly identical. At <code>1.0</code> they vary noticeably. This is the same model — only the sampling changed.</p>
+</div>
+
+<div class="exercise">
+<h3>Experiment 3 - max_tokens caps the answer</h3>
+<p>Create <code>tokenlimit.py</code> and set <code>max_tokens</code> to a very small number:</p>
+<pre><code>response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    max_tokens=15,
+    messages=[
+        {"role": "user", "content": "Explain quantum computing in detail."}
+    ],
+)
+print(response.choices[0].message.content)
+print("Stopped because:", response.choices[0].finish_reason)
+</code></pre>
+<p>You will see a truncated answer, and <code>finish_reason</code> will be <code>length</code> instead of <code>stop</code>. This is how you detect that the model hit the cap.</p>
+</div>
+
+<div class="exercise">
+<h3>Experiment 4 - Forced JSON output</h3>
+<p>Create <code>json_output.py</code>. This request forces the model to reply in JSON and then parses the result:</p>
+<pre><code>from openai import AzureOpenAI
+import os, json
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    response_format={"type": "json_object"},
+    messages=[
+        {"role": "system", "content": "Return a JSON object with keys: city and population."},
+        {"role": "user", "content": "Tell me about Cairo."},
+    ],
+)
+
+data = json.loads(response.choices[0].message.content)
+print("City:", data["city"])
+print("Population:", data["population"])
+</code></pre>
+</div>
+
+<h2>Reading the Results</h2>
+<p>After the four experiments, write down what each parameter did:</p>
+<table>
+<tr><th>Experiment</th><th>What changed</th><th>Takeaway</th></tr>
+<tr><td>System prompt</td><td>Identity and style</td><td>The prompt is the main behavioural lever.</td></tr>
+<tr><td>Temperature</td><td>Variability of answers</td><td>Low for facts, high for creativity.</td></tr>
+<tr><td>max_tokens</td><td>Answer length</td><td>Watch <code>finish_reason</code> for truncation.</td></tr>
+<tr><td>response_format</td><td>Output structure</td><td>JSON output parses cleanly in code.</td></tr>
+</table>
+
+<div class="tip">
+<p>Keep these four scripts. They will be the base you copy from for the rest of the course, since every later lab reuses the same client setup.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You have now seen the four core behaviour controls in action: the system prompt, temperature, max_tokens, and structured output. Each one changes the model's response in a predictable way, and together they let you shape one deployment into many different assistants.</p>
+<nav>
+<a href="16-controlling-model-behaviour.html">&larr; Previous: Controlling Model Behaviour</a><a href="18-reasoning-effort-thinking-before-answering.html">Next: Reasoning Effort Thinking Before Answering &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

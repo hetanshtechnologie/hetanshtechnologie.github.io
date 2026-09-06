@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>15. Feature Engineering &amp; Model Deployment - Data Science Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>15. Feature Engineering &amp; Model Deployment</h1>
+<p class="tag">Chapter 15</p>
+
+<h2>Features Decide Performance</h2>
+<p>Better features usually beat better algorithms. <strong>Feature engineering</strong> is creating columns that make the pattern easier for the model to see: dates → weekday/holiday, IDs → counts/frequencies, free text → sentiment, raw numbers → ratios and interactions.</p>
+
+<h2>A Feature Engineering Toolkit</h2>
+<pre><code># Dates -> calendar features
+df["weekday"]  = df["date"].dt.dayofweek
+df["hour"]     = df["date"].dt.hour
+df["is_weekend"] = df["weekday"] >= 5
+df["month"]    = df["date"].dt.month
+
+# Counts from IDs (frequency encoding)
+df["city_freq"] = df["city"].map(df["city"].value_counts())
+
+# Ratios & interactions
+df["spend_per_ticket"] = df["spend"] / (df["support_tickets"] + 1)
+df["spend_per_month"]  = df["spend"] / (df["tenure"] + 1)
+
+# Aggregates (rolling features for time series)
+df["spend_7d_avg"] = df.groupby("customer_id")["spend"].transform(lambda s: s.rolling(7).mean())
+</code></pre>
+
+<div class="warn">
+<strong>Target leakage in features:</strong> never create a feature from information that wouldn't be available at prediction time — e.g., "spend_next_month" as a feature, or a rolling average computed over the future. Leaky features make great offline scores and broken production systems.
+</div>
+
+<h2>sklearn Pipelines &amp; ColumnTransformer</h2>
+<p>Combine preprocessing and modeling into one artifact that cannot leak:</p>
+<pre><code>from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.ensemble import RandomForestRegressor
+
+num_cols = ["age", "spend", "support_tickets"]
+cat_cols = ["city", "plan"]
+
+pre = ColumnTransformer([
+    ("num", Pipeline([
+        ("impute", SimpleImputer(strategy="median")),
+        ("scale", StandardScaler())
+    ]), num_cols),
+    ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols)
+])
+
+model = Pipeline([
+    ("pre", pre),
+    ("rf", RandomForestRegressor(n_estimators=300, random_state=42))
+])
+model.fit(X_train, y_train)
+</code></pre>
+<p>This whole object can be saved with <code>joblib</code> and reused in production unchanged:</p>
+<pre><code>import joblib
+joblib.dump(model, "model/spend_model.joblib")
+# later / elsewhere:
+loaded = joblib.load("model/spend_model.joblib")
+prediction = loaded.predict(new_data)
+</code></pre>
+
+<h2>Feature Stores</h2>
+<p>In a real product, the same features are needed for <strong>training</strong> and for <strong>live scoring</strong>. A <strong>feature store</strong> (Feast, Databricks Feature Store, BigQuery ML features) is the shared catalog that serves both, so online and offline features never drift apart.</p>
+<table>
+<tr><th>Problem</th><th>Feature store answer</th></tr>
+<tr><td>Same feature computed differently in train vs serve</td><td>One definition, served everywhere</td></tr>
+<tr><td>Stale features in production</td><td>Online/offline consistency checks</td></tr>
+<tr><td>Teams re-inventing the same features</td><td>Shared, documented catalog with owners</td></tr>
+</table>
+
+<h2>Model Serving Options</h2>
+<table>
+<tr><th>Approach</th><th>Use for</th><th>Example</th></tr>
+<tr><td>Batch scoring</td><td>Scores computed nightly/on schedule</td><td>Cron job → warehouse table</td></tr>
+<tr><td>REST API</td><td>Real-time predictions behind an app</td><td>FastAPI + joblib model</td></tr>
+<tr><td>Serverless function</td><td>Event-driven, low traffic</td><td>Cloud Function / Lambda</td></tr>
+<tr><td>Managed serving</td><td>Scaling, monitoring, auto-ML ops</td><td>Vertex AI, SageMaker, Azure ML</td></tr>
+</table>
+
+<pre><code># A minimal real-time serving API (FastAPI)
+# pip install fastapi uvicorn joblib
+from fastapi import FastAPI
+from pydantic import BaseModel
+import joblib, pandas as pd
+
+app = FastAPI()
+model = joblib.load("model/spend_model.joblib")
+
+class Input(BaseModel):
+    age: float
+    spend: float
+    support_tickets: float
+    city: str
+    plan: str
+
+@app.post("/predict")
+def predict(x: Input):
+    row = pd.DataFrame([x.model_dump()])
+    return {"predicted_spend": float(model.predict(row)[0])}
+</code></pre>
+
+<h2>Monitoring in Production</h2>
+<p>Deploying is the beginning, not the end. Monitor:</p>
+<ul>
+<li><strong>Data drift</strong> — the input distribution changes over time (compare live inputs to training data).</li>
+<li><strong>Concept drift</strong> — the relationship you learned stops holding (retrain schedules, performance probes).</li>
+<li><strong>Performance</strong> — when ground truth arrives late, track it over time.</li>
+<li><strong>Operational health</strong> — latency, error rates, and staleness of features.</li>
+</ul>
+<p>Tools: <strong>Evidently</strong> (data drift), <strong>Prometheus/Grafana</strong> (operations), simple dashboards over logged predictions.</p>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Take your best model from Chapter 11, wrap its preprocessing + model in a single <code>Pipeline</code> with a <code>ColumnTransformer</code>, save it with <code>joblib</code>, and expose it through a minimal FastAPI endpoint. Test it with sample JSON. Then write a short monitoring plan: which columns would you watch for drift and how would you know the model needs retraining?
+</div>
+
+<nav>
+  <span></span>
+  <a href="../index.html">Back to Index</a>
+  <a href="16-big-data-cloud.html">Next: Data Science at Scale &amp; in the Cloud &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

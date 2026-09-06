@@ -1,0 +1,148 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Card Match</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+  body { background: #1e1b4b; }
+  .card {
+    width: 80px; height: 80px;
+    perspective: 600px; cursor: pointer;
+  }
+  .card-inner {
+    width: 100%; height: 100%;
+    position: relative;
+    transform-style: preserve-3d;
+    transition: transform 0.4s;
+  }
+  .card.flipped .card-inner { transform: rotateY(180deg); }
+  .card-face {
+    position: absolute; width: 100%; height: 100%;
+    backface-visibility: hidden;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 10px; font-size: 2rem;
+  }
+  .card-front {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: white; font-size: 1.5rem;
+  }
+  .card-back {
+    background: white;
+    transform: rotateY(180deg);
+  }
+  .card.matched .card-inner { transform: rotateY(180deg); }
+  .card.matched .card-back { background: #d1fae5; }
+</style>
+</head>
+<body class="min-h-screen text-white font-sans">
+<div class="max-w-md mx-auto p-4">
+  <a href="index.html" class="text-gray-400 hover:text-white transition">&larr; Back to Games</a>
+  <h1 class="text-2xl font-bold text-center text-purple-400 mt-2 mb-3">Memory Match</h1>
+  <div class="flex justify-center gap-6 mb-3">
+    <div>Moves: <span id="moves" class="font-bold text-yellow-300">0</span></div>
+    <div>Time: <span id="timer" class="font-bold text-green-400">0</span>s</div>
+    <div>Pairs: <span id="pairs" class="font-bold text-pink-400">0</span>/8</div>
+  </div>
+  <div id="grid" class="grid grid-cols-4 gap-2 justify-items-center mb-4"></div>
+  <div id="message" class="text-center text-lg mb-3 hidden"></div>
+  <div class="flex justify-center">
+    <button id="restartBtn" class="bg-purple-500 hover:bg-purple-600 px-6 py-2 rounded-lg font-bold transition">Restart</button>
+  </div>
+</div>
+<script>
+const emojis = ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼'];
+let cards, flipped, matched, moves, timerVal, timerInterval, locked;
+
+function init() {
+  clearInterval(timerInterval);
+  const pairs = [...emojis, ...emojis];
+  cards = shuffle(pairs).map((e, i) => ({emoji: e, index: i, flipped: false, matched: false}));
+  flipped = []; matched = 0; moves = 0; timerVal = 0; locked = false;
+  document.getElementById('moves').textContent = 0;
+  document.getElementById('timer').textContent = 0;
+  document.getElementById('pairs').textContent = 0;
+  document.getElementById('message').classList.add('hidden');
+  timerInterval = null;
+  render();
+}
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function render() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  cards.forEach((c, i) => {
+    const card = document.createElement('div');
+    card.className = 'card' + (c.flipped || c.matched ? ' flipped' : '') + (c.matched ? ' matched' : '');
+    card.innerHTML = `<div class="card-inner"><div class="card-face card-front">?</div><div class="card-face card-back">${c.emoji}</div></div>`;
+    card.addEventListener('click', () => flipCard(i));
+    grid.appendChild(card);
+  });
+}
+
+function flipCard(i) {
+  if (locked || cards[i].flipped || cards[i].matched) return;
+  if (!timerInterval) {
+    timerInterval = setInterval(() => {
+      timerVal++;
+      document.getElementById('timer').textContent = timerVal;
+    }, 1000);
+  }
+  cards[i].flipped = true;
+  flipped.push(i);
+  render();
+  if (flipped.length === 2) {
+    moves++;
+    document.getElementById('moves').textContent = moves;
+    locked = true;
+    const [a, b] = flipped;
+    if (cards[a].emoji === cards[b].emoji) {
+      cards[a].matched = cards[b].matched = true;
+      matched++;
+      document.getElementById('pairs').textContent = matched;
+      flipped = []; locked = false;
+      render();
+      if (matched === 8) {
+        clearInterval(timerInterval);
+        document.getElementById('message').textContent = `You won in ${moves} moves and ${timerVal} seconds!`;
+        document.getElementById('message').classList.remove('hidden');
+      }
+    } else {
+      setTimeout(() => {
+        cards[a].flipped = cards[b].flipped = false;
+        flipped = []; locked = false;
+        render();
+      }, 800);
+    }
+  }
+}
+
+document.getElementById('restartBtn').addEventListener('click', init);
+init();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

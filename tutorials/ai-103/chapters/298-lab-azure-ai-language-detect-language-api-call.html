@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>298. Lab - Azure AI Language - Detect Language - API Call - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 298</span>
+<h1>Lab - Azure AI Language - Detect Language - API Call</h1>
+<p>Language Studio is a friendly front end, but your applications will call the service directly. In this lab you will make a raw REST API call for language detection using <code>curl</code>, inspect the JSON response, and learn to diagnose the common failure modes. This is the same request the browser made on your behalf in the first lab of this section — now you send it yourself.</p>
+
+<h2>What You Need</h2>
+<ul>
+<li>The endpoint and key from your Azure AI Language resource (previous chapter).</li>
+<li>A terminal with <code>curl</code> available. On Windows, use <code>curl.exe</code> from Command Prompt or PowerShell.</li>
+</ul>
+
+<h2>The Language Detection Endpoint</h2>
+<p>Language detection uses the following path on the text analytics API:</p>
+<pre><code>POST https://YOUR_ENDPOINT.cognitiveservices.azure.com/text/analytics/v3.1/languages</code></pre>
+<p>Two details matter in that URL:</p>
+<ul>
+<li><code>YOUR_ENDPOINT</code> is the base URL of your resource, for example <code>https://lang-ai103-demo.cognitiveservices.azure.com</code>. Note there is no trailing slash.</li>
+<li><code>v3.1</code> is the API version in the path. Azure pins the behavior of each released version, so applications stay stable even as the service evolves.</li>
+</ul>
+<p>Every request must carry two things: your key in the <code>Ocp-Apim-Subscription-Key</code> header, and a JSON body with a <code>documents</code> array.</p>
+
+<h2>Your First Request</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Detect the language of one sentence</h3>
+<p>From your terminal, run the following request. Replace <code>YOUR_ENDPOINT</code> and <code>YOUR_KEY</code> with the values from your resource:</p>
+<pre><code>curl -X POST "https://YOUR_ENDPOINT.cognitiveservices.azure.com/text/analytics/v3.1/languages" \
+  -H "Ocp-Apim-Subscription-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"documents\": [{\"id\": \"1\", \"text\": \"El servicio de atención al cliente fue excelente.\"}]}"</code></pre>
+<p>You should see a JSON response similar to this:</p>
+<pre><code>{
+  "documents": [
+    {
+      "id": "1",
+      "detectedLanguage": {
+        "name": "Spanish",
+        "iso6391Name": "es",
+        "confidenceScore": 1.0
+      },
+      "warnings": []
+    }
+  ],
+  "errors": []
+}</code></pre>
+<ol>
+<li>Confirm the <code>iso6391Name</code> is <code>es</code> and the confidence is <code>1.0</code>.</li>
+<li>Change the <code>text</code> to an English sentence and run again. The code should switch to <code>en</code>.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>The <code>-d</code> flag in curl sends a request body, and <code>-X POST</code> sets the HTTP method. The escaped quotes inside <code>\"</code> are the JSON quotes. When you write this in Python with the <code>requests</code> library, the JSON handling is much cleaner — that is one reason applications prefer SDKs.</p>
+</div>
+
+<h2>Send a Batch of Documents</h2>
+<p>The same endpoint accepts up to ten documents per request. Each document must have a unique <code>id</code>; the service returns results in the same order.</p>
+
+<div class="exercise">
+<h3>Exercise 2: Detect languages for five documents</h3>
+<p>Save the following body to a file named <code>batch.json</code>:</p>
+<pre><code>{
+  "documents": [
+    {"id": "1", "text": "The invoice was sent by email this morning."},
+    {"id": "2", "text": "Die Lieferung erfolgt morgen per Kurier."},
+    {"id": "3", "text": "La réunion commence à dix heures."},
+    {"id": "4", "text": "Prazo de entrega é de cinco dias úteis."},
+    {"id": "5", "text": "Tilauksesi on valmis noudettavaksi."}
+  ]
+}</code></pre>
+<p>Then send it with curl using the <code>@filename</code> syntax:</p>
+<pre><code>curl -X POST "https://YOUR_ENDPOINT.cognitiveservices.azure.com/text/analytics/v3.1/languages" \
+  -H "Ocp-Apim-Subscription-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d @batch.json</code></pre>
+<ol>
+<li>Read the response. Document 1 is English (<code>en</code>), 2 is German (<code>de</code>), 3 is French (<code>fr</code>), 4 is Portuguese (<code>pt</code>), and 5 is Finnish (<code>fi</code>).</li>
+<li>Notice that every result keeps its original <code>id</code>, so your code can match results back to inputs even if the order changed.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>The <code>@batch.json</code> form tells curl to read the request body from a file. This avoids fragile escaping on the command line and is the pattern you should use for anything longer than a single line.</p>
+</div>
+
+<h2>Reading the Response</h2>
+<p>The response has three top-level blocks worth understanding:</p>
+<ul>
+<li><code>documents</code> — one entry per input document, each containing <code>detectedLanguage</code> and <code>warnings</code>.</li>
+<li><code>errors</code> — empty when everything succeeds. If a document exceeds the size limit, it appears here instead of in <code>documents</code>.</li>
+<li><code>modelVersion</code> — the model version used to produce the results, useful for auditing and reproducibility.</li>
+</ul>
+<p>Inside <code>detectedLanguage</code>, the <code>confidenceScore</code> is a number from <code>0</code> to <code>1</code>. Values near <code>1.0</code> are trustworthy; lower values indicate the text is short, mixed, or ambiguous.</p>
+
+<h2>Error Handling</h2>
+<p>When something goes wrong, the service returns an HTTP status code with an error body. Learn to recognize the common ones:</p>
+<table>
+<tr><th>Status</th><th>Meaning</th><th>Fix</th></tr>
+<tr><td><code>401</code></td><td>Unauthorized</td><td>Key is wrong or has a stray space. Re-copy it from Keys and Endpoint.</td></tr>
+<tr><td><code>404</code></td><td>Not found</td><td>Endpoint URL is malformed, or the API version is wrong. Check the full URL.</td></tr>
+<tr><td><code>429</code></td><td>Too many requests</td><td>You exceeded the rate or quota of your tier. Wait and retry.</td></tr>
+<tr><td><code>400</code></td><td>Bad request</td><td>The JSON body is invalid, or a document is too large.</td></tr>
+</table>
+
+<div class="warn">
+<p>An error in one document does not fail the whole batch. Check the <code>errors</code> array separately from <code>documents</code> — a partially successful call is still a <code>200 OK</code> response, and your code must handle both blocks.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You made a raw REST API call for language detection, sent both a single document and a batch, and learned to read the response and diagnose failures. The next lab does the same job in Python with the official SDK, where the HTTP layer disappears behind client methods.</p>
+<nav>
+<a href="297-lab-azure-ai-language-resource.html">&larr; Previous: Lab - Azure AI Language resource</a><a href="299-lab-azure-ai-language-detect-language-python.html">Next: Lab - Azure AI Language - Detect Language - Python &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

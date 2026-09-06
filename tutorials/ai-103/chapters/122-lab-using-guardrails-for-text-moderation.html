@@ -1,0 +1,152 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>122. Lab - Using Guardrails for Text Moderation - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 122</span>
+<h1>Lab - Using Guardrails for Text Moderation</h1>
+<p>Prompt Shields protects against injected instructions. Text moderation protects against harmful content itself. Azure AI Content Safety can examine any text and score it across a set of harm categories, from hate speech to self-harm. In this lab you will call the text moderation API from Python, read the severity scores, and use them to decide whether to allow content into your application.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li><strong>Python 3.9 or newer</strong> and VS Code.</li>
+<li><strong>An Azure AI Content Safety resource</strong> with its endpoint and key. If you do not have one, complete the resource-creation lab later in this section first, or create the resource as described there.</li>
+<li>Your endpoint and key available as environment variables.</li>
+</ul>
+
+<h2>Install the Content Safety SDK</h2>
+<p>Azure AI Content Safety has its own Python package. Open a terminal in VS Code and install it:</p>
+
+<pre><code>pip install azure-ai-contentsafety
+</code></pre>
+
+<h2>The Text Moderation Request</h2>
+<p>A text moderation call wraps your text in an <code>AnalyzeTextOptions</code> object and sends it to the <code>analyze_text</code> method. The service breaks the text into the harm categories it knows about and scores each one. The code pattern is:</p>
+<ol>
+<li>Create a <code>ContentSafetyClient</code> with your endpoint and key.</li>
+<li>Build an <code>AnalyzeTextOptions</code> with the text to check.</li>
+<li>Call <code>analyze_text</code>.</li>
+<li>Inspect the per-category results.</li>
+</ol>
+
+<h2>Moderate Some Text</h2>
+<div class="exercise">
+<h3>Step 1 - Create the project folder</h3>
+<p>Create a folder named <code>ai103-lab122</code> and open it in VS Code. Create a file called <code>moderate_text.py</code>.</p>
+
+<h3>Step 2 - Set your environment variables</h3>
+<p>Use the endpoint and key of your Content Safety resource:</p>
+<pre><code>$env:CONTENT_SAFETY_ENDPOINT = "https://YOUR_CONTENT_SAFETY.cognitiveservices.azure.com/"
+$env:CONTENT_SAFETY_KEY = "YOUR_KEY"
+</code></pre>
+
+<h3>Step 3 - Paste the script</h3>
+<pre><code>from azure.ai.contentsafety import ContentSafetyClient
+from azure.ai.contentsafety.models import AnalyzeTextOptions
+from azure.core.credentials import AzureKeyCredential
+import os
+
+endpoint = os.environ["CONTENT_SAFETY_ENDPOINT"]
+key = os.environ["CONTENT_SAFETY_KEY"]
+
+client = ContentSafetyClient(endpoint, AzureKeyCredential(key))
+
+text = "I am so angry I could do something terrible to this system."
+
+request = AnalyzeTextOptions(text=text)
+
+response = client.analyze_text(request)
+
+for item in response.categories_analysis:
+    print(item.category, "-", item.severity)
+</code></pre>
+
+<h3>Step 4 - Run the script</h3>
+<pre><code>python moderate_text.py
+</code></pre>
+<p>You should see one line per category, each with a severity score. The violent and self-harm categories should score higher than the others.</p>
+</div>
+
+<h2>Understanding the Output</h2>
+<p>Each category is scored on a severity scale from 0 to 6 (in current API versions):</p>
+<table>
+<tr><th>Severity</th><th>Meaning</th></tr>
+<tr><td>0</td><td>No content of this kind detected</td></tr>
+<tr><td>1</td><td>Mild — safe to display to most audiences</td></tr>
+<tr><td>2</td><td>Borderline — typically requires caution</td></tr>
+<tr><td>3</td><td>Moderate — generally not safe to display without age checks</td></tr>
+<tr><td>4-6</td><td>Severe to extreme — typically blocked</td></tr>
+</table>
+<p>The categories returned reflect the configuration of your resource. The standard harm categories are:</p>
+<ul>
+<li><strong>Hate:</strong> content that promotes hate or violence against a group.</li>
+<li><strong>Sexual:</strong> sexually explicit or inappropriate content.</li>
+<li><strong>Violence:</strong> content describing or promoting violence.</li>
+<li><strong>Self-harm:</strong> content encouraging or describing self-harm.</li>
+</ul>
+
+<h2>Applying a Threshold</h2>
+<p>Raw scores are useful, but applications usually need a yes/no decision. Pick a severity threshold and block anything at or above it:</p>
+<pre><code>BLOCK_THRESHOLD = 2
+
+blocked = any(
+    item.severity is not None and item.severity >= BLOCK_THRESHOLD
+    for item in response.categories_analysis
+)
+
+if blocked:
+    print("Content blocked.")
+else:
+    print("Content allowed.")
+</code></pre>
+
+<div class="tip">
+<p>Choose your threshold per category if your product rules differ. A family-friendly chat app may block everything at severity 2, while a news site quoting an article may want to allow severity 1 references.</p>
+</div>
+
+<h2>Moderating Several Strings</h2>
+<p>Real applications check many messages. Loop over your text inputs and record the verdict for each:</p>
+<pre><code>samples = [
+    "Great job on the presentation today.",
+    "I hope someone does something violent to that server room.",
+    "You are welcome to join the call tomorrow.",
+]
+
+for sample in samples:
+    result = client.analyze_text(AnalyzeTextOptions(text=sample))
+    worst = max(
+        (item.severity or 0 for item in result.categories_analysis),
+        default=0,
+    )
+    print(f"Severity {worst}: {sample}")
+</code></pre>
+
+<h2>Troubleshooting Common Errors</h2>
+<table>
+<tr><th>Error you may see</th><th>Most likely cause</th><th>Fix</th></tr>
+<tr><td><code>401 Invalid key</code></td><td>The key or endpoint is wrong.</td><td>Re-copy the key from the resource page and set the variable again.</td></tr>
+<tr><td><code>ModuleNotFoundError: azure</code></td><td>The SDK is not installed.</td><td>Run <code>pip install azure-ai-contentsafety</code>.</td></tr>
+<tr><td><code>InvalidRequest</code></td><td>The resource was created with the wrong kind.</td><td>Confirm the resource kind is <code>ContentSafety</code>.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You have moderated text with the Azure AI Content Safety API. You sent strings to the service, read the severity score for each harm category, applied a threshold to make an allow or block decision, and looped over multiple inputs. In the next chapter you will apply the same idea to images, which present their own moderation challenges.</p>
+<nav>
+<a href="121-trying-out-prompt-shields-for-documents.html">&larr; Previous: Trying out Prompt Shields for Documents</a><a href="123-trying-to-moderate-image-content.html">Next: Trying to moderate image content &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

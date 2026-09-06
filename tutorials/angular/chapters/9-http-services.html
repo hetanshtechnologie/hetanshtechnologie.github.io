@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapter 9: HTTP &amp; Services - Angular Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 9</span>
+    <h1>HTTP &amp; Services</h1>
+
+    <h2>HttpClient Overview</h2>
+    <p>Angular's <code>HttpClient</code> service, part of <code>@angular/common/http</code>, provides a simplified API for making HTTP requests. It returns typed Observables, supports request/response interception, and includes features like progress events and JSONP.</p>
+
+    <h2>Setting Up HttpClientModule</h2>
+    <p>Import <code>HttpClientModule</code> into your root or feature module:</p>
+    <pre><code>import { HttpClientModule } from '@angular/common/http';
+
+@NgModule({
+  imports: [HttpClientModule],
+  // ...
+})
+export class AppModule { }</code></pre>
+
+    <p>For standalone apps, use <code>provideHttpClient()</code> in the providers array:</p>
+    <pre><code>// main.ts or app.config.ts
+import { provideHttpClient } from '@angular/common/http';
+
+export const appConfig: ApplicationConfig = {
+  providers: [provideHttpClient()]
+};</code></pre>
+
+    <h2>Making HTTP Requests</h2>
+
+    <h3>GET Request</h3>
+    <pre><code>import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+
+interface Product {
+  id: number;
+  name: string;
+  price: number;
+}
+
+@Injectable({ providedIn: 'root' })
+export class ProductService {
+  private apiUrl = 'https://api.example.com/products';
+
+  constructor(private http: HttpClient) { }
+
+  getProducts(): Observable&lt;Product[]&gt; {
+    return this.http.get&lt;Product[]&gt;(this.apiUrl);
+  }
+}</code></pre>
+
+    <h3>POST Request</h3>
+    <pre><code>createProduct(product: Product): Observable&lt;Product&gt; {
+  return this.http.post&lt;Product&gt;(this.apiUrl, product);
+}</code></pre>
+
+    <h3>PUT Request</h3>
+    <pre><code>updateProduct(id: number, product: Product): Observable&lt;Product&gt; {
+  return this.http.put&lt;Product&gt;(`${this.apiUrl}/${id}`, product);
+}</code></pre>
+
+    <h3>DELETE Request</h3>
+    <pre><code>deleteProduct(id: number): Observable&lt;void&gt; {
+  return this.http.delete&lt;void&gt;(`${this.apiUrl}/${id}`);
+}</code></pre>
+
+    <h2>HttpParams</h2>
+    <p>Add query parameters to requests:</p>
+    <pre><code>import { HttpParams } from '@angular/common/http';
+
+searchProducts(query: string, page: number): Observable&lt;Product[]&gt; {
+  const params = new HttpParams()
+    .set('q', query)
+    .set('page', page.toString())
+    .set('limit', '20');
+
+  return this.http.get&lt;Product[]&gt;(this.apiUrl, { params });
+}</code></pre>
+
+    <h2>HttpHeaders</h2>
+    <p>Set custom headers for requests:</p>
+    <pre><code>import { HttpHeaders } from '@angular/common/http';
+
+getHeaders(): HttpHeaders {
+  return new HttpHeaders({
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${this.auth.getToken()}`,
+    'X-Custom-Header': 'custom-value'
+  });
+}
+
+getSecuredData(): Observable&lt;any&gt; {
+  return this.http.get(this.apiUrl, { headers: this.getHeaders() });
+}</code></pre>
+
+    <h2>Subscribing to Observables</h2>
+    <p>HttpClient methods return cold Observables. The request is made only when you subscribe:</p>
+    <pre><code>this.productService.getProducts().subscribe({
+  next: (products) => this.products = products,
+  error: (err) => this.errorMessage = 'Failed to load products',
+  complete: () => this.loading = false
+});</code></pre>
+
+    <h2>Error Handling</h2>
+    <p>Use RxJS operators like <code>catchError</code> and <code>retry</code> for robust error handling:</p>
+    <pre><code>import { catchError, retry, throwError } from 'rxjs';
+
+getProducts(): Observable&lt;Product[]&gt; {
+  return this.http.get&lt;Product[]&gt;(this.apiUrl).pipe(
+    retry(2),  // Retry failed requests up to 2 times
+    catchError(this.handleError)
+  );
+}
+
+private handleError(error: HttpErrorResponse) {
+  let errorMsg = 'An unknown error occurred';
+  if (error.error instanceof ErrorEvent) {
+    errorMsg = `Client error: ${error.error.message}`;
+  } else {
+    errorMsg = `Server error: ${error.status} - ${error.message}`;
+  }
+  console.error(errorMsg);
+  return throwError(() => new Error(errorMsg));
+}</code></pre>
+
+    <h2>Interceptors</h2>
+    <p>Interceptors examine and transform HTTP requests and responses globally. They are useful for adding auth tokens, logging, caching, or error handling.</p>
+
+    <h3>Auth Interceptor</h3>
+    <pre><code>import { HttpInterceptor, HttpRequest, HttpHandler } from '@angular/common/http';
+
+@Injectable()
+export class AuthInterceptor implements HttpInterceptor {
+  constructor(private auth: AuthService) { }
+
+  intercept(req: HttpRequest&lt;any&gt;, next: HttpHandler) {
+    const token = this.auth.getToken();
+    const authReq = token
+      ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } })
+      : req;
+    return next.handle(authReq);
+  }
+}
+
+// Provide the interceptor
+providers: [
+  { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true }
+]</code></pre>
+
+    <h3>Logging Interceptor</h3>
+    <pre><code>@Injectable()
+export class LoggingInterceptor implements HttpInterceptor {
+  intercept(req: HttpRequest&lt;any&gt;, next: HttpHandler) {
+    const start = Date.now();
+    return next.handle(req).pipe(
+      tap(() => console.log(`${req.method} ${req.url} took ${Date.now() - start}ms`))
+    );
+  }
+}</code></pre>
+
+    <h2>File Upload</h2>
+    <p>Upload files using <code>FormData</code> with POST:</p>
+    <pre><code>uploadFile(file: File): Observable&lt;any&gt; {
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+  return this.http.post('/api/upload', formData, {
+    reportProgress: true,
+    observe: 'events'
+  });
+}</code></pre>
+
+    <p>Subscribe with progress tracking:</p>
+    <pre><code>this.uploadService.uploadFile(file).subscribe(event => {
+  if (event.type === HttpEventType.UploadProgress) {
+    const percent = Math.round(100 * event.loaded / event.total);
+    this.progress = percent;
+  } else if (event.type === HttpEventType.Response) {
+    console.log('Upload complete', event.body);
+  }
+});</code></pre>
+
+    <h2>JSONP Support</h2>
+    <p>For cross-origin requests that don't support CORS, use <code>HttpClient.jsonp()</code>:</p>
+    <pre><code>this.http.jsonp('https://api.example.com/callback?format=jsonp', 'callback')
+  .subscribe(data => console.log(data));</code></pre>
+
+    <img src="../images/angular-component-tree.svg" alt="Angular HTTP client services">
+
+    <h2>Summary</h2>
+    <p>You learned how to use Angular's HttpClient for full CRUD operations, configure HttpParams and HttpHeaders, handle errors with catchError and retry, implement request/response interceptors for auth and logging, and handle file uploads with progress tracking. These HTTP patterns are essential for any real-world Angular application.</p>
+
+    <div class="exercise">
+      <strong>Exercise 9:</strong> Create a <code>TodoService</code> with full CRUD operations against JSONPlaceholder (<code>https://jsonplaceholder.typicode.com/todos</code>). Implement a logging interceptor that logs all request URLs and durations. Add a retry of 1 for failed requests. Build a TodoComponent that displays todos, marks them as complete (PUT), adds new todos (POST), and deletes them (DELETE) with error handling using catchError.
+    </div>
+
+    <nav>
+      <a href="8-routing.html">&larr; Previous: Routing</a>
+      <span>
+        <a href="../index.html">Back to Index</a>
+        <a href="10-modules.html">Next: Modules &rarr;</a>
+      </span>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

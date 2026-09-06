@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture - Android Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 3</span>
+    <h1>Application Architecture</h1>
+
+    <h2>Android App Architecture: MVVM</h2>
+    <p>Modern Android development follows the MVVM (Model-View-ViewModel) architecture pattern. It separates concerns and makes apps testable and maintainable.</p>
+
+    <pre><code>// Model - Data layer
+data class User(
+    val id: Int,
+    val name: String,
+    val email: String
+)
+
+class UserRepository(private val api: UserApi) {
+    suspend fun getUsers(): List&lt;User&gt; = api.fetchUsers()
+}
+
+// ViewModel - Presentation logic
+class UserViewModel(private val repo: UserRepository) : ViewModel() {
+    private val _users = MutableLiveData&lt;List&lt;User&gt;&gt;()
+    val users: LiveData&lt;List&lt;User&gt;&gt; = _users
+
+    fun loadUsers() {
+        viewModelScope.launch {
+            try {
+                _users.value = repo.getUsers()
+            } catch (e: Exception) {
+                _users.value = emptyList()
+            }
+        }
+    }
+}
+
+// View - UI layer (Activity/Fragment)
+class UserActivity : AppCompatActivity() {
+    private lateinit var viewModel: UserViewModel
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_users)
+
+        val repo = UserRepository(UserApi())
+        viewModel = ViewModelProvider(this, UserViewModelFactory(repo))
+            .get(UserViewModel::class.java)
+
+        viewModel.users.observe(this) { users ->
+            // Update RecyclerView adapter
+        }
+
+        viewModel.loadUsers()
+    }
+}</code></pre>
+
+    <h2>Jetpack Components</h2>
+    <p>Android Jetpack is a suite of libraries to help you follow best practices:</p>
+    <ul>
+      <li><strong>Lifecycle:</strong> Manage activity/fragment lifecycle</li>
+      <li><strong>LiveData:</strong> Observable data holder</li>
+      <li><strong>ViewModel:</strong> Store UI-related data</li>
+      <li><strong>Room:</strong> SQLite abstraction</li>
+      <li><strong>Navigation:</strong> Simplify screen navigation</li>
+      <li><strong>WorkManager:</strong> Deferrable background tasks</li>
+      <li><strong>Data Binding:</strong> Bind UI components to data sources</li>
+    </ul>
+
+    <h2>Clean Architecture Layers</h2>
+    <pre><code>// Domain Layer - Business logic
+interface UserRepository {
+    suspend fun getUsers(): Result&lt;List&lt;User&gt;&gt;
+}
+
+class GetUsersUseCase(private val repo: UserRepository) {
+    suspend operator fun invoke(): Result&lt;List&lt;User&gt;&gt; = repo.getUsers()
+}
+
+// Data Layer - Implementations
+class UserRepositoryImpl(
+    private val api: UserApi,
+    private val dao: UserDao
+) : UserRepository {
+    override suspend fun getUsers(): Result&lt;List&lt;User&gt;&gt; = runCatching {
+        val cached = dao.getAllUsers()
+        if (cached.isNotEmpty()) cached
+        else api.fetchUsers().also { dao.insertAll(it) }
+    }
+}
+
+// Presentation Layer
+@HiltViewModel
+class UserViewModel @Inject constructor(
+    private val getUsers: GetUsersUseCase
+) : ViewModel() {
+    val uiState: StateFlow&lt;UiState&lt;List&lt;User&gt;&gt;&gt; = ...
+}</code></pre>
+
+    <h2>Dependency Injection with Hilt</h2>
+    <pre><code>// app/build.gradle.kts
+plugins { id("com.google.dagger.hilt.android") }
+
+dependencies {
+    implementation("com.google.dagger:hilt-android:2.48")
+    kapt("com.google.dagger:hilt-compiler:2.48")
+}
+
+// Application class
+@HiltAndroidApp
+class App : Application()
+
+// Activity
+@AndroidEntryPoint
+class MainActivity : AppCompatActivity()</code></pre>
+
+    <h2>Navigation Component</h2>
+    <pre><code>&lt;!-- res/navigation/nav_graph.xml --&gt;
+&lt;navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    app:startDestination="@id/homeFragment"&gt;
+
+    &lt;fragment android:id="@+id/homeFragment"
+        android:name=".HomeFragment"&gt;
+        &lt;action android:id="@+id/to_detail"
+            app:destination="@id/detailFragment" /&gt;
+    &lt;/fragment&gt;
+
+    &lt;fragment android:id="@+id/detailFragment"
+        android:name=".DetailFragment" /&gt;
+&lt;/navigation&gt;
+
+// In code
+findNavController().navigate(R.id.to_detail, bundleOf("id" to 123))</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create an Android app that follows MVVM architecture. Use a ViewModel with LiveData to hold a list of items, a RecyclerView in the Activity to display them, and a Repository pattern to provide the data (use a mock data source). Add a loading state using LiveData.
+    </div>
+
+    <nav>
+      <a href="2-environment.html">&larr; Previous: Environment Setup</a>
+      <a href="../">Back to Index</a>
+      <a href="4-components.html">Next: Core Components &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

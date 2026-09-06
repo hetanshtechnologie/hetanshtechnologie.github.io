@@ -1,0 +1,189 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>243. Lab - Python - Using a model to generate an image - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 243</span>
+<h1>Lab - Python - Using a model to generate an image</h1>
+<p>In this lab you will generate images programmatically for the first time. You will send a text description to an image model deployed in Microsoft Foundry, receive a brand-new picture, save it to disk, and experiment with the parameters that control its size and quality.</p>
+
+<h2>Image Generation vs. Chat Completions</h2>
+<p>Image generation uses a different part of the API than chat. Instead of calling the chat completions endpoint, you call the image generation endpoint, which is exposed in the same SDK through the <code>images</code> client. The request is simpler — a prompt plus a few options — and the response contains either a URL to the finished image or the image bytes themselves.</p>
+
+<table>
+<tr><th>Aspect</th><th>Chat completion</th><th>Image generation</th></tr>
+<tr><td>SDK call</td><td><code>client.chat.completions.create(...)</code></td><td><code>client.images.generate(...)</code></td></tr>
+<tr><td>Key input</td><td>Messages (system, user)</td><td>A text prompt</td></tr>
+<tr><td>Response</td><td>Message text and token usage</td><td>Image URL or base64-encoded bytes</td></tr>
+</table>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li><strong>Python 3.9 or newer</strong> and VS Code.</li>
+<li><strong>An image model deployed</strong> in Foundry, for example <code>gpt-image-1</code> or <code>dall-e-3</code>.</li>
+<li>Your <strong>endpoint URL</strong> and <strong>API key</strong> as environment variables.</li>
+<li>The <code>openai</code> and <code>requests</code> packages installed.</li>
+</ul>
+<pre><code>pip install openai requests
+</code></pre>
+
+<div class="note">
+<p>An image deployment is separate from your chat deployment. Even if you already have a chat model deployed, you still need a dedicated deployment of an image-capable model for the calls in this lab. Confirm the deployment is ready in the Foundry portal before running the scripts.</p>
+</div>
+
+<h2>Step 1: Generate Your First Image</h2>
+<div class="exercise">
+<h3>Exercise 1: Create and save an image</h3>
+<ol>
+<li>Create a folder named <code>ai103-lab243</code> and open it in VS Code.</li>
+<li>Create <code>generate.py</code> and set your environment variables:</li>
+</ol>
+<pre><code>$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+<ol start="3">
+<li>Paste this script and replace <code>YOUR_IMAGE_DEPLOYMENT</code> with your image deployment name:</li>
+</ol>
+<pre><code>import base64
+import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+result = client.images.generate(
+    model="YOUR_IMAGE_DEPLOYMENT",
+    prompt="A small red lighthouse on a rocky coast at sunrise, painterly style",
+    size="1024x1024",
+    quality="standard",
+    n=1,
+)
+
+item = result.data[0]
+
+if item.url:
+    print("Image URL:", item.url)
+else:
+    raw = base64.b64decode(item.b64_json)
+    with open("lighthouse.png", "wb") as f:
+        f.write(raw)
+    print("Saved lighthouse.png")
+</code></pre>
+<ol start="4">
+<li>Run the script:</li>
+</ol>
+<pre><code>python generate.py
+</code></pre>
+<p>Depending on the deployment, the result either prints a URL or writes the image file directly. Open the image and check that it matches the prompt.</p>
+</div>
+
+<h2>Step 2: Always Save the Image to Disk</h2>
+<p>A URL is temporary — the file can be deleted or expire. For a durable result, download the bytes and store them locally. If the response gave you a URL, fetch it with <code>requests</code> and write the content to a file:</p>
+<div class="exercise">
+<h3>Exercise 2: Download the image when the response is a URL</h3>
+<p>Extend <code>generate.py</code> so that URL responses are downloaded automatically:</p>
+<pre><code>import base64
+import os
+import requests
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+result = client.images.generate(
+    model="YOUR_IMAGE_DEPLOYMENT",
+    prompt="A tiny coral reef with a clownfish, underwater photograph style",
+    size="1024x1024",
+    quality="standard",
+    n=1,
+)
+
+item = result.data[0]
+
+if item.url:
+    response = requests.get(item.url, timeout=60)
+    response.raise_for_status()
+    with open("reef.png", "wb") as f:
+        f.write(response.content)
+    print("Saved reef.png from URL")
+else:
+    with open("reef.png", "wb") as f:
+        f.write(base64.b64decode(item.b64_json))
+    print("Saved reef.png from base64 data")
+</code></pre>
+<pre><code>python generate.py
+</code></pre>
+</div>
+
+<div class="tip">
+<p>Handling both cases — URL and inline bytes — makes your script robust across deployments. Some models return URLs, others return base64; supporting both means the script works wherever you point it.</p>
+</div>
+
+<h2>Step 3: Tune Size and Quality</h2>
+<p>The <code>size</code> and <code>quality</code> parameters change what the model produces and how much it costs:</p>
+<ul>
+<li><code>size</code> controls resolution, for example <code>1024x1024</code>, <code>1024x1792</code>, or <code>1792x1024</code>.</li>
+<li><code>quality</code> trades detail against speed and price. <code>standard</code> is fast and cheaper; <code>hd</code> adds detail for premium results.</li>
+</ul>
+<div class="exercise">
+<h3>Exercise 3: Compare quality settings</h3>
+<p>Modify <code>generate.py</code> to generate a landscape-orientation image at high definition:</p>
+<pre><code>result = client.images.generate(
+    model="YOUR_IMAGE_DEPLOYMENT",
+    prompt="A dramatic mountain lake with autumn forest, hd quality",
+    size="1792x1024",
+    quality="hd",
+    n=1,
+)
+</code></pre>
+<pre><code>python generate.py
+</code></pre>
+<p>Generate the same prompt at <code>standard</code> quality and compare the two files. The detail difference is easiest to see in textures such as leaves or water.</p>
+</div>
+
+<div class="warn">
+<p>Image generation costs considerably more tokens per call than a short chat exchange, and <code>hd</code> raises the price further. Stick to <code>standard</code> quality during the lab unless a model card specifically encourages <code>hd</code>, and check the Foundry metrics page afterward to see the token impact.</p>
+</div>
+
+<h2>Handling a Blocked Prompt</h2>
+<p>Image models are paired with content filters, and a prompt that trips a filter returns an error instead of a picture. A small, reusable guard makes this obvious:</p>
+<pre><code>try:
+    result = client.images.generate(
+        model="YOUR_IMAGE_DEPLOYMENT",
+        prompt="A serene garden pond at dusk",
+        size="1024x1024",
+        quality="standard",
+        n=1,
+    )
+    print("Generated successfully")
+except Exception as exc:
+    print("Generation failed:", exc)
+</code></pre>
+
+<h2>Summary</h2>
+<p>You generated an image from a text prompt, saved the result to disk whether the response returned a URL or inline bytes, experimented with size and quality, and added error handling for blocked prompts. The <code>images.generate</code> pattern — prompt, size, quality — is all you need to turn any text description into a picture. In the next chapter the course shifts from calling models to adapting them, starting with fine-tuning.</p>
+<nav>
+<a href="242-lab-python-gpt-5-asking-the-model-to-explain-code.html">&larr; Previous: Lab - Python - GPT 5- Asking the model to explain code</a><a href="244-fine-tune-azure-openai-models.html">Next: Fine Tune Azure OpenAI models &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

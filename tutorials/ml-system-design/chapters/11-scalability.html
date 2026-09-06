@@ -1,0 +1,76 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>11. Scalability — ML System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>11. Scalability</h1>
+<h2>Horizontal Scaling</h2>
+<p>Add more machines to distribute the load. The standard approach for stateless inference servers.</p>
+<pre><code># Horizontal scaling for inference
+Load balancer distributes requests to N replicas
+All replicas identical, stateless (model loaded from shared storage)
+Auto-scaling based on:
+  - CPU/GPU utilization (>70% → add replica)
+  - Queue depth (>100 pending requests → add replica)
+  - Request latency (p99 > 200ms → add replica)</code></pre>
+<h2>Partitioning (Sharding)</h2>
+<p>For stateful components (feature stores, model registry), partition data across nodes.</p>
+<ul>
+<li><strong>Hash-based sharding:</strong> shard = hash(entity_id) % N. Even distribution, but resharding is expensive.</li>
+<li><strong>Range-based sharding:</strong> user_id 1—1M on shard A, 1M—2M on shard B. Good for range queries, risk of hot spots.</li>
+<li><strong>Directory-based sharding:</strong> Lookup table maps keys to shards. Flexible but adds latency.</li>
+</ul>
+<h2>Queues for Load Smoothing</h2>
+<p>Use message queues to decouple request arrival from processing. Queues absorb traffic spikes and provide back-pressure.</p>
+<pre><code># Queue-based inference
+Request → API Gateway → Request Queue (Kafka/SQS)
+Inference workers consume from queue:
+  - Pull batch of requests (up to 32)
+  - Run batch inference (GPU)
+  - Write results to response topic
+  - Consumer reads response and returns to client
+
+Benefits:
+  - Burst absorption (10K requests arrive, queue buffers)
+  - Worker auto-scaling (more workers = faster drain)
+  - Retry on failure (messages return to queue)</code></pre>
+<h2>Auto-Scaling Strategies</h2>
+<table>
+<tr><th>Strategy</th><th>Metric</th><th>Example</th></tr>
+<tr><td>Reactive</td><td>CPU > 70% for 2 minutes</td><td>+2 replicas</td></tr>
+<tr><td>Proactive</td><td>Schedule: 8 AM daily traffic surge</td><td>+5 replicas before 8 AM</td></tr>
+<tr><td>Predictive</td><td>ML model predicts traffic</td><td>Scale based on forecast</td></tr>
+</table>
+<h2>Load Balancing Algorithms for ML</h2>
+<ul>
+<li><strong>Round-robin:</strong> Simple, works for equal-capacity servers.</li>
+<li><strong>Least connections:</strong> Prefer server with fewest active requests. Good for variable inference times.</li>
+<li><strong>Weighted:</strong> Route more traffic to GPU-enabled servers, less to CPU-only.</li>
+<li><strong>Consistent hashing:</strong> Route same user to same server. Useful for model-level caching.</li>
+</ul>
+<h2>Scaling the Data Pipeline</h2>
+<ul>
+<li><strong>Partition Kafka topics</strong> by entity key for ordered processing.</li>
+<li><strong>Scale Spark/Dask workers</strong> based on data volume.</li>
+<li><strong>Feature store read replicas:</strong> Multiple Redis replicas for read-heavy serving.</li>
+<li><strong>Model registry:</strong> CDN for model binary downloads (avoid overloading registry).</li>
+</ul>
+<div class="exercise"><strong>Exercise:</strong> You are designing a real-time ad bidding ML system that serves 100K QPS peak. The system must evaluate 50 features per request using an ensemble of 3 models. Design the scaling architecture: number of replicas, load balancing strategy, queue design, auto-scaling rules, and how you partition the feature store. Calculate the required infrastructure for peak load.</div>
+<nav><a href="10-indexing.html">&larr; Previous</a><a href="../index.html">Index</a><a href="12-fault-tolerance.html">Next: Fault Tolerance &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

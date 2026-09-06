@@ -1,0 +1,85 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>174. Connecting Azure AI Search to an Agent - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 174</span>
+<h1>Connecting Azure AI Search to an Agent</h1>
+<p>A search index is only useful if something can query it at the right moment. In a chat application, that something is an agent: it decides when the user's question needs your data, runs a search, and writes an answer grounded in the results. This chapter explains the two ways an agent can reach Azure AI Search — a direct index tool and a knowledge-base connection — and the design decisions that make retrieval helpful rather than noisy.</p>
+
+<h2>Why an Agent Needs Search as a Tool</h2>
+<p>A chat model cannot see your index. Everything it knows came from training. To answer questions about your documents, the agent must fetch context at query time — which is exactly the RAG loop you built in the previous labs. The difference is who triggers the fetch:</p>
+<ul>
+<li>In a simple RAG script, your code always searches before calling the model.</li>
+<li>In an agent, the <em>model</em> decides whether a question requires a search, which terms to use, and whether one search is enough.</li>
+</ul>
+<p>That flexibility is what makes agents better for open-ended questions. A question like <em>"which models support vision?"</em> triggers a search; a follow-up like <em>"summarize what you found"</em> may not need another one.</p>
+
+<h2>Two Connection Patterns</h2>
+<p>Foundry and Azure AI Agent Service offer two ways to connect an agent to a search index:</p>
+<table>
+<tr><th>Pattern</th><th>How it works</th><th>Best for</th></tr>
+<tr><td>Index tool</td><td>The search index is exposed as a tool the agent calls during a conversation</td><td>Explicit control, multiple indexes, model-driven query crafting</td></tr>
+<tr><td>Knowledge-base connection</td><td>The index is registered as the agent's data source; retrieval runs automatically</td><td>Fast setup, consistent grounding, less plumbing</td></tr>
+</table>
+<p>Both end in the same place: retrieved chunks are injected into the model context, and the model answers from them. They differ in how much control you have over the retrieval step.</p>
+
+<div class="note">
+<p>Whatever the pattern, retrieval quality still comes from the index. A skillset that produced poor chunks will produce poor answers no matter how the agent is connected. Treat the index itself as the contract: if the right content is not in the top results, no agent wiring will fix it.</p>
+</div>
+
+<h2>What a Search Tool Gives the Model</h2>
+<p>When you attach an index as a tool, the agent receives a description of what the tool does and how to call it — for example, the index name, the searchable fields, and whether to search keywords, vectors, or both. The model uses that description to:</p>
+<ul>
+<li>Recognize when the question is answerable from the index.</li>
+<li>Compose a good query from the user's words.</li>
+<li>Decide how many results to request and which fields matter.</li>
+</ul>
+<p>This is why the tool description is so important. A vague description like <em>"search the index"</em> invites the model to skip it or misuse it; a precise one like <em>"Search the course manual index for pages that describe setup steps. Returns the top matching chunks with their source file names."</em> produces far more reliable calls.</p>
+
+<h2>Hybrid Search Is the Default You Want</h2>
+<p>For a general-purpose agent, hybrid search — keyword plus vector, combined and ranked together — is the strongest setting. It matches exact product names a user types verbatim, while still finding conceptually related content when the wording differs. Most agent connectors let you choose the query mode:</p>
+<table>
+<tr><th>Query mode</th><th>Behavior</th><th>When to choose it</th></tr>
+<tr><td>Keyword</td><td>Exact term matching</td><td>Precise identifiers and codes</td></tr>
+<tr><td>Vector</td><td>Semantic similarity over embeddings</td><td>Paraphrased, conceptual questions</td></tr>
+<tr><td>Hybrid</td><td>Both, reranked together</td><td>Default for open-ended assistant questions</td></tr>
+</table>
+
+<div class="tip">
+<p>Add a <strong>filter</strong> when the index spans categories — for example, restrict results to a product line or a date range before ranking. Filters applied at the tool level keep the agent from retrieving from the wrong slice of data.</p>
+</div>
+
+<h2>Grounding and Citations</h2>
+<p>Grounding is the guarantee that the model answered from the retrieved chunks. The pattern in this course: the system prompt instructs the model to answer only from the provided context and to cite the source when it uses one, and the search results carry <code>metadata_storage_path</code> and <code>metadata_storage_name</code> so citations can point at real files.</p>
+<div class="warn">
+<p>Grounding is an instruction, not a hard guarantee. The model can still answer from training knowledge if the prompt allows it. For strictly regulated content, add a verification step that rejects answers whose cited chunks do not actually contain the claim, or use content safety and evaluation to catch drifting responses.</p>
+</div>
+
+<h2>Secrets, Identity, and Permissions</h2>
+<p>The agent process needs permission to read the index. The simplest lab setup uses a search key in the connection configuration, but production systems should use a managed identity — the agent's identity is assigned a role such as <em>Search Index Data Reader</em> on the search service, and no key ever travels with the code. You will apply exactly this role assignment in the capstone project's permissions chapter.</p>
+
+<h2>Connecting in the Next Lab</h2>
+<p>In the next chapter you will attach your chunked index to an agent and have a conversation grounded in your documents. You will see the agent choose to search, read the retrieved chunks, and answer with citations — the full pattern that the capstone project scales into a course assistant.</p>
+
+<h2>Summary</h2>
+<p>Agents reach Azure AI Search either through an index tool the model calls deliberately or through a knowledge-base connection that retrieves automatically. Precise tool descriptions, hybrid query mode, and metadata filters shape retrieval quality, while grounding instructions and citations keep answers honest. The next lab wires your index to an agent and tests it end to end.</p>
+<nav>
+<a href="173-lab-ai-enrichment-and-skillsets.html">&larr; Previous: Lab - AI Enrichment and Skillsets</a><a href="175-lab-connecting-azure-ai-search-to-an-agent.html">Next: Lab - Connecting Azure AI Search to an Agent &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

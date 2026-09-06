@@ -1,0 +1,274 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azure AI Document Intelligence - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 18</span>
+<h1>Azure AI Document Intelligence</h1>
+
+<h2>Azure AI Document Intelligence Overview</h2>
+<p>Azure AI Document Intelligence (formerly Azure Form Recognizer) is a cloud-based service that extracts structured data from documents. It uses machine learning models to identify and extract text, key-value pairs, tables, selection marks, and structured fields from forms, invoices, receipts, identity documents, and custom document types. The service is part of the Azure AI Services portfolio and represents Microsoft's primary solution for document understanding — distinct from the general-purpose OCR capabilities in Azure AI Vision.</p>
+<p>Document Intelligence is organized around two main model categories: <strong>prebuilt models</strong> that handle common document types out of the box, and <strong>custom models</strong> that you train on your own document layouts. The service also provides a document analysis API that extracts layout information (tables, paragraphs, and selection marks) without applying a specific model. On the AI-102 exam, Document Intelligence appears in the "Document Intelligence and Knowledge Mining" domain. You should understand the available prebuilt models, the custom model training workflow, how to interpret confidence scores, and when to use Document Intelligence versus the Computer Vision Read API.</p>
+
+<h2>Prebuilt Models</h2>
+<p>Document Intelligence offers prebuilt models for the most common business document types. Each model is trained on thousands of real-world documents and can extract field-level data without any custom training. The prebuilt models are updated periodically as Microsoft retrains them on new data.</p>
+
+<table>
+<tr><th>Model</th><th>Extracted Fields</th><th>Best For</th></tr>
+<tr><td>Invoice</td><td>Vendor name, customer name, invoice date, due date, total, subtotal, tax, line items (description, quantity, unit price, amount)</td><td>Accounts payable automation</td></tr>
+<tr><td>Receipt</td><td>Merchant name, transaction date, total, subtotal, tax, line items, payment method</td><td>Expense management</td></tr>
+<tr><td>Identity Documents (ID)</td><td>First name, last name, date of birth, document number, address, expiration date, country/region</td><td>KYC verification, onboarding</td></tr>
+<tr><td>Business Card</td><td>First name, last name, job title, company, phone, email, website, address</td><td>Contact management</td></tr>
+<tr><td>Contract</td><td>Parties, title, contract ID, execution date, expiration date, renewal terms, legal clauses</td><td>Contract lifecycle management</td></tr>
+<tr><td>US Tax (W-2, 1098, 1099)</td><td>Employer EIN, wages, tax withheld, Social Security wages, Medicare wages</td><td>Tax document processing</td></tr>
+<tr><td>Health Insurance Card</td><td>Member name, member ID, group number, issuer, RX bin, PCN</td><td>Healthcare administration</td></tr>
+<tr><td>Marriage Certificate</td><td>Spouse names, date of marriage, place of marriage, certificate number, registrar</td><td>Legal document processing</td></tr>
+</table>
+
+<p>Prebuilt models are accessed through the Document Intelligence REST API or SDK, specifying the <code>modelId</code> parameter. For example, <code>modelId=prebuilt-invoice</code> analyzes the document as an invoice and returns the extracted fields. The response includes the field name, extracted value, confidence score, and bounding box coordinates for each extracted field.</p>
+
+<pre><code># Python - extracting data from an invoice with prebuilt model
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.formrecognizer import DocumentAnalysisClient
+
+endpoint = os.environ["DOC_INTELLIGENCE_ENDPOINT"]
+key = os.environ["DOC_INTELLIGENCE_KEY"]
+
+client = DocumentAnalysisClient(
+    endpoint=endpoint,
+    credential=AzureKeyCredential(key)
+)
+
+with open("invoice.pdf", "rb") as f:
+    doc = f.read()
+
+poller = client.begin_analyze_document("prebuilt-invoice", doc)
+result = poller.result()
+
+for idx, invoice in enumerate(result.documents):
+    print(f"Invoice #{idx + 1}:")
+    vendor = invoice.fields.get("VendorName")
+    if vendor:
+        print(f"  Vendor: {vendor.value} (confidence: {vendor.confidence:.2%})")
+
+    customer = invoice.fields.get("CustomerName")
+    if customer:
+        print(f"  Customer: {customer.value} (confidence: {customer.confidence:.2%})")
+
+    invoice_date = invoice.fields.get("InvoiceDate")
+    if invoice_date:
+        print(f"  Date: {invoice_date.value} (confidence: {invoice_date.confidence:.2%})")
+
+    invoice_total = invoice.fields.get("InvoiceTotal")
+    if invoice_total:
+        print(f"  Total: {invoice_total.value.amount} {invoice_total.value.currency_code} "
+              f"(confidence: {invoice_total.confidence:.2%})")
+
+    items = invoice.fields.get("Items")
+    if items:
+        print(f"  Line Items ({len(items.value)}):")
+        for item in items.value:
+            desc = item.value.get("Description")
+            qty = item.value.get("Quantity")
+            unit = item.value.get("UnitPrice")
+            amount = item.value.get("Amount")
+            if desc:
+                print(f"    {desc.value} x {qty.value if qty else 'N/A'} "
+                      f"@ {unit.value.amount if unit else 'N/A'} "
+                      f"= {amount.value.amount if amount else 'N/A'}")</pre></code>
+
+<pre><code>// C# - extracting data from an invoice
+using Azure;
+using Azure.AI.FormRecognizer.DocumentAnalysis;
+
+var endpoint = Environment.GetEnvironmentVariable("DOC_INTELLIGENCE_ENDPOINT");
+var key = Environment.GetEnvironmentVariable("DOC_INTELLIGENCE_KEY");
+
+var client = new DocumentAnalysisClient(
+    new Uri(endpoint),
+    new AzureKeyCredential(key));
+
+using var stream = File.OpenRead("invoice.pdf");
+var operation = client.AnalyzeDocument(WaitUntil.Completed, "prebuilt-invoice", stream);
+var result = operation.Value;
+
+foreach (var invoice in result.Documents)
+{
+    Console.WriteLine($"Vendor: {invoice.Fields["VendorName"].Value.AsString()}");
+    if (invoice.Fields.TryGetValue("InvoiceTotal", out var total))
+        Console.WriteLine($"Total: {total.Value.AsCurrency().Amount}");
+
+    if (invoice.Fields.TryGetValue("Items", out var items))
+    {
+        foreach (var item in items.Value.AsList())
+        {
+            var desc = item.AsDictionary()["Description"].Value.AsString();
+            Console.WriteLine($"  Item: {desc}");
+        }
+    }
+}</pre></code>
+
+<h2>Custom Models: Training on Your Own Document Types</h2>
+<p>When prebuilt models do not cover your document type, you train a custom model. Custom models learn the layout and field locations from labeled sample documents. The training process requires at least five labeled documents of the same type, though Microsoft recommends ten or more for production-quality accuracy. The service supports two custom model types: <strong>template models</strong> that learn field locations based on document structure (best for fixed-format forms) and <strong>neural models</strong> that use deep learning to understand document semantics (best for varied-format documents where fields appear in different positions).</p>
+<p>Training begins by uploading sample documents to Blob Storage. You then use Document Intelligence Studio (a web-based labeling tool) to draw bounding boxes around fields and assign field labels. The labeling creates a JSON file that maps field names to their locations in each document. After labeling, you submit a training request to the Document Intelligence API. The service analyzes the labeled documents, learns the field patterns, and creates a new model identified by a model ID. You can then use this custom model ID with the same <code>begin_analyze_document</code> API to extract fields from new documents.</p>
+
+<pre><code># Python - training a custom document model
+from azure.ai.formrecognizer import DocumentModelAdministrationClient
+from azure.core.credentials import AzureKeyCredential
+
+admin_client = DocumentModelAdministrationClient(
+    endpoint=endpoint,
+    credential=AzureKeyCredential(key)
+)
+
+# Training data is in Blob Storage with labeled files
+training_data_url = (
+    "https://mystorage.blob.core.windows.net/training-data/"
+    "my-custom-form?{SAS-token}"
+)
+
+poller = admin_client.begin_build_document_model(
+    model_id="purchase-order-model",
+    build_mode="template",  # or "neural"
+    blob_container_url=training_data_url,
+    description="Custom model for purchase order forms"
+)
+
+model = poller.result()
+print(f"Model created: {model.model_id}")
+print(f"Created on: {model.created_on}")
+print("Extracted fields:")
+for field_name in model.doc_types["purchase-order-model"].field_schemas:
+    print(f"  - {field_name}")
+
+# Use the custom model to analyze a document
+with open("purchase_order.pdf", "rb") as f:
+    doc = f.read()
+
+analysis_client = DocumentAnalysisClient(
+    endpoint=endpoint,
+    credential=AzureKeyCredential(key)
+)
+
+poller = analysis_client.begin_analyze_document(
+    model_id="purchase-order-model",
+    document=doc
+)
+result = poller.result()
+
+for doc_result in result.documents:
+    for field_name, field in doc_result.fields.items():
+        print(f"{field_name}: {field.value} (confidence: {field.confidence:.2%})")</pre></code>
+
+<h2>Document Analysis: Layout, Tables, and Selection Marks</h2>
+<p>The Layout model (<code>prebuilt-layout</code>) extracts structural information without requiring a specific prebuilt or custom model. It returns the document's text content organized into paragraphs, lines, and words, with bounding boxes and page numbers. It also extracts tables (including merged cells) with row and column coordinates, and selection marks (checkboxes and radio buttons) showing whether each mark is selected or unselected. Layout is useful when you need to process documents without a predefined schema — for example, extracting all text from a contract for downstream search indexing, or detecting which checkboxes are checked in an application form.</p>
+
+<pre><code># Python - extracting layout with tables and selection marks
+poller = client.begin_analyze_document("prebuilt-layout", doc)
+result = poller.result()
+
+print(f"Pages: {len(result.pages)}")
+print(f"Tables: {len(result.tables)}")
+print(f"Paragraphs: {len(result.paragraphs)}")
+
+for page in result.pages:
+    print(f"\nPage {page.page_number}: {page.width} x {page.height} {page.unit}")
+    for line in page.lines:
+        print(f"  Line: '{line.content}'")
+
+for table in result.tables:
+    print(f"\nTable ({table.row_count} rows x {table.column_count} cols):")
+    for cell in table.cells:
+        print(f"  [{cell.row_index},{cell.column_index}] '{cell.content}'")
+
+for mark in result.documents[0].fields.get("SelectionMarks", []):
+    state = "selected" if mark.value else "not selected"
+    print(f"Selection mark: {mark.field_name or 'unnamed'} ({state})")</pre></code>
+
+<div class="note">
+<p>Selection mark detection is available in the Layout model and in custom models. When you label a custom model, you can mark a field as a selection mark type, and the model will learn to detect checked/unchecked states. The Layout model detects selection marks but does not assign semantic labels — it simply tells you which marks exist and their state.</p>
+</div>
+
+<h2>Understanding Confidence Scores and Field Extraction</h2>
+<p>Every extracted field in Document Intelligence includes a confidence score between 0 and 1. The confidence reflects the model's certainty about the extracted value. Scores above 0.95 indicate high confidence — the model is very certain about both the presence and the value of the field. Scores between 0.80 and 0.95 indicate moderate confidence — the value is likely correct but should be reviewed. Scores below 0.80 indicate low confidence — the field may be missing, ambiguous, or incorrectly extracted. For production systems, set a confidence threshold and flag any extraction below that threshold for human review. A threshold of 0.85 is a common starting point, but you should tune it based on your specific document types and the cost of errors.</p>
+<p>Field extraction quality depends on document quality, layout consistency, and labeling accuracy. Poor scan quality, skewed pages, low contrast, and handwritten text all reduce confidence scores. For custom models, labeling quality is the most important factor — inconsistent labels (labeling the same field at different locations on different documents) confuse the model and reduce accuracy. Use at least five labeled documents per model, and ensure that the training documents represent the full variation you expect in production — different layouts, varying field values, different scan qualities.</p>
+
+<h2>Handling Different Document Formats</h2>
+<p>Document Intelligence supports a wide range of input formats. PDF files (both text-based and scanned), TIFF images (single and multi-page), JPEG, PNG, BMP, and WEBP are all supported. For PDFs, text-based PDFs are processed directly from the embedded text while scanned PDFs are first OCR'd by the service. The maximum file size is 500 MB for Standard tier and 50 MB for Free tier. Documents larger than these limits must be split into smaller files before processing. The total document length cannot exceed 2,000 pages for Standard tier and 2 pages for Free tier.</p>
+<p>When the input contains multiple languages, you can set the <code>locale</code> parameter to improve accuracy for language-specific fields. For prebuilt models, the invoice and receipt models support multiple regional formats — for example, an invoice from France will have different date formats, currency symbols, and tax structures than one from the United States. Set the expected locale to improve extraction accuracy for region-specific formatting.</p>
+
+<h2>Model Composition</h2>
+<p>Model composition allows you to combine multiple custom models into a single composed model. When you call <code>begin_analyze_document</code> with a composed model ID, the service automatically routes each document to the best-matching sub-model. This is useful when your application processes multiple document types — instead of calling each model separately and checking the confidence scores, you register a composed model that handles all types in one call. The service analyzes the document with each sub-model and returns the highest-confidence result. For example, an expense processing application might compose models for receipts, invoices, and credit card statements into a single "expense-documents" composed model.</p>
+
+<pre><code># Python - creating a composed model
+admin_client = DocumentModelAdministrationClient(
+    endpoint=endpoint,
+    credential=AzureKeyCredential(key)
+)
+
+model_ids = [
+    "purchase-order-model",
+    "invoice-model",
+    "receipt-model"
+]
+
+poller = admin_client.begin_compose_document_model(
+    model_id="expense-documents",
+    component_model_ids=model_ids,
+    description="Composed model for expense-related documents"
+)
+
+composed_model = poller.result()
+print(f"Composed model created: {composed_model.model_id}")
+print(f"Sub-models: {len(composed_model.component_models)}")
+
+# Analyze a document with the composed model
+# The service automatically routes to the best sub-model
+poller = client.begin_analyze_document("expense-documents", doc)
+result = poller.result()
+
+print(f"Matched model: {result.model_id}")
+for field_name, field in result.documents[0].fields.items():
+    print(f"{field_name}: {field.value} (confidence: {field.confidence:.2%})")</pre></code>
+
+<h2>Exercise: Build a Document Processing Pipeline with Prebuilt and Custom Models</h2>
+<p>This exercise builds a complete document processing solution that handles both standard invoices (prebuilt) and custom purchase orders (custom model).</p>
+<ol>
+<li>Create a Document Intelligence resource in the Azure portal at the Standard S0 tier.</li>
+<li>Use the prebuilt invoice model to extract data from a sample invoice PDF. Print the vendor name, invoice total, and line items.</li>
+<li>Collect 5-10 sample purchase order forms (create your own if needed). Upload them to a Blob Storage container.</li>
+<li>Use Document Intelligence Studio to label the purchase order fields: PO number, vendor name, order date, items (description, quantity, unit price), total amount, and delivery address.</li>
+<li>Train a custom template model using the labeled data. Set the model ID to "purchase-order."</li>
+<li>Test the custom model on a new purchase order document that was not in the training set. Print all extracted fields with confidence scores.</li>
+<li>Create a composed model that includes both the prebuilt invoice model (using <code>prebuilt-invoice</code>) and your custom purchase order model.</li>
+<li>Build a Python script that accepts a document path, sends it to the composed model, and prints the matched model type plus all extracted fields. Run it against both an invoice and a purchase order.</li>
+<li>Add a confidence threshold of 0.85 — any field below this threshold should be flagged for human review.</li>
+</ol>
+
+<div class="exam-tip">
+<h3>Exam Tip: Prebuilt vs. Custom Models and Document Intelligence vs. Computer Vision OCR</h3>
+<p>The AI-102 exam frequently tests your ability to choose between prebuilt and custom models. Use <strong>prebuilt models</strong> when your document matches one of the supported types (invoices, receipts, identities, business cards, contracts, tax forms). Use <strong>custom models</strong> when you have a unique form type that is not covered by prebuilt models but has a consistent layout (such as a company-specific expense report or a government form unique to your region). Use <strong>model composition</strong> when your application processes multiple document types. For the Document Intelligence vs. Computer Vision OCR decision: use <strong>Document Intelligence</strong> when you need to extract structured fields (key-value pairs, tables, selection marks) — it understands document semantics and field relationships. Use the <strong>Computer Vision Read API</strong> when you only need to extract raw text from images — it is simpler, faster, and does not impose a document schema. Document Intelligence also supports the <code>prebuilt-layout</code> model for layout-only extraction without field semantics, which is useful when you need table and paragraph structure but not field-level mapping.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Azure AI Document Intelligence extracts structured data from documents using prebuilt models for common types (invoices, receipts, IDs, contracts, tax forms) and custom models trained on your own labeled documents. The service supports template models for fixed-format forms and neural models for varied layouts. Document layout analysis extracts tables, selection marks, and paragraph structure without requiring a specific model. Model composition combines multiple models into a single endpoint that automatically routes documents to the best-matching sub-model. Confidence scores help you set extraction quality thresholds. The service accepts multiple document formats including PDF, TIFF, and common image types, with a maximum of 2,000 pages per document. On the exam, focus on the prebuilt vs. custom model decision, the training and labeling workflow, and the distinction between Document Intelligence and Computer Vision OCR. The next chapter introduces Azure OpenAI, covering GPT models, prompt engineering, and responsible AI considerations.</p>
+
+<nav>
+<a href="../index.html">&larr; Back to Index</a>
+<a href="19-azure-openai-basics.html">Next: Azure OpenAI: Models and Prompt Engineering &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

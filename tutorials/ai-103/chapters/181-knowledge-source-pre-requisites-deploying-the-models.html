@@ -1,0 +1,124 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>181. Knowledge source pre-requisites - Deploying the models - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 181</span>
+<h1>Knowledge source pre-requisites - Deploying the models</h1>
+<p>The knowledge base pipeline needs two models: an <strong>embedding model</strong> to vectorize the course chunks and the question, and a <strong>chat model</strong> to write the grounded answers. Neither exists until you deploy it in your Foundry project. This chapter deploys both and verifies they respond, so every later step has concrete endpoints and deployments to use.</p>
+
+<h2>Which Models to Deploy</h2>
+<table>
+<tr><th>Role</th><th>Model</th><th>Why this choice</th></tr>
+<tr><td>Embeddings</td><td>text-embedding-3-small</td><td>1536 dimensions, fast, low cost, matches the index created in the search labs</td></tr>
+<tr><td>Chat</td><td>gpt-4o-mini</td><td>Capable enough for grounded answers, inexpensive for many conversations</td></tr>
+</table>
+<p>Both models are available from the Azure OpenAI model catalog in Foundry. You can substitute other models, but keep the embedding dimensions in sync with your index — the index in the search labs was created with 1536 dimensions.</p>
+
+<h2>Step 1 - Open Your Project and Check Quota</h2>
+<p>Sign in to the Foundry web portal and open your capstone project. Before deploying, check the quota page: each deployment consumes tokens-per-minute from your project's model quota. If quota is exhausted, pick the same model in a different region or request an increase.</p>
+
+<div class="note">
+<p>Model availability varies by region. If a model does not appear in the catalog for your project's region, switch the project to a region that hosts it, or deploy from a different supported region. Choosing the region before you build the pipeline avoids rework later.</p>
+</div>
+
+<h2>Step 2 - Deploy the Embedding Model</h2>
+<ol>
+<li>In Foundry, open <strong>Model catalog</strong> and search for <code>text-embedding-3-small</code>.</li>
+<li>Select the model and choose <strong>Deploy</strong>.</li>
+<li>Name the deployment <code>text-embedding-3-small</code> (match the index's expectations).</li>
+<li>Pick the SKU. <strong>GlobalStandard</strong> is a good default for this project; it routes traffic through a globally distributed pool with your subscription quota.</li>
+<li>Leave the token rate limit at its default for now and confirm the deployment.</li>
+</ol>
+<p>The deployment usually becomes ready within a minute. Copy the deployment name and the project endpoint — you will need them when the indexer embeds chunks.</p>
+
+<h2>Step 3 - Deploy the Chat Model</h2>
+<p>Repeat the same steps for the chat model:</p>
+<ol>
+<li>In the model catalog, search for <code>gpt-4o-mini</code>.</li>
+<li>Select it and choose <strong>Deploy</strong>.</li>
+<li>Name the deployment <code>gpt-4o-mini</code>.</li>
+<li>Choose <strong>GlobalStandard</strong> and confirm.</li>
+</ol>
+<p>This deployment is what the assistant will use when it writes answers. You will reference its deployment name when you create the agent.</p>
+
+<div class="tip">
+<p>Give deployments exactly the names used in your code and index configuration. A deployment named <code>gpt-4o-mini</code> is easier to reason about than <code>model-a-test-2</code>, and the embedding deployment name appears in your skillset, so consistency prevents subtle configuration mismatches.</p>
+</div>
+
+<h2>Step 4 - Deploy with the CLI (Alternative)</h2>
+<p>If you prefer automation, the same deployments can be created with the Azure ML CLI against your Foundry project's workspace. Save this as <code>deploy-embed.json</code>:</p>
+<pre><code>{
+  "name": "text-embedding-3-small",
+  "model": "azureml://registries/azure-openai/models/text-embedding-3-small/versions/latest",
+  "type": "azureopenai",
+  "sku": "GlobalStandard"
+}
+</code></pre>
+<p>Then deploy it, repeating with a similar file for the chat model:</p>
+<pre><code>$ws = "YOUR_FOUNDRY_WORKSPACE_NAME"
+
+az ml model create `
+  --file deploy-embed.json `
+  --resource-group $rg `
+  --workspace-name $ws
+</code></pre>
+
+<div class="warn">
+<p>The <code>type: azureopenai</code> and the exact registry path must match what your Foundry version accepts. If the CLI rejects the model path, deploy through the portal instead and verify the deployment name in the Deployments page — the result is identical.</p>
+</div>
+
+<h2>Step 5 - Verify the Deployments</h2>
+<p>Open the project's <strong>Deployments</strong> page. You should see two entries with a Ready status. Then confirm each answers a real request from code. For the embedding model, embed a short sentence and check the output shape:</p>
+<pre><code>pip install openai
+</code></pre>
+<pre><code>from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    api_key="YOUR_KEY",
+    api_version="2024-10-21",
+    azure_endpoint="https://YOUR_ENDPOINT",
+)
+
+response = client.embeddings.create(
+    model="text-embedding-3-small",
+    input="What is hybrid search?",
+)
+
+print(len(response.data[0].embedding))  # expect 1536
+</code></pre>
+
+<div class="note">
+<p>Do not hard-code the key. Read it from an environment variable in your real scripts, as the capstone labs do. For local development, <code>DefaultAzureCredential</code> can authenticate to Foundry without any key at all once the permissions chapter adds the right role.</p>
+</div>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td>Model not in the catalog</td><td>Not offered in your region</td><td>Check regional availability or switch project region.</td></tr>
+<tr><td>Quota exceeded at deploy</td><td>TPM quota exhausted</td><td>Choose GlobalStandard or request a quota increase.</td></tr>
+<tr><td>Embedding length is not 1536</td><td>Wrong model or trimmed dimensions</td><td>Confirm the deployment is <code>text-embedding-3-small</code>; align the index.</td></tr>
+<tr><td>401 on the test call</td><td>Key or endpoint mismatch</td><td>Copy the key and endpoint from the Deployments page.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You deployed an embedding model and a chat model in your Foundry project, checked quota and regional availability, and verified the embedding model returns 1536 dimensions from a real call. These deployments are the intelligence of the knowledge base. The next chapter grants the identities that let the pipeline and the agent call them securely.</p>
+<nav>
+<a href="180-understanding-knowledge-sources-and-knowledge-bases-for-agentic-retrieval.html">&larr; Previous: Understanding Knowledge Sources and Knowledge Bases for Agentic Retrieval</a><a href="182-knowledge-source-pre-requisites-assigning-permissions.html">Next: Knowledge source pre-requisites - Assigning permissions &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,277 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pattern Lock Puzzle</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.dot {
+  width: 60px; height: 60px; border-radius: 50%;
+  background: #334155; border: 3px solid #475569;
+  cursor: pointer; transition: all 0.2s; position: relative; z-index: 2;
+}
+.dot.active { background: #3b82f6; border-color: #60a5fa; box-shadow: 0 0 20px rgba(59,130,246,0.5); }
+.dot.show-pattern { background: #22c55e; border-color: #4ade80; box-shadow: 0 0 20px rgba(34,197,94,0.5); }
+.dot.wrong { background: #ef4444; border-color: #f87171; box-shadow: 0 0 20px rgba(239,68,68,0.5); }
+canvas { position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
+</style>
+</head>
+<body class="min-h-screen text-white">
+<div class="max-w-3xl mx-auto px-4 py-6">
+  <div class="flex items-center justify-between mb-6">
+    <a href="index.html" class="text-blue-400 hover:text-blue-300 text-sm flex items-center">
+      <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Back to Games
+    </a>
+    <h1 class="text-2xl font-bold">Pattern Lock</h1>
+    <div></div>
+  </div>
+
+  <div class="flex flex-wrap gap-4 mb-6 justify-center items-center">
+    <div class="bg-gray-800 px-4 py-2 rounded text-sm">Score: <span id="score" class="font-mono text-green-400">0</span></div>
+    <div class="bg-gray-800 px-4 py-2 rounded text-sm">Round: <span id="round" class="font-mono text-blue-400">1</span></div>
+    <div class="bg-gray-800 px-4 py-2 rounded text-sm">Time: <span id="timer" class="font-mono text-yellow-400">00:00</span></div>
+    <div class="bg-gray-800 px-4 py-2 rounded text-sm">Pattern: <span id="pattern-length" class="font-mono text-purple-400">3</span> dots</div>
+  </div>
+
+  <div class="text-center mb-6" id="status-msg">
+    <span class="text-lg text-gray-300">Watch the pattern, then reproduce it!</span>
+  </div>
+
+  <div class="flex justify-center mb-6">
+    <div class="relative" id="grid-container">
+      <canvas id="line-canvas" width="240" height="240"></canvas>
+      <div id="dot-grid" style="display: grid; grid-template-columns: repeat(3, 80px); gap: 0; padding: 10px;">
+        <div class="dot" data-index="0"></div>
+        <div class="dot" data-index="1"></div>
+        <div class="dot" data-index="2"></div>
+        <div class="dot" data-index="3"></div>
+        <div class="dot" data-index="4"></div>
+        <div class="dot" data-index="5"></div>
+        <div class="dot" data-index="6"></div>
+        <div class="dot" data-index="7"></div>
+        <div class="dot" data-index="8"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex justify-center gap-4">
+    <button onclick="startGame()" class="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-bold">Start Game</button>
+    <button onclick="clearPattern()" class="px-6 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 font-bold">Clear</button>
+  </div>
+
+  <div class="text-center mt-4 text-gray-400 text-xs">
+    <p>Watch the pattern light up, then click the dots in the same order. Patterns get longer each round!</p>
+  </div>
+</div>
+
+<script>
+let score = 0, round = 1, pattern = [], playerPattern = [];
+let showingPattern = false, canPlay = false, timerInterval, seconds;
+let patternLength = 3;
+let isMouseDown = false;
+
+const canvas = document.getElementById('line-canvas');
+const ctx = canvas.getContext('2d');
+
+function getDotCenter(index) {
+  const col = index % 3;
+  const row = Math.floor(index / 3);
+  return { x: 40 + col * 80, y: 40 + row * 80 };
+}
+
+function startGame() {
+  clearInterval(timerInterval);
+  seconds = 0;
+  document.getElementById('timer').textContent = '00:00';
+  timerInterval = setInterval(() => {
+    seconds++;
+    const m = String(Math.floor(seconds/60)).padStart(2,'0');
+    const s = String(seconds%60).padStart(2,'0');
+    document.getElementById('timer').textContent = m+':'+s;
+  }, 1000);
+
+  score = 0;
+  round = 1;
+  patternLength = 3;
+  document.getElementById('score').textContent = '0';
+  document.getElementById('round').textContent = '1';
+  document.getElementById('pattern-length').textContent = '3';
+  generatePattern();
+}
+
+function generatePattern() {
+  pattern = [];
+  while (pattern.length < patternLength) {
+    const n = Math.floor(Math.random() * 9);
+    if (!pattern.includes(n)) pattern.push(n);
+  }
+  playerPattern = [];
+  canPlay = false;
+  showingPattern = true;
+  showPatternAnimation();
+}
+
+function showPatternAnimation() {
+  clearAllDots();
+  clearLines();
+  setStatus('Watch the pattern...', 'text-yellow-400');
+
+  let i = 0;
+  const showNext = () => {
+    if (i > 0) {
+      document.querySelector(`.dot[data-index="${pattern[i-1]}"]`).classList.remove('show-pattern');
+    }
+    if (i < pattern.length) {
+      document.querySelector(`.dot[data-index="${pattern[i]}"]`).classList.add('show-pattern');
+      if (i > 0) {
+        drawLine(pattern[i-1], pattern[i], '#4ade80');
+      }
+      i++;
+      setTimeout(showNext, 600);
+    } else {
+      setTimeout(() => {
+        clearAllDots();
+        clearLines();
+        showingPattern = false;
+        canPlay = true;
+        setStatus('Your turn! Reproduce the pattern.', 'text-blue-400');
+      }, 800);
+    }
+  };
+  showNext();
+}
+
+function drawLine(from, to, color) {
+  const fromCenter = getDotCenter(from);
+  const toCenter = getDotCenter(to);
+  ctx.beginPath();
+  ctx.moveTo(fromCenter.x, fromCenter.y);
+  ctx.lineTo(toCenter.x, toCenter.y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+}
+
+function clearLines() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function clearAllDots() {
+  document.querySelectorAll('.dot').forEach(d => {
+    d.classList.remove('active', 'show-pattern', 'wrong');
+  });
+}
+
+function setStatus(msg, colorClass) {
+  const el = document.getElementById('status-msg');
+  el.innerHTML = `<span class="text-lg ${colorClass}">${msg}</span>`;
+}
+
+function handleDotClick(index) {
+  if (!canPlay || showingPattern) return;
+
+  const dot = document.querySelector(`.dot[data-index="${index}"]`);
+  if (playerPattern.includes(index)) return;
+
+  playerPattern.push(index);
+  dot.classList.add('active');
+  if (playerPattern.length > 1) {
+    drawLine(playerPattern[playerPattern.length-2], playerPattern[playerPattern.length-1], '#3b82f6');
+  }
+
+  const pos = playerPattern.length - 1;
+  if (pattern[pos] !== index) {
+    canPlay = false;
+    dot.classList.remove('active');
+    dot.classList.add('wrong');
+    setTimeout(() => dot.classList.remove('wrong'), 500);
+    setStatus('Wrong! Try again.', 'text-red-400');
+    setTimeout(() => {
+      if (score > 0) {
+        clearInterval(timerInterval);
+        setStatus(`Game Over! Score: ${score} | Time: ${formatTime(seconds)}`, 'text-yellow-400');
+      } else {
+        generatePattern();
+      }
+    }, 1000);
+    return;
+  }
+
+  if (playerPattern.length === pattern.length) {
+    canPlay = false;
+    score++;
+    round++;
+    patternLength = Math.min(9, 3 + Math.floor(score / 2));
+    document.getElementById('score').textContent = score;
+    document.getElementById('round').textContent = round;
+    document.getElementById('pattern-length').textContent = patternLength;
+    setStatus('Correct! Next pattern...', 'text-green-400');
+    setTimeout(() => generatePattern(), 1200);
+  }
+}
+
+function formatTime(s) {
+  const m = String(Math.floor(s/60)).padStart(2,'0');
+  const sec = String(s%60).padStart(2,'0');
+  return m+':'+sec;
+}
+
+function clearPattern() {
+  if (!canPlay) return;
+  playerPattern.forEach(i => {
+    document.querySelector(`.dot[data-index="${i}"]`).classList.remove('active');
+  });
+  clearLines();
+  playerPattern = [];
+}
+
+document.querySelectorAll('.dot').forEach(dot => {
+  const index = parseInt(dot.dataset.index);
+  
+  dot.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isMouseDown = true;
+    clearPattern();
+  });
+
+  dot.addEventListener('mouseenter', (e) => {
+    if (isMouseDown && canPlay && !showingPattern) {
+      if (!playerPattern.includes(index)) {
+        handleDotClick(index);
+      }
+    }
+  });
+
+  dot.addEventListener('mouseup', (e) => {
+    isMouseDown = false;
+  });
+
+  dot.addEventListener('click', (e) => {
+    handleDotClick(index);
+  });
+});
+
+document.addEventListener('mouseup', () => { isMouseDown = false; });
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DB Replication Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:1000px;margin:24px auto;padding:0 16px}
+.db-topology{display:flex;justify-content:center;align-items:center;gap:16px;margin:20px 0;flex-wrap:wrap}
+.db-node{background:#1e293b;border:2px solid #334155;border-radius:12px;padding:16px;width:140px;text-align:center;transition:all .3s}
+.db-node.primary{border-color:#4ade80}
+.db-node.replica{border-color:#38bdf8}
+.db-node.secondary{border-color:#a78bfa}
+.db-node h4{font-size:12px;margin-bottom:6px}
+.db-node .status{font-size:11px;padding:3px 8px;border-radius:4px;display:inline-block}
+.status-sync{background:rgba(74,222,128,.2);color:#4ade80}
+.status-lag{background:rgba(251,191,36,.2);color:#fbbf24}
+.status-error{background:rgba(248,113,113,.2);color:#f87171}
+.arrow-line{color:#475569;font-size:20px;display:flex;align-items:center}
+.conflict-box{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0}
+.conflict-box h3{font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.conflict-box h3::before{content:'';width:10px;height:10px;background:#f87171;border-radius:50%;display:inline-block}
+.conflict-ops{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.conflict-op{background:#334155;border-radius:8px;padding:10px 14px;font-size:12px;min-width:150px;border:2px solid transparent}
+.conflict-op.pri{border-color:#4ade80}
+.conflict-op.rep{border-color:#38bdf8}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.repl-stats{display:flex;justify-content:center;gap:24px;margin:12px 0;font-size:13px;color:#94a3b8}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>DB Replication</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/12</div>
+<div class="hud-item"><span id="conflicts">0</span>Resolved</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="scenario-card">
+<h3 id="scenario-title">Replication Scenario</h3>
+<p id="scenario-desc"></p>
+</div>
+<div class="db-topology" id="topology"></div>
+<div class="conflict-box" id="conflict-box">
+<h3>Conflict Details</h3>
+<div class="conflict-ops" id="conflict-ops"></div>
+</div>
+<div class="choices" id="choices"></div>
+<div class="repl-stats">
+<span>Writes: <b id="writes">0</b></span>
+<span>Replicated: <b id="repl">0</b></span>
+<span>Lag: <b id="lag">0ms</b></span>
+</div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Replication Expert!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=12,conflicts=0,writes=0,repl=0,answered=false;
+const scenarios=[
+{title:"Write Conflict",desc:"Primary writes user:1 name='Alice'. Replica writes user:1 name='Bob' simultaneously.",priOp:"UPDATE users SET name='Alice' WHERE id=1",repOp:"UPDATE users SET name='Bob' WHERE id=1",correct:"Last-Write-Wins (LWW)",reason:"LWW is simple and deterministic. Timestamp decides the winner."},
+{title:"Split Brain",desc:"Network partition between two primaries. Both accept writes.",priOp:"Primary A: INSERT order:100",repOp:"Primary B: INSERT order:200",correct:"Fencing token",reason:"Fencing tokens prevent split-brain by ensuring only one primary can write."},
+{title:"Replica Lag",desc:"Replica is 30 seconds behind. Read from replica returns stale data.",priOp:"Primary: order:50 status='shipped'",repOp:"Replica: order:50 status='pending'",correct:"Read from primary for fresh data",reason:"Critical reads should go to primary. Replicas serve non-critical reads."},
+{title:"Circular Replication",desc:"A→B→C→A creates infinite loop of updates.",priOp:"A writes x=1 → B → C → A",repOp:"Loop detected: A→B→C→A",correct:"Break the cycle with source tracking",reason:"Source tracking prevents infinite replication loops."},
+{title:"Schema Change During Replication",desc:"Primary adds column while replica still has old schema.",priOp:"ALTER TABLE users ADD COLUMN phone",repOp:"INSERT INTO users (name) VALUES ('X')",correct:"Schema migration on replicas first",reason:"Schema changes must be backward-compatible and rolled out to replicas first."},
+{title:"Cascade Failure",desc:"Replica crash causes primary to queue writes, filling disk.",priOp:"Primary: 10K queued writes",repOp:"Replica: crashed, no acknowledgment",correct:"Backpressure + circuit breaker",reason:"Queue overflow protection prevents primary from going down too."},
+{title:"Conflict on Delete",desc:"Primary deletes row, replica updates same row.",priOp:"DELETE FROM orders WHERE id=42",repOp:"UPDATE orders SET status='complete' WHERE id=42",correct:"Delete wins (tombstone)",reason:"Deletes should be final. Updates to deleted data are discarded."},
+{title:"Multi-Region Lag",desc:"Cross-region replication with 200ms latency. Consistency vs availability?",priOp:"US-East: user update",repOp:"EU-West: same user read",correct:"Async replication with eventual consistency",reason:"Sync replication across regions would be too slow. Eventual is acceptable."},
+{title:"Replica Promotion",desc:"Primary fails. Which replica should be promoted?",priOp:"Primary crashed",repOp:"Replica 1: lag 0ms, Replica 2: lag 500ms",correct:"Promote replica with least lag",reason:"Least-lag replica has the most up-to-date data."},
+{title:"Write-Ahead Log",desc:"Primary crashes mid-write. How to recover?",priOp:"WAL: write x=5 (committed)",repOp:"Replica received x=5",correct:"Replay WAL from last checkpoint",reason:"WAL ensures no committed writes are lost after crash."},
+{title:"Hot Partition",desc:"One shard gets 80% of writes. Replicas overwhelmed.",priOp:"Shard 2: 800 writes/sec",repOp:"Replica of Shard 2: can't keep up",correct:"Split hot partition",reason:"Hot partitions need splitting to distribute load."},
+{title:"Cross-DC Replication",desc:"Data center 1 goes down. DC 2 has stale data.",priOp:"DC1: 1000 new orders",repOp:"DC2: last sync 5 min ago",correct:"Serve from DC2 with staleness indicator",reason:"Availability over perfect consistency. Show staleness to users."}
+];
+let writesCount=0,replCount=0;
+function init(){score=0;round=0;conflicts=0;writesCount=0;replCount=0;startRound();}
+function renderTopology(lag=0){
+const el=document.getElementById('topology');
+el.innerHTML=`
+<div class="db-node primary"><h4>Primary</h4><div class="status status-sync">Active</div><div style="font-size:10px;color:#94a3b8;margin-top:4px">${writesCount} writes</div></div>
+<div class="arrow-line">→</div>
+<div class="db-node replica"><h4>Replica 1</h4><div class="status ${lag<50?'status-sync':'status-lag'}">${lag<50?'Synced':'Lag: '+lag+'ms'}</div></div>
+<div class="arrow-line">→</div>
+<div class="db-node secondary"><h4>Replica 2</h4><div class="status status-sync">Synced</div></div>`;
+}
+function startRound(){
+answered=false;
+const s=scenarios[round%scenarios.length];
+document.getElementById('scenario-title').textContent=s.title;
+document.getElementById('scenario-desc').textContent=s.desc;
+renderTopology(50);
+document.getElementById('conflict-ops').innerHTML=`
+<div class="conflict-op pri"><div style="color:#4ade80;font-size:10px;margin-bottom:4px">PRIMARY</div>${s.priOp}</div>
+<div class="conflict-op rep"><div style="color:#38bdf8;font-size:10px;margin-bottom:4px">REPLICA</div>${s.repOp}</div>`;
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+document.getElementById('choices').innerHTML=['Last-Write-Wins','Merge Changes','Manual Resolution','Accept Both'].map(c=>`<button class="choice-btn" onclick="answer('${c}','${s.correct}','${s.reason}')">${c}</button>`).join('');
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect){score+=10;conflicts++;writesCount++;replCount++;}
+else{score=Math.max(0,score-3);writesCount++;}
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Resolved!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+document.getElementById('conflicts').textContent=conflicts;
+document.getElementById('writes').textContent=writesCount;
+document.getElementById('repl').textContent=replCount;
+document.getElementById('lag').textContent=Math.floor(Math.random()*100)+'ms';
+renderTopology(Math.floor(Math.random()*100));
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;document.getElementById('conflicts').textContent=0;
+}
+init();
+</script>
+</body>
+</html>

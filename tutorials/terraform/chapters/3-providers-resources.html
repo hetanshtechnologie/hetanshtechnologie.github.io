@@ -1,0 +1,986 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 3: Providers &amp; Resources — Terraform eBook</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#7c3aed;text-decoration:none;">&larr; Back to Tutorials</a>
+
+<h1>Chapter 3: Providers &amp; Resources</h1>
+
+<p class="subtitle">The building blocks of every Terraform configuration — providers that talk to APIs and resources that define your infrastructure.</p>
+
+<div class="toc">
+<h2>Contents</h2>
+<ol>
+<li><a href="#what-are-providers">What Are Providers?</a></li>
+<li><a href="#provider-config">Provider Configuration</a></li>
+<li><a href="#provider-aliases">Provider Aliases &amp; Multi-Region</a></li>
+<li><a href="#resource-basics">Resource Basics</a></li>
+<li><a href="#dependencies">Implicit vs Explicit Dependencies</a></li>
+<li><a href="#meta-arguments">Resource Meta-Arguments</a></li>
+<li><a href="#resource-addressing">Resource Addressing</a></li>
+<li><a href="#data-sources">Data Sources</a></li>
+<li><a href="#sensitive-resources">Sensitive Resources</a></li>
+<li><a href="#summary">Summary &amp; Checklist</a></li>
+</ol>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="what-are-providers">1. What Are Providers?</h2>
+
+<p>Providers are plugins that Terraform uses to interact with cloud platforms, SaaS providers, and other APIs. Each provider exposes <strong>resources</strong> (things you create), <strong>data sources</strong> (things you query), and <strong>configuration blocks</strong> (authentication, endpoints).</p>
+
+<div class="diagram">
+<pre>
+┌──────────────────────────────────────────────────────────┐
+│                   Terraform Core                          │
+│                                                           │
+│   HCL Config ──► Plan ──► Apply                           │
+│       │              ▲         │                          │
+│       │              │         ▼                          │
+│       ▼              │   ┌─────────────┐                  │
+│ ┌───────────┐        │   │ Provider A  │ ──► Azure        │
+│ │ Provider  │ ◄──────┘   │ (azurerm)   │                  │
+│ │ Registry  │            ├─────────────┤                  │
+│ │           │            │ Provider B  │ ──► AWS          │
+│ │ terraform │            │ (aws)       │                  │
+│ │   .io     │            ├─────────────┤                  │
+│ └───────────┘            │ Provider C  │ ──► GCP          │
+│                          │ (google)    │                  │
+│                          └─────────────┘                  │
+└──────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<table>
+<thead>
+<tr><th>Provider</th><th>Registry Address</th><th>What It Manages</th></tr>
+</thead>
+<tbody>
+<tr><td><code>azurerm</code></td><td><code>hashicorp/azurerm</code></td><td>Azure resources (VMs, VNets, Storage, etc.)</td></tr>
+<tr><td><code>aws</code></td><td><code>hashicorp/aws</code></td><td>Amazon Web Services (EC2, S3, VPC, etc.)</td></tr>
+<tr><td><code>google</code></td><td><code>hashicorp/google</code></td><td>Google Cloud Platform (Compute Engine, GCS, etc.)</td></tr>
+<tr><td><code>random</code></td><td><code>hashicorp/random</code></td><td>Random resources (passwords, IDs)</td></tr>
+<tr><td><code>tls</code></td><td><code>hashicorp/tls</code></td><td>TLS certificates and keys</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<strong>Key concept:</strong> When you run <code>terraform init</code>, Terraform downloads the provider plugins declared in your configuration and locks their versions in <code>.terraform.lock.hcl</code>.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="provider-config">2. Provider Configuration</h2>
+
+<p>Provider blocks configure authentication, regions, and other settings. Every provider block uses the source address and a pinned version.</p>
+
+<h3>2.1 Azure (azurerm)</h3>
+
+<pre><code>terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~&gt; 4.0"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+
+  # Authenticate via:
+  # 1. az login (CLI), or
+  # 2. ARM_CLIENT_ID / ARM_CLIENT_SECRET / ARM_TENANT_ID / ARM_SUBSCRIPTION_ID
+}
+
+# Optional: scope resources to a subscription
+provider "azurerm" {
+  alias           = "management"
+  subscription_id = "00000000-0000-0000-0000-000000000000"
+  features {}
+}</code></pre>
+
+<h3>2.2 AWS</h3>
+
+<pre><code>terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~&gt; 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Environment = "production"
+      ManagedBy   = "terraform"
+    }
+  }
+
+  # Authenticate via:
+  # 1. AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars, or
+  # 2. ~/.aws/credentials profile, or
+  # 3. IAM role (EC2 / ECS task)
+}</code></pre>
+
+<h3>2.3 Google Cloud Platform</h3>
+
+<pre><code>terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~&gt; 5.0"
+    }
+  }
+}
+
+provider "google" {
+  project = "my-gcp-project-id"
+  region  = "us-central1"
+  zone    = "us-central1-a"
+
+  # Authenticate via:
+  # 1. gcloud auth application-default login, or
+  # GOOGLE_CREDENTIALS / GOOGLE_APPLICATION_CREDENTIALS env var
+}</code></pre>
+
+<h3>2.4 Version Pinning Strategies</h3>
+
+<table>
+<thead>
+<tr><th>Constraint</th><th>Meaning</th><th>Example Range</th></tr>
+</thead>
+<tbody>
+<tr><td><code>= 3.1.0</code></td><td>Exact version</td><td>3.1.0</td></tr>
+<tr><td><code>~&gt; 3.1.0</code></td><td>Minor &amp; patch only</td><td>3.1.x</td></tr>
+<tr><td><code>~&gt; 3.0</code></td><td>Patch only</td><td>3.x.x</td></tr>
+<tr><td><code>&gt;= 3.0, &lt; 4.0</code></td><td>Range</td><td>3.0.0 – 3.999.999</td></tr>
+</tbody>
+</table>
+
+<div class="tip">
+<strong>Best practice:</strong> Use the <code>~&gt;</code> (pessimistic constraint) operator. It allows patches and minor updates but prevents major version bumps that may contain breaking changes.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="provider-aliases">3. Provider Aliases &amp; Multi-Region</h2>
+
+<p>Aliases let you declare multiple instances of the same provider — useful for deploying to different regions, subscriptions, or accounts.</p>
+
+<h3>3.1 Azure Multi-Region Example</h3>
+
+<pre><code>provider "azurerm" {
+  alias           = "primary"
+  subscription_id = "aaaa-1111"
+  features {}
+}
+
+provider "azurerm" {
+  alias           = "secondary"
+  subscription_id = "bbbb-2222"
+  features {}
+}
+
+resource "azurerm_resource_group" "primary" {
+  provider = azurerm.primary
+  name     = "rg-primary"
+  location = "East US"
+}
+
+resource "azurerm_resource_group" "secondary" {
+  provider = azurerm.secondary
+  name     = "rg-secondary"
+  location = "West US 2"
+}</code></pre>
+
+<h3>3.2 AWS Multi-Region Example</h3>
+
+<pre><code>provider "aws" {
+  alias  = "us_east"
+  region = "us-east-1"
+}
+
+provider "aws" {
+  alias  = "eu_west"
+  region = "eu-west-1"
+}
+
+resource "aws_s3_bucket" "replica" {
+  provider = aws.eu_west
+  bucket   = "my-replicated-bucket-eu"
+}</code></pre>
+
+<div class="warning">
+<strong>Important:</strong> When a provider has an alias, every resource that uses it <em>must</em> specify the <code>provider</code> argument. Omitting it will cause an error at plan time.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="resource-basics">4. Resource Basics</h2>
+
+<p>Resources are the most important building blocks. Each resource block declares the resource <strong>type</strong> and a <strong>local name</strong> — together they form the <em>resource address</em>.</p>
+
+<pre><code>resource "&lt;TYPE&gt;" "&lt;LOCAL_NAME&gt;" {
+  # configuration arguments
+}
+# Example:
+resource "azurerm_resource_group" "main" {
+  name     = "rg-demo"
+  location = "East US"
+}</code></pre>
+
+<h3>4.1 Azure Full Stack Example</h3>
+
+<p>Let's build a complete VM deployment with networking:</p>
+
+<pre><code># ─── Resource Group ──────────────────────────────
+resource "azurerm_resource_group" "main" {
+  name     = "rg-terraform-demo"
+  location = "East US"
+}
+
+# ─── Virtual Network ─────────────────────────────
+resource "azurerm_virtual_network" "main" {
+  name                = "vnet-main"
+  address_space       = ["10.0.0.0/16"]
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+# ─── Subnet ──────────────────────────────────────
+resource "azurerm_subnet" "frontend" {
+  name                 = "snet-frontend"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+# ─── Network Security Group ──────────────────────
+resource "azurerm_network_security_group" "web" {
+  name                = "nsg-web"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  security_rule {
+    name                       = "Allow-SSH"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "203.0.113.0/24"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "Allow-HTTP"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  tags = {
+    environment = "demo"
+  }
+}
+
+# ─── Public IP ───────────────────────────────────
+resource "azurerm_public_ip" "main" {
+  name                = "pip-web"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+# ─── Network Interface ──────────────────────────
+resource "azurerm_network_interface" "main" {
+  name                = "nic-web"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.frontend.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.main.id
+  }
+}
+
+# ─── Associate NSG with NIC ──────────────────────
+resource "azurerm_network_interface_security_group_association" "web" {
+  network_interface_id      = azurerm_network_interface.main.id
+  network_security_group_id = azurerm_network_security_group.web.id
+}
+
+# ─── Linux Virtual Machine ───────────────────────
+resource "azurerm_linux_virtual_machine" "web" {
+  name                = "vm-web-01"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  size                = "Standard_B2s"
+  admin_username      = "azureuser"
+
+  network_interface_ids = [
+    azurerm_network_interface.main.id,
+  ]
+
+  admin_ssh_key {
+    username   = "azureuser"
+    public_key = file("~/.ssh/id_rsa.pub")
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+
+  tags = {
+    environment = "demo"
+  }
+}</code></pre>
+
+<h3>4.2 AWS Full Stack Example</h3>
+
+<pre><code># ─── VPC ──────────────────────────────────────────
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = {
+    Name = "vpc-main"
+  }
+}
+
+# ─── Subnet ───────────────────────────────────────
+resource "aws_subnet" "public" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = "us-east-1a"
+
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "snet-public"
+  }
+}
+
+# ─── Internet Gateway ─────────────────────────────
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "igw-main"
+  }
+}
+
+# ─── EC2 Instance ─────────────────────────────────
+resource "aws_instance" "web" {
+  ami                    = "ami-0c02fb55956c7d316" # Amazon Linux 2
+  instance_type          = "t3.micro"
+  subnet_id              = aws_subnet.public.id
+  vpc_security_group_ids = [aws_security_group.web.id]
+
+  tags = {
+    Name = "ec2-web-01"
+  }
+}
+
+# ─── S3 Bucket ────────────────────────────────────
+resource "aws_s3_bucket" "data" {
+  bucket = "my-terraform-demo-bucket-2026"
+
+  tags = {
+    Environment = "demo"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "data" {
+  bucket = aws_s3_bucket.data.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}</code></pre>
+
+<h3>4.3 GCP Full Stack Example</h3>
+
+<pre><code># ─── VPC Network ──────────────────────────────────
+resource "google_compute_network" "main" {
+  name                    = "vpc-main"
+  auto_create_subnetworks = false
+  routing_mode            = "REGIONAL"
+}
+
+resource "google_compute_subnetwork" "main" {
+  name          = "snet-main"
+  ip_cidr_range = "10.0.1.0/24"
+  region        = "us-central1"
+  network       = google_compute_network.main.id
+}
+
+# ─── Firewall Rule ────────────────────────────────
+resource "google_compute_firewall" "allow_http" {
+  name    = "fw-allow-http"
+  network = google_compute_network.main.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80", "443"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["web-server"]
+}
+
+# ─── Compute Instance ─────────────────────────────
+resource "google_compute_instance" "web" {
+  name         = "vm-web-01"
+  machine_type = "e2-medium"
+  zone         = "us-central1-a"
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+      size  = 20
+      type  = "pd-balanced"
+    }
+  }
+
+  network_interface {
+    subnetwork = google_compute_subnetwork.main.id
+    access_config {
+      # Ephemeral public IP
+    }
+  }
+
+  tags = ["web-server"]
+
+  metadata_startup_script = &lt;&lt;-EOF
+    #!/bin/bash
+    apt-get update &amp;&amp; apt-get install -y nginx
+    systemctl enable nginx &amp;&amp; systemctl start nginx
+  EOF
+}</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="dependencies">5. Implicit vs Explicit Dependencies</h2>
+
+<h3>5.1 Implicit Dependencies</h3>
+
+<p>Terraform automatically infers dependencies when one resource references another's attribute. This is the most common and preferred pattern.</p>
+
+<pre><code># azurerm_subnet.frontend is referenced via virtual_network_name,
+# so Terraform knows to create the VNet BEFORE the subnet — implicit dependency.
+resource "azurerm_subnet" "frontend" {
+  name                 = "snet-frontend"
+  virtual_network_name = azurerm_virtual_network.main.name  # ← implicit dep
+  resource_group_name  = azurerm_resource_group.main.name
+  address_prefixes     = ["10.0.1.0/24"]
+}</code></pre>
+
+<div class="diagram">
+<pre>
+Implicit dependency graph:
+
+azurerm_resource_group.main
+    │
+    ├──► azurerm_virtual_network.main
+    │         │
+    │         └──► azurerm_subnet.frontend
+    │                   │
+    │                   └──► azurerm_network_interface.main
+    │                              │
+    │                              └──► azurerm_linux_virtual_machine.web
+    │
+    └──► azurerm_network_security_group.web
+              │
+              └──► azurerm_network_interface_security_group_association.web
+</pre>
+</div>
+
+<h3>5.2 Explicit Dependencies with <code>depends_on</code></h3>
+
+<p>Use <code>depends_on</code> when a dependency exists but isn't expressed through attribute references — for example, a policy that must be applied before a resource is created.</p>
+
+<pre><code>resource "azurerm_linux_virtual_machine" "web" {
+  name                = "vm-web-01"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  size                = "Standard_B2s"
+  admin_username      = "azureuser"
+
+  network_interface_ids = [azurerm_network_interface.main.id]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+
+  # Explicit: wait for NSG rules to propagate before creating VM
+  depends_on = [
+    azurerm_network_security_group.web,
+  ]
+}</code></pre>
+
+<div class="warning">
+<strong>Use sparingly:</strong> Overusing <code>depends_on</code> hides the true dependency graph and makes plans slower. If an implicit reference exists, prefer that. Only use <code>depends_on</code> for non-obvious ordering.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="meta-arguments">6. Resource Meta-Arguments</h2>
+
+<p>Meta-arguments are available on <em>every</em> resource type and control behavior like repetition, lifecycle, and timeouts.</p>
+
+<h3>6.1 <code>count</code></h3>
+
+<p>Creates multiple instances of a resource. The count is an integer expression.</p>
+
+<pre><code>variable "instance_count" {
+  type    = number
+  default = 3
+}
+
+resource "azurerm_linux_virtual_machine" "web" {
+  count               = var.instance_count
+  name                = "vm-web-${count.index + 1}"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  size                = "Standard_B2s"
+  admin_username      = "azureuser"
+
+  network_interface_ids = [
+    azurerm_network_interface.main[count.index].id,
+  ]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+}
+
+# Access all instances
+output "vm_ids" {
+  value = azurerm_linux_virtual_machine.web[*].id
+}</code></pre>
+
+<div class="note">
+<strong>Limitation:</strong> With <code>count</code>, removing an item from the middle of the list causes all subsequent items to be destroyed and recreated. Prefer <code>for_each</code> for stable naming.
+</div>
+
+<h3>6.2 <code>for_each</code></h3>
+
+<p>Creates resources from a map or set. Each instance gets a unique key, making insertion/deletion safe.</p>
+
+<pre><code>variable "vms" {
+  default = {
+    web   = { size = "Standard_B2s", zone = "1" }
+    api   = { size = "Standard_B2ms", zone = "2" }
+    worker = { size = "Standard_B1ms", zone = "1" }
+  }
+}
+
+resource "azurerm_linux_virtual_machine" "app" {
+  for_each            = var.vms
+  name                = "vm-${each.key}"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  size                = each.value.size
+  admin_username      = "azureuser"
+  zone                = each.value.zone
+
+  network_interface_ids = [
+    azurerm_network_interface.app[each.key].id,
+  ]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+}</code></pre>
+
+<h3>6.3 <code>lifecycle</code></h3>
+
+<p>The <code>lifecycle</code> block overrides default behaviors for creation, update, and destruction.</p>
+
+<h4>prevent_destroy</h4>
+
+<pre><code>resource "azurerm_storage_account" "critical" {
+  name                     = "stcritdata2026"
+  resource_group_name      = azurerm_resource_group.main.name
+  location                 = azurerm_resource_group.main.location
+  account_tier             = "Standard"
+  account_replication_type = "GRS"
+
+  lifecycle {
+    prevent_destroy = true   # terraform destroy will FAIL if this resource exists
+  }
+}</code></pre>
+
+<h4>create_before_destroy</h4>
+
+<pre><code>resource "azurerm_linux_virtual_machine" "web" {
+  name                = "vm-web-01"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  size                = "Standard_B2s"
+  admin_username      = "azureuser"
+
+  lifecycle {
+    create_before_destroy = true  # Build new VM before destroying old one
+  }
+
+  # ... rest of config
+}</code></pre>
+
+<h4>ignore_changes</h4>
+
+<pre><code>resource "azurerm_linux_virtual_machine" "web" {
+  # ...
+
+  # External tools may modify the tags; don't drift on every plan
+  lifecycle {
+    ignore_changes = [
+      tags["LastModifiedBy"],
+      tags["AppliedPatch"],
+    ]
+  }
+}</code></pre>
+
+<h4>replace_triggered_by</h4>
+
+<pre><code>resource "azurerm_linux_virtual_machine" "web" {
+  # ...
+
+  # Force recreation when the subnet changes
+  lifecycle {
+    replace_triggered_by = [
+      azurerm_subnet.frontend,
+    ]
+  }
+}</code></pre>
+
+<h4>precondition &amp; postcondition</h4>
+
+<pre><code>resource "azurerm_linux_virtual_machine" "web" {
+  # ...
+
+  lifecycle {
+    precondition {
+      condition     = var.vm_size != "Standard_B1s"
+      error_message = "VM size B1s is too small for production workloads."
+    }
+
+    postcondition {
+      condition     = self.power_state == "running"
+      error_message = "VM failed to reach running state."
+    }
+  }
+}</code></pre>
+
+<div class="tip">
+<strong>Pro tip:</strong> Combine <code>precondition</code> with variables and data sources to enforce organizational policies — for example, verifying that the chosen region supports the required VM SKU.
+</div>
+
+<h3>6.4 <code>timeouts</code></h3>
+
+<p>Override Terraform's default operation timeouts (varies by resource provider).</p>
+
+<pre><code>resource "azurerm_linux_virtual_machine" "web" {
+  # ...
+
+  timeouts {
+    create = "30m"
+    update = "20m"
+    delete = "15m"
+  }
+}</code></pre>
+
+<table>
+<thead>
+<tr><th>Meta-Argument</th><th>Applies To</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>count</code></td><td>All resources</td><td>Create N identical instances</td></tr>
+<tr><td><code>for_each</code></td><td>All resources</td><td>Create instances from map/set</td></tr>
+<tr><td><code>depends_on</code></td><td>All resources</td><td>Explicit ordering</td></tr>
+<tr><td><code>provider</code></td><td>All resources</td><td>Select aliased provider</td></tr>
+<tr><td><code>provisioner</code></td><td>All resources</td><td>Run local/remote commands on create/destroy</td></tr>
+<tr><td><code>lifecycle</code></td><td>All resources</td><td>Control create/destroy/ignore behavior</td></tr>
+<tr><td><code>timeouts</code></td><td>Most resources</td><td>Override operation durations</td></tr>
+<tr><td><code>connection</code></td><td>Provisioners only</td><td>SSH/WinRM connection info</td></tr>
+</tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="resource-addressing">7. Resource Addressing</h2>
+
+<p>Resource addresses uniquely identify every resource and attribute in a Terraform configuration.</p>
+
+<div class="diagram">
+<pre>
+Full addressing syntax:
+
+module.&lt;name&gt;.resource.&lt;type&gt;.&lt;name&gt;
+  └─ optional   └─ required  └─ required
+
+Examples:
+  azurerm_resource_group.main                        # resource type + name
+  azurerm_linux_virtual_machine.web[0]               # count index
+  azurerm_linux_virtual_machine.app["api"]           # for_each key
+  module.network.azurerm_virtual_network.main        # module-scoped
+  azurerm_linux_virtual_machine.web.private_ip       # attribute access
+</pre>
+</div>
+
+<h3>7.1 Targeting from the CLI</h3>
+
+<pre><code># Plan changes to a specific resource
+terraform plan -target=azurerm_linux_virtual_machine.web
+
+# Target an entire module
+terraform plan -target=module.network
+
+# Target with for_each
+terraform plan -target='azurerm_linux_virtual_machine.app["api"]'
+
+# Destroy a specific resource (careful!)
+terraform destroy -target=azurerm_linux_virtual_machine.web[1]</code></pre>
+
+<div class="warning">
+<strong>Avoid in automation:</strong> Using <code>-target</code> in CI/CD pipelines can mask drift and missing dependencies. Use it only for debugging.
+</div>
+
+<h3>7.2 Moving Resources</h3>
+
+<p>Rename a resource without destroying and recreating it:</p>
+
+<pre><code># In the config, write a move block (Terraform 1.1+)
+moved {
+  from = azurerm_linux_virtual_machine.web
+  to   = azurerm_linux_virtual_machine.app_server
+}
+
+# Or move from count to for_each:
+moved {
+  from = azurerm_linux_virtual_machine.web[0]
+  to   = azurerm_linux_virtual_machine.web["primary"]
+}</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="data-sources">8. Data Sources</h2>
+
+<p>Data sources <em>query</em> existing infrastructure that Terraform does not manage. They use the <code>data</code> block instead of <code>resource</code>.</p>
+
+<pre><code># ─── Query the current Azure subscription ────────
+data "azurerm_client_config" "current" {}
+
+# ─── Look up an existing VNet ────────────────────
+data "azurerm_virtual_network" "shared" {
+  name                = "vnet-shared-hub"
+  resource_group_name = "rg-networking"
+}
+
+# ─── Get the latest Ubuntu image ─────────────────
+data "azurerm_platform_image" "ubuntu" {
+  location  = "East US"
+  publisher = "Canonical"
+  offer     = "0001-com-ubuntu-server-jammy"
+  sku       = "22_04-lts"
+}
+
+# ─── AWS: Look up latest Amazon Linux AMI ────────
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+}
+
+# ─── GCP: Look up the default compute service account ──
+data "google_compute_default_service_account" "default" {
+  project = "my-gcp-project-id"
+}
+
+# ─── Use data source values in a resource ────────
+resource "azurerm_linux_virtual_machine" "web" {
+  # ...
+  size = data.azurerm_platform_image.ubuntu.id != "" ? "Standard_B2s" : "Standard_B1ms"
+}</code></pre>
+
+<div class="note">
+<strong>Data source vs resource:</strong> A <code>data</code> block only <em>reads</em> — it will never create, modify, or destroy infrastructure. If the queried resource doesn't exist, the plan fails.
+</div>
+
+<h3>8.1 Using <code>data</code> with <code>for_each</code></h3>
+
+<pre><code>variable "subnets_to_lookup" {
+  default = {
+    frontend = { name = "snet-frontend", vnet = "vnet-main" }
+    backend  = { name = "snet-backend", vnet = "vnet-main" }
+  }
+}
+
+data "azurerm_subnet" "existing" {
+  for_each             = var.subnets_to_lookup
+  name                 = each.value.name
+  virtual_network_name = each.value.vnet
+  resource_group_name  = "rg-networking"
+}
+
+output "subnet_ids" {
+  value = { for k, v in data.azurerm_subnet.existing : k => v.id }
+}</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="sensitive-resources">9. Sensitive Resources</h2>
+
+<p>Terraform provides built-in support for hiding sensitive values in state and output.</p>
+
+<h3>9.1 The <code>sensitive</code> Argument</h3>
+
+<pre><code># Marks an output as sensitive — hidden in CLI output, stored in state
+output "admin_password" {
+  value     = azurerm_linux_virtual_machine.web.admin_password
+  sensitive = true  # Value won't appear in terraform output without -json
+}</code></pre>
+
+<h3>9.2 Sensitive Variables</h3>
+
+<pre><code>variable "db_password" {
+  type      = string
+  sensitive = true   # Won't be shown in plans or output
+}
+
+resource "azurerm_postgresql_flexible_server" "main" {
+  # ...
+  administrator_password = var.db_password
+}</code></pre>
+
+<h3>9.3 Marking a Resource Attribute as Sensitive</h3>
+
+<pre><code>resource "random_password" "db" {
+  length           = 16
+  special          = true
+  override_special = "!@#$%&amp;"
+}
+
+locals {
+  db_password = random_password.db.result
+}
+
+resource "azurerm_key_vault_secret" "db_password" {
+  name         = "db-password"
+  value        = local.db_password
+  key_vault_id = azurerm_key_vault.main.id
+
+  # Attributes marked sensitive won't be shown in plan output
+  lifecycle {
+    ignore_changes = [value]
+  }
+}</code></pre>
+
+<div class="warning">
+<strong>State file is still sensitive:</strong> Even with <code>sensitive = true</code>, values are stored in plaintext in the Terraform state file. Use remote state backends with encryption (e.g., Azure Storage, S3 with SSE, GCS with CMEK) and restrict access with IAM.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="summary">10. Summary &amp; Checklist</h2>
+
+<h3>Key Takeaways</h3>
+
+<ul>
+<li><strong>Providers</strong> are plugins that bridge Terraform and cloud APIs. Pin versions and authenticate via environment variables or identity.</li>
+<li><strong>Resources</strong> declare desired infrastructure state. Reference other resources by name for automatic dependency ordering.</li>
+<li><strong>Provider aliases</strong> enable multi-region or multi-subscription deployments in a single configuration.</li>
+<li><strong><code>count</code> and <code>for_each</code></strong> replicate resources — <code>for_each</code> is preferred for stable addressing.</li>
+<li><strong><code>lifecycle</code></strong> controls destruction behavior, drift handling, and pre/postconditions.</li>
+<li><strong>Data sources</strong> query existing infrastructure without managing it.</li>
+<li><strong>Sensitive values</strong> must be marked and protected in both state and CI/CD pipelines.</li>
+</ul>
+
+<div class="exercise">
+<h2>Chapter 3 Checklist</h2>
+<ol>
+<li><input type="checkbox"> Declared <code>required_providers</code> with version constraints for every provider.</li>
+<li><input type="checkbox"> Configured provider authentication via environment variables (not hardcoded secrets).</li>
+<li><input type="checkbox"> Used <code>~&gt;</code> version constraint to allow safe upgrades.</li>
+<li><input type="checkbox"> Used provider aliases only where multi-region/subscription is needed.</li>
+<li><input type="checkbox"> Defined all resources with explicit names (no reliance on defaults).</li>
+<li><input type="checkbox"> Let implicit dependencies (attribute references) handle ordering.</li>
+<li><input type="checkbox"> Used <code>depends_on</code> only when no implicit reference is possible.</li>
+<li><input type="checkbox"> Used <code>for_each</code> over <code>count</code> for multi-instance resources.</li>
+<li><input type="checkbox"> Added <code>lifecycle { prevent_destroy = true }</code> on critical-state resources.</li>
+<li><input type="checkbox"> Used <code>lifecycle { ignore_changes }</code> for attributes modified outside Terraform.</li>
+<li><input type="checkbox"> Leveraged data sources to reference existing infrastructure.</li>
+<li><input type="checkbox"> Marked sensitive variables and outputs with <code>sensitive = true</code>.</li>
+<li><input type="checkbox"> Verified <code>terraform plan</code> shows expected changes before apply.</li>
+</ol>
+</div>
+
+<div class="diagram" style="margin-top:2rem;">
+<pre>
+┌──────────────────────────────────────────────────────────────┐
+│                      Chapter Progress                         │
+├──────────────────────────────────────────────────────────────┤
+│  Ch 1: Intro        ──► Ch 2: Install ──► Ch 3: Providers ◄─ YOU ARE HERE
+│  ──► Ch 4: Variables ──► Ch 5: State ──► ... ──► Ch 9: CI/CD │
+└──────────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<!-- Navigation -->
+<div style="display:flex;justify-content:space-between;margin-top:2.5rem;padding-top:1.5rem;border-top:1px solid #e2e8f0;">
+  <a href="2-installation.html" style="color:#7c3aed;text-decoration:none;font-weight:600;">&larr; Ch 2: Installation &amp; Setup</a>
+  <a href="4-variables-outputs.html" style="color:#7c3aed;text-decoration:none;font-weight:600;">Ch 4: Variables, Outputs &amp; Data Sources &rarr;</a>
+</div>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../js/feedback.js"></script>
+<script src="../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

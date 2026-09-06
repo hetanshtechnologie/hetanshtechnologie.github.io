@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Geology Explorer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.rock-display{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+.rock-card{width:100px;height:100px;border:2px solid #475569;border-radius:12px;background:#1e293b;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:2.5rem;cursor:pointer;transition:all .2s}
+.rock-card:hover{border-color:#38bdf8;transform:scale(1.05)}
+.rock-card.selected{border-color:#facc15;box-shadow:0 0 12px rgba(250,204,21,0.3)}
+.rock-card.correct{border-color:#22c55e}
+.rock-card.wrong{border-color:#ef4444;animation:shake .3s}
+.rock-label{font-size:.7rem;color:#94a3b8;margin-top:4px}
+.card{background:#1e293b;border-radius:16px;padding:20px;max-width:600px;width:100%;text-align:center;border:2px solid #334155}
+.q-text{font-size:1rem;margin:10px 0;line-height:1.4}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.opt{background:#0f172a;color:#e2e8f0;border:2px solid #475569;padding:12px;border-radius:8px;font-size:.85rem;cursor:pointer;transition:all .2s}
+.opt:hover{border-color:#38bdf8}
+.opt.correct{border-color:#22c55e;background:rgba(34,197,94,0.15)}
+.opt.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15)}
+.opt.disabled{pointer-events:none;opacity:.7}
+.fb{margin-top:10px;padding:10px;border-radius:8px;font-size:.9rem;min-height:2em}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.wave-display{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:10px 0}
+.wave-type{padding:8px 16px;border-radius:20px;border:2px solid #475569;cursor:pointer;transition:all .2s;font-size:.85rem}
+.wave-type:hover{border-color:#38bdf8}
+.wave-type.selected{border-color:#facc15;background:#1e3a5f}
+.wave-type.correct{border-color:#22c55e}
+.wave-type.wrong{border-color:#ef4444}
+.mode-toggle{display:flex;gap:8px;margin:8px 0}
+.mode-btn{padding:8px 16px;border-radius:8px;border:2px solid #475569;background:#0f172a;color:#e2e8f0;cursor:pointer;font-size:.85rem}
+.mode-btn.active{border-color:#38bdf8;background:#1e293b}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>🪨 Geology Explorer</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/10</span>
+</div>
+<div class="mode-toggle">
+<button class="mode-btn active" id="mode-rocks" onclick="setMode('rocks')">🪨 Rock Types</button>
+<button class="mode-btn" id="mode-quakes" onclick="setMode('quakes')">🌊 Earthquake Waves</button>
+<button class="mode-btn" id="mode-cycles" onclick="setMode('cycles')">🔄 Rock Cycle</button>
+</div>
+<div class="rock-display" id="display"></div>
+<div class="card">
+<div class="q-text" id="qtext"></div>
+<div class="opts" id="opts"></div>
+<div class="fb" id="fb"></div>
+</div>
+<button class="btn" id="next-btn" style="display:none" onclick="nextQ()">Next ➡️</button>
+</div>
+<script>
+let score=0,level=1,qNum=0,answered=false,mode='rocks';
+const rockQuestions=[
+  {q:'Which rock forms from cooled magma or lava?',emoji:'🌋',opts:['Igneous','Sedimentary','Metamorphic','Composite'],ans:0,explain:'Igneous rocks form when magma (underground) or lava (surface) cools and crystallizes.'},
+  {q:'Which rock is made from compressed layers of sediment?',emoji:'🏗️',opts:['Sedimentary','Igneous','Metamorphic','Volcanic'],ans:0,explain:'Sedimentary rocks form from accumulated, compressed, and cemented sediments.'},
+  {q:'Which rock forms when existing rock is changed by heat/pressure?',emoji:'💎',opts:['Metamorphic','Igneous','Sedimentary','Extrusive'],ans:0,explain:'Metamorphic rocks form when pre-existing rocks are transformed by heat and/or pressure.'},
+  {q:'Granite is an example of which rock type?',emoji:'🪨',opts:['Igneous (intrusive)','Sedimentary','Metamorphic','Organic'],ans:0,explain:'Granite is intrusive igneous — it cools slowly underground, forming large crystals.'},
+  {q:'Limestone is which type of rock?',emoji:'🏛️',opts:['Sedimentary','Igneous','Metamorphic','Volcanic'],ans:0,explain:'Limestone is sedimentary — often formed from shells and coral (organic sedimentary).'},
+  {q:'Marble forms from limestone under heat and pressure. It is:',emoji:'💎',opts:['Metamorphic','Sedimentary','Igneous','Chemical'],ans:0,explain:'Marble is metamorphic — limestone recrystallizes under heat and pressure.'},
+  {q:'Which rock contains fossils?',emoji:'🦴',opts:['Sedimentary','Igneous','Metamorphic','Volcanic'],ans:0,explain:'Fossils are found in sedimentary rocks — the gentle process preserves organisms.'},
+  {q:'Basalt is which type of rock?',emoji:'⚫',opts:['Igneous (extrusive)','Sedimentary','Metamorphic','Organic'],ans:0,explain:'Basalt is extrusive igneous — forms from rapid cooling of lava on the surface.'},
+  {q:'Sandstone is formed from:',emoji:'🏖️',opts:['Cemented sand grains','Volcanic ash','Metamorphosed limestone','Crystal growth'],ans:0,explain:'Sandstone is sedimentary — sand grains are cemented together over time.'},
+  {q:'Which process breaks rocks into smaller pieces?',emoji:'💨',opts:['Weathering','Melting','Cementation','Recrystallization'],ans:0,explain:'Weathering breaks rocks through physical, chemical, or biological processes.'},
+];
+
+const quakeQuestions=[
+  {q:'Which earthquake wave arrives first at seismographs?',emoji:'📊',opts:['P-wave (Primary)','S-wave (Secondary)','Surface wave','Love wave'],ans:0,explain:'P-waves (compressional) are fastest and arrive first. They travel through solids and liquids.'},
+  {q:'Which earthquake wave cannot travel through liquid?',emoji:'🌊',opts:['S-wave (Secondary)','P-wave (Primary)','Surface wave','Rayleigh wave'],ans:0,explain:'S-waves (shear) can only travel through solids — this is how we know Earth\'s outer core is liquid.'},
+  {q:'P-waves are also called ______ waves.',emoji:'🔊',opts:['Compressional','Transverse','Surface','Love'],ans:0,explain:'P-waves compress and expand the rock in the direction of travel (compressional/longitudinal).'},
+  {q:'S-waves are also called ______ waves.',emoji:'↕️',opts:['Shear/Transverse','Compressional','Surface','Body'],ans:0,explain:'S-waves move rock perpendicular to the wave direction (shear/transverse).'},
+  {q:'Which wave causes the most damage during earthquakes?',emoji:'💥',opts:['Surface waves','P-waves','S-waves','Body waves'],ans:0,explain:'Surface waves (Love and Rayleigh) travel along Earth\'s surface and cause the most destruction.'},
+  {q:'How do scientists know Earth\'s outer core is liquid?',emoji:'🌍',opts:['S-waves don\'t pass through it','P-waves stop at it','Surface waves avoid it','All waves stop'],ans:0,explain:'S-waves (shear waves) cannot travel through liquid — they stop at the outer core boundary.'},
+  {q:'What is the focus (hypocenter) of an earthquake?',emoji:'📍',opts:['Where the quake originates underground','The point on the surface directly above','The seismograph location','The plate boundary'],ans:0,explain:'The focus (hypocenter) is where the earthquake rupture actually begins, deep underground.'},
+  {q:'What is the epicenter?',emoji:'🎯',opts:['Point on surface directly above focus','The focus itself','Where P-waves start','The seismograph'],ans:0,explain:'The epicenter is the point on Earth\'s surface directly above the focus.'},
+  {q:'Seismic P-waves compress rock like:',emoji:'🔊',opts:['A slinky pushing and pulling','A wave on water','A spinning rope','Light rays'],ans:0,explain:'P-waves work like a slinky being compressed and stretched — alternating compression and rarefaction.'},
+  {q:'Which type of seismograph wave measures vertical ground motion?',emoji:'📊',opts:['P-wave','S-wave','Love wave','All of them'],ans:0,explain:'P-waves cause vertical motion (compression), making them detectable by vertical seismographs.'},
+];
+
+const cycleQuestions=[
+  {q:'What must happen to sedimentary rock to become metamorphic?',emoji:'🔄',opts:['Heat and pressure','Melting into lava','Weathering','Erosion only'],ans:0,explain:'Sedimentary rock + heat & pressure → metamorphic rock.'},
+  {q:'How does metamorphic rock become igneous?',emoji:'🌋',opts:['Melts into magma, then cools','Weathering','Compaction','Cementation'],ans:0,explain:'Metamorphic → melt → magma → cool → igneous rock.'},
+  {q:'What process turns igneous rock into sediment?',emoji:'💨',opts:['Weathering and erosion','Melting','Metamorphism','Crystallization'],ans:0,explain:'Weathering breaks igneous rock into sediments, which are then eroded and transported.'},
+  {q:'What turns sediments into sedimentary rock?',emoji:'🏗️',opts:['Compaction and cementation','Melting','Heat and pressure','Volcanic eruption'],ans:0,explain:'Sediments are compacted by weight and cemented by minerals to form sedimentary rock.'},
+  {q:'Which rock type can become any other rock type?',emoji:'🔄',opts:['Any of them can','Only igneous','Only sedimentary','Only metamorphic'],ans:0,explain:'All three rock types can transform into any other through the rock cycle processes.'},
+  {q:'Lava cooling creates what type of rock?',emoji:'🌋',opts:['Extrusive igneous','Sedimentary','Metamorphic','Intrusive igneous'],ans:0,explain:'Lava cools on the surface → extrusive igneous (fine-grained like basalt).'},
+  {q:'Magma cooling underground creates:',emoji:'🪨',opts:['Intrusive igneous','Extrusive igneous','Sedimentary','Metamorphic'],ans:0,explain:'Magma cools slowly underground → intrusive igneous (coarse-grained like granite).'},
+  {q:'Which is NOT a process in the rock cycle?',emoji:'❌',opts:['Photosynthesis','Melting','Weathering','Metamorphism'],ans:0,explain:'Photosynthesis is a biological process, not part of the rock cycle.'},
+];
+let allQuestions={rocks:rockQuestions,quakes:quakeQuestions,cycles:cycleQuestions};
+let shuffled;
+
+function setMode(m){
+  mode=m;
+  document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('mode-'+m).classList.add('active');
+  qNum=0;answered=false;
+  shuffled=[...allQuestions[m]].sort(()=>Math.random()-0.5);
+  document.getElementById('next-btn').style.display='none';
+  document.getElementById('fb').textContent='';
+  showQ();
+}
+
+function showDisplay(){
+  const d=document.getElementById('display');d.innerHTML='';
+  if(mode==='rocks'){
+    d.innerHTML='<div class="rock-card" style="border-color:#ef4444">🌋<div class="rock-label">Igneous</div></div>'+
+      '<div class="rock-card" style="border-color:#f59e0b">🏗️<div class="rock-label">Sedimentary</div></div>'+
+      '<div class="rock-card" style="border-color:#a855f7">💎<div class="rock-label">Metamorphic</div></div>';
+  }else if(mode==='quakes'){
+    d.innerHTML='<div class="wave-display"><div class="wave-type" style="border-color:#38bdf8">🔊 P-Wave</div>'+
+      '<div class="wave-type" style="border-color:#f59e0b">↕️ S-Wave</div>'+
+      '<div class="wave-type" style="border-color:#ef4444">🌊 Surface</div></div>';
+  }else{
+    d.innerHTML='<div class="rock-card">🌋<div class="rock-label">Magma</div></div>'+
+      '<div class="rock-card">🪨<div class="rock-label">Igneous</div></div>'+
+      '<div class="rock-card">🏖️<div class="rock-label">Sediment</div></div>'+
+      '<div class="rock-card">🏗️<div class="rock-label">Sedimentary</div></div>'+
+      '<div class="rock-card">💎<div class="rock-label">Metamorphic</div></div>';
+  }
+}
+
+function showQ(){
+  if(!shuffled||qNum>=10){showResults();return}
+  answered=false;
+  document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';
+  document.getElementById('next-btn').style.display='none';
+  document.getElementById('qnum').textContent=qNum+1;
+  showDisplay();
+  let q=shuffled[qNum];
+  document.getElementById('qtext').textContent=q.q;
+  const opts=document.getElementById('opts');opts.innerHTML='';
+  q.opts.forEach((o,i)=>{const b=document.createElement('button');b.className='opt';b.textContent=o;b.onclick=()=>check(i);opts.appendChild(b)});
+}
+
+function check(i){
+  if(answered)return;answered=true;
+  let q=shuffled[qNum];
+  document.querySelectorAll('.opt').forEach((b,j)=>{if(j===q.ans)b.classList.add('correct');if(j===i&&i!==q.ans)b.classList.add('wrong')});
+  let fb=document.getElementById('fb');
+  if(i===q.ans){let pts=10+level*5;score+=pts;fb.innerHTML='✅ '+q.explain+' <b>+'+pts+' pts</b>';fb.style.background='rgba(34,197,94,0.15)'}
+  else{fb.innerHTML='❌ '+q.explain;fb.style.background='rgba(239,68,68,0.15)'}
+  document.getElementById('score').textContent=score;document.getElementById('next-btn').style.display='inline-block';
+}
+
+function nextQ(){qNum++;showQ()}
+function showResults(){
+  document.getElementById('display').innerHTML='<div style="font-size:3rem">🏆</div>';
+  document.getElementById('qtext').innerHTML='Level '+level+' Complete! Score: '+score;
+  document.getElementById('opts').innerHTML='<button class="btn" onclick="nextLevel()">Next Level ⬆️</button> <button class="btn sec" onclick="restart()">↺ Restart</button>';
+  document.getElementById('fb').textContent='';document.getElementById('next-btn').style.display='none';
+}
+function nextLevel(){level++;qNum=0;shuffled=[...allQuestions[mode]].sort(()=>Math.random()-0.5);document.getElementById('level').textContent=level;showQ()}
+function restart(){score=0;level=1;qNum=0;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;shuffled=[...allQuestions[mode]].sort(()=>Math.random()-0.5);showQ()}
+shuffled=[...allQuestions.rocks].sort(()=>Math.random()-0.5);
+showQ();
+</script>
+</body>
+</html>

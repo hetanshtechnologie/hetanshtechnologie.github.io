@@ -1,0 +1,132 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>152. Lab - Speech Translation - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 152</span>
+<h1>Lab - Speech Translation</h1>
+<p>In this lab you will build the speech-native translation path from the previous chapter: a Python program that listens to spoken English and streams the translation into Spanish, both as text on the console and as synthesized audio. This is the same architecture that powers live multilingual captions, and it uses the Speech SDK's translation recognizer.</p>
+
+<h2>What the Translation Recognizer Does</h2>
+<p>The <code>SpeechTranslationRecognizer</code> combines three jobs in one object. It recognizes the source-language speech, translates each recognized phrase into the target language, and optionally synthesizes the translation into audio. Events fire as translations are produced, so you can render captions live just as you did with plain recognition in an earlier lab.</p>
+
+<div class="exercise">
+<h3>Exercise: Streaming speech translation with the SDK</h3>
+
+<h3>Step 1 — Set the target language</h3>
+<p>You need your Speech key and region, plus a target language code. Spanish uses <code>es-ES</code> (Castilian) or <code>es-MX</code> (Mexican) — pick one. The source language is detected from the configured recognition language.</p>
+
+<h3>Step 2 — Write the translation script</h3>
+<p>Create <code>translate_speech.py</code> with the following code. It captures from the default microphone, prints partial translations as you speak, and synthesizes each final translation into an audio file.</p>
+<pre><code>import os
+
+import azure.cognitiveservices.speech as speechsdk
+
+SPEECH_KEY = os.environ.get("YOUR_SPEECH_KEY", "")
+SPEECH_REGION = os.environ.get("YOUR_SPEECH_REGION", "")
+TARGET_LANGUAGE = "es-ES"
+VOICE_NAME = "es-ES-ElviraNeural"
+
+speech_config = speechsdk.SpeechConfig(
+    subscription=SPEECH_KEY,
+    region=SPEECH_REGION,
+)
+speech_config.speech_recognition_language = "en-US"
+
+audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
+
+translation_config = speechsdk.translation.SpeechTranslationConfig(
+    subscription=SPEECH_KEY,
+    region=SPEECH_REGION,
+)
+translation_config.speech_recognition_language = "en-US"
+translation_config.add_target_language(TARGET_LANGUAGE)
+translation_config.speech_synthesis_voice_name = VOICE_NAME
+
+recognizer = speechsdk.translation.TranslationRecognizer(
+    translation_config=translation_config,
+    audio_config=audio_config,
+)
+
+def on_partial(evt):
+    translation = evt.result.translations.get(TARGET_LANGUAGE, "")
+    print(f"\rpartial: {evt.result.text}  &gt;  {translation}", end="", flush=True)
+
+def on_recognized(evt):
+    result = evt.result
+    if result.reason == speechsdk.ResultReason.TranslatedSpeech:
+        translation = result.translations.get(TARGET_LANGUAGE, "")
+        print(f"\rfinal:   {result.text}  &gt;  {translation}")
+    elif result.reason == speechsdk.ResultReason.NoMatch:
+        print("\r(no speech heard)")
+
+recognizer.recognizing.connect(on_partial)
+recognizer.recognized.connect(on_recognized)
+
+print("Speak English now. Translations will appear as you talk.")
+print("Press Ctrl+C to stop.")
+recognizer.start_continuous_recognition()
+
+import time
+try:
+    while True:
+        time.sleep(0.5)
+except KeyboardInterrupt:
+    recognizer.stop_continuous_recognition()
+    print("\nSession stopped.")</code></pre>
+
+<h3>Step 3 — Run the live translation</h3>
+<pre><code>python translate_speech.py</code></pre>
+<p>Speak a few short English sentences. You should see the Spanish translation appear live on the console, updating as partial results arrive. Press Ctrl+C to stop.</p>
+
+<h3>Step 4 — Save translated audio</h3>
+<p>To also hear the translation, modify <code>on_recognized</code> so each final translation is synthesized to a numbered file:</p>
+<pre><code>import threading
+
+_audio_lock = threading.Lock()
+_audio_index = 0
+
+def save_translation_audio(text):
+    global _audio_index
+    with _audio_lock:
+        _audio_index += 1
+        synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
+        result = synthesizer.speak_text_async(text).get()
+        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            speechsdk.AudioDataStream(result).save_to_file(
+                f"translation_{_audio_index:03d}.wav"
+            )</code></pre>
+<p>Call <code>save_translation_audio(translation)</code> inside <code>on_recognized</code>, then rerun the lab. Each final phrase produces a WAV file with the Spanish voice reading the translation.</p>
+</div>
+
+<h2>Understanding the Events</h2>
+<p>As with plain recognition, partial events arrive continuously while you speak. Each event's <code>result.translations</code> is a dictionary keyed by target language code, which is why the code looks up <code>[TARGET_LANGUAGE]</code>. If you add more than one target language, each event carries a translation for every language you registered — one session, many languages.</p>
+
+<div class="tip">
+<p>Try registering two target languages, for example <code>es-ES</code> and <code>fr-FR</code>, and print both. You will see the same sentence translated to both languages in a single event stream — a preview of how a single source language can feed captions in many languages simultaneously.</p>
+</div>
+
+<h2>Comparing with the LLM Path</h2>
+<p>This lab is the "speech-native" architecture from the comparison chapter. Notice what you did not write: no JSON call to a translation model, no prompt, no glossary, no waiting for a full transcript before anything appeared. The trade-off, as discussed, is that you have no style or terminology control. If you translate "our net promoter score rose to 62" through this lab, the speech service will translate it plainly; an LLM could be told to keep the metric name exact and explain it for a marketing audience.</p>
+
+<h2>Summary</h2>
+<p>You built a streaming speech translation application with <code>SpeechTranslationConfig</code> and <code>TranslationRecognizer</code>. It recognizes spoken English, translates it live into Spanish, prints partial translations, and synthesizes the results into audio files. In the next chapter you will test what you have learned with a section quiz.</p>
+<nav>
+<a href="151-speech-translation-vs-llm-speech.html">&larr; Previous: Speech Translation vs. LLM Speech</a><a href="153-section-quiz.html">Next: Section Quiz &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

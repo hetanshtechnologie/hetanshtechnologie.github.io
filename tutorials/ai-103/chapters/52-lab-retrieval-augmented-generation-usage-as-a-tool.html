@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>52. Lab - Retrieval Augmented Generation - Usage as a tool - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 52</span>
+<h1>Lab - Retrieval Augmented Generation - Usage as a tool</h1>
+<p>So far the RAG assistant answers a single question end to end. In a real product, retrieval is one capability among many: the model should decide when a question needs the knowledge base and when it needs a different tool or just a conversation. This lab wraps the CloudXeus retrieval into a callable tool and teaches the chat model to invoke it through function tool calling, turning your RAG pipeline into a reusable component of a larger agent.</p>
+
+<h2>From Function to Tool</h2>
+<p>Function tool calling works by declaring a JSON schema that describes the function. The model reads the schema, decides the call is needed, and returns a structured request. Your code performs the actual search and sends the results back as a tool message.</p>
+
+<h2>The Tool Schema</h2>
+<p>Define the search function with its parameters in <code>scripts/rag_tool.py</code>:</p>
+
+<pre><code>TOOL_SPEC = {
+    "type": "function",
+    "function": {
+        "name": "search_cloudxeus_docs",
+        "description": "Search the CloudXeus knowledge base and return the most "
+                       "relevant passages for a question.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The user's question or search text."
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "How many passages to return. Default 4."
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}</code></pre>
+
+<h2>The Retrieval Implementation</h2>
+<p>The function behind the tool is the hybrid search from the earlier lab, packaged as a plain Python callable. Add the search client, <code>embed_query</code>, and their imports from the search lab at the top of the file:</p>
+
+<pre><code>import json
+from azure.search.documents.models import RawVectorQuery
+
+def search_cloudxeus_docs(query: str, top_k: int = 4) -&gt; str:
+    vector = embed_query(query)
+    vector_query = RawVectorQuery(vector=vector, k=top_k, fields="content_vector")
+    results = client.search(search_text=query, vector_queries=[vector_query], top=top_k)
+
+    passages = []
+    for r in results:
+        passages.append(f"Document: {r['title']}\n{r['content']}")
+    return "\n\n".join(passages) if passages else "No relevant passages found."</code></pre>
+
+<h2>The Tool Calling Loop</h2>
+<p>The loop sends the user message with the tool schema declared, then handles the model's request. When the model asks to call the tool, your code runs it and hands the result back as a tool message:</p>
+
+<pre><code>def chat_with_tool(user_message: str):
+    messages = [
+        {"role": "system",
+         "content": "You are the CloudXeus support assistant. Use "
+                    "search_cloudxeus_docs when you need information, "
+                    "then answer from the retrieved text."},
+        {"role": "user", "content": user_message},
+    ]
+    response = chat_client.chat.completions.create(
+        model=CHAT_DEPLOYMENT,
+        messages=messages,
+        tools=[TOOL_SPEC],
+        tool_choice="auto",
+    )
+    message = response.choices[0].message
+
+    if message.tool_calls:
+        for call in message.tool_calls:
+            args = json.loads(call.function.arguments)
+            result = search_cloudxeus_docs(**args)
+            messages.append(message)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": result,
+            })
+        response = chat_client.chat.completions.create(
+            model=CHAT_DEPLOYMENT, messages=messages, tools=[TOOL_SPEC]
+        )
+
+    print(response.choices[0].message.content)</code></pre>
+
+<div class="note">
+<p>The pattern is always the same: declare the tool, let the model ask, execute the tool yourself, return the output as a tool message, and give the model a second chance to answer. This loop generalizes to any number of tools.</p>
+</div>
+
+<h2>Test the Agent</h2>
+<div class="exercise">
+<h3>Exercise &mdash; Use Retrieval as a Tool</h3>
+<ol>
+<li>Create <code>scripts/rag_tool.py</code> combining the schema, the search function, and the chat loop (plus the client setup from the previous labs).</li>
+<li>Add a test call: <code>chat_with_tool("How do I reset the EdgeCam 300?")</code>.</li>
+<li>Run the script. The model should invoke <code>search_cloudxeus_docs</code> and then answer from the returned passages.</li>
+<li>Try a general question, such as <code>Hello, how are you?</code>. The model should chat directly without calling the tool.</li>
+</ol>
+</div>
+
+<h2>Troubleshooting</h2>
+<ul>
+<li><strong>The tool is never called:</strong> improve the tool's description so the model understands when it applies.</li>
+<li><strong>Malformed arguments:</strong> the model occasionally invents parameters; validate them and retry once with a corrected request.</li>
+<li><strong>The answer is still generic:</strong> check whether the retrieval actually returned good passages, and increase <code>top_k</code>.</li>
+<li><strong>Slow responses:</strong> each tool round trip adds latency; keep the schema small and the search fast.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>Retrieval is now a first-class tool: the model decides when to consult the knowledge base and answers from what it retrieves. You can combine this tool with others, such as an orders API, in one agent. The next chapters show exactly that, using OpenAPI tools and Azure Functions to connect agents to real services.</p>
+<nav>
+<a href="51-retrieval-augmented-generation-the-full-loop-review.html">&larr; Previous: Retrieval Augmented Generation - The Full Loop - Review</a><a href="53-building-an-api-powered-agent-with-openapi-tools-on-microsoft-foundry.html">Next: Building an API-Powered Agent with OpenAPI Tools on Microsoft Foundry &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

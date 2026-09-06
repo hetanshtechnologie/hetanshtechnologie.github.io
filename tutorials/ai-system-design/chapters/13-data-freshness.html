@@ -1,0 +1,77 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>13. Data Freshness — AI System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>13. Data Freshness</h1>
+<p>Data freshness measures how up-to-date the data used for inference is. Stale features lead to poor predictions — but making everything real-time is expensive. You must design for the right freshness for each feature.</p>
+<h2>Freshness Tiers</h2>
+<table>
+<tr><th>Tier</th><th>Freshness</th><th>Examples</th><th>Pipeline</th></tr>
+<tr><td>Real-time</td><td>&lt;1 second</td><td>Current session activity, GPS location, weather</td><td>Streaming</td></tr>
+<tr><td>Near real-time</td><td>Seconds—minutes</td><td>Recent clicks, page views, cart updates</td><td>Micro-batch / streaming</td></tr>
+<tr><td>Batch fresh</td><td>Hours—days</td><td>User demographics, 7-day purchase history</td><td>Batch (hourly/daily)</td></tr>
+<tr><td>Static</td><td>Weeks—months</td><td>User signup date, product category</td><td>Batch (weekly)</td></tr>
+</table>
+<h2>Streaming Feature Updates</h2>
+<p>For real-time features, use stream processing to compute and update feature values as events arrive.</p>
+<pre><code># Streaming feature computation (Kafka Streams)
+Input stream: purchases (user_id, amount, timestamp, product_id)
+Stream processor:
+  - Per-user sliding window (7 days)
+  - compute: avg_purchase_amount_7d
+  - compute: purchase_count_7d
+  - compute: days_since_last_purchase
+  - Output to online feature store (Redis) + offline store (S3)
+
+Feature update latency: ~100ms from event → feature stored</code></pre>
+<h2>Micro-Batching</h2>
+<p>Micro-batching strikes a balance between freshness and cost. Instead of processing every event individually (expensive), collect events into small time or size windows.</p>
+<pre><code># Micro-batch feature computation
+Window: 10 seconds or 1000 events, whichever comes first
+Within window:
+  - Aggregate events per user
+  - Update feature values
+  - Write batch update to feature store
+
+Trade-off: 10s staleness vs 10x fewer DB writes vs streaming</code></pre>
+<h2>Versioned Datasets</h2>
+<p>For training, you must use consistent snapshots of data. Versioning ensures reproducibility.</p>
+<pre><code># Dataset versioning strategy
+Dataset version: 2026-06-15-v3
+Contains:
+  - All events up to 2026-06-14T23:59:59Z
+  - Features computed as of event_time (point-in-time correct)
+  - Labels assigned based on outcomes known as of 2026-06-15
+
+Benefits:
+  - Reproducible training runs ("train on v3, eval on v4")
+  - Rollback capability (deploy model trained on v2 if v3 is buggy)
+  - Audit trail for compliance</code></pre>
+<h2>Handling Late-Arriving Data</h2>
+<p>In distributed systems, events can arrive hours or days late. Your system must handle this gracefully:</p>
+<ul>
+<li><strong>Ignore late data:</strong> Simple but lose accuracy.</li>
+<li><strong>Recompute features:</strong> Update feature store and retrain if significant.</li>
+<li><strong>Watermarks:</strong> In streaming systems, define a cutoff (e.g., "events more than 1 hour late are dropped").</li>
+<li><strong>Grace period:</strong> Accept late events within a configurable window; compute corrections.</li>
+</ul>
+<div class="exercise"><strong>Exercise:</strong> A ride-sharing app uses driver location features for pricing and ETA. Classify each feature into a freshness tier: a) driver's current GPS position, b) driver's rating (average of all rides), c) driver's acceptance rate (last 100 rides), d) rider's home address, e) current traffic conditions by area, f) event surge multiplier. For each, describe the pipeline that keeps it fresh.</div>
+<nav><a href="12-inference.html">&larr; Previous</a><a href="../index.html">Index</a><a href="14-deployment.html">Next: Deployment Strategies &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>29. Lab - Building Your First AI Agent - The OpenAI SDK - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 29</span>
+<h1>Lab - Building Your First AI Agent - The OpenAI SDK</h1>
+<p>In this lab you will turn the concepts from the previous chapter into a working program. You will build a small but complete AI agent using the OpenAI Python SDK, configure it against an Azure-hosted model deployment, and drive a full conversation from start to finish. By the end of the exercise you will have a reusable script that creates an assistant, opens a conversation thread, submits a message, and reads back the model's final answer.</p>
+
+<h2>Objectives</h2>
+<p>This lab walks through the four stages that every agent application shares:</p>
+<ul>
+<li>Setting up a Python environment with the SDK installed.</li>
+<li>Pointing the SDK at your Azure OpenAI resource with an endpoint and key.</li>
+<li>Creating an assistant object that holds the model name and system instructions.</li>
+<li>Running a thread-based conversation and polling for the final result.</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<p>Before you begin, make sure you have the following ready:</p>
+<ul>
+<li>Python 3.10 or later installed on your machine.</li>
+<li>A deployed model in Microsoft Foundry or Azure OpenAI that your key can access. You will need the deployment name, the endpoint URL, and the API key.</li>
+<li>Your credentials stored somewhere safe. You will place them in a local <code>.env</code> file that is never committed to source control.</li>
+</ul>
+
+<div class="warn">
+<p>Keep your API key secret. Any code you share, push, or publish must not contain the key itself. Read it from an environment variable or a <code>.env</code> file, and make sure that file is listed in your <code>.gitignore</code>.</p>
+</div>
+
+<h2>Step 1: Create the project environment</h2>
+<p>Create a new folder for the project and install the packages you need. The OpenAI SDK is the only runtime dependency for this lab.</p>
+
+<div class="exercise">
+<h3>Set up the project</h3>
+<ol>
+<li>Open a terminal and create a directory for the lab.</li>
+<li>Create a virtual environment so packages stay isolated from the rest of your system.</li>
+<li>Install the OpenAI SDK and the dotenv helper for reading credentials.</li>
+</ol>
+<pre><code>mkdir my-first-agent
+cd my-first-agent
+python -m venv .venv
+.venv\Scripts\activate
+pip install openai python-dotenv
+</code></pre>
+<p>On macOS or Linux the activation command is <code>source .venv/bin/activate</code>.</p>
+</div>
+
+<h2>Step 2: Store your credentials</h2>
+<p>Create a file named <code>.env</code> in the project folder. Fill in the values from your Azure OpenAI resource. The endpoint looks similar to <code>https://your-resource.openai.azure.com/</code> and the deployment name is the model name you chose when you deployed it in Foundry.</p>
+
+<pre><code>AZURE_OPENAI_ENDPOINT=https://YOUR_RESOURCE.openai.azure.com/
+AZURE_OPENAI_API_KEY=YOUR_KEY
+AZURE_OPENAI_DEPLOYMENT=YOUR_DEPLOYMENT_NAME
+</code></pre>
+
+<div class="tip">
+<p>If you are using the Microsoft Foundry model catalog, the deployment name shown in the playground is the exact string your code must use. It is rarely the same as the base model name, so copy it carefully.</p>
+</div>
+
+<h2>Step 3: Write the agent script</h2>
+<p>Create a file named <code>agent.py</code>. The script loads the credentials, creates the client, and builds an assistant with a clear set of system instructions. The assistant holds the personality and rules; the thread holds the conversation history.</p>
+
+<div class="exercise">
+<h3>Create the assistant and start a thread</h3>
+<pre><code>import os
+from dotenv import load_dotenv
+from openai import AzureOpenAI
+
+load_dotenv()
+
+client = AzureOpenAI(
+    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+    api_version="2024-10-21",
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+)
+
+assistant = client.beta.assistants.create(
+    name="Travel Planner",
+    instructions=(
+        "You are a travel planning assistant. Help the user build a "
+        "day-by-day itinerary. Ask for their destination, budget, and "
+        "travel dates before making suggestions."
+    ),
+    model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+)
+
+thread = client.beta.threads.create()
+print(f"Assistant created: {assistant.id}")
+print(f"Thread created: {thread.id}")
+</code></pre>
+</div>
+
+<h2>Step 4: Send a message and wait for the answer</h2>
+<p>Agents run asynchronously. Sending a message into the thread does not produce an immediate answer; it creates a <em>run</em> that the service executes on its own timeline. Your code must poll the run until it reaches a terminal state, then read the messages back from the thread.</p>
+
+<div class="exercise">
+<h3>Complete the conversation loop</h3>
+<pre><code>import time
+
+client.beta.threads.messages.create(
+    thread_id=thread.id,
+    role="user",
+    content="Plan a 3-day trip to Lisbon for two people.",
+)
+
+run = client.beta.threads.runs.create(
+    thread_id=thread.id,
+    assistant_id=assistant.id,
+)
+
+while run.status in ("queued", "in_progress", "requires_action"):
+    run = client.beta.threads.runs.retrieve(
+        thread_id=thread.id, run_id=run.id
+    )
+    time.sleep(1)
+
+messages = client.beta.threads.messages.list(thread_id=thread.id)
+for message in messages.data:
+    for block in message.content:
+        if block.type == "text":
+            print(f"{message.role}: {block.text.value}")
+            print("---")
+</code></pre>
+</div>
+
+<h2>Step 5: Run and verify</h2>
+<p>Run the script from the terminal and confirm that the output contains both the user question and the assistant's itinerary.</p>
+
+<pre><code>python agent.py
+</code></pre>
+
+<p>Experiment with the design:</p>
+<ul>
+<li>Change the system instructions and observe how the tone of the answer changes.</li>
+<li>Send a second user message into the <em>same</em> thread to see the assistant remember the earlier request.</li>
+<li>Lower the <code>temperature</code> parameter when creating the assistant to get more predictable output.</li>
+</ul>
+
+<div class="note">
+<p>The list of messages includes every turn in the thread, oldest first. The assistant's last message is usually the final element, but scanning all blocks and printing each one is a useful way to watch the conversation unfold during debugging.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You have now built your first AI agent program: an assistant with system instructions, a thread to hold the dialogue, an asynchronous run, and a polling loop that retrieves the result. This four-part pattern — assistant, thread, message, run — is the foundation you will build on in the rest of this section, where you will add tools, host agents in the Foundry Agent Service, and eventually invoke them as production services.</p>
+<nav>
+<a href="28-building-your-first-ai-agent-the-openai-sdk.html">&larr; Previous: Building Your First AI Agent - The OpenAI SDK</a><a href="30-microsoft-foundry-agent-service-overview.html">Next: Microsoft Foundry Agent Service Overview &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

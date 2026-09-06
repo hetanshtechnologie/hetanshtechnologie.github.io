@@ -1,0 +1,117 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>50. Lab - Retrieval Augmented Generation - The Full Loop - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 50</span>
+<h1>Lab - Retrieval Augmented Generation - The Full Loop</h1>
+<p>Retrieval finds the right passages; the last step is generation. This lab combines everything into one script: embed the question, search the index, assemble a grounded prompt from the top chunks, and call a chat model that answers strictly from that context. When it works, you will have a complete RAG assistant for CloudXeus.</p>
+
+<h2>How the Loop Fits Together</h2>
+<ol>
+<li>Take the user's question.</li>
+<li>Embed it and run a hybrid search against <code>cloudxeus-docs</code>.</li>
+<li>Collect the top-k chunks into a context block.</li>
+<li>Send a system prompt, the context, and the question to the chat model.</li>
+<li>Print the answer together with the sources that grounded it.</li>
+</ol>
+
+<h2>The Context Assembly</h2>
+<p>The prompt tells the model exactly how to behave. The key instruction: answer only from the supplied context, and say when the context does not contain the answer.</p>
+
+<pre><code>def build_prompt(question: str, chunks: list[dict]) -&gt; str:
+    context = "\n\n".join(
+        f"Document: {c['title']}\n{c['content']}" for c in chunks
+    )
+    return (
+        "You are the CloudXeus support assistant. Answer the question "
+        "using ONLY the context below. If the context has no answer, say "
+        "so honestly. Quote the source document when you use it.\n\n"
+        f"CONTEXT:\n{context}\n\nQUESTION: {question}"
+    )</code></pre>
+
+<h2>The Chat Call</h2>
+<p>The chat model receives the assembled prompt in a single user message. A low temperature keeps the answer close to the supplied facts:</p>
+
+<pre><code>chat_client = AzureOpenAI(
+    api_key=os.getenv("AZURE_OPENAI_KEY", "YOUR_KEY"),
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", "YOUR_ENDPOINT"),
+    api_version="2024-06-01",
+)
+CHAT_DEPLOYMENT = "gpt-4o-mini"
+
+def generate_answer(prompt: str) -&gt; str:
+    response = chat_client.chat.completions.create(
+        model=CHAT_DEPLOYMENT,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
+    return response.choices[0].message.content</code></pre>
+
+<h2>The Complete Script</h2>
+<p>Assemble everything into <code>scripts/rag_assistant.py</code>, reusing the search client, <code>embed_query</code>, and imports from the previous labs. The main function ties the pieces together:</p>
+
+<pre><code>from azure.search.documents.models import RawVectorQuery
+
+def rag_answer(question: str, top: int = 4):
+    vector = embed_query(question)
+    vector_query = RawVectorQuery(vector=vector, k=top, fields="content_vector")
+    results = client.search(search_text=question, vector_queries=[vector_query], top=top)
+
+    chunks = [
+        {"title": r["title"], "content": r["content"]}
+        for r in results
+    ]
+    prompt = build_prompt(question, chunks)
+    answer = generate_answer(prompt)
+
+    print("ANSWER:", answer)
+    print()
+    print("SOURCES:")
+    for c in chunks:
+        print("-", c["title"])</code></pre>
+
+<h2>Run the Assistant</h2>
+<div class="exercise">
+<h3>Exercise &mdash; Ask the Assistant Questions</h3>
+<ol>
+<li>Combine the code blocks from this chapter into <code>scripts/rag_assistant.py</code>, adding the imports and client setup from the search lab.</li>
+<li>Add a call at the bottom: <code>rag_answer("How do I reset the EdgeCam 300?")</code>.</li>
+<li>Run <code>python scripts/rag_assistant.py</code>.</li>
+<li>Ask two or three more questions, including one the documents do not cover, and check that the assistant says it lacks the information rather than inventing it.</li>
+</ol>
+</div>
+
+<h2>Diagnosing Bad Answers</h2>
+<ul>
+<li><strong>No relevant chunk returned:</strong> revisit chunking and consider hybrid search with a higher <code>top</code>.</li>
+<li><strong>The answer ignores the context:</strong> strengthen the system prompt and lower the temperature.</li>
+<li><strong>The answer is shallow:</strong> the top chunk may be too short; merge adjacent chunks or increase the chunk size.</li>
+<li><strong>Wrong sources:</strong> check whether your index actually contains the right documents and that re-embedding used the same model.</li>
+</ul>
+
+<div class="tip">
+<p>Every RAG system needs iteration. Log the retrieved chunks alongside each answer during testing; when an answer is wrong, the log tells you whether retrieval or generation was at fault.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You now have a working RAG assistant: it retrieves relevant CloudXeus passages, grounds the answer in them, and cites its sources. This full loop is the pattern behind most knowledge assistants you will build. The next chapter reviews the loop with a quiz, and the chapter after that turns retrieval into a reusable tool the agent can call on demand.</p>
+<nav>
+<a href="49-lab-retrieval-augmented-generation-searching-the-index-from-python.html">&larr; Previous: Lab - Retrieval Augmented Generation - Searching the index from Python</a><a href="51-retrieval-augmented-generation-the-full-loop-review.html">Next: Retrieval Augmented Generation - The Full Loop - Review &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

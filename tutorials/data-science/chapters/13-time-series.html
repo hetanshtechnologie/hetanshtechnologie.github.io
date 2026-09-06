@@ -1,0 +1,130 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>13. Time Series Analysis - Data Science Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>13. Time Series Analysis</h1>
+<p class="tag">Chapter 13</p>
+
+<h2>What Makes Time Series Special</h2>
+<p>Time series data has <strong>order</strong>: rows are not exchangeable. Neighboring observations are correlated, so the tools from Chapter 10 (which assume independence) do not apply directly. Time series work powers forecasting — demand, revenue, load, prices — and anomaly detection.</p>
+
+<h2>Components of a Time Series</h2>
+<ul>
+<li><strong>Trend</strong> — long-term direction (up, down, flat).</li>
+<li><strong>Seasonality</strong> — repeating pattern with fixed period (daily, weekly, yearly, holiday effects).</li>
+<li><strong>Cyclicality</strong> — longer, irregular cycles (economic booms/busts).</li>
+<li><strong>Noise</strong> — irregular, unpredictable movement.</li>
+</ul>
+<p>Decompose any series with <code>statsmodels</code>:</p>
+<pre><code>import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+df = df.set_index("date").sort_index()
+result = seasonal_decompose(df["revenue"], model="additive", period=12)
+result.plot()
+plt.show()
+</code></pre>
+
+<h2>Stationarity</h2>
+<p>Most classical models assume <strong>stationarity</strong>: constant mean and variance over time (no trend, no changing seasonality).</p>
+<pre><code>from statsmodels.tsa.stattools import adfuller
+
+stat, p_value = adfuller(df["revenue"])[:2]
+print(p_value)   # p &lt; 0.05 -> stationary
+</code></pre>
+<p>Non-stationary? Common fixes:</p>
+<ul>
+<li>Differencing: <code>df["revenue"].diff()</code> removes trend; seasonal differencing removes seasonality.</li>
+<li>Log transform stabilizes variance.</li>
+<li>Model the components explicitly instead (Prophet, or include trend/season dummies).</li>
+</ul>
+
+<h2>Autocorrelation</h2>
+<p>Check how a series correlates with its own past. <strong>ACF</strong> shows correlation at each lag; <strong>PACF</strong> shows the partial correlation after removing intermediate lags. These plots guide ARIMA orders.</p>
+<pre><code>from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
+plot_acf(df["revenue"].diff().dropna(), lags=24)
+plot_pacf(df["revenue"].diff().dropna(), lags=24)
+plt.show()
+</code></pre>
+
+<h2>ARIMA</h2>
+<p>ARIMA combines <strong>AR</strong> (autoregression on past values), <strong>I</strong> (differencing to reach stationarity), and <strong>MA</strong> (moving average of past errors): <code>ARIMA(p, d, q)</code>.</p>
+<pre><code>from statsmodels.tsa.arima.model import ARIMA
+
+model = ARIMA(df["revenue"], order=(1, 1, 1))
+fit = model.fit()
+print(fit.summary())
+
+# Forecast the next 12 periods
+forecast = fit.forecast(steps=12)
+print(forecast)
+</code></pre>
+<p>Choosing p, d, q: use <code>auto_arima</code> (pmdarima) or ACF/PACF plots plus AIC comparison of a small grid.</p>
+
+<div class="note">
+<strong>Never train/test randomly on time series.</strong> Split chronologically: train on the past, test on the future (e.g., last 20% of dates). A random split leaks the future into training and flatters your scores.
+</div>
+
+<h2>Holidays &amp; Exogenous Variables</h2>
+<p>Real demand is driven by calendars (Diwali, Christmas, fiscal year-end). Two ways to handle it:</p>
+<ul>
+<li>Add holiday/external regressors (weather, promotions, events) to a model that supports them.</li>
+<li>Use a model designed for this, such as <strong>Prophet</strong> or SARIMAX with exogenous regressors.</li>
+</ul>
+<pre><code># Prophet: trend + seasonality + holidays handled automatically
+# pip install prophet
+from prophet import Prophet
+
+forecast_df = df.reset_index().rename(columns={"date": "ds", "revenue": "y"})
+m = Prophet(seasonality_mode="multiplicative",
+            yearly_seasonality=True, weekly_seasonality=True)
+m.add_country_holidays(country_name="IN")
+m.fit(forecast_df)
+future = m.make_future_dataframe(periods=90)
+forecast = m.predict(future)
+m.plot(forecast)
+</code></pre>
+
+<h2>Evaluating Forecasts</h2>
+<p>Report error relative to the scale of the data:</p>
+<ul>
+<li><strong>MAE</strong> — average error in units.</li>
+<li><strong>MAPE</strong> — average percentage error (be careful with near-zero values).</li>
+<li><strong>RMSE</strong> — penalizes large errors.</li>
+<li><strong>MASE</strong> — compares against a naive baseline; &lt; 1 means better than "predict last value."</li>
+</ul>
+<pre><code>from sklearn.metrics import mean_absolute_error
+
+y_true, y_pred = test["revenue"], test["forecast"]
+print("MAE:", mean_absolute_error(y_true, y_pred))
+</code></pre>
+
+<h2>When to Use What</h2>
+<table>
+<tr><th>Situation</th><th>Tool</th></tr>
+<tr><td>Simple trend/seasonality, business forecasting</td><td>Prophet, SARIMA</td></tr>
+<tr><td>Many series with shared patterns</td><td>Global models (LightGBM with features, deep learning)</td></tr>
+<tr><td>High-frequency (seconds-minutes)</td><td>Exponential smoothing, ML with rolling features</td></tr>
+<tr><td>Exogenous drivers matter (weather, price)</td><td>SARIMAX, Prophet regressors, ML</td></tr>
+</table>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Find a monthly or daily public time series (sales, weather, stock, energy). Decompose it, test for stationarity, and build an ARIMA (or Prophet if holidays are relevant) forecast on a chronological train/test split. Plot the forecast with confidence bands and report MAE/MAPE on the test period.
+</div>
+
+<nav>
+  <span></span>
+  <a href="../index.html">Back to Index</a>
+  <a href="14-nlp-text.html">Next: NLP &amp; Text Analytics &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

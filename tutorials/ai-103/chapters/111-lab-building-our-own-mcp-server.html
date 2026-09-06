@@ -1,0 +1,177 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>111. Lab - Building our own MCP Server - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 111</span>
+<h1>Lab - Building our own MCP Server</h1>
+<p>You have called someone else's MCP server. Now you will build your own. This lab walks you through creating a small MCP server in Python that exposes a couple of genuinely useful tools — a contact lookup and a simple calculator — using the official MCP SDK. When you finish, you will own the whole stack: your tools, your schemas, your endpoint.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>Your Python virtual environment from the earlier labs.</li>
+<li>The MCP SDK and its server extras installed:</li>
+</ul>
+
+<pre><code>pip install "mcp[server]"</code></pre>
+
+<div class="tip">
+<p>The server extras pull in everything needed to run both transports. If the <code>[server]</code> extra fails to resolve on your platform, install <code>mcp</code> alone — it includes the core primitives you need for this lab.</p>
+</div>
+
+<h2>Step 1: Design Your Server</h2>
+<p>Your server will expose two tools:</p>
+<table>
+<tr><th>Tool</th><th>Purpose</th><th>Arguments</th></tr>
+<tr><td><code>lookup_contact</code></td><td>Return an email address for a name from a small in-memory directory</td><td><code>name</code> (string)</td></tr>
+<tr><td><code>evaluate_expression</code></td><td>Evaluate a simple arithmetic expression safely</td><td><code>expression</code> (string)</td></tr>
+</table>
+
+<p>Both are intentionally simple so the focus stays on MCP mechanics rather than domain logic. In a real deployment these would call a database and a proper computation engine.</p>
+
+<h2>Step 2: Write the Server</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Create the MCP server</h3>
+<p>Create <code>my_mcp_server.py</code>:</p>
+
+<pre><code>import ast
+import operator
+
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("ai103-contact-server")
+
+CONTACTS = {
+    "sam": "sam@example.com",
+    "HetanshTechnologie": "HetanshTechnologie@example.com",
+    "mira": "mira@example.com",
+}
+
+
+@mcp.tool()
+def lookup_contact(name: str) -&gt; str:
+    """Return the email address for a person by name."""
+    key = name.strip().lower()
+    if key not in CONTACTS:
+        return f"No contact found for {name}."
+    return f"{name} &lt;{CONTACTS[key]}&gt;"
+
+
+SAFE_OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+}
+
+
+def _safe_eval(node):
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in SAFE_OPERATORS:
+        left = _safe_eval(node.left)
+        right = _safe_eval(node.right)
+        return SAFE_OPERATORS[type(node.op)](left, right)
+    if isinstance(node, ast.UnaryOp) and type(node.op) in SAFE_OPERATORS:
+        return SAFE_OPERATORS[type(node.op)](_safe_eval(node.operand))
+    raise ValueError("Unsupported expression.")
+
+
+@mcp.tool()
+def evaluate_expression(expression: str) -&gt; float:
+    """Evaluate a simple arithmetic expression such as '2 + 3 * 4'."""
+    tree = ast.parse(expression, mode="eval")
+    return _safe_eval(tree.body)
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")</code></pre>
+
+<p>The <code>FastMCP</code> class generates the tool schemas from your functions' type hints and docstrings automatically — the same decoration pattern you used with LangChain, but for the MCP protocol.</p>
+</div>
+
+<div class="warn">
+<p>Never evaluate arbitrary input with Python's <code>eval</code>. The example above walks an AST and only allows a fixed set of operators, which is why it is safe. This matters especially for servers that face the network: a tool that runs <code>eval</code> on user input is an invitation to arbitrary code execution.</p>
+</div>
+
+<h2>Step 3: Run the Server Locally</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Start the server over stdio</h3>
+<ol>
+<li>Run the server from the activated environment:</li>
+</ol>
+
+<pre><code>python my_mcp_server.py</code></pre>
+
+<ol start="2">
+<li>The server prints nothing and waits — stdio servers only respond to messages on standard input. Leave the process running and open a second terminal for the next step.</li>
+<li>Confirm it stays up with no errors. If you see a traceback, fix the import before continuing.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>A quiet terminal is a healthy sign for a stdio server. It means the process launched and is blocked waiting for protocol messages. Any startup exception would print immediately.</p>
+</div>
+
+<h2>Step 4: Add an HTTP Transport</h2>
+<p>A stdio server only works on one machine. To reach it from other hosts — or from a container in Azure — add the HTTP (SSE) transport. This makes the server a network endpoint your agents can call remotely:</p>
+
+<pre><code>if __name__ == "__main__":
+    mcp.run(transport="sse", host="0.0.0.0", port=8080)</code></pre>
+
+<p>Restart the server and you now have an endpoint at <code>http://localhost:8080/sse</code>. This is the same shape as the Azure-hosted server you called in the previous lab — the difference is that this one is yours.</p>
+
+<div class="warn">
+<p>Binding to <code>0.0.0.0</code> exposes the server on all network interfaces, including your LAN. Only do this when you understand who can reach it. For a public deployment, put authentication in front of the endpoint and prefer HTTPS.</p>
+</div>
+
+<h2>Step 5: Containerize for Azure</h2>
+<p>To deploy this server the way you deployed the Azure MCP server, package it as a container. Create a <code>Dockerfile</code> in the project folder:</p>
+
+<pre><code>FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY my_mcp_server.py .
+
+EXPOSE 8080
+CMD ["python", "my_mcp_server.py"]</code></pre>
+
+<p>Create <code>requirements.txt</code> alongside it:</p>
+
+<pre><code>mcp[server]</code></pre>
+
+<p>Build and push the image to a registry, then deploy it with the same <code>az containerapp create</code> steps you used in the Azure MCP deployment lab — pointing the image at your own container this time.</p>
+
+<div class="note">
+<p>Deployment is a review, not a new skill. The container app, environment, ingress, and FQDN steps are identical to the earlier lab; only the image name and the tools inside change.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You built an MCP server with the Python SDK that exposes two original tools with automatically generated schemas, ran it over stdio, added an SSE transport for remote access, and containerized it for Azure Container Apps. Your server is now a genuine participant in the MCP ecosystem. In the next lab you will connect a client to it and put the tools to work.</p>
+<nav>
+<a href="110-lab-talking-to-the-azure-mcp-server.html">&larr; Previous: Lab - Talking to the Azure MCP Server</a><a href="112-lab-talking-to-our-custom-mcp-server.html">Next: Lab - Talking to our custom MCP server &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Organization — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Organization</span>
+    </div>
+    <div>
+      <span id="user-info" class="text-sm text-gray-500"></span>
+      <button onclick="signOut()" class="text-sm text-red-500 hover:underline ml-4">Logout</button>
+    </div>
+  </nav>
+  <div class="max-w-3xl mx-auto p-6">
+    <div id="alert"></div>
+    <h1 class="text-2xl font-bold mb-6">Organization Settings</h1>
+    <div id="loading" class="text-gray-500">Loading...</div>
+    <form id="org-form" class="hidden bg-white rounded-xl shadow-sm border p-6">
+      <div class="grid grid-cols-2 gap-4">
+        <div class="mb-4 col-span-2">
+          <label class="block text-sm font-semibold mb-1">Organization Name</label>
+          <input type="text" id="name" class="w-full border rounded-lg px-3 py-2 text-sm" required>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">GSTIN</label>
+          <input type="text" id="gstin" class="w-full border rounded-lg px-3 py-2 text-sm font-mono">
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">PAN</label>
+          <input type="text" id="pan" class="w-full border rounded-lg px-3 py-2 text-sm font-mono">
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">Phone</label>
+          <input type="tel" id="phone" class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">Email</label>
+          <input type="email" id="org_email" class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">State</label>
+          <input type="text" id="state" class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">City</label>
+          <input type="text" id="city" class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">Pincode</label>
+          <input type="text" id="pincode" class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">Industry Type</label>
+          <select id="industry_type" class="w-full border rounded-lg px-3 py-2 text-sm"></select>
+        </div>
+        <div class="mb-4">
+          <label class="block text-sm font-semibold mb-1">Variant</label>
+          <select id="variant" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <option value="express">Express (Free)</option>
+            <option value="blue">Blue (Basic)</option>
+            <option value="saffron">Saffron (GST)</option>
+            <option value="emerald">Emerald (Enterprise)</option>
+          </select>
+        </div>
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-semibold mb-1">Street Address</label>
+        <textarea id="street" class="w-full border rounded-lg px-3 py-2 text-sm" rows="2"></textarea>
+      </div>
+      <div class="flex gap-3">
+        <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">Save</button>
+        <button type="button" onclick="loadDemoData()" class="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-200">Load Demo Data</button>
+      </div>
+    </form>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin();
+      if (!user) return;
+      document.getElementById('user-info').textContent = user.email;
+
+      const { data: configs } = await erp.from('industry_configs').select('industry_type, label').order('label');
+      const sel = document.getElementById('industry_type');
+      (configs || []).forEach(c => { const o = document.createElement('option'); o.value = c.industry_type; o.textContent = c.label; sel.appendChild(o); });
+
+      const profile = await getUserProfile();
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('org-form').classList.remove('hidden');
+
+      if (profile?.org_id) {
+        const { data: org, error } = await erp.from('organizations').select('*').eq('id', profile.org_id).single();
+        if (!error && org) {
+          document.getElementById('name').value = org.name || '';
+          document.getElementById('gstin').value = org.gstin || '';
+          document.getElementById('pan').value = org.pan || '';
+          document.getElementById('org_email').value = org.contact?.email || '';
+          document.getElementById('phone').value = org.contact?.phone || '';
+          document.getElementById('state').value = org.address?.state || '';
+          document.getElementById('city').value = org.address?.city || '';
+          document.getElementById('pincode').value = org.address?.pincode || '';
+          document.getElementById('street').value = org.address?.street || '';
+          document.getElementById('industry_type').value = org.industry_type || '';
+          document.getElementById('variant').value = org.variant || 'blue';
+        }
+      } else {
+        loadDemoData();
+      }
+
+      document.getElementById('org-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const btn = this.querySelector('button[type="submit"]');
+        btn.disabled = true; btn.textContent = 'Saving...';
+        try {
+          const updates = {
+            name: document.getElementById('name').value.trim(),
+            gstin: document.getElementById('gstin').value.trim() || null,
+            pan: document.getElementById('pan').value.trim() || null,
+            industry_type: document.getElementById('industry_type').value,
+            variant: document.getElementById('variant').value,
+            contact: { email: document.getElementById('org_email').value.trim(), phone: document.getElementById('phone').value.trim() },
+            address: { street: document.getElementById('street').value.trim(), city: document.getElementById('city').value.trim(), state: document.getElementById('state').value.trim(), pincode: document.getElementById('pincode').value.trim() }
+          };
+          if (profile?.org_id) {
+            const { error: upErr } = await erp.from('organizations').update(updates).eq('id', profile.org_id);
+            if (upErr) throw upErr;
+            showAlert('Organization updated!', 'success');
+            btn.disabled = false; btn.textContent = 'Save';
+          } else {
+            const { error: orgErr } = await erp.from('organizations').insert(updates);
+            if (orgErr) throw orgErr;
+            const { data: freshOrgs } = await erp.from('organizations')
+              .select('id').eq('name', updates.name)
+              .order('created_at', { ascending: false }).limit(1);
+            if (!freshOrgs || !freshOrgs.length) throw new Error('Could not find new org');
+            const { error: profErr } = await erp.from('user_profiles').update({ org_id: freshOrgs[0].id }).eq('id', user.id);
+            if (profErr) throw profErr;
+            showAlert('Organization created! Redirecting...', 'success');
+            setTimeout(() => window.location.reload(), 1500);
+          }
+        } catch (err) { showAlert(err.message, 'error'); btn.disabled = false; btn.textContent = 'Save'; }
+      });
+    });
+
+    function loadDemoData() {
+      document.getElementById('name').value = 'Hetansh Technologie Solutions';
+      document.getElementById('gstin').value = '27AABCS1234E1Z5';
+      document.getElementById('pan').value = 'AABCS1234E';
+      document.getElementById('phone').value = '+91-9974031480';
+      document.getElementById('org_email').value = 'contact@hetanshtechnologie.github.io';
+      document.getElementById('state').value = 'Maharashtra';
+      document.getElementById('city').value = 'Mumbai';
+      document.getElementById('pincode').value = '400001';
+      document.getElementById('street').value = '42, Tech Park, Andheri East';
+      document.getElementById('industry_type').value = 'computer_hardware';
+      document.getElementById('variant').value = 'saffron';
+      showAlert('Demo data loaded! Edit and save.', 'success');
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>10. Lab - Deploying Models in Microsoft Foundry - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 10</span>
+<h1>Lab - Deploying Models in Microsoft Foundry</h1>
+<p>This lab puts the previous chapter's concepts into practice. You will deploy a real model in Microsoft Foundry, inspect its endpoint, send test requests from the portal playground and from the command line, and then clean up. Completing this lab gives you the endpoint, deployment name, and key that every later coding chapter will reuse.</p>
+
+<h2>What You Will Need</h2>
+<ul>
+<li>An Azure free account with a Microsoft Foundry resource (from the earlier labs).</li>
+<li>A Foundry project inside that resource.</li>
+<li>Your resource's endpoint and one access key, found under <strong>Keys and Endpoint</strong> in the Azure portal.</li>
+</ul>
+
+<div class="warn">
+<p>Before you start, decide whether to use a free-tier or pay-as-you-go deployment and keep an eye on it. If your region offers no free tier for the model you pick, the pay-as-you-go option still costs almost nothing for the handful of test requests in this lab — but delete the deployment when you finish, as instructed in the final step.</p>
+</div>
+
+<h2>Step 1: Open Your Project in Foundry</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Deploy a chat model and test it</h3>
+<ol>
+<li>Open the Foundry portal and navigate to your project.</li>
+<li>In the left menu, open the <strong>Model catalog</strong>. Filter the list to chat models and choose a general-purpose model that is available in your region.</li>
+<li>Open the model's card and read the model card summary — note the context length and the supported languages.</li>
+<li>Click <strong>Deploy</strong> (sometimes labeled <strong>Deploy to endpoint</strong>).</li>
+<li>Enter a deployment name such as <code>ai103-chat-deploy</code>. This exact string is what your code will reference, so type it carefully.</li>
+<li>Choose the region closest to you and the smallest capacity or tier available. Leave content filtering at its default for now.</li>
+<li>Click <strong>Deploy</strong> and wait for the status to change to <strong>Ready</strong>. This can take from a few seconds to a couple of minutes.</li>
+<li>From the deployments page, open the new deployment. Note the <strong>Endpoint</strong> URL and the <strong>Deployment name</strong> — both are needed for the next steps.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>If the model card shows no <strong>Deploy</strong> button or the deployment fails, the model is probably unavailable in your region or under your quota. The fix is usually a different region or a different model family — not a different resource. Try a small sibling model if a large one refuses to deploy.</p>
+</div>
+
+<h2>Step 2: Test from the Playground</h2>
+<p>Before touching code, test the deployment in the Foundry playground. The playground lets you send a chat request and see the response immediately, which makes it the fastest way to confirm the deployment works:</p>
+<ol>
+<li>In your project, open the <strong>Playground</strong> area.</li>
+<li>Select your deployment from the model dropdown.</li>
+<li>Send a simple prompt such as <em>"Explain what a token is in one sentence."</em></li>
+<li>Adjust the <strong>temperature</strong> slider and send the same prompt again. Notice how the same input can produce different wording — that is sampling in action.</li>
+</ol>
+
+<div class="note">
+<p>The playground is the same model endpoint your code will use, so a good playground result is a strong signal that the deployment itself is healthy. If the playground works but your code fails, the bug is almost always in the code or the connection values — not the deployment.</p>
+</div>
+
+<h2>Step 3: Call the Deployment with curl</h2>
+<p>Next, verify the endpoint from outside the portal using <code>curl</code>. Replace the placeholder values with your own endpoint, key, and deployment name. On Windows PowerShell, put the JSON body in a file to avoid quoting problems:</p>
+
+<pre><code># request-body.json
+{
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "List three uses of generative AI in customer support."}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 150
+}</code></pre>
+
+<pre><code># Call the deployment (Windows PowerShell)
+curl.exe https://YOUR_ENDPOINT/openai/deployments/YOUR_DEPLOYMENT_NAME/chat/completions?api-version=2024-06-01 `
+  -H "api-key: YOUR_KEY" `
+  -H "Content-Type: application/json" `
+  -d "@request-body.json"</code></pre>
+
+<p>On macOS or Linux the same request works with a single line:</p>
+
+<pre><code>curl https://YOUR_ENDPOINT/openai/deployments/YOUR_DEPLOYMENT_NAME/chat/completions?api-version=2024-06-01 \
+  -H "api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":"Hello, model!"}],"max_tokens":50}'</code></pre>
+
+<p>A healthy response includes a <code>choices</code> array with your model's text and a <code>usage</code> block with token counts. If you see an authentication error, double-check the key; if you see a 404, verify the deployment name and API version.</p>
+
+<h2>Step 4: Inspect the Response</h2>
+<p>Spend a moment reading the full response JSON. Every field teaches you something:</p>
+<ul>
+<li><code>id</code> and <code>model</code> identify which deployment and model served the request.</li>
+<li><code>choices[0].message.content</code> holds the generated text your application will use.</li>
+<li><code>choices[0].finish_reason</code> tells you why generation stopped — reaching a length limit (<code>length</code>), stopping naturally (<code>stop</code>), or stopping on a content filter.</li>
+<li><code>usage</code> reports prompt and completion tokens, which is how your cost is calculated.</li>
+</ul>
+
+<div class="warn">
+<p>If <code>finish_reason</code> is <code>length</code>, the model hit its maximum output cap and the answer is cut off. Your application should detect this and either raise the cap or tell the user the response was truncated — silent truncation produces misleading content.</p>
+</div>
+
+<h2>Step 5: Clean Up</h2>
+<p>Once you have confirmed the deployment works, delete it unless you are immediately continuing to the next chapter. This stops any recurring cost:</p>
+<ol>
+<li>Open the <strong>Deployments</strong> page in your project.</li>
+<li>Select your deployment and choose <strong>Delete</strong> (or <strong>Stop</strong> if your platform offers pausing).</li>
+<li>Confirm the deletion. The model card in the catalog is unaffected — you can redeploy anytime.</li>
+</ol>
+
+<pre><code># Or delete via Azure CLI if you prefer
+az cognitiveservices account deployment delete \
+  --resource-group rg-ai103-rg \
+  --name YOUR_RESOURCE_NAME \
+  --deployment-name ai103-chat-deploy</code></pre>
+
+<h2>Summary</h2>
+<p>You deployed a chat model to a named endpoint in Foundry, tested it in the playground, verified it from the command line, learned to interpret the response JSON, and cleaned up afterwards. This deployment cycle — create, test, inspect, delete — is the exact workflow you will repeat throughout the course. Next you will review what you learned about model deployment.</p>
+<nav>
+<a href="9-deploying-models-in-microsoft-foundry.html">&larr; Previous: Deploying Models in Microsoft Foundry</a><a href="11-review-on-model-deployment.html">Next: Review on model deployment &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

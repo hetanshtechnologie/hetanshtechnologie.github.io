@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Balance Chemical Equations</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:12px;border-bottom:2px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem}
+.game-wrap{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:14px}
+.stats{display:flex;gap:20px;flex-wrap:wrap;justify-content:center}
+.stats span{background:#1e293b;padding:8px 14px;border-radius:8px;border:1px solid #334155;font-size:.9rem}
+.equation-display{background:#1e293b;border:2px solid #334155;border-radius:16px;padding:24px;width:100%;max-width:650px;text-align:center}
+.eq-title{font-size:.85rem;color:#94a3b8;margin-bottom:12px}
+.eq-row{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin:16px 0}
+.eq-compound{display:flex;align-items:center;gap:4px;font-size:1.3rem}
+.eq-coeff{width:40px;height:40px;background:#0f172a;border:2px solid #475569;border-radius:8px;text-align:center;font-size:1.2rem;color:#facc15;font-weight:700;outline:none}
+.eq-coeff:focus{border-color:#38bdf8}
+.eq-coeff.correct{border-color:#22c55e;background:rgba(34,197,94,0.15)}
+.eq-coeff.wrong{border-color:#ef4444;background:rgba(239,68,68,0.15)}
+.eq-symbol{font-weight:700}
+.eq-plus{font-size:1.2rem;color:#64748b}
+.eq-arrow{font-size:1.5rem;color:#f59e0b;margin:0 8px}
+.subscript{font-size:.7em;vertical-align:sub}
+.atom-count{display:flex;gap:16px;justify-content:center;margin:12px 0;flex-wrap:wrap}
+.atom-pill{padding:6px 12px;border-radius:20px;font-size:.8rem;border:1px solid #475569}
+.atom-pill.balanced{border-color:#22c55e;color:#22c55e}
+.atom-pill.unbalanced{border-color:#ef4444;color:#ef4444}
+.btn{background:#38bdf8;color:#0f172a;border:none;padding:10px 22px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer}
+.btn:hover{background:#7dd3fc}
+.btn.sec{background:#475569;color:#e2e8f0}
+.btn.green{background:#22c55e;color:#fff}
+.fb{padding:10px;border-radius:8px;font-size:.95rem;min-height:2em;text-align:center;max-width:650px;width:100%}
+.hint{background:#1e293b;border:1px solid #475569;border-radius:8px;padding:10px;font-size:.85rem;color:#94a3b8;max-width:650px;width:100%;text-align:left}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">⬅ Back</a><h1>⚖️ Balance Chemical Equations</h1></div>
+<div class="game-wrap">
+<div class="stats">
+<span>⭐ Score: <b id="score">0</b></span>
+<span>📊 Level: <b id="level">1</b></span>
+<span>❓ Q: <b id="qnum">1</b>/8</span>
+</div>
+<div class="equation-display" id="eq-display"></div>
+<div class="atom-count" id="atom-count"></div>
+<div style="display:flex;gap:10px;margin:8px 0">
+<button class="btn green" onclick="checkBalance()">✅ Check Balance</button>
+<button class="btn sec" onclick="showHint()">💡 Hint</button>
+</div>
+<div class="fb" id="fb"></div>
+<div class="hint" id="hint" style="display:none"></div>
+<button class="btn" id="next-btn" style="display:none" onclick="nextQ()">Next ➡️</button>
+</div>
+<script>
+let score=0,level=1,qNum=0,answered=false;
+const equations=[
+  {left:['H₂','O₂'],right:['H₂O'],answer:[2,1,2],hint:'Need 2 H₂ to get 4 H atoms, producing 2 H₂O.',atoms:{H:[4,4],O:[2,2]}},
+  {left:['N₂','H₂'],right:['NH₃'],answer:[1,3,2],hint:'N₂ has 2 N, so need 2 NH₃ (6 H). Use 3 H₂.',atoms:{N:[2,2],H:[6,6]}},
+  {left:['Fe','O₂'],right:['Fe₂O₃'],answer:[4,3,2],hint:'Fe₂O₃ has 2 Fe and 3 O. Use 4 Fe + 3 O₂ → 2 Fe₂O₃.',atoms:{Fe:[4,4],O:[6,6]}},
+  {left:['CH₄','O₂'],right:['CO₂','H₂O'],answer:[1,2,1,2],hint:'CH₄ + 2O₂ → CO₂ + 2H₂O',atoms:{C:[1,1],H:[4,4],O:[4,4]}},
+  {left:['Na','Cl₂'],right:['NaCl'],answer:[2,1,2],hint:'Cl₂ provides 2 Cl, so need 2 NaCl. Use 2 Na.',atoms:{Na:[2,2],Cl:[2,2]}},
+  {left:['Al','O₂'],right:['Al₂O₃'],answer:[4,3,2],hint:'Al₂O₃ needs 2 Al and 3 O. Scale up: 4 Al + 3 O₂ → 2 Al₂O₃.',atoms:{Al:[4,4],O:[6,6]}},
+  {left:['C₂H₆','O₂'],right:['CO₂','H₂O'],answer:[2,7,4,6],hint:'2C₂H₆ → 4CO₂ + 6H₂O, needs 7 O₂.',atoms:{C:[4,4],H:[12,12],O:[14,14]}},
+  {left:['Mg','HCl'],right:['MgCl₂','H₂'],answer:[1,2,1,1],hint:'Mg needs 2 Cl, so 2 HCl → MgCl₂ + H₂.',atoms:{Mg:[1,1],H:[2,2],Cl:[2,2]}},
+  {left:['Ca','H₂O'],right:['Ca(OH)₂','H₂'],answer:[1,2,1,1],hint:'Ca + 2H₂O → Ca(OH)₂ + H₂.',atoms:{Ca:[1,1],H:[4,4],O:[2,2]}},
+  {left:['K','H₂O'],right:['KOH','H₂'],answer:[2,2,2,1],hint:'2K + 2H₂O → 2KOH + H₂.',atoms:{K:[2,2],H:[4,4],O:[2,2]}},
+  {left:['P','O₂'],right:['P₂O₅'],answer:[4,5,2],hint:'P₂O₅ has 2P + 5O. Use 4P + 5O₂ → 2P₂O₅.',atoms:{P:[4,4],O:[10,10]}},
+  {left:['Zn','HCl'],right:['ZnCl₂','H₂'],answer:[1,2,1,1],hint:'Zn + 2HCl → ZnCl₂ + H₂.',atoms:{Zn:[1,1],H:[2,2],Cl:[2,2]}},
+];
+let shuffled=[...equations].sort(()=>Math.random()-0.5);
+let currentEq;
+
+function renderEquation(){
+  currentEq=shuffled[qNum];
+  const disp=document.getElementById('eq-display');
+  let html='<div class="eq-title">Balance this equation — enter coefficients (use 1 if implicit):</div><div class="eq-row">';
+  currentEq.left.forEach((c,i)=>{
+    if(i>0)html+='<span class="eq-plus">+</span>';
+    html+='<div class="eq-compound"><input class="eq-coeff" id="c'+i+'" type="number" min="1" max="10" value="1" onchange="updateAtoms()">'+parseCompound(c)+'</div>';
+  });
+  html+='<span class="eq-arrow">→</span>';
+  currentEq.right.forEach((c,i)=>{
+    if(i>0)html+='<span class="eq-plus">+</span>';
+    html+='<div class="eq-compound"><input class="eq-coeff" id="c'+(currentEq.left.length+i)+'" type="number" min="1" max="10" value="1" onchange="updateAtoms()">'+parseCompound(c)+'</div>';
+  });
+  html+='</div>';
+  disp.innerHTML=html;
+  updateAtoms();
+}
+
+function parseCompound(s){
+  return s.replace(/([A-Z][a-z]?)(\d*)/g,(m,sym,num)=>{
+    return '<span class="eq-symbol">'+sym+'</span>'+(num?'<span class="subscript">'+num+'</span>':'');
+  });
+}
+
+function getCoeffs(){
+  let coeffs=[];
+  let total=currentEq.left.length+currentEq.right.length;
+  for(let i=0;i<total;i++){
+    let v=parseInt(document.getElementById('c'+i).value)||1;
+    coeffs.push(v);
+  }
+  return coeffs;
+}
+
+function updateAtoms(){
+  if(!currentEq)return;
+  let coeffs=getCoeffs();
+  let leftAtoms={},rightAtoms={};
+  currentEq.left.forEach((c,i)=>{
+    parseAtomCount(c,coeffs[i],leftAtoms);
+  });
+  currentEq.right.forEach((c,i)=>{
+    parseAtomCount(c,coeffs[i],rightAtoms);
+  });
+  let allAtoms=[...new Set([...Object.keys(leftAtoms),...Object.keys(rightAtoms)])];
+  let html='';
+  allAtoms.forEach(a=>{
+    let l=leftAtoms[a]||0,r=rightAtoms[a]||0;
+    let bal=l===r;
+    html+='<div class="atom-pill '+(bal?'balanced':'unbalanced')+'">'+a+': '+l+(bal?' ✓':' → '+r)+'</div>';
+  });
+  document.getElementById('atom-count').innerHTML=html;
+}
+
+function parseAtomCount(formula,multiplier,result){
+  let matches=formula.match(/[A-Z][a-z]?\d*/g);
+  if(!matches)return;
+  matches.forEach(m=>{
+    let sym=m.match(/[A-Z][a-z]?/)[0];
+    let num=m.match(/\d+/);
+    result[sym]=(result[sym]||0)+(num?parseInt(num[0]):1)*multiplier;
+  });
+}
+
+function checkBalance(){
+  if(answered)return;
+  let coeffs=getCoeffs();
+  let leftAtoms={},rightAtoms={};
+  currentEq.left.forEach((c,i)=>parseAtomCount(c,coeffs[i],leftAtoms));
+  currentEq.right.forEach((c,i)=>parseAtomCount(c,coeffs[i],rightAtoms));
+  let balanced=JSON.stringify(leftAtoms)===JSON.stringify(rightAtoms)&&
+    JSON.stringify(Object.keys(leftAtoms).sort())===JSON.stringify(Object.keys(currentEq.answer).sort());
+  // check against expected
+  let expected=currentEq.answer;
+  let exactMatch=coeffs.every((c,i)=>c===expected[i]);
+  answered=true;
+  let fb=document.getElementById('fb');
+  // mark inputs
+  let total=currentEq.left.length+currentEq.right.length;
+  for(let i=0;i<total;i++){
+    let el=document.getElementById('c'+i);
+    if(exactMatch)el.classList.add('correct');
+    else el.classList.add(el.value==expected[i]?'correct':'wrong');
+    el.disabled=true;
+  }
+  if(exactMatch){let pts=20+level*10;score+=pts;fb.innerHTML='✅ Perfectly balanced! <b>+'+pts+' pts</b>';fb.style.background='rgba(34,197,94,0.15)'}
+  else if(balanced){let pts=10;score+=pts;fb.innerHTML='✅ Balanced! But expected: '+expected.join(', ')+'. <b>+'+pts+' pts</b>';fb.style.background='rgba(56,189,248,0.15)'}
+  else{fb.innerHTML='❌ Not balanced correctly. Answer: '+expected.join(', ')+'. '+currentEq.hint;fb.style.background='rgba(239,68,68,0.15)'}
+  document.getElementById('score').textContent=score;document.getElementById('next-btn').style.display='inline-block';
+}
+
+function showHint(){
+  document.getElementById('hint').textContent='💡 '+currentEq.hint;
+  document.getElementById('hint').style.display='block';
+}
+
+function nextQ(){qNum++;document.getElementById('hint').style.display='none';document.getElementById('fb').textContent='';document.getElementById('fb').style.background='transparent';document.getElementById('next-btn').style.display='none';renderEquation();}
+function showResults(){
+  document.getElementById('eq-display').innerHTML='<div style="font-size:3rem;margin-bottom:12px">🏆</div><div style="font-size:1.3rem">Level '+level+' Complete! Score: '+score+'</div><div style="margin-top:16px"><button class="btn" onclick="nextLevel()">Next Level ⬆️</button> <button class="btn sec" onclick="restart()">↺ Restart</button></div>';
+  document.getElementById('atom-count').innerHTML='';document.getElementById('fb').textContent='';document.getElementById('next-btn').style.display='none';
+}
+function nextLevel(){level++;qNum=0;shuffled=[...equations].sort(()=>Math.random()-0.5);document.getElementById('level').textContent=level;renderEquation()}
+function restart(){score=0;level=1;qNum=0;document.getElementById('score').textContent=0;document.getElementById('level').textContent=1;shuffled=[...equations].sort(()=>Math.random()-0.5);renderEquation()}
+renderEquation();
+</script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>241. Lab - Multi-Modal support for models - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 241</span>
+<h1>Lab - Multi-Modal support for models</h1>
+<p>Until now your prompts have been text only. Many of the models in Microsoft Foundry are multimodal, which means they can read text <em>and</em> images in the same conversation. In this lab you will attach real image files to chat requests and ask the model questions about what it sees, using the same deployment and SDK you already know.</p>
+
+<h2>What Multimodal Means in Practice</h2>
+<p>A multimodal chat model accepts multiple kinds of input inside one message. Instead of a single string, a user message becomes a list of parts: text, an image, and sometimes audio. The model reasons across all of them together, so you can ask questions like "look at this diagram and explain the flow" or "read the price on this photo and convert it to euros."</p>
+<p>This capability unlocks a whole family of applications that text-only models cannot handle: document inspection, screenshot analysis, receipt parsing, UI review, and visual QA, to name a few.</p>
+
+<div class="note">
+<p>Multimodal input requires a deployment of a model that supports vision, such as <code>gpt-5</code> or <code>gpt-4o</code>. A text-only model will either reject the request or ignore the image parts. Check the model card in the Foundry catalog before you start.</p>
+</div>
+
+<h2>How Images Travel in a Request</h2>
+<p>Two formats are commonly supported for image parts:</p>
+<ul>
+<li><strong>Public URL:</strong> You pass the image's web address. The service fetches it on your behalf. Simple, but the URL must be publicly reachable.</li>
+<li><strong>Base64 data URI:</strong> You encode the file's bytes as base64 and inline them directly in the message. This works for local files and private storage.</li>
+</ul>
+<p>For local images, the base64 data URI is the reliable choice because it does not depend on network access to your file. The pattern is always the same: read the file, base64-encode it, and build a part that points at the encoded string.</p>
+
+<h2>Step 1: Prepare a Test Image</h2>
+<div class="exercise">
+<h3>Exercise 1: Send a local image with a question</h3>
+<ol>
+<li>Create a folder named <code>ai103-lab241</code> and open it in VS Code.</li>
+<li>Place a small image file (a screenshot, a photo, or any JPG/PNG you have) next to your script and call it <code>sample.png</code>.</li>
+<li>Create <code>vision.py</code> and set your environment variables:</li>
+</ol>
+<pre><code>$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+<ol start="4">
+<li>Paste this script and replace <code>YOUR_DEPLOYMENT_NAME</code> with your vision-capable chat deployment:</li>
+</ol>
+<pre><code>import base64
+import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+with open("sample.png", "rb") as f:
+    image_bytes = f.read()
+
+data_uri = "data:image/png;base64," + base64.b64encode(image_bytes).decode()
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe what is in this image in two sentences."},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ],
+        }
+    ],
+)
+
+print(response.choices[0].message.content)
+</code></pre>
+<ol start="5">
+<li>Run the script:</li>
+</ol>
+<pre><code>python vision.py
+</code></pre>
+<p>If everything is wired correctly, the model describes the image you attached.</p>
+</div>
+
+<div class="tip">
+<p>The MIME type in the data URI must match the file. If your image is a JPEG, use <code>data:image/jpeg;base64,...</code>. Mismatched types cause the request to be rejected by the service.</p>
+</div>
+
+<h2>Step 2: Ask a Targeted Question About the Image</h2>
+<p>Describing the image is the simplest test. The real value comes from asking questions that require reading specific details. The model treats the image as visual context, so you can ask it to count, extract, compare, or explain.</p>
+<div class="exercise">
+<h3>Exercise 2: Extract a specific fact from the image</h3>
+<p>Create <code>extract.py</code> that reuses the same image-loading code but asks a factual question:</p>
+<pre><code>import base64
+import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+with open("sample.png", "rb") as f:
+    data_uri = "data:image/png;base64," + base64.b64encode(f.read()).decode()
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Look carefully at this image and answer exactly three things: "
+                        "the main subject, the dominant colors, and any text you can read in it."
+                    ),
+                },
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ],
+        }
+    ],
+)
+
+print(response.choices[0].message.content)
+</code></pre>
+<pre><code>python extract.py
+</code></pre>
+<p>Try the same question with a different image. Notice how the answer changes completely when the picture changes — the model is genuinely reading the image you sent, not guessing from the question.</p>
+</div>
+
+<h2>Step 3: Mix Text and Multiple Images</h2>
+<p>A single message can contain more than one image part. Put two images into the same request and compare them in one turn.</p>
+<div class="exercise">
+<h3>Exercise 3: Compare two images in one call</h3>
+<p>Add a second image file named <code>second.png</code> and build a request with two image parts:</p>
+<pre><code>import base64
+import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+def to_data_uri(path: str, mime: str) -> str:
+    with open(path, "rb") as f:
+        return f"data:{mime};base64," + base64.b64encode(f.read()).decode()
+
+first = to_data_uri("sample.png", "image/png")
+second = to_data_uri("second.png", "image/png")
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Compare these two images. What is similar and what is different?"},
+                {"type": "image_url", "image_url": {"url": first}},
+                {"type": "image_url", "image_url": {"url": second}},
+            ],
+        }
+    ],
+)
+
+print(response.choices[0].message.content)
+</code></pre>
+<pre><code>python compare.py
+</code></pre>
+</div>
+
+<div class="warn">
+<p>Images count toward your token usage. A large photograph can consume far more tokens than the text around it, and several images multiply that quickly. Resize images to the minimum resolution that still answers your question, and cache any images you process repeatedly.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You made your first multimodal calls: you attached a local image to a chat request using a base64 data URI, asked the model to describe it and to extract specific facts, and compared two images in a single turn. The message content array — mixing <code>text</code> and <code>image_url</code> parts — is the same structure you will use for every vision-capable deployment. In the next lab you will use a model the opposite way, not to read images but to explain code.</p>
+<nav>
+<a href="240-quick-note-on-monitoring-the-model-usage.html">&larr; Previous: Quick note on monitoring the model usage</a><a href="242-lab-python-gpt-5-asking-the-model-to-explain-code.html">Next: Lab - Python - GPT 5- Asking the model to explain code &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

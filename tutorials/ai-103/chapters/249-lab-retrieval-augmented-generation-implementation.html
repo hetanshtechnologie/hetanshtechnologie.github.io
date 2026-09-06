@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>249. Lab - Retrieval Augmented Generation - Implementation - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 249</span>
+<h1>Lab - Retrieval Augmented Generation - Implementation</h1>
+<p>The previous labs built the pieces: a storage account holding documents and an empty search index. This lab wires them together. You will define a data source that points the search service at your blobs, create an indexer that copies and transforms the documents, run it, and verify that your knowledge base is genuinely searchable.</p>
+
+<h2>The Three Objects of Indexing</h2>
+<p>Indexing on Azure AI Search is configured with three cooperating objects:</p>
+<table>
+<tr><th>Object</th><th>Role</th></tr>
+<tr><td>Data source</td><td>Describes where documents live and how to connect (blob container + credentials)</td></tr>
+<tr><td>Index</td><td>Describes the target schema (created in the previous lab)</td></tr>
+<tr><td>Indexer</td><td>The job that reads from the data source and writes into the index</td></tr>
+</table>
+<p>For plain text documents, the built-in blob parser reads each file's content, so no skillset is required. Embedding can be added either with a custom skill or by a separate step; for this lab the focus is on getting text into the index.</p>
+
+<h2>Step 1: Create the Data Source</h2>
+<div class="exercise">
+<h3>Exercise 1: Connect the search service to your blobs</h3>
+<p>Create <code>datasource.json</code> using the connection string you saved in the Blob lab:</p>
+<pre><code>{
+  "name": "rag-blob-source",
+  "type": "azureblob",
+  "credentials": {
+    "connectionString": "YOUR_BLOB_CONNECTION_STRING"
+  },
+  "container": {"name": "ragdocs"},
+  "dataChangeDetectionPolicy": {"@odata.type": "#Microsoft.Azure.Search.HighWaterMarkChangeDetectionPolicy", "highWaterMarkColumnName": "metadata_storage_last_modified"}
+}
+</code></pre>
+<p>Submit it to the search service:</p>
+<pre><code>curl -X PUT "https://ai103-rag-search.search.windows.net/datasources/rag-blob-source?api-version=2023-11-01" \
+  -H "Content-Type: application/json" \
+  -H "api-key: YOUR_SEARCH_ADMIN_KEY" \
+  --data "@datasource.json"
+</code></pre>
+</div>
+
+<div class="tip">
+<p>The change-detection policy tells the indexer to re-ingest only blobs whose <code>last_modified</code> timestamp moved forward. It makes later re-runs incremental instead of reprocessing every file, which keeps indexing fast as your knowledge base grows.</p>
+</div>
+
+<h2>Step 2: Create the Indexer</h2>
+<p>The indexer maps source blob fields to index fields. Blob indexers expose built-in metadata fields such as <code>metadata_storage_name</code>, and the file's text is available through the special field <code>content</code>.</p>
+<div class="exercise">
+<h3>Exercise 2: Define the mapping job</h3>
+<p>Create <code>indexer.json</code>:</p>
+<pre><code>{
+  "name": "rag-indexer",
+  "dataSourceName": "rag-blob-source",
+  "targetIndexName": "rag-index",
+  "fieldMappings": [
+    {"sourceFieldName": "content", "targetFieldName": "content"},
+    {"sourceFieldName": "metadata_storage_name", "targetFieldName": "title"}
+  ],
+  "parameters": {
+    "configuration": {
+      "parsingMode": "text",
+      "dataToExtract": "contentAndMetadata"
+    }
+  },
+  "schedule": {"interval": "PT1H"}
+}
+</code></pre>
+<p>The <code>parsingMode: text</code> configuration tells the indexer that the blobs are plain text. For PDFs and Word files, use <code>parsingMode: default</code> or the document-specific modes so the indexer can extract the embedded text.</p>
+</div>
+
+<h2>Step 3: Run and Monitor the Indexer</h2>
+<div class="exercise">
+<h3>Exercise 3: Start the job and check its health</h3>
+<p>Create the indexer and run it on demand (the hourly schedule in the definition is a safety net):</p>
+<pre><code>curl -X PUT "https://ai103-rag-search.search.windows.net/indexers/rag-indexer?api-version=2023-11-01" \
+  -H "Content-Type: application/json" \
+  -H "api-key: YOUR_SEARCH_ADMIN_KEY" \
+  --data "@indexer.json"
+
+curl -X POST "https://ai103-rag-search.search.windows.net/indexers/rag-indexer/run?api-version=2023-11-01" \
+  -H "api-key: YOUR_SEARCH_ADMIN_KEY"
+</code></pre>
+<p>Wait about a minute, then check the indexer status:</p>
+<pre><code>curl -X GET "https://ai103-rag-search.search.windows.net/indexers/rag-indexer/status?api-version=2023-11-01" \
+  -H "api-key: YOUR_SEARCH_ADMIN_KEY"
+</code></pre>
+<p>You want to see <code>lastResult.status</code> equal to <code>success</code> with an <code>itemCount</code> matching the number of blobs you uploaded.</p>
+</div>
+
+<div class="warn">
+<p>An indexer that stays at zero documents usually failed silently on every file. Check <code>lastResult.errors</code> and <code>lastResult.warnings</code> — a common cause is a wrong connection string or a container name typo in the data source. Fix the data source and re-run the indexer; there is nothing else to reset.</p>
+</div>
+
+<h2>Step 4: Verify the Index Is Searchable</h2>
+<p>Now query the index exactly as the RAG application will — with a keyword search over the content field:</p>
+<pre><code>curl -X POST "https://ai103-rag-search.search.windows.net/indexes/rag-index/docs/search?api-version=2023-11-01" \
+  -H "Content-Type: application/json" \
+  -H "api-key: YOUR_SEARCH_ADMIN_KEY" \
+  --data '{"search": "return policy", "top": 3}'
+</code></pre>
+<p>The response lists the documents whose content matches the query, with relevance scores. If you see hits that obviously relate to your uploaded files, the retrieval half of the RAG pipeline is now working end to end.</p>
+
+<div class="note">
+<p>This search call is exactly what the Python lab later in this section will make programmatically. The pieces you just built — data source, indexer, index — are the same ones that production RAG applications use, just driven here through the management API.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You connected the search service to Blob Storage with a data source, defined an indexer that maps blob content into the index, ran it, checked its status, and queried the populated index. The knowledge base is now real: documents on disk have become searchable records. In the next lab you will do this from Python and complete the full generate step that turns a query into a grounded answer.</p>
+<nav>
+<a href="248-lab-retrieval-augmented-generation-azure-search-service.html">&larr; Previous: Lab - Retrieval Augmented Generation - Azure Search service</a><a href="250-lab-retrieval-augmented-generation-using-python.html">Next: Lab - Retrieval Augmented Generation - Using Python &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

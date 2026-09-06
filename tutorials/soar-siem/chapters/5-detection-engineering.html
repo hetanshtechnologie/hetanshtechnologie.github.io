@@ -1,0 +1,148 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>5. Detection Engineering for SIEM - SOAR &amp; SIEM Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>5. Detection Engineering for SIEM</h1>
+<p class="tag">Chapter 5</p>
+
+<h2>What is Detection Engineering?</h2>
+<p><strong>Detection engineering</strong> is the discipline of designing, implementing, testing, and maintaining the detections that turn raw security data into meaningful alerts. It is the bridge between "we have a SIEM" and "we can reliably detect attacks." A detection engineer decides what to detect, writes the rule, tests it, tunes it, and decommissions it when it no longer earns its place.</p>
+
+<h2>From Threat Model to Use Case</h2>
+<p>Good detection work starts before any rule is written. The process:</p>
+<ol>
+<li><strong>Know your threats:</strong> map the organization's crown-jewel assets and the realistic attack paths to them (MITRE ATT&amp;CK is the de facto framework).</li>
+<li><strong>Define a use case:</strong> a plain-language statement of what you want to detect and why. Example: "Detect credential dumping via LSASS access on Windows endpoints."</li>
+<li><strong>Identify data:</strong> which log sources and fields provide visibility into this behavior.</li>
+<li><strong>Write the detection:</strong> encode the use case as a rule, query, or analytics model.</li>
+<li><strong>Test and validate:</strong> prove it fires on known-bad data and stays quiet on normal traffic.</li>
+<li><strong>Deploy and tune:</strong> ship, monitor false positives, iterate.</li>
+<li><strong>Retire:</strong> review rules periodically; delete what is ineffective.</li>
+</ol>
+
+<h2>MITRE ATT&amp;CK as a Detection Backbone</h2>
+<p>MITRE ATT&amp;CK is a free, globally accessible knowledge base of adversary tactics and techniques. Tactics are the "why" (Initial Access, Execution, Persistence, Privilege Escalation, Defense Evasion, Credential Access, Discovery, Lateral Movement, Collection, C&amp;C, Exfiltration, Impact); techniques are the "how" (e.g., T1003.001 OS Credential Dumping: LSASS Memory).</p>
+
+<p>Detection engineers use ATT&amp;CK to:</p>
+<ul>
+<li>Prioritize techniques that map to the organization's risk.</li>
+<li>Reference documented behaviors, examples, and detections from the community.</li>
+<li>Track coverage: which techniques you can detect, and which are gaps.</li>
+<li>Design "detect the behavior, not the signature" — technique-focused rules survive malware family churn.</li>
+</ul>
+
+<div class="note">
+<strong>Analogy:</strong> Rules tied to a specific malware sample are like a wanted poster for one person. Rules tied to a technique (e.g., "LSASS access without a legitimate reason") are like a description of the behavior that catches anyone doing it — even new criminals.
+</div>
+
+<h2>Detection as Code</h2>
+<p>Modern detection engineering treats rules like software: versioned in git, peer-reviewed, tested in CI, and deployed through pipelines. Benefits: auditability, rollback, collaboration, and portability.</p>
+
+<pre><code># Example pipeline (concept)
+# 1. Write rule in version control        (e.g., detection rule YAML/JSON)
+# 2. Pull request -> peer review
+# 3. CI runs the rule against test data    (expected true positive + false positive sets)
+# 4. Merge to main -> deploy to SIEM via API
+# 5. Alert telemetry feeds a tuning dashboard</code></pre>
+
+<p>Detection-as-code is the reason <strong>Sigma</strong> rules exist.</p>
+
+<h2>Sigma: The Portable Detection Format</h2>
+<p><strong>Sigma</strong> is an open-source, generic signature format for detection rules. A Sigma rule describes a detection in a tool-agnostic way and can be converted to many SIEM query languages (Splunk SPL, KQL, Lucene, QRadar AQL, etc.).</p>
+
+<pre><code>title: Suspicious LSASS Access
+logsource:
+  category: process_access
+  product: windows
+detection:
+  selection:
+    TargetImage|endswith: '\lsass.exe'
+    SourceImage|startswith: 'C:\Windows\'
+  filter:
+    SourceImage|startswith:
+      - 'C:\Windows\system32\'
+      - 'C:\Windows\SysWOW64\'
+      - 'C:\Program Files\'
+  condition: selection and not filter
+falsepositives:
+  - Legitimate system administration tools
+level: high</code></pre>
+
+<p>The <a href="https://github.com/SigmaHQ/sigma">SigmaHQ/sigma</a> repository hosts thousands of community-maintained rules that can be converted and deployed to your platform — a huge head start for new detection programs.</p>
+
+<h2>Writing Good Detection Rules</h2>
+<p>Characteristics of a high-quality rule:</p>
+<ul>
+<li><strong>Specific but not brittle:</strong> matches the technique across variants.</li>
+<li><strong>Low false positives:</strong> has filters for known-good activity.</li>
+<li><strong>Performant:</strong> uses indexed fields, avoids wildcard scans where possible.</li>
+<li><strong>Documented:</strong> title, description, references, assumptions, tuning notes.</li>
+<li><strong>Tested:</strong> validated against both true-positive and false-positive datasets.</li>
+<li><strong>Versioned and reviewed:</strong> lives in source control with change history.</li>
+</ul>
+
+<h2>Alert Triage and Classification</h2>
+<p>When an alert fires, the first human interaction is triage — the rapid determination of whether an alert is a true positive, false positive, or needs escalation. This is where the SOC's triage quality determines overall effectiveness.</p>
+
+<table>
+<tr><th>Classification</th><th>Meaning</th><th>Typical Action</th></tr>
+<tr><td>False Positive (FP)</td><td>Benign activity that matched the rule</td><td>Close, log feedback, tune rule</td></tr>
+<tr><td>True Positive (TP)</td><td>Real malicious or policy-violating activity</td><td>Escalate / respond per playbook</td></tr>
+<tr><td>Benign True Positive</td><td>Real but harmless (policy violation, testing)</td><td>Close, possibly tune severity</td></tr>
+<tr><td>Unknown / Needs enrichment</td><td>Cannot determine with current data</td><td>Enrich, investigate further</td></tr>
+</table>
+
+<p>Every triage outcome should feed back into rule tuning. SOCs with mature feedback loops steadily reduce false positive rate and surface the true positives faster.</p>
+
+<h2>Reducing False Positives Systematically</h2>
+<ol>
+<li>Track FP rate per rule — identify your worst offenders.</li>
+<li>Add filters for known-good sources, applications, and users.</li>
+<li>Raise thresholds or extend correlation windows.</li>
+<li>Use asset criticality to prioritize, not just count matches.</li>
+<li>Split one noisy rule into targeted variants.</li>
+<li>Use SOAR to auto-verify and auto-close common FPs before humans see them.</li>
+<li>Retire rules whose detection value does not justify their noise.</li>
+</ol>
+
+<h2>Testing Detections</h2>
+<p>You cannot trust a rule you have not tested. Approaches include:</p>
+<ul>
+<li><strong>Attack simulation:</strong> deliberately perform the technique (e.g., mimikatz, atomic tests) and confirm the alert fires. <strong>Atomic Red Team</strong> automates this.</li>
+<li><strong>Baseline testing:</strong> run the rule against a period of known-good traffic to measure false positive baseline.</li>
+<li><strong>Historical replay:</strong> run the rule across past incidents to see if it would have caught them.</li>
+<li><strong>CI-driven tests:</strong> automated validation in a test SIEM as part of detection-as-code.</li>
+</ul>
+
+<h2>Metrics for the Detection Program</h2>
+<ul>
+<li><strong>Coverage:</strong> % of MITRE techniques with at least one active detection.</li>
+<li><strong>False positive rate:</strong> FPs as a fraction of all alerts.</li>
+<li><strong>Precision:</strong> true positives / (true positives + false positives).</li>
+<li><strong>Detection time / MTTD:</strong> how quickly detections catch real incidents.</li>
+<li><strong>Mean time to tune:</strong> how long between first alert and a tuned rule.</li>
+<li><strong>Rule freshness:</strong> how many rules are stale/untested/unreviewed.</li>
+</ul>
+
+<div class="info">
+<strong>Career Note:</strong> Detection engineering is currently one of the highest-demand SOC skills. It combines security knowledge, data engineering, software practices (git/CI), and analytic writing. If you want to grow beyond Tier-1 triage, learn detection engineering.
+</div>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Pick a MITRE ATT&amp;CK technique that applies to your environment (e.g., T1078 Valid Accounts, or T1059.001 PowerShell). Write a Sigma-style rule for it, convert it to your SIEM's query language, test it by generating a sample event, and log the result. Document your false-positive filter decisions and what data sources were required.
+</div>
+
+<nav>
+  <a href="4-siem-features.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="6-soar-fundamentals.html">Next: SOAR Fundamentals &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

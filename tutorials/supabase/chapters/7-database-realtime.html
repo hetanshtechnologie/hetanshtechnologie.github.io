@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapter 7: Database Realtime - Supabase Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+
+    <span class="tag">Chapter 7</span>
+    <h1>Database: Realtime Updates</h1>
+
+    <h2>How Supabase Realtime Works</h2>
+    <p>Supabase Realtime is built on PostgreSQL's built-in logical replication. When you enable Realtime on a table, Postgres streams every INSERT, UPDATE, and DELETE as a change event. The Supabase Realtime server picks up these events from the replication slot and pushes them to connected WebSocket clients. The whole pipeline is event-driven — there is no polling, no interval timers, no wasted database queries. Changes propagate from the database to the browser in milliseconds.</p>
+    <p>This architecture means Realtime is as fast as your network and database allow. It also means Realtime is a server-side feature: you enable it on the database, not the client. The client simply subscribes to an existing stream.</p>
+
+    <div class="note">
+      <strong>Note:</strong> Realtime is not enabled for any table by default. You must explicitly add tables to the <code>supabase_realtime</code> publication before clients can receive changes. Skipping this step is the most common reason Realtime subscriptions appear to do nothing.
+    </div>
+
+    <h2>Enabling Realtime for a Table</h2>
+    <p>In the Supabase Dashboard, go to Database > Replication and toggle the tables you want to replicate. Or use SQL:</p>
+    <pre><code>alter publication supabase_realtime add table posts;</code></pre>
+    <p>To remove a table from Realtime:</p>
+    <pre><code>alter publication supabase_realtime drop table posts;</code></pre>
+    <p>You can verify which tables are in the publication with:</p>
+    <pre><code>SELECT * FROM pg_publication_tables WHERE pubname = 'supabase_realtime';</code></pre>
+    <p>Once a table is added, every write to it generates a change event that clients can subscribe to.</p>
+
+    <h2>Subscribing to Changes</h2>
+    <p>On the client side, subscribing is a three-step process: create a channel, listen for events, and subscribe.</p>
+    <pre><code>const channel = supabase
+  .channel('posts-changes')
+  .on(
+    'postgres_changes',
+    { event: 'INSERT', schema: 'public', table: 'posts' },
+    (payload) => {
+      console.log('New post:', payload.new);
+    }
+  )
+  .subscribe();</code></pre>
+    <p>The <code>.channel()</code> call creates a named channel (choose any unique name). The <code>.on()</code> call registers a listener for a specific combination of event type, schema, and table. The <code>.subscribe()</code> call opens the WebSocket connection.</p>
+    <p>The <code>payload</code> object contains:</p>
+    <ul>
+      <li><code>eventType</code> — 'INSERT', 'UPDATE', or 'DELETE'</li>
+      <li><code>new</code> — the new row (for INSERT and UPDATE)</li>
+      <li><code>old</code> — the old row (for UPDATE and DELETE)</li>
+      <li><code>schema</code> and <code>table</code> — the source</li>
+    </ul>
+
+    <h2>Event Types</h2>
+    <p>The <code>event</code> parameter accepts <code>'INSERT'</code>, <code>'UPDATE'</code>, <code>'DELETE'</code>, or <code>'*'</code> for all three. You can subscribe to only the events you care about:</p>
+    <pre><code>// Listen only for deletes
+.on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'posts' }, callback)
+
+// Listen for everything
+.on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, callback)</code></pre>
+
+    <h2>Filtering Changes</h2>
+    <p>You can add a <code>filter</code> to receive only matching changes. The filter syntax uses <code>column=value</code>:</p>
+    <pre><code>const channel = supabase
+  .channel('my-posts')
+  .on(
+    'postgres_changes',
+    { event: '*', schema: 'public', table: 'posts', filter: `user_id=eq.${user.id}` },
+    (payload) => {
+      console.log('Change to my post:', payload);
+    }
+  )
+  .subscribe();</code></pre>
+    <p>This listener fires only when a row is inserted, updated, or deleted where <code>user_id</code> matches the current user. Filters are evaluated by the Realtime server, so no unwanted events cross the network.</p>
+
+    <h2>Broadcast and Presence</h2>
+    <p>Beyond database change streaming, Supabase Realtime also supports <strong>broadcast</strong> (send arbitrary messages to all clients on a channel) and <strong>presence</strong> (track who is currently connected). These are useful for features like cursor positions in collaborative editing, typing indicators, or "10 users viewing this page" counters. Broadcast and presence do not touch the database at all — they are purely WebSocket-based.</p>
+
+    <h2>Use Cases</h2>
+    <ul>
+      <li><strong>Live chat:</strong> Subscribe to inserts on a messages table. New messages appear instantly for all participants.</li>
+      <li><strong>Collaborative editing:</strong> Broadcast cursor positions and subscribe to document updates.</li>
+      <li><strong>Notifications:</strong> Listen for new rows in a notifications table and show a badge count.</li>
+      <li><strong>Dashboards:</strong> Subscribe to inserts on a metrics table to update charts in real time.</li>
+    </ul>
+
+    <h2>Limitations and Best Practices</h2>
+    <ul>
+      <li><strong>One channel per logical subscription.</strong> Do not create hundreds of channels. Group related listeners into fewer channels.</li>
+      <li><strong>Replication lag.</strong> Under heavy write load, there can be a short delay between a commit and the change event arriving. For most UI use cases this is imperceptible.</li>
+      <li><strong>Connection management.</strong> Every open channel uses a WebSocket. On mobile or low-bandwidth connections, close subscriptions when navigating away.</li>
+      <li><strong>Cleanup.</strong> Always unsubscribe to prevent memory leaks:</li>
+    </ul>
+    <pre><code>// On page leave or component unmount
+channel.unsubscribe();</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Build a live counter that displays the total number of rows in a table and updates automatically whenever a new row is inserted. Subscribe to INSERT events on the <code>posts</code> table and increment a counter in the DOM. Do not forget to enable Realtime on the table first.
+    </div>
+
+    <nav>
+      <a href="../index.html">Back to Index</a>
+      <a href="6-database-select-join.html">&laquo; Previous: Database Select and Join</a>
+      <a href="8-database-delete.html">Next: Database Delete &raquo;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

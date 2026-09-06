@@ -1,0 +1,204 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>138. Lab - Using the Azure MCP Language Server - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 138</span>
+<h1>Lab - Using the Azure MCP Language Server</h1>
+<p>In the previous chapter you learned what the Azure Language MCP server is. In this lab you will use a live one: connect a real MCP client, call the <code>translate_text</code> and <code>analyze_sentiment</code> tools directly, and then let a chat model drive the same tools as an agent. By the end you will have moved from service-specific SDK calls to a model-facing tool catalog.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>A deployed Azure Language MCP server with its URL and access key. If you did not deploy one, complete the MCP deployment lab before continuing.</li>
+<li>Your Python environment with the MCP SDK and an HTTP client installed:</li>
+</ul>
+<pre><code>pip install mcp httpx</code></pre>
+
+<div class="warn">
+<p>Keep the server running for the whole lab. If it has scaled to zero, requests will fail with a connection error — restart it or redeploy and note the new endpoint and access key.</p>
+</div>
+
+<h2>Step 1: Connect and Call the Translation Tool</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Translate text through MCP</h3>
+<p>Create <code>mcp_use_server.py</code>:</p>
+<pre><code>import asyncio
+
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+SERVER_URL = "http://YOUR_SERVER_FQDN/sse"
+ACCESS_KEY = "YOUR_GENERATED_KEY"
+
+
+async def call_tool(session: ClientSession, name: str, args: dict) -&gt; str:
+    result = await session.call_tool(name, args)
+    lines = [
+        block.text for block in result.content if block.type == "text"
+    ]
+    output = "\n".join(lines)
+    if result.isError:
+        output = f"(tool error) {output}"
+    return output
+
+
+async def main():
+    read, write = await sse_client(SERVER_URL, headers={
+        "Authorization": f"Bearer {ACCESS_KEY}",
+    })
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+
+        print(call_tool and "translating...")
+        translation = await call_tool(session, "translate_text", {
+            "text": "The quarterly report is ready for review.",
+            "to": "fr",
+        })
+        print("French:", translation)
+
+        detection = await call_tool(session, "detect_language", {
+            "text": "El informe está listo para revisión.",
+        })
+        print("Detected:", detection)
+
+
+asyncio.run(main())</code></pre>
+<ol>
+<li>Run the script. The first call should return a French translation, and the second should identify the language as Spanish.</li>
+<li>If <code>translate_text</code> is missing from your server's catalog, run the tools-listing script first and adjust the names to match your deployment.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>This single MCP call replaced what would otherwise be an SDK call with its own authentication, endpoint, and response parsing. The server handled all of that — your client only spoke MCP.</p>
+</div>
+
+<h2>Step 2: Call the Sentiment Tool</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Analyze sentiment through MCP</h3>
+<p>Extend the script with a sentiment call:</p>
+<pre><code>        sentiment = await call_tool(session, "analyze_sentiment", {
+            "text": "The camera arrived two weeks late and the autofocus "
+                    "keeps hunting in low light. I want a refund.",
+        })
+        print("Sentiment:", sentiment)</code></pre>
+<ol>
+<li>Run the script and inspect the sentiment result. Depending on the server's implementation, it may return scores or a label — the shape is whatever the server's tool produces.</li>
+<li>Swap the text for a clearly positive review and rerun. The tool result should reflect the change.</li>
+</ol>
+</div>
+
+<h2>Step 3: Wire the Tools into an Agent</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Let the model call the server</h3>
+<p>Assemble the pieces from this lab and the LangChain agent labs. Connect to the server, wrap each discovered tool in a LangChain <code>StructuredTool</code>, bind them to your Foundry chat model, and ask a question that requires translation:</p>
+<pre><code>import asyncio
+
+from dotenv import load_dotenv
+from langchain.agents import AgentExecutor, create_tool_calling_agent
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.tools import StructuredTool
+from langchain_openai import AzureChatOpenAI
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+load_dotenv()
+
+SERVER_URL = "http://YOUR_SERVER_FQDN/sse"
+ACCESS_KEY = "YOUR_GENERATED_KEY"
+
+
+def make_langchain_tool(session: ClientSession, mcp_tool):
+    async def _run(**kwargs):
+        result = await session.call_tool(mcp_tool.name, kwargs)
+        return "\n".join(
+            block.text for block in result.content if block.type == "text"
+        )
+
+    return StructuredTool.from_function(
+        name=mcp_tool.name,
+        description=mcp_tool.description,
+        func=_run,
+    )
+
+
+async def run():
+    read, write = await sse_client(SERVER_URL, headers={
+        "Authorization": f"Bearer {ACCESS_KEY}",
+    })
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        langchain_tools = [make_langchain_tool(session, t) for t in tools.tools]
+
+        model = AzureChatOpenAI(
+            azure_endpoint="YOUR_ENDPOINT",
+            api_key="YOUR_KEY",
+            api_version="2024-06-01",
+            deployment_name="YOUR_DEPLOYMENT_NAME",
+        )
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "Use the tools you have access to when they help."),
+            ("human", "{input}"),
+            ("placeholder", "{agent_scratchpad}"),
+        ])
+        agent = create_tool_calling_agent(
+            model.bind_tools(langchain_tools), langchain_tools, prompt
+        )
+        executor = AgentExecutor(agent=agent, tools=langchain_tools)
+
+        result = await executor.ainvoke({
+            "input": "Translate 'see you at the conference' into Italian.",
+        })
+        print(result["output"])
+
+
+asyncio.run(run())</code></pre>
+<ol>
+<li>Run the agent script. The model should select the translation tool, the call goes through MCP to your server, and the agent answers with the Italian text.</li>
+<li>Ask a question that does not need tools, such as "What is 9 times 9?" — the agent should answer directly, proving it only uses the server when relevant.</li>
+<li>Ask a question that needs sentiment analysis instead, and confirm the model picks the matching tool from the catalog.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>The adapter snippet is a pattern, not a verbatim recipe — the exact LangChain APIs shift between versions. The invariant is the idea: wrap each MCP tool in a callable your model framework can bind, with every call routed through the MCP session.</p>
+</div>
+
+<h2>Step 4: Troubleshoot Common Failures</h2>
+<ul>
+<li><strong>Connection refused:</strong> the server is stopped, scaled to zero, or the FQDN is wrong.</li>
+<li><strong>401/403 at connect:</strong> the access key is missing, wrong, or not being sent as a bearer token.</li>
+<li><strong>Tool not found:</strong> the tool name does not exist on your server version — run the listing script and match names exactly.</li>
+<li><strong>Invalid arguments:</strong> the schema from <code>tools/list</code> is the contract; compare your argument names and types against it.</li>
+<li><strong>Azure-side errors:</strong> the server relays errors from the underlying service, so the tool result usually names the real cause.</li>
+</ul>
+
+<div class="warn">
+<p>Your agent now reaches the Azure language services through a public endpoint guarded only by the access key. Keep that key out of source control and regenerate it if it ever leaks. In production, prefer Azure AD token authentication and endpoint restrictions over a shared static key.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You connected to a live Azure Language MCP server, called the translation, detection, and sentiment tools directly, wrapped the discovered catalog for a LangChain model, and ran an agent that drove the tools on demand. The next lab steps back and studies the discovery step in detail — listing every tool and its schema.</p>
+<nav>
+<a href="137-the-azure-language-mcp-server.html">&larr; Previous: The Azure Language MCP Server</a><a href="139-lab-listing-tools-on-the-azure-language-mcp-server.html">Next: Lab - Listing Tools on the Azure Language MCP Server &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

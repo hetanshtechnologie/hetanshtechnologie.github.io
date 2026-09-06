@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Color Memory - Memory Game</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;flex-direction:column}
+.top-bar{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;background:#1e293b;border-bottom:1px solid #334155}
+.top-bar a{color:#818cf8;text-decoration:none;font-size:14px}
+.top-bar h1{font-size:18px;font-weight:700}
+.stats{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;margin:16px;border-radius:12px}
+.stat{text-align:center}
+.stat-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#94a3b8}
+.stat-value{font-size:24px;font-weight:700;color:#818cf8}
+#board{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;gap:20px}
+.color-grid{display:grid;gap:10px}
+.color-cell{width:70px;height:70px;border-radius:12px;cursor:pointer;border:3px solid transparent;transition:transform .2s,border-color .2s}
+.color-cell:hover{transform:scale(1.1)}
+.color-cell.selected{border-color:#e2e8f0;transform:scale(1.1)}
+.color-cell.flash{animation:flash .3s}
+@keyframes flash{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}
+.info{color:#94a3b8;text-align:center}
+.btn{padding:12px 32px;background:#818cf8;color:#0f172a;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit}
+.btn:hover{background:#6366f1}
+.start-screen,.complete{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:20px}
+.start-screen h2{font-size:28px;color:#818cf8}
+.start-screen p{color:#94a3b8;text-align:center;max-width:400px}
+.complete h2{color:#34d399}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="top-bar">
+  <a href="../index.html">← Back</a>
+  <h1>Color Memory</h1>
+  <span></span>
+</div>
+<div class="stats">
+  <div class="stat"><div class="stat-label">Level</div><div class="stat-value" id="level">1</div></div>
+  <div class="stat"><div class="stat-label">Score</div><div class="stat-value" id="score">0</div></div>
+  <div class="stat"><div class="stat-label">Best</div><div class="stat-value" id="best">0</div></div>
+</div>
+<div id="board">
+  <div class="start-screen" id="startScreen">
+    <h2>Color Memory</h2>
+    <p>Watch the colors flash in order, then pick them back!</p>
+    <button class="btn" onclick="startGame()">Play</button>
+  </div>
+  <div class="info" id="info"></div>
+  <div class="color-grid" id="colorGrid"></div>
+  <div class="complete hidden" id="complete">
+    <h2>Game Over!</h2>
+    <p id="completeMsg"></p>
+    <button class="btn" onclick="startGame()">Play Again</button>
+  </div>
+</div>
+<script>
+const COLORS=['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#8b5cf6','#ec4899','#f43f5e','#14b8a6','#a855f7'];
+let level=1,score=0,best=0,sequence=[],playerSeq=[],playing=false;
+const colorGrid=document.getElementById('colorGrid');
+const info=document.getElementById('info');
+const complete=document.getElementById('complete');
+const startScreen=document.getElementById('startScreen');
+
+function startGame(){
+  level=1;score=0;
+  document.getElementById('score').textContent='0';
+  document.getElementById('level').textContent='1';
+  startScreen.classList.add('hidden');
+  complete.classList.add('hidden');
+  playing=false;
+  nextRound();
+}
+function nextRound(){
+  let numColors=Math.min(level+2,8);
+  let cols=numColors<=4?2:numColors<=6?3:4;
+  colorGrid.style.gridTemplateColumns='repeat('+cols+',70px)';
+  colorGrid.innerHTML='';
+  playerSeq=[];
+  let colors=COLORS.slice(0,numColors);
+  sequence=[];
+  for(let i=0;i<level+2;i++)sequence.push(colors[Math.floor(Math.random()*colors.length)]);
+  colors.forEach(c=>{
+    let cell=document.createElement('div');
+    cell.className='color-cell';cell.style.background=c;cell.dataset.color=c;
+    cell.onclick=()=>pickColor(cell);
+    colorGrid.appendChild(cell);
+  });
+  info.textContent='Watch the colors...';playing=false;
+  flashSequence(0);
+}
+function flashSequence(i){
+  if(i>=sequence.length){
+    info.textContent='Now pick '+sequence.length+' colors in order!';
+    playing=true;return;
+  }
+  let cells=colorGrid.children;
+  for(let c of cells){if(c.dataset.color===sequence[i]){c.classList.add('flash');setTimeout(()=>c.classList.remove('flash'),250)}}
+  setTimeout(()=>flashSequence(i+1),600);
+}
+function pickColor(cell){
+  if(!playing)return;
+  cell.classList.add('selected');
+  playerSeq.push(cell.dataset.color);
+  let idx=playerSeq.length-1;
+  if(playerSeq[idx]!==sequence[idx]){
+    info.textContent='Wrong! The sequence was different.';
+    playing=false;setTimeout(()=>endGame(),1000);return;
+  }
+  if(playerSeq.length===sequence.length){
+    score+=level*10;level++;
+    document.getElementById('score').textContent=score;
+    info.textContent='Correct!';
+    playing=false;
+    colorGrid.querySelectorAll('.selected').forEach(c=>c.classList.remove('selected'));
+    setTimeout(()=>nextRound(),800);
+  }
+}
+function endGame(){
+  if(score>best){best=score;document.getElementById('best').textContent=best}
+  complete.classList.remove('hidden');
+  document.getElementById('completeMsg').textContent='Score: '+score+' | Level reached: '+level;
+}
+</script>
+</body>
+</html>

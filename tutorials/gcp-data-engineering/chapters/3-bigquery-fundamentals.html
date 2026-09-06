@@ -1,0 +1,167 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>3. BigQuery Fundamentals - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>3. BigQuery Fundamentals</h1>
+<p class="tag">Chapter 3</p>
+
+<h2>What is BigQuery?</h2>
+<p><strong>BigQuery</strong> is Google Cloud's serverless, petabyte-scale data warehouse. "Serverless" means there are no servers to provision, patch, or scale: you write SQL, and Google's infrastructure runs it on a massively parallel compute fabric. You pay for what you query and store, not for capacity you reserve (unless you choose the flat-rate/slots model).</p>
+
+<h2>Architecture: Why It's Fast</h2>
+<p>BigQuery's speed comes from three Google-internal systems:</p>
+<ul>
+<li><strong>Colossus:</strong> the distributed file system that stores data in compressed, columnar format (Capacitor) on replicated storage. Storage is decoupled from compute.</li>
+<li><strong>Dremel:</strong> the query execution engine that shards queries across thousands of workers, giving near-linear scaling. This is what makes petabyte scans possible in seconds.</li>
+<li><strong>Jupiter:</strong> the high-speed network fabric connecting compute and storage — a single query can use over 1 Tbps of network bandwidth.</li>
+</ul>
+
+<p>Two consequences shape everything you do: <strong>columnar storage</strong> (reading a few columns is much cheaper than reading whole rows) and <strong>separation of storage and compute</strong> (storing data is cheap; scanning it is what you pay for).</p>
+
+<h2>Core Objects</h2>
+<table>
+<tr><th>Object</th><th>Description</th></tr>
+<tr><td>Project</td><td>Container for datasets; billing scope</td></tr>
+<tr><td>Dataset</td><td>Container for tables; access control boundary; has a region</td></tr>
+<tr><td>Table</td><td>Columnar data with a schema; can be native, external, or a view</td></tr>
+<tr><td>Job</td><td>An operation BigQuery performs (query, load, extract, copy); has an ID and logs</td></tr>
+<tr><td>Slot</td><td>Unit of query compute capacity (used for flat-rate pricing)</td></tr>
+</table>
+
+<pre><code># Fully-qualified table name
+project.dataset.table   # e.g. myproj.analytics.orders</code></pre>
+
+<h2>Loading Data into BigQuery</h2>
+<p>Several loading patterns:</p>
+<ul>
+<li><strong>Batch load jobs</strong> from GCS (Avro, Parquet, ORC, JSON, CSV) — fast, atomic, recommended.</li>
+<li><strong>Streaming inserts</strong> (or the newer BigQuery Storage Write API) for near-real-time.</li>
+<li><strong>Data Transfer Service</strong> for Google services (Google Ads, Ad Manager, etc.).</li>
+<li><strong>External tables</strong> that query files in GCS directly without loading (see next chapter).</li>
+</ul>
+
+<pre><code># Load from GCS using bq
+bq load --source_format=PARQUET \
+  myproj.analytics.orders \
+  gs://my-bucket/orders/*.parquet \
+  orders_schema.json</code></pre>
+
+<h2>BigQuery SQL Essentials</h2>
+<p>BigQuery uses GoogleSQL (ANSI-compliant). Key syntax points:</p>
+<pre><code>-- Basic query with SELECT
+SELECT
+  order_id,
+  customer_id,
+  total_amount
+FROM
+  `myproj.analytics.orders`
+WHERE
+  order_date >= '2026-01-01'
+ORDER BY
+  order_id DESC
+LIMIT 100;
+
+-- Aggregation with GROUP BY
+SELECT
+  DATE(order_ts) AS day,
+  COUNT(*) AS orders,
+  SUM(total_amount) AS revenue
+FROM
+  `myproj.analytics.orders`
+WHERE
+  order_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+GROUP BY
+  day
+ORDER BY
+  day;</code></pre>
+
+<ul>
+<li><strong>Backticks</strong> around fully-qualified table names containing project/dataset.</li>
+<li>Support for <strong>structs, arrays, JSON</strong>, geography, and ML types.</li>
+<li>Window functions, CTEs (WITH), and scripting (DECLARE, FOR, IF) for multi-step logic.</li>
+</ul>
+
+<h2>Partitioning: The #1 Cost and Performance Lever</h2>
+<p><strong>Partitioning</strong> physically divides a table into segments by a column (usually a date or timestamp). Queries that filter on the partition column scan only the relevant segments instead of the whole table — dramatically cutting cost and improving speed.</p>
+
+<ul>
+<li>Partition by <code>DATE</code>/<code>TIMESTAMP</code> column, ingestion time (<code>_PARTITIONTIME</code>), or an integer range.</li>
+<li>Daily is most common; hourly and monthly are possible.</li>
+<li>Partition pruning happens automatically when the WHERE clause filters on the partition column.</li>
+</ul>
+
+<pre><code>CREATE TABLE myproj.analytics.orders (
+  order_id INT64,
+  order_ts TIMESTAMP,
+  total_amount NUMERIC
+)
+PARTITION BY DATE(order_ts)
+OPTIONS (partition_expiration_days = 365);
+
+-- This query scans only the single day partition:
+SELECT COUNT(*) FROM myproj.analytics.orders
+WHERE DATE(order_ts) = '2026-08-01';</code></pre>
+
+<h2>Clustering</h2>
+<p><strong>Clustering</strong> sorts data within partitions by one or more columns and stores them in blocks by sort key. It helps when queries filter on non-partition columns, and it helps join/group performance. Clustering adds no extra storage cost and can substantially reduce bytes scanned for selective filters on the cluster columns.</p>
+
+<pre><code>CREATE TABLE myproj.analytics.orders
+PARTITION BY DATE(order_ts)
+CLUSTER BY customer_id
+OPTIONS (partition_expiration_days = 365);</code></pre>
+
+<div class="note">
+<strong>Rule of thumb:</strong> Partition by a high-cardinality time column used in most queries; cluster by columns used in filters and joins (customer, product, region). Keep cardinality in mind — clustering on a near-unique column like order_id provides little benefit.
+</div>
+
+<h2>Pricing Model</h2>
+<p>BigQuery bills two things:</p>
+<ul>
+<li><strong>Analysis (query) cost:</strong> on-demand pricing charges per TiB of data <em>scanned</em> by each query. Filter early, partition, cluster, and select only needed columns to control this.</li>
+<li><strong>Storage cost:</strong> per GB per month, with a sliding discount as tables age. Active (last modified 90 days) is full price; long-term storage is cheaper.</li>
+</ul>
+
+<pre><code># Estimate bytes a query will scan (dry run)
+bq query --dry_run \
+  "SELECT * FROM myproj.analytics.orders WHERE DATE(order_ts) = '2026-08-01'"</code></pre>
+
+<p>BigQuery also supports <strong>flat-rate pricing</strong> (commit to slots) for predictable heavy usage. As of modern pricing, you can also use <strong>editions</strong> (Standard, Enterprise, Enterprise Plus) that bundle features like BI Engine and multi-query statements with slot commitments.</p>
+
+<h2>Materialized Views and Approximate Aggregations</h2>
+<ul>
+<li><strong>Materialized views:</strong> precomputed results refreshed automatically; the engine serves queries from them when possible. Great for repeated aggregates over big tables.</li>
+<li><strong>Approximate functions:</strong> APPROX_COUNT_DISTINCT, HyperLogLog++ — near-exact results at a fraction of the cost for large distinct counts.</li>
+</ul>
+
+<h2>Query Performance Best Practices</h2>
+<ul>
+<li>Select only columns you need; avoid <code>SELECT *</code> in production.</li>
+<li>Filter on partition and cluster columns.</li>
+<li>Push down predicates and joins (BigQuery does this automatically with the right table design).</li>
+<li>Use <code>WITH</code> CTEs sparingly — each reference may be materialized.</li>
+<li>Use <code>IN</code> over <code>OR</code> chains; prefer <code>WHERE col = value</code> over functions on the column that block pruning.</li>
+<li>Limit heavy joins; use denormalization (arrays/structs) where analytics patterns demand it.</li>
+</ul>
+
+<div class="warn">
+<strong>Anti-pattern:</strong> Wrapping the partition column in a function — e.g., <code>WHERE DATE(order_ts) = '2026-08-01'</code> on an unpartitioned table scans everything. On a partitioned table it prunes fine; on an unpartitioned table the function prevents any columnar pruning. Design partitions first.
+</div>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Using the public dataset (e.g., <code>bigquery-public-data.samples.gsod</code> or any public dataset you choose): (1) write a query that counts rows by date and confirm the bytes scanned, (2) create a partitioned, clustered copy of a small public table, (3) run the same query against the raw and the optimized copy and compare bytes processed. Document the savings.
+</div>
+
+<nav>
+  <a href="2-gcp-data-platform.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="4-bigquery-advanced.html">Next: BigQuery Advanced &amp; Optimization &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

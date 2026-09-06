@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>All-in-One ERP — System Design</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',sans-serif; background:#f8fafc; color:#1e293b; line-height:1.7; }
+    nav { background:#1e293b; color:#fff; padding:14px 24px; position:sticky; top:0; z-index:100; display:flex; gap:20px; align-items:center; flex-wrap:wrap; }
+    nav a { color:#94a3b8; text-decoration:none; font-size:.9rem; font-weight:500; }
+    nav a:hover { color:#fff; }
+    .container { max-width:1100px; margin:0 auto; padding:40px 24px; }
+    h1 { font-size:2.4rem; font-weight:700; margin-bottom:8px; color:#0f172a; }
+    h2 { font-size:1.6rem; font-weight:600; margin:40px 0 12px; padding-bottom:8px; border-bottom:3px solid #3b82f6; color:#0f172a; }
+    h3 { font-size:1.15rem; font-weight:600; margin:24px 0 8px; color:#1e293b; }
+    h4 { font-weight:600; margin:16px 0 4px; color:#334155; }
+    p, li { color:#475569; font-size:.95rem; }
+    ul, ol { padding-left:24px; margin:8px 0; }
+    li { margin:4px 0; }
+    .badge { display:inline-block; background:#dbeafe; color:#1e40af; font-size:.75rem; font-weight:600; padding:2px 10px; border-radius:20px; margin:2px; }
+    .badge-green { background:#dcfce7; color:#166534; }
+    .badge-purple { background:#f3e8ff; color:#6b21a8; }
+    pre { background:#1e293b; color:#e2e8f0; padding:16px; border-radius:10px; overflow-x:auto; font-size:.82rem; line-height:1.5; margin:12px 0; }
+    code { font-family:'Cascadia Code','Fira Code',monospace; }
+    table { width:100%; border-collapse:collapse; margin:12px 0; font-size:.9rem; }
+    th, td { border:1px solid #e2e8f0; padding:10px 14px; text-align:left; }
+    th { background:#f1f5f9; font-weight:600; color:#0f172a; }
+    .card { background:#fff; border-radius:12px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,.08); border:1px solid #e2e8f0; margin:16px 0; }
+    .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+    @media(max-width:700px){ .grid-2,.grid-3 { grid-template-columns:1fr; } }
+  </style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+
+<nav>
+  <span style="font-weight:700;color:#fff;">All-in-One ERP</span>
+  <a href="#arch">Architecture</a>
+  <a href="#schema">Schema</a>
+  <a href="#api">API</a>
+  <a href="#rbac">RBAC</a>
+  <a href="#gst">GST</a>
+  <a href="#industry">Industry</a>
+  <a href="#variants">Variants</a>
+  <a href="#tech">Tech Stack</a>
+  <a href="#sql">SQL</a>
+  <a href="app/index.html" style="background:#3b82f6;color:#fff;padding:4px 14px;border-radius:20px;font-weight:600;">Launch App</a>
+</nav>
+
+<div class="container">
+
+<h1>All-in-One ERP — System Design Document</h1>
+<p style="color:#64748b;font-size:1.05rem;margin-bottom:32px;">
+  Comprehensive ERP-style accounting &amp; business management software with full GST compliance,
+  20+ industry solutions, and 8 product variants. Backed by Supabase + PostgreSQL.
+</p>
+
+<!-- ================================================================= -->
+<h2 id="arch">1. System Architecture</h2>
+
+<div class="card">
+<h3>High-Level Architecture (Modular Monolith + Microservices)</h3>
+<pre>
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Client Layer                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────────┐   │
+│  │  Web App │  │ Mobile   │  │  Desktop │  │ 3rd-Party APIs    │   │
+│  │ (React)  │  │ (Flutter)│  │ (Electron)│  │ (E-comm, Banks)   │   │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────────┬──────────┘   │
+└───────┼──────────────┼─────────────┼──────────────────┼──────────────┘
+        │              │             │                  │
+┌───────┼──────────────┼─────────────┼──────────────────┼──────────────┐
+│       ▼              ▼             ▼                  ▼              │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                 API Gateway (Supabase + Custom)               │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐ │   │
+│  │  │ REST API │  │ GraphQL  │  │ Webhooks │  │ Edge Functions│ │   │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────┘ │   │
+│  └──────────────────────────┬───────────────────────────────────┘   │
+│                              │                                       │
+│  ┌──────────────────────────▼───────────────────────────────────┐   │
+│  │                    Service Modules                             │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │   │
+│  │  │ Auth &   │ │ Accounting│ │Inventory │ │ GST Compliance   │ │   │
+│  │  │ RBAC     │ │ Ledger    │ │ Mgmt     │ │ Engine           │ │   │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘ │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │   │
+│  │  │ Invoicing│ │ Reporting│ │Industry  │ │ E-Way / E-Invoice│ │   │
+│  │  │ Billing  │ │ Analytics│ │Configs   │ │ Generator         │ │   │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘ │   │
+│  └──────────────────────────┬───────────────────────────────────┘   │
+│                              │                                       │
+│  ┌──────────────────────────▼───────────────────────────────────┐   │
+│  │                   Data Layer (Supabase)                        │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │   │
+│  │  │PostgreSQL│ │ Realtime │ │ Storage  │ │ Auth (GoTrue)    │ │   │
+│  │  │  (Core)  │ │ (WS)     │ │ (Files)  │ │ + RLS            │ │   │
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘ │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+</pre>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="schema">2. Database Schema</h2>
+
+<div class="card">
+<h3>Core Tables</h3>
+
+<h4>organizations</h4>
+<pre>
+CREATE TABLE organizations (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name          TEXT NOT NULL,
+  gstin         TEXT UNIQUE,
+  pan           TEXT,
+  address       JSONB,           -- {street,city,state,pincode,country}
+  contact       JSONB,           -- {phone,email}
+  industry_type TEXT,            -- pharmacy, retail, fmcg, ...
+  variant       TEXT DEFAULT 'blue',  -- express, blue, saffron, emerald
+  settings      JSONB DEFAULT '{}',
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+</pre>
+
+<h4>users (Supabase Auth + profile)</h4>
+<pre>
+CREATE TABLE user_profiles (
+  id            UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  org_id        BIGINT REFERENCES organizations(id),
+  full_name     TEXT,
+  role          TEXT NOT NULL DEFAULT 'staff'
+                CHECK (role IN ('admin','accountant','sales','inventory_manager','staff')),
+  phone         TEXT,
+  avatar_url    TEXT,
+  is_active     BOOLEAN DEFAULT TRUE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+</pre>
+
+<h4>chart_of_accounts (Ledger)</h4>
+<pre>
+CREATE TABLE chart_of_accounts (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  code          TEXT NOT NULL,         -- Account code
+  name          TEXT NOT NULL,         -- Account name
+  type          TEXT NOT NULL           -- asset, liability, income, expense, equity
+                CHECK (type IN ('asset','liability','income','expense','equity')),
+  parent_id     BIGINT REFERENCES chart_of_accounts(id),
+  is_active     BOOLEAN DEFAULT TRUE,
+  UNIQUE(org_id, code)
+);
+</pre>
+
+<h4>journal_entries</h4>
+<pre>
+CREATE TABLE journal_entries (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  entry_date    DATE NOT NULL DEFAULT CURRENT_DATE,
+  reference     TEXT,                  -- Invoice #, Voucher #
+  description   TEXT,
+  entry_type    TEXT DEFAULT 'manual'  -- manual, invoice, payment, contra, gst
+                CHECK (entry_type IN ('manual','invoice','payment','contra','gst')),
+  created_by    UUID REFERENCES auth.users(id),
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE journal_lines (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  entry_id      BIGINT REFERENCES journal_entries(id) ON DELETE CASCADE,
+  account_id    BIGINT REFERENCES chart_of_accounts(id),
+  debit         NUMERIC(14,2) DEFAULT 0,
+  credit        NUMERIC(14,2) DEFAULT 0,
+  description   TEXT
+);
+</pre>
+
+<h4>products / inventory</h4>
+<pre>
+CREATE TABLE products (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  name          TEXT NOT NULL,
+  sku           TEXT,
+  hsn_code      TEXT,                  -- GST HSN
+  sac_code      TEXT,                  -- GST SAC (services)
+  unit          TEXT DEFAULT 'nos',    -- kg, m, box, nos, ltr
+  gst_rate      NUMERIC(5,2) DEFAULT 0,
+  cess_rate     NUMERIC(5,2) DEFAULT 0,
+  category      TEXT,
+  brand         TEXT,
+  attributes    JSONB DEFAULT '[]',    -- [{name:'Color',value:'Red'},...]
+  mrp           NUMERIC(12,2),
+  selling_price NUMERIC(12,2),
+  purchase_price NUMERIC(12,2),
+  is_active     BOOLEAN DEFAULT TRUE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE inventory_batches (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  product_id    BIGINT REFERENCES products(id),
+  batch_no      TEXT,
+  mfg_date      DATE,
+  expiry_date   DATE,
+  quantity      NUMERIC(12,3) DEFAULT 0,
+  cost_price    NUMERIC(12,2),
+  location      TEXT,                  -- Warehouse / Rack
+  is_active     BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE inventory_serial_numbers (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  product_id    BIGINT REFERENCES products(id),
+  batch_id      BIGINT REFERENCES inventory_batches(id),
+  serial_no     TEXT NOT NULL UNIQUE,
+  status        TEXT DEFAULT 'available'
+                CHECK (status IN ('available','sold','damaged','returned'))
+);
+</pre>
+
+<h4>invoices</h4>
+<pre>
+CREATE TABLE invoices (
+  id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id            BIGINT REFERENCES organizations(id),
+  invoice_no        TEXT NOT NULL,
+  invoice_date      DATE NOT NULL DEFAULT CURRENT_DATE,
+  due_date          DATE,
+  customer_id       BIGINT REFERENCES parties(id),
+  billing_address   JSONB,
+  shipping_address  JSONB,
+  gstin             TEXT,
+  place_of_supply   TEXT,              -- State code for GST
+  invoice_type      TEXT DEFAULT 'regular'
+                    CHECK (invoice_type IN ('regular','export','debit_note','credit_note','proforma')),
+  reverse_charge    BOOLEAN DEFAULT FALSE,
+  payment_terms     TEXT,
+  subtotal          NUMERIC(14,2),
+  discount_pct      NUMERIC(5,2) DEFAULT 0,
+  discount_amt      NUMERIC(14,2) DEFAULT 0,
+  taxable_amt       NUMERIC(14,2),
+  cgst_amt          NUMERIC(14,2) DEFAULT 0,
+  sgst_amt          NUMERIC(14,2) DEFAULT 0,
+  igst_amt          NUMERIC(14,2) DEFAULT 0,
+  cess_amt          NUMERIC(14,2) DEFAULT 0,
+  total             NUMERIC(14,2),
+  status            TEXT DEFAULT 'draft'
+                    CHECK (status IN ('draft','sent','paid','overdue','cancelled')),
+  irn               TEXT,              -- Invoice Reference Number (e-invoice)
+  eway_bill_no      TEXT,
+  created_by        UUID REFERENCES auth.users(id),
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE invoice_lines (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invoice_id      BIGINT REFERENCES invoices(id) ON DELETE CASCADE,
+  product_id      BIGINT REFERENCES products(id),
+  batch_id        BIGINT REFERENCES inventory_batches(id),
+  description     TEXT,
+  quantity        NUMERIC(12,3),
+  unit            TEXT,
+  rate            NUMERIC(14,2),
+  discount_pct    NUMERIC(5,2) DEFAULT 0,
+  taxable_amt     NUMERIC(14,2),
+  gst_rate        NUMERIC(5,2),
+  cgst_amt        NUMERIC(14,2) DEFAULT 0,
+  sgst_amt        NUMERIC(14,2) DEFAULT 0,
+  igst_amt        NUMERIC(14,2) DEFAULT 0,
+  total           NUMERIC(14,2)
+);
+</pre>
+
+<h4>parties (customers / suppliers)</h4>
+<pre>
+CREATE TABLE parties (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  type          TEXT NOT NULL CHECK (type IN ('customer','supplier','both')),
+  name          TEXT NOT NULL,
+  gstin         TEXT,
+  pan           TEXT,
+  phone         TEXT,
+  email         TEXT,
+  address       JSONB,
+  credit_limit  NUMERIC(14,2),
+  opening_bal   NUMERIC(14,2) DEFAULT 0,
+  is_active     BOOLEAN DEFAULT TRUE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+</pre>
+
+<h4>gst_records</h4>
+<pre>
+CREATE TABLE gst_records (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id          BIGINT REFERENCES organizations(id),
+  return_type     TEXT NOT NULL CHECK (return_type IN ('GSTR1','GSTR2A','GSTR3B','GSTR9')),
+  return_period   TEXT NOT NULL,      -- '042024' (Apr 2024)
+  invoice_id      BIGINT REFERENCES invoices(id),
+  party_id        BIGINT REFERENCES parties(id),
+  gstin           TEXT,
+  invoice_no      TEXT,
+  invoice_date    DATE,
+  taxable_amt     NUMERIC(14,2),
+  cgst_amt        NUMERIC(14,2) DEFAULT 0,
+  sgst_amt        NUMERIC(14,2) DEFAULT 0,
+  igst_amt        NUMERIC(14,2) DEFAULT 0,
+  status          TEXT DEFAULT 'pending'
+                  CHECK (status IN ('pending','matched','mismatched','filed')),
+  filed_at        TIMESTAMPTZ
+);
+</pre>
+
+<h4>industry_configs</h4>
+<pre>
+CREATE TABLE industry_configs (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  industry_type   TEXT NOT NULL UNIQUE,
+  label           TEXT NOT NULL,
+  features        JSONB DEFAULT '[]',  -- feature flags
+  default_accounts JSONB DEFAULT '[]', -- COA templates
+  gst_required    BOOLEAN DEFAULT TRUE,
+  is_active       BOOLEAN DEFAULT TRUE
+);
+
+INSERT INTO industry_configs (industry_type, label, features) VALUES
+  ('retail','Retail Shop','["billing","inventory","gst"]'),
+  ('pharmacy','Pharmacy','["batch","expiry","schedule_h","gst"]'),
+  ('fmcg','FMCG','["batch","expiry","distribution","gst"]'),
+  ('auto_parts','Auto Parts','["serial_no","interchangeable","gst"]'),
+  ('food_beverages','Food & Beverages','["batch","expiry","fssai","gst"]'),
+  ('chemical','Chemical','["batch","hazardous","gst"]'),
+  ('computer_hardware','Computer Hardware','["serial_no","warranty","gst"]'),
+  ('furniture','Furniture','["attributes","dimensions","gst"]'),
+  ('book_publishing','Book Publishing','["isbn","author","edition","gst"]'),
+  ('travel','Travel','["booking","itinerary","gst"]'),
+  ('electrical','Electrical','["serial_no","warranty","gst"]'),
+  ('paper_mill','Paper Mill','["batch","weight","gst"]'),
+  ('paint','Paint','["batch","shade","gst"]'),
+  ('mobile','Mobile','["imei","brand","warranty","gst"]'),
+  ('garments','Garments','["size","color","season","gst"]'),
+  ('jewellery','Jewellery','["hallmark","carat","weight","gst"]'),
+  ('agriculture','Agriculture','["mandi","commission","gst"]'),
+  ('stationery','Stationery','["batch","gst"]'),
+  ('electronics','Electronics','["serial_no","warranty","gst"]'),
+  ('real_estate','Real Estate','["project","unit","rera","gst"]'),
+  ('grocery','Grocery','["batch","expiry","gst"]'),
+  ('ecommerce','Ecommerce','["order_sync","marketplace","gst"]');
+</pre>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="api">3. API Design</h2>
+
+<div class="card">
+<h3>RESTful Endpoints</h3>
+<p>All endpoints are prefixed with <code>/api/v1</code>.<br>
+Authentication: Bearer token (Supabase JWT).<br>
+Row-Level Security (RLS) enforced at database level.</p>
+
+<table>
+<tr><th>Module</th><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+<tr><td>Auth</td><td>POST</td><td>/auth/signup</td><td>Register user</td></tr>
+<tr><td>Auth</td><td>POST</td><td>/auth/login</td><td>Login (Supabase auth)</td></tr>
+<tr><td>Auth</td><td>POST</td><td>/auth/oauth/{provider}</td><td>Google/Facebook/etc.</td></tr>
+<tr><td>Org</td><td>GET</td><td>/organizations</td><td>List orgs (admin)</td></tr>
+<tr><td>Org</td><td>POST</td><td>/organizations</td><td>Create org</td></tr>
+<tr><td>Org</td><td>PUT</td><td>/organizations/{id}</td><td>Update org</td></tr>
+<tr><td>Accounts</td><td>GET</td><td>/chart-of-accounts</td><td>List COA</td></tr>
+<tr><td>Accounts</td><td>POST</td><td>/chart-of-accounts</td><td>Add account</td></tr>
+<tr><td>Accounts</td><td>GET</td><td>/journal-entries</td><td>List entries</td></tr>
+<tr><td>Accounts</td><td>POST</td><td>/journal-entries</td><td>Create entry</td></tr>
+<tr><td>Accounts</td><td>GET</td><td>/ledger/{account_id}</td><td>Ledger report</td></tr>
+<tr><td>Accounts</td><td>GET</td><td>/trial-balance</td><td>Trial balance</td></tr>
+<tr><td>Accounts</td><td>GET</td><td>/profit-loss</td><td>P&L statement</td></tr>
+<tr><td>Accounts</td><td>GET</td><td>/balance-sheet</td><td>Balance sheet</td></tr>
+<tr><td>Parties</td><td>GET</td><td>/parties</td><td>List customers/suppliers</td></tr>
+<tr><td>Parties</td><td>POST</td><td>/parties</td><td>Add party</td></tr>
+<tr><td>Parties</td><td>PUT</td><td>/parties/{id}</td><td>Update party</td></tr>
+<tr><td>Products</td><td>GET</td><td>/products</td><td>List products</td></tr>
+<tr><td>Products</td><td>POST</td><td>/products</td><td>Add product</td></tr>
+<tr><td>Products</td><td>PUT</td><td>/products/{id}</td><td>Update product</td></tr>
+<tr><td>Inventory</td><td>GET</td><td>/inventory/batches</td><td>List batches</td></tr>
+<tr><td>Inventory</td><td>POST</td><td>/inventory/batches</td><td>Add batch</td></tr>
+<tr><td>Inventory</td><td>GET</td><td>/inventory/serials</td><td>List serials</td></tr>
+<tr><td>Inventory</td><td>POST</td><td>/inventory/movement</td><td>Stock in/out</td></tr>
+<tr><td>Inventory</td><td>GET</td><td>/inventory/stock-report</td><td>Stock report</td></tr>
+<tr><td>Inventory</td><td>GET</td><td>/inventory/expiry-report</td><td>Near-expiry report</td></tr>
+<tr><td>Invoicing</td><td>GET</td><td>/invoices</td><td>List invoices</td></tr>
+<tr><td>Invoicing</td><td>POST</td><td>/invoices</td><td>Create invoice</td></tr>
+<tr><td>Invoicing</td><td>PUT</td><td>/invoices/{id}</td><td>Update invoice</td></tr>
+<tr><td>Invoicing</td><td>GET</td><td>/invoices/{id}/pdf</td><td>Download PDF</td></tr>
+<tr><td>Invoicing</td><td>POST</td><td>/invoices/{id}/send</td><td>Email invoice</td></tr>
+<tr><td>GST</td><td>POST</td><td>/gst/e-invoice/generate</td><td>Generate IRN</td></tr>
+<tr><td>GST</td><td>POST</td><td>/gst/e-waybill/generate</td><td>Generate e-way bill</td></tr>
+<tr><td>GST</td><td>GET</td><td>/gst/returns/{type}</td><td>Get GST return data</td></tr>
+<tr><td>GST</td><td>POST</td><td>/gst/reconcile</td><td>Reconcile GSTR2A</td></tr>
+<tr><td>GST</td><td>GET</td><td>/gst/hsn-summary</td><td>HSN-wise summary</td></tr>
+<tr><td>Reports</td><td>GET</td><td>/reports/sales</td><td>Sales report</td></tr>
+<tr><td>Reports</td><td>GET</td><td>/reports/purchase</td><td>Purchase report</td></tr>
+<tr><td>Reports</td><td>GET</td><td>/reports/gst</td><td>GST report</td></tr>
+<tr><td>Reports</td><td>GET</td><td>/reports/dashboard</td><td>Dashboard KPIs</td></tr>
+<tr><td>Industry</td><td>GET</td><td>/industry-configs</td><td>List industry configs</td></tr>
+<tr><td>Industry</td><td>GET</td><td>/industry-configs/{type}</td><td>Get config by type</td></tr>
+</table>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="rbac">4. Role-Based Access Control</h2>
+
+<div class="card">
+<h3>RLS Policies (Supabase)</h3>
+<p>Each table has RLS enabled. Users see only their organization's data.</p>
+
+<pre>
+-- Base policy: users can only access their org's data
+CREATE POLICY org_isolation ON products
+  FOR ALL USING (
+    org_id IN (
+      SELECT org_id FROM user_profiles WHERE id = auth.uid()
+    )
+  );
+
+-- Admin: full access
+CREATE POLICY admin_all ON products
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM user_profiles
+      WHERE id = auth.uid() AND role = 'admin'
+    )
+  );
+
+-- Inventory Manager: CRUD on products, batches, serials
+CREATE POLICY inv_mgr_products ON products
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM user_profiles
+      WHERE id = auth.uid() AND role = 'inventory_manager'
+    )
+  );
+
+-- Sales: read only products, CRUD on invoices, parties
+CREATE POLICY sales_read_products ON products
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM user_profiles
+      WHERE id = auth.uid() AND role = 'sales'
+    )
+  );
+
+-- Accountant: full on accounts, read on others
+CREATE POLICY accountant_finance ON chart_of_accounts
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM user_profiles
+      WHERE id = auth.uid() AND role IN ('accountant','admin')
+    )
+  );
+</pre>
+
+<h3>Role Matrix</h3>
+<table>
+<tr><th>Module</th><th>Admin</th><th>Accountant</th><th>Sales</th><th>Inventory Mgr</th></tr>
+<tr><td>Dashboard</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Chart of Accounts</td><td>CRUD</td><td>CRUD</td><td>R</td><td>R</td></tr>
+<tr><td>Journal Entries</td><td>CRUD</td><td>CRUD</td><td>-</td><td>-</td></tr>
+<tr><td>Products</td><td>CRUD</td><td>R</td><td>R</td><td>CRUD</td></tr>
+<tr><td>Inventory Batches</td><td>CRUD</td><td>R</td><td>R</td><td>CRUD</td></tr>
+<tr><td>Parties</td><td>CRUD</td><td>CRUD</td><td>CRUD</td><td>R</td></tr>
+<tr><td>Invoices</td><td>CRUD</td><td>CRUD</td><td>CRUD</td><td>R</td></tr>
+<tr><td>Payments</td><td>CRUD</td><td>CRUD</td><td>R</td><td>-</td></tr>
+<tr><td>GST Returns</td><td>CRUD</td><td>CRUD</td><td>-</td><td>-</td></tr>
+<tr><td>Reports</td><td>All</td><td>Financial</td><td>Sales</td><td>Inventory</td></tr>
+<tr><td>Users</td><td>CRUD</td><td>-</td><td>-</td><td>-</td></tr>
+<tr><td>Org Settings</td><td>CRUD</td><td>-</td><td>-</td><td>-</td></tr>
+</table>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="gst">5. GST Compliance Module</h2>
+
+<div class="card">
+<h3>E-Invoice Flow</h3>
+<pre>
+  1. User creates invoice  ──>  Invoice status = 'draft'
+  2. User clicks "Generate E-Invoice"
+  3. System validates: GSTIN, HSN/SAC, amounts
+  4. POST to Govt ERP API (IRP):
+     - Request: {invoice JSON as per GST schema}
+     - Response: {irn, ack_no, ack_date, signed_invoice, qr_code}
+  5. Store IRN in invoices.irn
+  6. Attach QR code to PDF invoice
+  7. Invoice status → 'sent'
+</pre>
+
+<h3>E-Way Bill Flow</h3>
+<pre>
+  1. Triggered when invoice value > ₹50,000 (configurable)
+  2. Required fields: transporter, vehicle_no, distance, from_pincode, to_pincode
+  3. POST to GST e-way bill API
+  4. Store ewb_no in invoices.eway_bill_no
+  5. Auto-regenerate on route change
+</pre>
+
+<h3>GST Return Reconciliation</h3>
+<pre>
+  1. Fetch GSTR-2A from GST Portal (inward supplies)
+  2. Match against purchase invoices:
+     - Match: vendor GSTIN, invoice no, date, taxable amount, tax
+     - Status: matched / mismatched / missing
+  3. GSTR-1 (outward) auto-populated from sales invoices
+  4. GSTR-3B auto-calculated summary
+  5. GSTR-9 annual return compilation
+</pre>
+
+<h3>GST Rate Reference Table</h3>
+<pre>
+CREATE TABLE gst_rates (
+  hsn_code    TEXT PRIMARY KEY,
+  description TEXT,
+  cgst        NUMERIC(5,2),
+  sgst        NUMERIC(5,2),
+  igst        NUMERIC(5,2),
+  cess        NUMERIC(5,2) DEFAULT 0,
+  effective_from DATE,
+  effective_to   DATE
+);
+
+INSERT INTO gst_rates VALUES
+  ('0101','Live animals',2.5,2.5,5,0,'2017-07-01','9999-12-31'),
+  ('0402','Milk powder',2.5,2.5,5,0,'2017-07-01','9999-12-31'),
+  ('0901','Coffee',2.5,2.5,5,0,'2017-07-01','9999-12-31'),
+  ('1701','Sugar',2.5,2.5,5,0,'2017-07-01','9999-12-31'),
+  ('2710','Petrol',NULL,NULL,NULL,0,'2017-07-01','9999-12-31'), -- exempt
+  ('3004','Pharmaceuticals',6,6,12,0,'2017-07-01','9999-12-31'),
+  ('6204','Women garments',6,6,12,0,'2017-07-01','9999-12-31'),
+  ('8471','Computers',9,9,18,0,'2017-07-01','9999-12-31'),
+  ('8517','Mobile phones',9,9,18,0,'2017-07-01','9999-12-31'),
+  ('9999','Services (general)',9,9,18,0,'2017-07-01','9999-12-31')
+  ON CONFLICT (hsn_code) DO NOTHING;
+</pre>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="industry">6. Industry-Specific Configurations</h2>
+
+<div class="card">
+<h3>Industry Feature Flags</h3>
+<table>
+<tr><th>Industry</th><th>Extra Fields</th><th>Special Logic</th></tr>
+<tr><td>Pharmacy</td><td>Schedule H, batch, expiry</td><td>GST 12% on most, 5% on life-saving</td></tr>
+<tr><td>Mobile</td><td>IMEI (x2), brand, model</td><td>Serial tracking mandatory</td></tr>
+<tr><td>Jewellery</td><td>Hallmark, carat, weight, making charge</td><td>GST 3% on gold, 5% on making</td></tr>
+<tr><td>Garments</td><td>Size, color, season (SS/AW)</td><td>GST 5% under ₹1000, 12% above</td></tr>
+<tr><td>Agriculture</td><td>Mandi, commission agent</td><td>TCS under GST, APMC cess</td></tr>
+<tr><td>Auto Parts</td><td>Interchangeable part nos, OEM</td><td>GST 28% on most parts</td></tr>
+<tr><td>Food & Bev</td><td>FSSAI license, batch, expiry</td><td>GST 5%/12%/18% slab</td></tr>
+<tr><td>Real Estate</td><td>Project, unit, RERA no</td><td>GST 1% affordable / 5% others</td></tr>
+<tr><td>Ecommerce</td><td>Marketplace, order ID, TCS</td><td>TCS @ 1%,
+auto-sync orders</td></tr>
+</table>
+
+<h3>Per-Industry COA Templates</h3>
+<pre>
+-- Example: Pharmacy chart of accounts seed
+INSERT INTO chart_of_accounts (org_id, code, name, type)
+SELECT
+  o.id, a.code, a.name, a.type
+FROM organizations o
+CROSS JOIN (VALUES
+  ('10001','Cash','asset'),
+  ('10002','Bank Account','asset'),
+  ('10003','Inventory - Medicines','asset'),
+  ('10004','Accounts Receivable','asset'),
+  ('20001','Accounts Payable','liability'),
+  ('20002','GST Payable','liability'),
+  ('30001','Sales Revenue','income'),
+  ('30002','Discount Given','income'),
+  ('40001','Cost of Goods Sold','expense'),
+  ('40002','Salary Expense','expense'),
+  ('40003','Rent Expense','expense')
+) AS a(code, name, type)
+WHERE o.industry_type = 'pharmacy' AND o.id = org_id_param;
+</pre>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="variants">7. Product Variants</h2>
+
+<div class="card">
+<div class="grid-3">
+<div>
+<h4>🚀 Express (Free)</h4>
+<ul>
+<li>Single user</li>
+<li>Basic invoicing</li>
+<li>10 products limit</li>
+<li>Simple cash-book accounting</li>
+<li>No GST</li>
+<li>Community support</li>
+</ul>
+</div>
+<div>
+<h4>🔵 Blue (Basic)</h4>
+<ul>
+<li>Up to 3 users</li>
+<li>Full invoicing</li>
+<li>Inventory management</li>
+<li>Basic accounting</li>
+<li>Party management</li>
+<li>Email support</li>
+</ul>
+</div>
+<div>
+<h4>🟠 Saffron (GST)</h4>
+<ul>
+<li>Up to 10 users</li>
+<li>All Blue features</li>
+<li>Full GST compliance</li>
+<li>E-Invoice + E-Way Bill</li>
+<li>GSTR return filing</li>
+<li>HSN/SAC master</li>
+<li>Priority support</li>
+</ul>
+</div>
+<div>
+<h4>💎 Emerald (Enterprise)</h4>
+<ul>
+<li>Unlimited users</li>
+<li>Multi-branch</li>
+<li>All Saffron features</li>
+<li>Consolidated reports</li>
+<li>Custom workflows</li>
+<li>Dedicated account mgr</li>
+<li>SLA: 4hr response</li>
+</ul>
+</div>
+<div>
+<h4>📱 Mobile App</h4>
+<ul>
+<li>100+ reports</li>
+<li>Quotations &amp; orders</li>
+<li>Invoices on-the-go</li>
+<li>GPS-based attendance</li>
+<li>Push notifications</li>
+</ul>
+</div>
+<div>
+<h4>☁️ Cloud Access</h4>
+<ul>
+<li>Add-on for all plans</li>
+<li>Secure remote access</li>
+<li>Auto-backup</li>
+<li>SSL encrypted</li>
+<li>99.9% uptime SLA</li>
+</ul>
+</div>
+</div>
+<div class="grid-2" style="margin-top:16px;">
+<div>
+<h4>🔄 Busy Recom</h4>
+<ul>
+<li>E-commerce sync</li>
+<li>Amazon / Flipkart / Shopify</li>
+<li>Auto-order import</li>
+<li>Inventory sync</li>
+<li>Reconciliation</li>
+</ul>
+</div>
+<div>
+<h4>🌾 Busy Mandi</h4>
+<ul>
+<li>Commission agent solution</li>
+<li>Anaj (grain) &amp; Sabji (veg) mandis</li>
+<li>Weighbridge integration</li>
+<li>Commission calculation</li>
+<li>APMC &amp; market fee</li>
+<li>Mandi rate dashboard</li>
+</ul>
+</div>
+</div>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="tech">8. Tech Stack</h2>
+
+<div class="card">
+<table>
+<tr><th>Layer</th><th>Technology</th><th>Rationale</th></tr>
+<tr><td>Database</td><td><strong>Supabase (PostgreSQL 15)</strong></td><td>RLS, realtime, auth built-in, managed backups, auto-scaling</td></tr>
+<tr><td>Backend</td><td><strong>Supabase Edge Functions (Deno)</strong> + <strong>Node.js (Fastify)</strong></td><td>Edge Functions for lightweight APIs; Fastify for complex workflows</td></tr>
+<tr><td>Frontend</td><td><strong>React 18 + Vite + Tailwind</strong></td><td>Fast dev, static export for landing pages, SPA for app</td></tr>
+<tr><td>Mobile</td><td><strong>Flutter</strong></td><td>Cross-platform, single codebase for iOS + Android</td></tr>
+<tr><td>Auth</td><td><strong>Supabase Auth</strong> + Google/Facebook/GitHub OAuth</td><td>Managed, RLS integration, MFA</td></tr>
+<tr><td>File Storage</td><td><strong>Supabase Storage</strong> (S3-compatible)</td><td>Invoice PDFs, e-way bill docs, product images</td></tr>
+<tr><td>Realtime</td><td><strong>Supabase Realtime</strong> (WebSockets)</td><td>Live dashboard, inventory updates, notifications</td></tr>
+<tr><td>Payments</td><td><strong>Razorpay</strong> / <strong>Instamojo</strong></td><td>Indian payment gateways, UPI, net-banking</td></tr>
+<tr><td>Email</td><td><strong>Resend</strong> / <strong>SendGrid</strong></td><td>Invoice emails, OTP, alerts</td></tr>
+<tr><td>GST API</td><td><strong>GST Suvidha Provider (GSP)</strong></td><td>E-invoice, e-way bill, GSTR filing</td></tr>
+<tr><td>E-commerce</td><td><strong>Amazon SP-API</strong>, <strong>Flipkart API</strong>, <strong>Shopify REST</strong></td><td>Order sync, inventory sync</td></tr>
+<tr><td>Hosting</td><td><strong>Vercel</strong> (frontend) / <strong>Supabase</strong> (backend)</td><td>Global CDN, serverless, auto-scaling</td></tr>
+<tr><td>CI/CD</td><td><strong>GitHub Actions</strong></td><td>Deploy Edge Functions, run migrations</td></tr>
+<tr><td>Monitoring</td><td><strong>Sentry</strong> + <strong>Supabase Logs</strong></td><td>Error tracking, query profiling</td></tr>
+</table>
+</div>
+
+<!-- ================================================================= -->
+<h2 id="sql">9. Full Supabase Setup SQL</h2>
+
+<div class="card">
+<p>Run this in Supabase SQL Editor to bootstrap the entire schema:</p>
+
+<pre>
+-- ============================================================
+-- All-in-One ERP — Database Bootstrap
+-- ============================================================
+
+-- 1. Core tables
+CREATE TABLE organizations (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name          TEXT NOT NULL,
+  gstin         TEXT UNIQUE,
+  pan           TEXT,
+  address       JSONB,
+  contact       JSONB,
+  industry_type TEXT,
+  variant       TEXT DEFAULT 'blue',
+  settings      JSONB DEFAULT '{}',
+  is_active     BOOLEAN DEFAULT TRUE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE user_profiles (
+  id            UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  org_id        BIGINT REFERENCES organizations(id),
+  full_name     TEXT,
+  role          TEXT NOT NULL DEFAULT 'staff'
+                CHECK (role IN ('admin','accountant','sales','inventory_manager','staff')),
+  phone         TEXT,
+  avatar_url    TEXT,
+  is_active     BOOLEAN DEFAULT TRUE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE chart_of_accounts (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  code          TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  type          TEXT NOT NULL CHECK (type IN ('asset','liability','income','expense','equity')),
+  parent_id     BIGINT REFERENCES chart_of_accounts(id),
+  is_active     BOOLEAN DEFAULT TRUE,
+  UNIQUE(org_id, code)
+);
+
+CREATE TABLE journal_entries (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  entry_date    DATE NOT NULL DEFAULT CURRENT_DATE,
+  reference     TEXT,
+  description   TEXT,
+  entry_type    TEXT DEFAULT 'manual' CHECK (entry_type IN ('manual','invoice','payment','contra','gst')),
+  created_by    UUID REFERENCES auth.users(id),
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE journal_lines (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  entry_id      BIGINT REFERENCES journal_entries(id) ON DELETE CASCADE,
+  account_id    BIGINT REFERENCES chart_of_accounts(id),
+  debit         NUMERIC(14,2) DEFAULT 0,
+  credit        NUMERIC(14,2) DEFAULT 0,
+  description   TEXT
+);
+
+CREATE TABLE parties (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  type          TEXT NOT NULL CHECK (type IN ('customer','supplier','both')),
+  name          TEXT NOT NULL,
+  gstin         TEXT,
+  pan           TEXT,
+  phone         TEXT,
+  email         TEXT,
+  address       JSONB,
+  credit_limit  NUMERIC(14,2),
+  opening_bal   NUMERIC(14,2) DEFAULT 0,
+  is_active     BOOLEAN DEFAULT TRUE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE products (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  name          TEXT NOT NULL,
+  sku           TEXT,
+  hsn_code      TEXT,
+  sac_code      TEXT,
+  unit          TEXT DEFAULT 'nos',
+  gst_rate      NUMERIC(5,2) DEFAULT 0,
+  cess_rate     NUMERIC(5,2) DEFAULT 0,
+  category      TEXT,
+  brand         TEXT,
+  attributes    JSONB DEFAULT '[]',
+  mrp           NUMERIC(12,2),
+  selling_price NUMERIC(12,2),
+  purchase_price NUMERIC(12,2),
+  is_active     BOOLEAN DEFAULT TRUE,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE inventory_batches (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  product_id    BIGINT REFERENCES products(id),
+  batch_no      TEXT,
+  mfg_date      DATE,
+  expiry_date   DATE,
+  quantity      NUMERIC(12,3) DEFAULT 0,
+  cost_price    NUMERIC(12,2),
+  location      TEXT,
+  is_active     BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE inventory_serial_numbers (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  product_id    BIGINT REFERENCES products(id),
+  batch_id      BIGINT REFERENCES inventory_batches(id),
+  serial_no     TEXT NOT NULL UNIQUE,
+  status        TEXT DEFAULT 'available' CHECK (status IN ('available','sold','damaged','returned'))
+);
+
+CREATE TABLE invoices (
+  id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id            BIGINT REFERENCES organizations(id),
+  invoice_no        TEXT NOT NULL,
+  invoice_date      DATE NOT NULL DEFAULT CURRENT_DATE,
+  due_date          DATE,
+  customer_id       BIGINT REFERENCES parties(id),
+  billing_address   JSONB,
+  shipping_address  JSONB,
+  gstin             TEXT,
+  place_of_supply   TEXT,
+  invoice_type      TEXT DEFAULT 'regular' CHECK (invoice_type IN ('regular','export','debit_note','credit_note','proforma')),
+  reverse_charge    BOOLEAN DEFAULT FALSE,
+  payment_terms     TEXT,
+  subtotal          NUMERIC(14,2),
+  discount_pct      NUMERIC(5,2) DEFAULT 0,
+  discount_amt      NUMERIC(14,2) DEFAULT 0,
+  taxable_amt       NUMERIC(14,2),
+  cgst_amt          NUMERIC(14,2) DEFAULT 0,
+  sgst_amt          NUMERIC(14,2) DEFAULT 0,
+  igst_amt          NUMERIC(14,2) DEFAULT 0,
+  cess_amt          NUMERIC(14,2) DEFAULT 0,
+  total             NUMERIC(14,2),
+  status            TEXT DEFAULT 'draft' CHECK (status IN ('draft','sent','paid','overdue','cancelled')),
+  irn               TEXT,
+  eway_bill_no      TEXT,
+  created_by        UUID REFERENCES auth.users(id),
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE invoice_lines (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invoice_id      BIGINT REFERENCES invoices(id) ON DELETE CASCADE,
+  product_id      BIGINT REFERENCES products(id),
+  batch_id        BIGINT REFERENCES inventory_batches(id),
+  description     TEXT,
+  quantity        NUMERIC(12,3),
+  unit            TEXT,
+  rate            NUMERIC(14,2),
+  discount_pct    NUMERIC(5,2) DEFAULT 0,
+  taxable_amt     NUMERIC(14,2),
+  gst_rate        NUMERIC(5,2),
+  cgst_amt        NUMERIC(14,2) DEFAULT 0,
+  sgst_amt        NUMERIC(14,2) DEFAULT 0,
+  igst_amt        NUMERIC(14,2) DEFAULT 0,
+  total           NUMERIC(14,2)
+);
+
+CREATE TABLE payments (
+  id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id        BIGINT REFERENCES organizations(id),
+  invoice_id    BIGINT REFERENCES invoices(id),
+  party_id      BIGINT REFERENCES parties(id),
+  amount        NUMERIC(14,2) NOT NULL,
+  mode          TEXT DEFAULT 'cash' CHECK (mode IN ('cash','bank','upi','card','cheque','online')),
+  reference_no  TEXT,
+  payment_date  DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_by    UUID REFERENCES auth.users(id),
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE gst_records (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_id          BIGINT REFERENCES organizations(id),
+  return_type     TEXT NOT NULL CHECK (return_type IN ('GSTR1','GSTR2A','GSTR3B','GSTR9')),
+  return_period   TEXT NOT NULL,
+  invoice_id      BIGINT REFERENCES invoices(id),
+  party_id        BIGINT REFERENCES parties(id),
+  gstin           TEXT,
+  invoice_no      TEXT,
+  invoice_date    DATE,
+  taxable_amt     NUMERIC(14,2),
+  cgst_amt        NUMERIC(14,2) DEFAULT 0,
+  sgst_amt        NUMERIC(14,2) DEFAULT 0,
+  igst_amt        NUMERIC(14,2) DEFAULT 0,
+  status          TEXT DEFAULT 'pending' CHECK (status IN ('pending','matched','mismatched','filed')),
+  filed_at        TIMESTAMPTZ
+);
+
+CREATE TABLE gst_rates (
+  hsn_code      TEXT PRIMARY KEY,
+  description   TEXT,
+  cgst          NUMERIC(5,2),
+  sgst          NUMERIC(5,2),
+  igst          NUMERIC(5,2),
+  cess          NUMERIC(5,2) DEFAULT 0,
+  effective_from DATE,
+  effective_to   DATE
+);
+
+CREATE TABLE industry_configs (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  industry_type   TEXT NOT NULL UNIQUE,
+  label           TEXT NOT NULL,
+  features        JSONB DEFAULT '[]',
+  default_accounts JSONB DEFAULT '[]',
+  gst_required    BOOLEAN DEFAULT TRUE,
+  is_active       BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE keepalive (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  pinged_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Enable RLS
+ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chart_of_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE journal_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE journal_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE parties ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inventory_batches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inventory_serial_numbers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_lines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gst_records ENABLE ROW LEVEL SECURITY;
+
+-- 3. RLS Policies (org isolation)
+CREATE POLICY org_isolation ON organizations
+  FOR ALL USING (
+    id IN (SELECT org_id FROM user_profiles WHERE id = auth.uid())
+  );
+
+CREATE POLICY org_isolation ON products
+  FOR ALL USING (
+    org_id IN (SELECT org_id FROM user_profiles WHERE id = auth.uid())
+  );
+
+CREATE POLICY org_isolation ON invoices
+  FOR ALL USING (
+    org_id IN (SELECT org_id FROM user_profiles WHERE id = auth.uid())
+  );
+
+CREATE POLICY org_isolation ON parties
+  FOR ALL USING (
+    org_id IN (SELECT org_id FROM user_profiles WHERE id = auth.uid())
+  );
+
+CREATE POLICY org_isolation ON chart_of_accounts
+  FOR ALL USING (
+    org_id IN (SELECT org_id FROM user_profiles WHERE id = auth.uid())
+  );
+
+CREATE POLICY org_isolation ON journal_entries
+  FOR ALL USING (
+    org_id IN (SELECT org_id FROM user_profiles WHERE id = auth.uid())
+  );
+
+CREATE POLICY org_isolation ON payments
+  FOR ALL USING (
+    org_id IN (SELECT org_id FROM user_profiles WHERE id = auth.uid())
+  );
+
+-- Admin-specific full access
+CREATE POLICY admin_all ON organizations
+  FOR ALL USING (
+    EXISTS (SELECT 1 FROM user_profiles WHERE id = auth.uid() AND role = 'admin')
+  );
+
+-- 4. Seed industry configs
+INSERT INTO industry_configs (industry_type, label, features) VALUES
+  ('retail','Retail Shop','["billing","inventory","gst"]'),
+  ('pharmacy','Pharmacy','["batch","expiry","schedule_h","gst"]'),
+  ('fmcg','FMCG','["batch","expiry","distribution","gst"]'),
+  ('auto_parts','Auto Parts','["serial_no","interchangeable","gst"]'),
+  ('food_beverages','Food & Beverages','["batch","expiry","fssai","gst"]'),
+  ('chemical','Chemical','["batch","hazardous","gst"]'),
+  ('computer_hardware','Computer Hardware','["serial_no","warranty","gst"]'),
+  ('furniture','Furniture','["attributes","dimensions","gst"]'),
+  ('book_publishing','Book Publishing','["isbn","author","edition","gst"]'),
+  ('travel','Travel','["booking","itinerary","gst"]'),
+  ('electrical','Electrical','["serial_no","warranty","gst"]'),
+  ('paper_mill','Paper Mill','["batch","weight","gst"]'),
+  ('paint','Paint','["batch","shade","gst"]'),
+  ('mobile','Mobile','["imei","brand","warranty","gst"]'),
+  ('garments','Garments','["size","color","season","gst"]'),
+  ('jewellery','Jewellery','["hallmark","carat","weight","gst"]'),
+  ('agriculture','Agriculture','["mandi","commission","gst"]'),
+  ('stationery','Stationery','["batch","gst"]'),
+  ('electronics','Electronics','["serial_no","warranty","gst"]'),
+  ('real_estate','Real Estate','["project","unit","rera","gst"]'),
+  ('grocery','Grocery','["batch","expiry","gst"]'),
+  ('ecommerce','Ecommerce','["order_sync","marketplace","gst"]')
+ON CONFLICT (industry_type) DO NOTHING;
+
+-- 5. Seed GST rates (sample)
+INSERT INTO gst_rates VALUES
+  ('0101','Live animals',2.5,2.5,5,0,'2017-07-01','9999-12-31'),
+  ('0402','Milk powder',2.5,2.5,5,0,'2017-07-01','9999-12-31'),
+  ('1701','Sugar',2.5,2.5,5,0,'2017-07-01','9999-12-31'),
+  ('2710','Petroleum',NULL,NULL,NULL,0,'2017-07-01','9999-12-31'),
+  ('3004','Pharmaceuticals',6,6,12,0,'2017-07-01','9999-12-31'),
+  ('6204','Women garments',6,6,12,0,'2017-07-01','9999-12-31'),
+  ('8471','Computers',9,9,18,0,'2017-07-01','9999-12-31'),
+  ('8517','Mobile phones',9,9,18,0,'2017-07-01','9999-12-31'),
+  ('9999','Services (general)',9,9,18,0,'2017-07-01','9999-12-31')
+ON CONFLICT (hsn_code) DO NOTHING;
+
+-- 6. Functions
+
+-- Get next invoice number
+CREATE OR REPLACE FUNCTION next_invoice_no(org_id_param BIGINT)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  prefix TEXT;
+  next_num INT;
+BEGIN
+  SELECT COALESCE(SUBSTRING(settings->>'invoice_prefix' FROM '^(.+)$'), 'INV-')
+  INTO prefix FROM organizations WHERE id = org_id_param;
+  SELECT COALESCE(MAX(CAST(SPLIT_PART(invoice_no, '-', 2) AS INTEGER)), 0) + 1
+  INTO next_num FROM invoices WHERE org_id = org_id_param;
+  RETURN prefix || LPAD(next_num::TEXT, 5, '0');
+END;
+$$;
+
+-- GST auto-calculation
+CREATE OR REPLACE FUNCTION calculate_gst(
+  taxable_amt NUMERIC,
+  gst_rate NUMERIC,
+  place_of_supply TEXT,
+  org_state TEXT
+) RETURNS JSONB
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+  cgst NUMERIC;
+  sgst NUMERIC;
+  igst NUMERIC;
+BEGIN
+  IF place_of_supply = org_state THEN
+    cgst := ROUND(taxable_amt * gst_rate / 200, 2);
+    sgst := cgst;
+    igst := 0;
+  ELSE
+    cgst := 0;
+    sgst := 0;
+    igst := ROUND(taxable_amt * gst_rate / 100, 2);
+  END IF;
+  RETURN jsonb_build_object('cgst', cgst, 'sgst', sgst, 'igst', igst);
+END;
+$$;
+
+-- 7. Indexes
+CREATE INDEX idx_products_org ON products(org_id);
+CREATE INDEX idx_invoices_org ON invoices(org_id);
+CREATE INDEX idx_invoices_customer ON invoices(customer_id);
+CREATE INDEX idx_parties_org ON parties(org_id);
+CREATE INDEX idx_journal_entries_org ON journal_entries(org_id);
+CREATE INDEX idx_inventory_batches_product ON inventory_batches(product_id);
+CREATE INDEX idx_inventory_batches_expiry ON inventory_batches(expiry_date);
+CREATE INDEX idx_gst_records_period ON gst_records(org_id, return_period);
+CREATE INDEX idx_invoices_irn ON invoices(irn);
+CREATE INDEX idx_user_profiles_org ON user_profiles(org_id);
+</pre>
+</div>
+
+<!-- ================================================================= -->
+<h2>10. Integration Points</h2>
+
+<div class="card">
+<table>
+<tr><th>Integration</th><th>Provider</th><th>Purpose</th></tr>
+<tr><td>Payment Gateway</td><td>Razorpay / Instamojo</td><td>Collect payments via UPI, cards, net-banking, wallets</td></tr>
+<tr><td>GST E-Invoice</td><td>GSP (Suvidha Provider)</td><td>Generate IRN, QR code, validate GSTIN</td></tr>
+<tr><td>GST E-Way Bill</td><td>GSP</td><td>Generate &amp; cancel e-way bills, track movement</td></tr>
+<tr><td>GSTR Filing</td><td>GSP</td><td>Auto-filing GSTR-1, GSTR-3B, view GSTR-2A</td></tr>
+<tr><td>E-commerce</td><td>Amazon SP-API, Flipkart, Shopify</td><td>Import orders, sync inventory, reconcile payouts</td></tr>
+<tr><td>SMS</td><td>Twilio / MSG91</td><td>Invoice alerts, OTP, payment reminders</td></tr>
+<tr><td>Email</td><td>Resend / SendGrid</td><td>Invoice PDFs, statements, marketing</td></tr>
+<tr><td>WhatsApp</td><td>Twilio / WATI</td><td>Order confirmations, invoice sharing</td></tr>
+<tr><td>Banking</td><td>RazorpayX / ICICI Direct</td><td>Auto-reconciliation, payout API</td></tr>
+<tr><td>Weighbridge</td><td>Custom TCP/API</td><td>Mandi weight integration (Busy Mandi)</td></tr>
+</table>
+</div>
+
+<!-- ================================================================= -->
+<h2>11. Deployment Strategy</h2>
+
+<div class="card">
+<pre>
+┌─────────────────────────────────────────────────────────────┐
+│                    Deployment Pipeline                        │
+├─────────────────────────────────────────────────────────────┤
+│  GitHub → GitHub Actions → Supabase (DB + Edge Fns)         │
+│                           → Vercel (Frontend)                │
+│                           → Flutter Build (App Store/Play)   │
+└─────────────────────────────────────────────────────────────┘
+
+Infrastructure:
+├── Supabase (Managed PostgreSQL + Auth + Storage + Realtime)
+├── Vercel (Frontend - React, SSR for SEO pages)
+├── Supabase Edge Functions (Deno - lightweight APIs)
+├── Node.js Microservices (Fastify - complex business logic)
+│   ├── gst-engine        (e-invoice, e-way bill, GSTR)
+│   ├── ecommerce-sync    (marketplace order sync)
+│   └── report-generator  (PDF, Excel exports)
+├── AWS S3 / Supabase Storage (backups, reports)
+└── Cloudflare (DNS, CDN, DDoS protection)
+
+Scaling:
+├── Horizontal: Supabase auto-scales PostgreSQL read replicas
+├── Edge Functions scale per-request (Deno isolates)
+├── Vercel: Global CDN with edge caching
+├── Connection pooling via PgBouncer (Supabase managed)
+└── Background jobs via pg_cron or Edge Function queues
+</pre>
+</div>
+
+<!-- ================================================================= -->
+<h2>12. Security</h2>
+
+<div class="card">
+<ul>
+<li><strong>Row-Level Security</strong> on every table — users only see their org's data</li>
+<li><strong>Supabase Auth</strong> with JWT — no raw passwords stored</li>
+<li><strong>MFA</strong> support via Supabase Auth (TOTP)</li>
+<li><strong>API rate limiting</strong> at Edge Function level</li>
+<li><strong>Audit logs</strong> — all financial mutations logged to <code>audit_log</code> table</li>
+<li><strong>Data encryption</strong> at rest (Supabase-managed)</li>
+<li><strong>HTTPS</strong> enforced across all endpoints</li>
+<li><strong>GDPR / IT Act</strong> compliance — data export &amp; delete APIs</li>
+<li><strong>Backup</strong> — Supabase daily backups, point-in-time recovery</li>
+</ul>
+</div>
+
+<hr style="margin:48px 0;border:none;border-top:2px solid #e2e8f0;">
+<p style="text-align:center;color:#94a3b8;">
+  All-in-One ERP — System Design Document · Prepared for Supabase Backend
+</p>
+
+</div>
+<script src="../js/analytics-tracker.js" defer></script>
+</body>
+</html>

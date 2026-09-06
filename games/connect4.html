@@ -1,0 +1,230 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connect Four</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css">
+<style>
+.board-cell { width: 52px; height: 52px; border-radius: 50%; background: #1e3a5f; border: 3px solid #0f2744; cursor: pointer; transition: background 0.2s, transform 0.2s; position: relative; }
+.board-cell:hover { transform: scale(1.08); }
+.board-cell.red { background: #ef4444; }
+.board-cell.yellow { background: #eab308; }
+.board-cell.winning { animation: winPulse 0.6s ease-in-out infinite alternate; }
+@keyframes winPulse { 0%{box-shadow:0 0 0 0 rgba(255,255,255,0.6)} 100%{box-shadow:0 0 20px 6px rgba(255,255,255,0.6)} }
+.board-cell.drop { animation: dropIn 0.3s ease-in; }
+@keyframes dropIn { 0%{transform:translateY(-300px);opacity:0} 100%{transform:translateY(0);opacity:1} }
+.board-bg { background: #0a1628; border: 6px solid #1e3a5f; border-radius: 16px; padding: 8px; }
+.col-hover:hover { background: rgba(255,255,255,0.05); border-radius: 8px; }
+</style>
+</head>
+<body class="bg-gray-900 min-h-screen flex flex-col items-center">
+<a href="index.html" class="absolute top-4 left-4 text-blue-400 hover:text-blue-300 font-semibold text-lg">&larr; Back to Games</a>
+<h1 class="text-3xl font-bold text-blue-400 mt-6 mb-2">Connect Four</h1>
+<div class="flex gap-6 mb-3 text-lg">
+  <div class="text-white">You: <span class="font-bold text-red-400" id="pScore">0</span></div>
+  <div class="text-white">AI: <span class="font-bold text-yellow-400" id="aScore">0</span></div>
+</div>
+<div id="message" class="text-white text-xl mb-3 h-8"></div>
+<div class="board-bg mb-4">
+  <div id="board" class="grid grid-cols-7 gap-1"></div>
+</div>
+<button id="startBtn" class="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-full text-xl shadow-lg transition">New Game</button>
+<script>
+const ROWS = 6, COLS = 7;
+let board, playerTurn, gameOver, pWins = 0, aWins = 0;
+const boardEl = document.getElementById('board');
+const messageEl = document.getElementById('message');
+const startBtn = document.getElementById('startBtn');
+
+function initBoard() {
+  board = Array.from({length:ROWS}, () => Array(COLS).fill(0));
+  playerTurn = true; gameOver = false;
+  messageEl.textContent = 'Your turn — click a column!';
+  render();
+}
+
+function render() {
+  boardEl.innerHTML = '';
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'board-cell' + (board[r][c] === 1 ? ' red' : board[r][c] === 2 ? ' yellow' : '');
+      cell.dataset.row = r;
+      cell.dataset.col = c;
+      if (board[r][c] === 0 && playerTurn && !gameOver) {
+        cell.addEventListener('click', () => playerMove(c));
+      }
+      boardEl.appendChild(cell);
+    }
+  }
+}
+
+function dropDisc(col, player) {
+  for (let r = ROWS - 1; r >= 0; r--) {
+    if (board[r][col] === 0) { board[r][col] = player; return r; }
+  }
+  return -1;
+}
+
+function checkWin(player) {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (board[r][c] !== player) continue;
+      const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+      for (const [dr, dc] of dirs) {
+        let count = 0;
+        for (let i = 0; i < 4; i++) {
+          const nr = r + dr*i, nc = c + dc*i;
+          if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && board[nr][nc] === player) count++;
+          else break;
+        }
+        if (count === 4) {
+          const winCells = [];
+          for (let i = 0; i < 4; i++) winCells.push([r+dr*i, c+dc*i]);
+          return winCells;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function isDraw() { return board[0].every(c => c !== 0); }
+
+function getValidCols() { return board[0].map((v,i) => v === 0 ? i : -1).filter(i => i >= 0); }
+
+function minimax(depth, isMax, alpha, beta) {
+  const win2 = checkWin(2);
+  if (win2) return 100 - depth;
+  const win1 = checkWin(1);
+  if (win1) return depth - 100;
+  if (isDraw()) return 0;
+  if (depth === 0) return 0;
+
+  const valid = getValidCols();
+  if (isMax) {
+    let best = -Infinity;
+    for (const c of valid) {
+      const r = dropDisc(c, 2);
+      const val = minimax(depth - 1, false, alpha, beta);
+      board[r][c] = 0;
+      best = Math.max(best, val);
+      alpha = Math.max(alpha, val);
+      if (beta <= alpha) break;
+    }
+    return best;
+  } else {
+    let best = Infinity;
+    for (const c of valid) {
+      const r = dropDisc(c, 1);
+      const val = minimax(depth - 1, true, alpha, beta);
+      board[r][c] = 0;
+      best = Math.min(best, val);
+      beta = Math.min(beta, val);
+      if (beta <= alpha) break;
+    }
+    return best;
+  }
+}
+
+function aiMove() {
+  if (gameOver) return;
+  playerTurn = false;
+  messageEl.textContent = 'AI thinking...';
+
+  setTimeout(() => {
+    const valid = getValidCols();
+    if (valid.length === 0) return;
+
+    // Check if AI can win immediately
+    for (const c of valid) {
+      const r = dropDisc(c, 2);
+      if (checkWin(2)) { board[r][c] = 0; doAIMove(c); return; }
+      board[r][c] = 0;
+    }
+    // Check if player can win next and block
+    for (const c of valid) {
+      const r = dropDisc(c, 1);
+      if (checkWin(1)) { board[r][c] = 0; doAIMove(c); return; }
+      board[r][c] = 0;
+    }
+
+    let bestScore = -Infinity, bestCol = valid[0];
+    for (const c of valid) {
+      const r = dropDisc(c, 2);
+      const score = minimax(4, false, -Infinity, Infinity);
+      board[r][c] = 0;
+      if (score > bestScore) { bestScore = score; bestCol = c; }
+    }
+    doAIMove(bestCol);
+  }, 400);
+}
+
+function doAIMove(col) {
+  const r = dropDisc(col, 2);
+  render();
+  const cells = boardEl.children;
+  cells[r * COLS + col].classList.add('drop');
+  const winCells = checkWin(2);
+  if (winCells) {
+    gameOver = true;
+    aWins++;
+    document.getElementById('aScore').textContent = aWins;
+    highlightWin(winCells);
+    messageEl.innerHTML = '<span class="text-yellow-400">AI wins!</span>';
+    return;
+  }
+  if (isDraw()) { gameOver = true; messageEl.innerHTML = '<span class="text-gray-400">Draw!</span>'; return; }
+  playerTurn = true;
+  messageEl.textContent = 'Your turn — click a column!';
+  render();
+}
+
+function playerMove(col) {
+  if (!playerTurn || gameOver) return;
+  if (board[0][col] !== 0) return;
+  const r = dropDisc(col, 1);
+  render();
+  boardEl.children[r * COLS + col].classList.add('drop');
+  const winCells = checkWin(1);
+  if (winCells) {
+    gameOver = true;
+    pWins++;
+    document.getElementById('pScore').textContent = pWins;
+    highlightWin(winCells);
+    messageEl.innerHTML = '<span class="text-red-400">You win!</span>';
+    return;
+  }
+  if (isDraw()) { gameOver = true; messageEl.innerHTML = '<span class="text-gray-400">Draw!</span>'; return; }
+  playerTurn = false;
+  aiMove();
+}
+
+function highlightWin(cells) {
+  cells.forEach(([r,c]) => {
+    boardEl.children[r * COLS + c].classList.add('winning');
+  });
+}
+
+startBtn.addEventListener('click', initBoard);
+initBoard();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

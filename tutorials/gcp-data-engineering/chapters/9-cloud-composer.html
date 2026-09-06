@@ -1,0 +1,156 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>9. Cloud Composer in Practice - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>9. Cloud Composer in Practice</h1>
+<p class="tag">Chapter 9</p>
+
+<h2>What is Cloud Composer?</h2>
+<p><strong>Cloud Composer</strong> is Google Cloud's fully managed <strong>Apache Airflow</strong> service. You create an <em>environment</em> — which provisions the Airflow scheduler, webserver, workers, metadata database, and Redis cache — and you focus on writing DAGs. Google handles upgrades, scaling, and infrastructure, and it integrates natively with GCP (IAM, networking, Secret Manager, logging, monitoring).</p>
+
+<h2>Environment Components</h2>
+<ul>
+<li><strong>Webserver:</strong> the Airflow UI — DAG list, graph views, logs, connections, variables, triggers.</li>
+<li><strong>Scheduler:</strong> decides which tasks are ready to run; scheduler parallelism is your main tuning lever.</li>
+<li><strong>Workers:</strong> execute tasks; can scale based on queue pressure.</li>
+<li><strong>Metadata database (Cloud SQL):</strong> stores DAG and task state.</li>
+<li><strong>Redis:</strong> the Celery message broker coordinating workers.</li>
+<li><strong>Cloud Storage bucket:</strong> where DAGs, plugins, requirements, and data live.</li>
+</ul>
+
+<pre><code># Create a Composer environment
+gcloud composer environments create composer-prod \
+  --location=us-central1 \
+  --image-version=composer-2.22.0-airflow-2.7.3 \
+  --node-count=3 \
+  --environment-size=MEDIUM</code></pre>
+
+<h2>Deploying DAGs</h2>
+<p>Every environment has a GCS bucket; DAG files go into the <code>dags/</code> folder and the scheduler picks them up within a few minutes.</p>
+
+<pre><code># Find the DAG bucket
+gcloud composer environments describe composer-prod \
+  --location=us-central1 \
+  --format="value(config.dagGcsPrefix)"
+
+# Sync DAGs from your repo
+gcloud composer environments storage dags import \
+  --environment=composer-prod --location=us-central1 \
+  --source=./dags/</code></pre>
+
+<div class="info">
+<strong>CI/CD pattern:</strong> commit DAGs to git; on merge, a pipeline validates with <code>airflow dags list</code> and deploys with <code>gsutil rsync</code>. Rollbacks are a redeploy of the previous commit. Keep DAG code in version control — it is application code, not configuration.
+</div>
+
+<h2>Connections, Variables, and Secrets</h2>
+<ul>
+<li>Prefer the <strong>Google Secret Manager backend</strong> so secrets live in Secret Manager, not Airflow's metadata DB.</li>
+<li>For GCP integrations, use the <strong>default connection</strong>, which uses the environment's service account + Application Default Credentials.</li>
+<li>Use Airflow <strong>Variables</strong> sparingly for non-secret config; prefer explicit DAG parameters.</li>
+</ul>
+
+<pre><code># Referencing a connection in DAG code
+from airflow.hooks.base import BaseHook
+conn = BaseHook.get_connection("my_source_db")</code></pre>
+
+<h2>Service Accounts and IAM</h2>
+<ul>
+<li>The environment runs under a <strong>service account</strong>. Grant it exactly the roles DAGs need (BigQuery Job User, Dataproc Editor, Storage Object Admin, etc.).</li>
+<li>Use separate environments (dev/staging/prod) with separate projects and service accounts for isolation.</li>
+<li>For regulated data, add IAM conditions or VPC Service Controls boundaries.</li>
+</ul>
+
+<h2>Running Dataproc Jobs from Composer</h2>
+<p>The classic production pattern: Airflow creates a temporary Dataproc cluster, submits the job, then deletes the cluster.</p>
+
+<pre><code>from airflow.providers.google.cloud.operators.dataproc import (
+    DataprocCreateClusterOperator,
+    DataprocDeleteClusterOperator,
+    DataprocSubmitPySparkJobOperator,
+)
+
+CLUSTER_CONFIG = {
+    "master_config": {"num_instances": 1, "machine_type_uri": "n2-standard-4"},
+    "worker_config": {"num_instances": 4, "machine_type_uri": "n2-standard-8"},
+}
+
+create_cluster = DataprocCreateClusterOperator(
+    task_id="create_cluster",
+    project_id="my-data-project",
+    region="us-central1",
+    cluster_name="ephemeral-{{ ds_nodash }}",
+    cluster_config=CLUSTER_CONFIG,
+    delete_on_error=True,
+)
+
+submit_job = DataprocSubmitPySparkJobOperator(
+    task_id="submit_pyspark",
+    project_id="my-data-project",
+    region="us-central1",
+    main="gs://my-bucket/jobs/sales_agg.py",
+    arguments=["--date={{ ds }}"],
+    cluster_name="ephemeral-{{ ds_nodash }}",
+)
+
+delete_cluster = DataprocDeleteClusterOperator(
+    task_id="delete_cluster",
+    project_id="my-data-project",
+    region="us-central1",
+    cluster_name="ephemeral-{{ ds_nodash }}",
+    trigger_rule="all_done",
+)
+
+create_cluster >> submit_job >> delete_cluster</code></pre>
+
+<h2>Running BigQuery and dbt from Composer</h2>
+<ul>
+<li><strong>BigQueryInsertJobOperator</strong> for SQL steps in DAGs.</li>
+<li><strong>dbt:</strong> run it from a worker image with dbt installed, via KubernetesPodOperator, a Dataproc job, or a Cloud Run job triggered by Composer. Package dbt in a container for reproducibility.</li>
+<li><strong>Dataflow:</strong> DataflowStartFlexTemplateOperator for Beam pipelines.</li>
+</ul>
+
+<h2>Scheduling Data-Interval Jobs Correctly</h2>
+<p>Airflow runs a run for data interval <code>{{ ds }}</code> <em>after</em> that interval ends. A <code>schedule="0 6 * * *"</code> DAG processes the <em>previous</em> day's data at 06:00. Always name partition paths from the context (<code>{{ ds }}</code>, <code>{{ ds_nodash }}</code>), never from <code>datetime.now()</code>.</p>
+
+<div class="warn">
+<strong>Timezone pitfall:</strong> if you build partition paths with <code>datetime.now()</code> inside a DAG, you mismatch the data interval and create data leaks across partitions. Derive dates from the Airflow context. Also set <code>catchup=False</code> on new DAGs to avoid surprise backfills.
+</div>
+
+<h2>Monitoring and Alerting</h2>
+<ul>
+<li>Use the Airflow UI for task state, DAG duration, and logs.</li>
+<li>Cloud Monitoring provides Composer-specific metrics (DAG runs, task state, scheduler health) — build alerting policies on DAG/task failures.</li>
+<li>Logs go to Cloud Logging; enable data lineage (Dataplex) to track what pipelines produce.</li>
+<li>Add DAG-level SLA and timeout policies so long-running jobs page the team.</li>
+</ul>
+
+<h2>Environment Tuning and Troubleshooting</h2>
+<ul>
+<li><strong>Scheduler too slow:</strong> increase scheduler parallelism, or split large environments.</li>
+<li><strong>Task timeouts:</strong> align task <code>execution_timeout</code> with actual runtimes; investigate long-running tasks.</li>
+<li><strong>DAG import errors:</strong> a DAG that fails to parse shows red in the UI; fix the top-of-file import error first.</li>
+<li><strong>Worker starvation:</strong> if tasks queue but never start, workers may be under-provisioned or a Celery deadlock needs an environment restart.</li>
+</ul>
+
+<div class="note">
+<strong>Composer 2/3 note:</strong> Composer 2 introduced autoscaling workers and IP address auto-allocation; Composer 3 continues the Kubernetes-native approach. Check the current image version when creating environments and keep DAG code portable so Airflow upgrades are painless.
+</div>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Create a Composer environment (or run Airflow locally via the official image) and deploy a three-task DAG: (1) a Python task that writes a small test file to GCS, (2) a BigQuery load task reading that file, (3) a data-quality task that fails if the table is empty. Configure a Slack or email alert on failure, trigger a backfill for two past days, and confirm idempotent reruns. Document scheduler settings you changed.
+</div>
+
+<nav>
+  <a href="8-airflow-orchestration.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="10-data-pipelines.html">Next: Building Reliable Data Pipelines &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

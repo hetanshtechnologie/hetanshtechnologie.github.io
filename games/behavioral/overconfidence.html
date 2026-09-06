@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Overconfidence Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;border-bottom:1px solid #334155}
+.topbar a{color:#60a5fa;text-decoration:none;font-size:14px}
+.topbar h1{margin-left:16px;font-size:18px;color:#e2e8f0}
+.container{max-width:760px;margin:0 auto;padding:24px}
+.stats{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.stat{background:#1e293b;padding:12px 20px;border-radius:10px;flex:1;min-width:100px;text-align:center}
+.stat .label{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px}
+.stat .value{font-size:24px;font-weight:700;color:#60a5fa;margin-top:4px}
+.card{background:#1e293b;border-radius:12px;padding:28px;margin-bottom:20px;border:1px solid #334155}
+.card h2{font-size:16px;color:#94a3b8;margin-bottom:8px;font-weight:500}
+.scenario{font-size:17px;line-height:1.7;margin-bottom:20px;color:#e2e8f0}
+.options{display:flex;flex-direction:column;gap:10px}
+.option{background:#0f172a;border:2px solid #334155;border-radius:10px;padding:14px 18px;cursor:pointer;transition:all .2s;font-size:15px;text-align:left;color:#e2e8f0}
+.option:hover{border-color:#60a5fa;background:#1a2744}
+.option.correct{border-color:#22c55e;background:#052e16;color:#86efac}
+.option.wrong{border-color:#ef4444;background:#450a0a;color:#fca5a5}
+.option.disabled{pointer-events:none}
+.explanation{margin-top:16px;padding:16px;background:#0f172a;border-radius:8px;border-left:4px solid #60a5fa;font-size:14px;line-height:1.6;color:#cbd5e1;display:none}
+.explanation.show{display:block}
+.btn{background:#3b82f6;color:#fff;border:none;padding:12px 28px;border-radius:8px;font-size:15px;cursor:pointer;font-weight:600;transition:background .2s}
+.btn:hover{background:#2563eb}
+.btn-row{margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.game-over{text-align:center;padding:40px 20px}
+.game-over h2{font-size:28px;margin-bottom:12px;color:#60a5fa}
+.game-over p{font-size:16px;color:#94a3b8;margin-bottom:24px}
+.progress-bar{width:100%;height:6px;background:#334155;border-radius:3px;margin-bottom:24px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:3px;transition:width .3s}
+.hidden{display:none}
+.calibration{text-align:center;padding:20px;margin:16px 0;background:#0f172a;border-radius:12px;border:1px solid #334155}
+.confidence-bar{width:100%;height:12px;background:#334155;border-radius:6px;overflow:hidden;margin:8px 0}
+.confidence-fill{height:100%;border-radius:6px;transition:width .3s}
+.conf-label{font-size:13px;color:#94a3b8}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&larr; Back to Games</a><h1>Overconfidence Bias</h1></div>
+<div class="container">
+<div class="stats">
+<div class="stat"><div class="label">Score</div><div class="value" id="score">0</div></div>
+<div class="stat"><div class="label">Level</div><div class="value" id="level">1</div></div>
+<div class="stat"><div class="label">Streak</div><div class="value" id="streak">0</div></div>
+<div class="stat"><div class="label">Question</div><div class="value" id="qnum">1/10</div></div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+<div id="game-area"></div>
+</div>
+<script>
+const qs=[
+{q:"You feel 90% confident your answers on this quiz are correct. Research shows people with 90% confidence are correct about:",options:["Exactly 90% of the time","About 70% of the time — overconfidence is the norm","About 50% of the time","95% of the time"],answer:1,explanation:"Calibration Research: When people claim 90% confidence, they're typically correct only ~70% of the time. This systematic overestimation is one of the most robust findings in psychology."},
+{q:"After winning 3 poker hands in a row, you increase your bets dramatically. This overconfidence is caused by:",options:["Good strategy","Illusion of control — confusing skill with random chance","Bankroll management","Poker expertise"],answer:1,explanation:"Illusion of Control: Winning streaks in random games create false confidence in one's ability to predict or control outcomes. Each hand is independent, but the brain sees patterns."},
+{q:"A CEO who successfully launched one product assumes she can launch any product. This is:",options:["Natural leadership confidence","Overconfidence spillover — success in one domain inflates confidence in unrelated domains","Good business sense","Market research"],answer:1,explanation:"Domain-Specific Overconfidence: Success in one area doesn't transfer to others, but the brain treats it as evidence of general competence. This is why star executives sometimes fail in new roles."},
+{q:"You estimate that your driving skill is 'above average.' Statistically, approximately what percentage of drivers say this?",options:["About 30%","About 50%","About 70%","About 90%"],answer:2,explanation:"Above-Average Effect: ~73% of drivers rate themselves above average. This is mathematically impossible for a symmetric distribution, but overconfidence makes it feel right."},
+{q:"After reading a few articles about investing, you feel ready to beat the market. Professionals with decades of experience often can't. This is:",options:["Good research","Dunning-Kruger Effect — insufficient knowledge to recognize your incompetence","Confidence is always good","The market is easy"],answer:1,explanation:"Dunning-Kruger: Limited knowledge provides insufficient metacognitive ability to recognize your own incompetence. You don't know enough to know what you don't know."},
+{q:"During project planning, your team estimates the project will take 3 months. Historical data shows similar projects take 8-12 months. Your team is showing:",options:["Good planning","Planning Fallacy — optimistic bias in time estimation","Realistic assessment","Nothing wrong"],answer:1,explanation:"Planning Fallacy (Kahneman): People systematically underestimate task completion time, focusing on best-case scenarios while ignoring base rates and potential obstacles."},
+{q:"A weather forecaster says '80% chance of rain' and it doesn't rain. This doesn't mean the forecast was wrong because:",options:["Forecasting is always wrong","Probabilistic forecasts can't be judged by single outcomes","80% means it probably won't rain","Weather is unpredictable"],answer:1,explanation:"Calibration of Probabilities: A well-calibrated 80% forecast should be right 80% of the time over many predictions. Single outcomes don't evaluate calibration."},
+{q:"You're 95% sure a stock will go up. You invest your entire savings. Even with 95% confidence, over 20 such predictions, you'd likely experience:",options:["Zero failures","At least one failure on average","All successes","Only gains"],answer:1,explanation:"With 95% confidence, you'd expect ~1 failure in 20 predictions. Overconfidence leads to insufficient risk management — even 'almost certain' events can fail."},
+{q:"A doctor with 20 years experience confidently diagnoses a patient without running tests. The diagnosis is wrong. This is:",options:["Bad luck","Overconfidence from experience — expertise can increase confidence more than accuracy","Poor medical training","The patient's fault"],answer:1,explanation:"Expertise-Confidence Gap: Experience increases confidence faster than accuracy. Doctors become more confident over time, but accuracy plateaus. Tests exist for a reason."},
+{q:"In studies, people asked to generate 10 reasons why they might be wrong about something become MORE confident, not less. This is:",options:["Normal thinking","The 'consider-the-opposite' failure — generating counterarguments can reinforce original belief","Good analysis","Self-doubt is weakness"],answer:1,explanation:"When people generate counterarguments superficially, they often find them unconvincing, which paradoxically strengthens their original position. Deep engagement is needed."},
+{q:"After preparing for a job interview, you feel certain you'll get the offer. You don't. The most likely reason:",options:["You were unqualified","Interview performance is hard to self-evaluate — overconfidence is normal in social evaluation","The company made a mistake","Interviews are useless"],answer:1,explanation:"Self-Evaluation in Social Contexts: People consistently overestimate how well they performed in interviews, negotiations, and social evaluations. External feedback is essential."},
+{q:"Venture capitalists estimate that 75% of their startups will succeed. Actual success rate is about 10-20%. This gap is:",options:["Good motivation","Overconfidence bias affecting professional judgment","Market conditions","Startup nature"],answer:1,explanation:"Professional Overconfidence: Even experienced VCs show massive overconfidence in startup predictions. The gap between expected and actual success rates is enormous."},
+{q:"The Dunning-Kruger effect suggests that unskilled individuals:",options:["Know they're unskilled","Overestimate their ability because they lack the metacognitive skills to recognize incompetence","Are always wrong","Should never opine"],answer:1,explanation:"Dunning-Kruger: Low ability = inability to recognize one's own deficiency. The skills needed to produce correct answers are the same skills needed to recognize correct answers."},
+{q:"You complete a task quickly and feel confident about your answer. But you made 3 errors you didn't notice. This is:",options:["Normal human processing","Speed-Accuracy Tradeoff — speed reduces accuracy, but confidence doesn't decrease proportionally","Carelessness","Not important"],answer:1,explanation:"The speed-accuracy tradeoff: Fast decisions feel confident but sacrifice accuracy. Critically, confidence doesn't decrease proportionally — you feel just as confident when fast as when slow."},
+{q:"A surgeon who has performed 100 successful operations starts taking more risks. This is:",options:["Appropriate confidence growth","Overconfidence escalation — success breeds unwarranted risk-taking","Good surgical judgment","Experience-based skill"],answer:1,explanation:"Overconfidence Escalation: Success breeds increased risk-taking. The surgeon's confidence outpaces the actual increase in skill, leading to potentially dangerous complacency."},
+{q:"Research on expert prediction shows that complex models often outperform expert judgment. This is because:",options:["Experts are incompetent","Experts are subject to biases (overconfidence, availability, anchoring) that statistical models avoid","Models are perfect","Expertise is worthless"],answer:1,explanation:"Clinical vs Actuarial Judgment (Meehl): Statistical models outperform experts because they're consistent and bias-free. Experts are influenced by irrelevant factors and overconfidence."},
+{q:"You ask 100 people if they're in the top 50% of intelligence. Approximately how many say yes?",options:["50","60","70","80"],answer:2,explanation:"Above-Average Effect + Overconfidence: ~70% of people rate themselves above average in intelligence. This is mathematically impossible but psychologically universal."},
+{q:"A company's CEO is so confident in her vision that she ignores warning signs from middle managers. Best description:",options:["Strong leadership","Overconfidence — dismissing disconfirming evidence from those with ground-level information","Decisive management","Visionary thinking"],answer:1,explanation:"Overconfidence + Confirmation Bias: Top-down confidence can dismiss valuable ground-level information. Effective leaders seek out disconfirming evidence, not just supporting views."},
+{q:"To calibrate your confidence better, the best strategy is:",options:["Trust your gut feeling","Keep a decision journal and track your confidence vs actual outcomes","Ask friends for validation","Be more confident in general"],answer:1,explanation:"Calibration Training: Recording predictions, confidence levels, and outcomes over time reveals systematic biases. This feedback loop is the most effective way to improve calibration."},
+{q:"Studies show that the most accurate forecasters are those who:",options:["Have the most experience","Express the most confidence","Express uncertainty and give wide probability ranges","Ignore data"],answer:2,explanation:"Best Forecasters: Express uncertainty, give probabilistic ranges, update beliefs with new information, and think in base rates. Confidence often inversely correlates with accuracy."}
+];
+let state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:[]};
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function getQ(){return shuffle([...qs]).slice(0,10)}
+function updateStats(){document.getElementById('score').textContent=state.score;document.getElementById('level').textContent=state.level;document.getElementById('streak').textContent=state.streak;document.getElementById('qnum').textContent=`${state.q+1}/${state.questions.length}`;document.getElementById('progress').style.width=`${((state.q)/state.questions.length)*100}%`}
+function renderQ(){if(state.q>=state.questions.length){renderOver();return}const q=state.questions[state.q];state.answered=false;document.getElementById('game-area').innerHTML=`<div class="card"><h2>Overconfidence Challenge</h2><div class="scenario">${q.q}</div><div class="options" id="options"></div><div class="explanation" id="explanation"></div><div class="btn-row"><button class="btn hidden" id="nextBtn" onclick="nextQ()">Next →</button></div></div>`;const opts=document.getElementById('options');q.options.forEach((o,i)=>{const b=document.createElement('button');b.className='option';b.textContent=o;b.onclick=()=>pick(i,b);opts.appendChild(b)});updateStats()}
+function pick(i,btn){if(state.answered)return;state.answered=true;const q=state.questions[state.q];document.querySelectorAll('.option').forEach(b=>b.classList.add('disabled'));if(i===q.answer){btn.classList.add('correct');state.score+=10+state.streak*5;state.streak++;if(state.streak>state.maxStreak)state.maxStreak=state.streak;if(state.streak>=3)state.level=Math.floor(state.streak/3)+1}else{btn.classList.add('wrong');document.querySelectorAll('.option')[q.answer].classList.add('correct');state.streak=0}document.getElementById('explanation').textContent=q.explanation;document.getElementById('explanation').classList.add('show');document.getElementById('nextBtn').classList.remove('hidden');updateStats()}
+function nextQ(){state.q++;renderQ()}
+function renderOver(){const g=state.maxStreak>=8?'Calibration Master!':state.maxStreak>=5?'Self-Aware Thinker':state.maxStreak>=3?'Questioning Assumptions':'Stay Humble';document.getElementById('game-area').innerHTML=`<div class="card game-over"><h2>Overconfidence Complete!</h2><p>Score: <strong>${state.score}</strong> | Max Streak: <strong>${state.maxStreak}</strong></p><p style="font-size:20px;color:#60a5fa;margin-bottom:24px">${g}</p><div class="btn-row"><button class="btn" onclick="resetGame()">Play Again</button></div></div>`;document.getElementById('progress').style.width='100%'}
+function resetGame(){state={score:0,level:1,streak:0,maxStreak:0,q:0,answered:false,questions:getQ()};renderQ()}
+state.questions=getQ();renderQ();
+</script>
+</body>
+</html>

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consistent Hashing Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:900px;margin:24px auto;padding:0 16px}
+.hash-ring{width:320px;height:320px;border:3px solid #334155;border-radius:50%;position:relative;margin:20px auto;background:#1e293b}
+.ring-node{position:absolute;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:3px solid;transform:translate(-50%,-50%);transition:all .5s;cursor:pointer}
+.ring-node.server{background:#1e293b;color:#f8fafc}
+.ring-node.server:nth-child(1){border-color:#4ade80}
+.ring-node.server:nth-child(2){border-color:#38bdf8}
+.ring-node.server:nth-child(3){border-color:#a78bfa}
+.ring-node.server:nth-child(4){border-color:#fbbf24}
+.ring-node.server:nth-child(5){border-color:#f87171}
+.ring-node.key{width:14px;height:14px;background:#e2e8f0;border-color:#e2e8f0;cursor:default}
+.ring-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center}
+.ring-center h3{font-size:14px;color:#f8fafc}
+.ring-center p{font-size:11px;color:#94a3b8}
+.mapping-table{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0}
+.mapping-table h3{font-size:14px;margin-bottom:12px}
+.mapping-rows{max-height:200px;overflow-y:auto}
+.mapping-row{display:flex;justify-content:space-between;padding:6px 12px;font-size:12px;border-bottom:1px solid #334155}
+.mapping-row:last-child{border-bottom:none}
+.mapping-row .key-name{color:#e2e8f0;font-weight:600}
+.mapping-row .server-name{color:#94a3b8}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>Consistent Hashing</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/15</div>
+<div class="hud-item"><span id="nodes">3</span>Nodes</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="scenario-card">
+<h3 id="scenario-title">Consistent Hashing</h3>
+<p id="scenario-desc">Map keys to nodes on the hash ring. Handle node changes with minimal redistribution.</p>
+</div>
+<div class="hash-ring" id="hash-ring"><div class="ring-center"><h3>Hash Ring</h3><p>0 — 2³²</p></div></div>
+<div class="mapping-table">
+<h3>Key → Node Mappings</h3>
+<div class="mapping-rows" id="mappings"></div>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Hash Ring Master!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=15,answered=false;
+let servers=[
+{name:'S1',angle:30,color:'#4ade80'},
+{name:'S2',angle:150,color:'#38bdf8'},
+{name:'S3',angle:270,color:'#a78bfa'}
+];
+let keys=[
+{name:'user:101',angle:45,mapped:'S1'},
+{name:'order:202',angle:120,mapped:'S2'},
+{name:'session:303',angle:200,mapped:'S3'},
+{name:'product:404',angle:310,mapped:'S1'}
+];
+const scenarios=[
+{desc:"Add Server 4 between S1 and S2. How many keys redistribute?",action:"add",node:'S4',angle:90,color:'#fbbf24',
+correct:"1 key",reason:"Only keys between new node and predecessor redistribute. ~1/N keys affected."},
+{desc:"Remove Server 2. Where do its keys go?",action:"remove",node:'S2',
+correct:"Server 3 (next clockwise)",reason:"Keys from removed node go to the next node clockwise on the ring."},
+{desc:"Add virtual nodes to Server 1. What's the benefit?",action:"virtual",
+correct:"Better balance",reason:"Virtual nodes distribute load more evenly across physical nodes."},
+{desc:"Hash collision: two keys map to same position. What happens?",action:"collision",
+correct:"Use consistent tiebreaking",reason:"Tiebreaking ensures deterministic routing despite collisions."},
+{desc:"New key 'cart:505' needs placement. Where on the ring?",action:"place",
+correct:"Next clockwise node",reason:"Keys are placed at the next clockwise node on the ring."},
+{desc:"Server 3 has 3x more keys than others. What's wrong?",action:"imbalance",
+correct:"Add more virtual nodes to S3",reason:"Virtual nodes improve load distribution."},
+{desc:"Adding Server 4 causes cache miss storm. How to prevent?",action:"prevent",
+correct:"Gradual key migration",reason:"Migrate keys gradually to avoid overwhelming the new node."},
+{desc:"Two keys hash to same virtual node. Routing issue?",action:"vnode",
+correct:"No issue — virtual nodes are separate slots",reason:"Each virtual node is an independent slot on the ring."},
+{desc:"Network partition between client and Server 2. Handling?",action:"partition",
+correct:"Retry on next clockwise node",reason:"Client retries to the next available node clockwise."},
+{desc:"Scaling from 3 to 6 nodes. Expected key movement?",action:"scale",
+correct:"~1/N of all keys (1/6)",reason:"With consistent hashing, only ~1/N keys move per node addition."},
+{desc:"Using power of 2 choices. Which node gets the key?",action:"power2",
+correct:"Less loaded of 2 random nodes",reason:"Power of 2 choices picks the less loaded node."},
+{desc:"Node S1 is overloaded but healthy. What to do?",action:"overload",
+correct:"Add virtual nodes for other servers",reason:"Virtual nodes help balance load without moving physical infrastructure."},
+{desc:"Client caches node mappings. Node removed. Impact?",action:"cache",
+correct:"Stale cache causes failed requests",reason:"Clients need to invalidate cache when topology changes."},
+{desc:"Session stickiness required. How to ensure?",action:"session",
+correct:"Consistent hash of user ID",reason:"Same user ID always maps to same node."},
+{desc:"Multi-datacenter setup. Ring strategy?",action:"multi",
+correct:"Separate rings per datacenter",reason:"Each datacenter should have its own hash ring for locality."}
+];
+function renderRing(){
+const ring=document.getElementById('hash-ring');
+ring.innerHTML='<div class="ring-center"><h3>Hash Ring</h3><p>0 — 2³²</p></div>';
+const cx=160,cy=160,r=140;
+servers.forEach(s=>{
+const rad=(s.angle-90)*Math.PI/180;
+const x=cx+r*Math.cos(rad);
+const y=cy+r*Math.sin(rad);
+ring.innerHTML+=`<div class="ring-node server" style="left:${x}px;top:${y}px;border-color:${s.color};color:${s.color}">${s.name}</div>`;
+});
+keys.forEach(k=>{
+const rad=(k.angle-90)*Math.PI/180;
+const x=cx+r*Math.cos(rad);
+const y=cy+r*Math.sin(rad);
+ring.innerHTML+=`<div class="ring-node key" style="left:${x}px;top:${y}px" title="${k.name} → ${k.mapped}"></div>`;
+});
+// Mappings
+const mapEl=document.getElementById('mappings');
+mapEl.innerHTML=keys.map(k=>`<div class="mapping-row"><span class="key-name">${k.name}</span><span>→</span><span class="server-name" style="color:${servers.find(s=>s.name===k.mapped)?.color||'#94a3b8'}">${k.mapped}</span></div>`).join('');
+document.getElementById('nodes').textContent=servers.length;
+}
+function startRound(){
+answered=false;
+const s=scenarios[round%scenarios.length];
+document.getElementById('scenario-title').textContent=s.action.charAt(0).toUpperCase()+s.action.slice(1)+' Operation';
+document.getElementById('scenario-desc').textContent=s.desc;
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+let choices;
+switch(s.action){
+case'add':choices=['1 key','2 keys','3 keys','All keys'];break;
+case'remove':choices=['Server 1','Server 3 (next clockwise)','Server 1 (previous)','Redistribute evenly'];break;
+case'virtual':choices=['Better balance','Faster lookup','Less memory','More security'];break;
+case'collision':choices=['Use consistent tiebreaking','Hash again','Random placement','Merge keys'];break;
+case'place':choices=['Next clockwise node','Previous node','Random node','All nodes'];break;
+case'imbalance':choices=['Add more virtual nodes to S3','Move S3','Remove S3','Add new server'];break;
+case'prevent':choices=['Gradual key migration','Force rebalance','Restart all nodes','Disable caching'];break;
+case'vnode':choices=['No issue — virtual nodes are separate slots','Merge them','Reroute','Error'];break;
+case'partition':choices=['Retry on next clockwise node','Fail all requests','Switch to Server 1','Wait for recovery'];break;
+case'scale':choices=['~1/N of all keys (1/6)','All keys','Half the keys','None'];break;
+case'power2':choices=['Less loaded of 2 random nodes','More loaded node','Random node','First node'];break;
+case'overload':choices=['Add virtual nodes for other servers','Add CPU to S1','Move keys','Disable S1'];break;
+case'cache':choices=['Stale cache causes failed requests','No impact','Faster routing','Better balance'];break;
+case'session':choices=['Consistent hash of user ID','Random node','Round robin','Session store'];break;
+case'multi':choices=['Separate rings per datacenter','Single global ring','Mirror all data','Ignore'];break;
+default:choices=['Option A','Option B','Option C','Option D'];
+}
+document.getElementById('choices').innerHTML=choices.map(c=>`<button class="choice-btn" onclick="answer('${c.replace(/'/g,"\\'")}','${s.correct.replace(/'/g,"\\'")}','${s.reason.replace(/'/g,"\\'")}')">${c}</button>`).join('');
+renderRing();
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+if(isCorrect)score+=10;else score=Math.max(0,score-3);
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;
+}
+init();
+</script>
+</body>
+</html>

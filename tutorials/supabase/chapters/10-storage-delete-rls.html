@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapter 10: Storage Delete and RLS - Supabase Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+
+    <span class="tag">Chapter 10</span>
+    <h1>Storage: Delete and RLS</h1>
+
+    <h2>File Deletion</h2>
+    <p>Removing files from Supabase Storage is straightforward with the <code>remove</code> method. Pass an array of file paths to delete multiple objects in a single call:</p>
+    <pre><code>const { data, error } = await supabase
+  .storage
+  .from('avatars')
+  .remove(['user-123/profile.png']);
+
+if (error) {
+  console.error('Delete failed:', error.message);
+} else {
+  console.log('Deleted files:', data);
+}</code></pre>
+    <p>The response contains the list of successfully deleted file objects. For bulk cleanup — like removing all images for a deleted user account — pass multiple paths:</p>
+    <pre><code>const { data, error } = await supabase
+  .storage
+  .from('documents')
+  .remove([
+    'user-123/receipt-1.pdf',
+    'user-123/receipt-2.pdf',
+    'user-123/receipt-3.pdf'
+  ]);</code></pre>
+
+    <h2>Folder Deletion</h2>
+    <p>Supabase Storage does not have true folders — paths are prefixes on object keys. To "delete a folder," you must list all files under that prefix and remove them individually:</p>
+    <pre><code>const { data: files, error: listError } = await supabase
+  .storage
+  .from('documents')
+  .list('user-123');
+
+if (files) {
+  const paths = files.map(f => `user-123/${f.name}`);
+  const { data, error } = await supabase
+    .storage
+    .from('documents')
+    .remove(paths);
+}</code></pre>
+    <p>This two-step pattern — list then remove — is the standard approach for cleaning up entire user directories. Consider wrapping it in a server-side function or database trigger that fires when a user account is deleted, so orphaned files never accumulate.</p>
+
+    <h2>Storage RLS Policies</h2>
+    <p>Row Level Security applies to the <code>storage.objects</code> table just like any other table in your database. Each policy targets one of four operations: <code>SELECT</code>, <code>INSERT</code>, <code>UPDATE</code>, or <code>DELETE</code>. Enabling RLS on the storage schema is the first step — then you define policies per bucket using standard SQL.</p>
+    <p>A common setup is a public bucket for avatars with wide read access and restricted write access:</p>
+    <pre><code>-- Allow anyone to read avatars
+CREATE POLICY "Public read for avatars"
+ON storage.objects FOR SELECT
+TO public
+USING (bucket_id = 'avatars');
+
+-- Allow authenticated users to upload to avatars
+CREATE POLICY "Auth users can upload avatars"
+ON storage.objects FOR INSERT
+TO authenticated
+WITH CHECK (bucket_id = 'avatars');</code></pre>
+
+    <h2>Policy Examples</h2>
+    <p>The most powerful pattern uses <code>auth.uid()</code> to tie file ownership to the authenticated user. When you upload a file with a path that includes the user's ID, a policy can enforce that users only manage their own files:</p>
+    <pre><code>-- Users can only delete their own files
+CREATE POLICY "Users can delete their own files"
+ON storage.objects FOR DELETE
+TO authenticated
+USING (
+  bucket_id = 'documents'
+  AND auth.uid() = owner
+);
+
+-- Users can only view their own documents
+CREATE POLICY "Users can view their own documents"
+ON storage.objects FOR SELECT
+TO authenticated
+USING (
+  bucket_id = 'documents'
+  AND auth.uid() = owner
+);</code></pre>
+    <p>The <code>owner</code> column on <code>storage.objects</code> is automatically set to the authenticated user's ID when they upload a file. This means ownership-based RLS requires no extra work on the upload side — just enforce it at the policy level. For admin bypass, add a role check:</p>
+    <pre><code>CREATE POLICY "Admins can delete any file"
+ON storage.objects FOR DELETE
+TO authenticated
+USING (
+  bucket_id = 'documents'
+  AND (auth.jwt() ->> 'role')::text = 'admin'
+);</code></pre>
+
+    <h2>Bucket-Level vs Object-Level Security</h2>
+    <p>Bucket visibility (public vs private) is a coarse access control — it determines whether the storage API allows anonymous reads. RLS policies on <code>storage.objects</code> give you fine-grained, row-level control. For maximum security, set all buckets to private and rely entirely on RLS and signed URLs. This ensures that even if someone guesses a file URL, the policy engine checks authorization before serving the object. Public buckets are convenient for truly public assets like avatars or blog images, but should never be used for sensitive data.</p>
+
+    <h2>File Management Best Practices</h2>
+    <ul>
+      <li><strong>Consistent folder structure.</strong> Organize files by user ID or entity, like <code>users/{userId}/files/</code> or <code>posts/{postId}/images/</code>. This makes listing, deleting, and policy writing predictable.</li>
+      <li><strong>Cleanup on delete.</strong> When you delete a database record, also delete its associated storage files. Use Supabase Edge Functions, database triggers, or client-side logic to keep storage in sync.</li>
+      <li><strong>Validate file types in RLS.</strong> Add a CHECK constraint or policy condition that verifies the file extension or MIME type before allowing an INSERT. This prevents users from uploading executable files or unexpected formats.</li>
+      <li><strong>Rate limit uploads.</strong> Without guardrails, a single user can fill your storage quota in minutes. Implement client-side limits and consider using Supabase's built-in rate limiting or a custom Edge Function.</li>
+    </ul>
+
+    <div class="info">
+      <strong>storage.objects metadata.</strong> Every uploaded file is tracked in the <code>storage.objects</code> table with columns including <code>name</code>, <code>bucket_id</code>, <code>owner</code> (the user who uploaded it), <code>metadata</code> (a JSON object with size, mimetype, and cacheControl), <code>created_at</code>, and <code>updated_at</code>. You can query this table directly if you enable RLS appropriately, which is useful for building admin dashboards or usage reports.
+    </div>
+
+    <h2>Common Pitfalls</h2>
+    <ul>
+      <li><strong>Deleting the wrong file.</strong> Always confirm the path before calling <code>remove</code>. A typo in the path deletes an unintended file, and there is no trash bin — deletions are permanent.</li>
+      <li><strong>Forgetting RLS on storage.</strong> If you enable RLS on the <code>storage.objects</code> table but define no policies, all operations are denied by default. Test file operations immediately after enabling RLS so you catch this early.</li>
+      <li><strong>Not handling delete errors.</strong> Network failures, permission errors, or invalid paths cause <code>remove</code> to return an error. Always check the error response and surface it to the user or retry the operation.</li>
+      <li><strong>Assuming folder deletion is atomic.</strong> The list-then-remove pattern makes individual API calls. If one delete fails, some files remain. Implement retry logic or use a database trigger for atomicity.</li>
+    </ul>
+
+    <h2>Checking Ownership Before Deletion</h2>
+    <p>Even with RLS policies in place, you may want to verify ownership on the client side for immediate feedback:</p>
+    <pre><code>async function deleteFile(filePath) {
+  const { data: file, error: fetchError } = await supabase
+    .storage
+    .from('documents')
+    .list('', { search: filePath });
+
+  if (fetchError || !file.length) {
+    console.error('File not found');
+    return;
+  }
+
+  // RLS will reject if not owner, but we can check the owner column
+  const { data, error } = await supabase
+    .storage
+    .from('documents')
+    .remove([filePath]);
+
+  if (error) {
+    alert('You can only delete your own files.');
+  } else {
+    alert('File deleted successfully.');
+  }
+}</code></pre>
+    <p>This pattern gives the user clear feedback while relying on RLS as the authoritative security layer. Never skip server-side enforcement just because you checked on the client — always use RLS as your safety net.</p>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create an RLS policy so users can only delete their own uploaded files. Start by setting all storage buckets to private, enable RLS on <code>storage.objects</code>, and write a FOR DELETE policy using <code>auth.uid() = owner</code>. Test by uploading two files from different user accounts and verifying that each user can only delete their own uploads.
+    </div>
+
+    <nav>
+      <a href="../index.html">Back to Index</a>
+      <a href="9-storage-insert.html">&laquo; Previous: Storage Insert</a>
+      <a href="11-summary.html">Next: Course Summary &raquo;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

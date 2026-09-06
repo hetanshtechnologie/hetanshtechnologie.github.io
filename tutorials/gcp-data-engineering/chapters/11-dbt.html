@@ -1,0 +1,202 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>11. dbt: The Data Build Tool - GCP Data Engineering Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>11. dbt: The Data Build Tool</h1>
+<p class="tag">Chapter 11</p>
+
+<h2>What is dbt?</h2>
+<p><strong>dbt (data build tool)</strong> is the industry-standard tool for <strong>transformations inside the warehouse</strong> — the "T" of ELT. Instead of writing transformation code in Spark or scripts, dbt lets you define transformations as <strong>SQL models</strong>, version-controlled in git, with automatic dependency management, testing, and documentation. It connects to BigQuery (and Redshift, Snowflake, Postgres, etc.), compiles your models, and runs them in dependency order.</p>
+
+<p>dbt is the tool that made ELT and "analytics engineering" a real discipline: transformations become reviewable, testable code that lives with the team.</p>
+
+<h2>Core Concepts</h2>
+<table>
+<tr><th>Concept</th><th>Description</th></tr>
+<tr><td>Model</td><td>A SQL file (<code>.sql</code>) that defines a table or view — the core unit of transformation</td></tr>
+<tr><td>Materialization</td><td>How a model is built: <code>view</code>, <code>table</code>, <code>incremental</code>, <code>ephemeral</code></td></tr>
+<tr><td>Seed</td><td>A CSV loaded as a table (for small reference data)</td></tr>
+<tr><td>Snapshot</td><td>Type-2 history of slowly changing data</td></tr>
+<tr><td>Test</td><td>Assertions about data quality (unique, not_null, relationships, custom)</td></tr>
+<tr><td>Source</td><td>External tables dbt reads but doesn't own</td></tr>
+<tr><td>Macro / Jinja</td><td>Templating for DRY SQL (loops, conditionals, reusable logic)</td></tr>
+<tr><td>Package</td><td>Reusable macros/models shared across projects (e.g., dbt-utils)</td></tr>
+</table>
+
+<h2>Project Structure</h2>
+<pre><code>my_project/
+├── dbt_project.yml          # project config, model paths, materializations
+├── profiles.yml             # connection profiles (targets: dev/prod)
+├── models/
+│   ├── staging/             # stg_* models: clean, rename, standardize
+│   ├── marts/               # business-ready models
+│   └── sources.yml          # declares source tables
+├── seeds/                   # CSV reference data
+├── tests/                   # custom generic tests
+├── snapshots/               # type-2 history models
+└── macros/                  # reusable Jinja macros</code></pre>
+
+<h2>A First Model</h2>
+<pre><code>-- models/staging/stg_orders.sql
+SELECT
+  order_id,
+  customer_id,
+  TIMESTAMP(order_ts) AS order_ts,
+  SAFE_CAST(total_amount AS NUMERIC) AS total_amount
+FROM {{ source('sales', 'orders') }}
+WHERE order_ts IS NOT NULL</code></pre>
+
+<pre><code># models/marts/marketing/customer_revenue.sql
+-- This model depends on stg_orders automatically
+WITH orders AS (
+  SELECT * FROM {{ ref('stg_orders') }}
+)
+SELECT
+  customer_id,
+  DATE(order_ts) AS day,
+  SUM(total_amount) AS revenue
+FROM orders
+GROUP BY customer_id, DATE(order_ts)</code></pre>
+
+<p><code>{{ ref() }}</code> is the magic: dbt parses these to build the dependency graph and runs models in the correct order. <code>{{ source() }}</code> declares upstream data sources with tests and freshness checks.</p>
+
+<h2>Materializations</h2>
+<table>
+<tr><th>Materialization</th><th>Behavior</th><th>Use When</th></tr>
+<tr><td>view</td><td>A view; re-queries upstream each time</td><td>Lightweight, cheap, staging</td></tr>
+<tr><td>table</td><td>Built as a table each run</td><td>Models used repeatedly or with heavy logic</td></tr>
+<tr><td>incremental</td><td>Builds full first time, then inserts/merges new rows</td><td>Large append-only or slowly changing data</td></tr>
+<tr><td>ephemeral</td><td>Inlined into dependents; not materialized</td><td>Reusable logic that shouldn't exist as a table</td></tr>
+</table>
+
+<pre><code># dbt_project.yml — set default materialization
+models:
+  my_project:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table</code></pre>
+
+<h2>Incremental Models in BigQuery</h2>
+<pre><code>{{
+  config(
+    materialized='incremental',
+    partition_by={'field': 'order_date', 'data_type': 'date'},
+    cluster_by=['customer_id']
+  )
+}}
+
+SELECT
+  order_id, customer_id, order_ts, total_amount,
+  DATE(order_ts) AS order_date
+FROM {{ source('sales', 'orders') }}
+WHERE order_ts IS NOT NULL
+{% if is_incremental() %}
+  AND order_ts > (SELECT MAX(order_ts) FROM {{ this }})
+{% endif %}</code></pre>
+
+<p>The <code>is_incremental()</code> guard adds the watermark predicate only on incremental runs, so the first run builds full history and later runs only process new data. Combined with BigQuery partitioning, incremental models are the standard for large tables.</p>
+
+<h2>Tests: Data Quality as Code</h2>
+<pre><code># models/marts/marketing/_customer_revenue.yml
+version: 2
+models:
+  - name: customer_revenue
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+          - unique
+      - name: revenue
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.accepted_range:
+          column_name: revenue
+          min_value: 0</code></pre>
+
+<pre><code># Source freshness — alert if a source stops updating
+sources:
+  - name: sales
+    tables:
+      - name: orders
+        freshness:
+          warn_after: {count: 24, period: hour}
+          error_after: {count: 48, period: hour}
+        loaded_at_field: order_ts</code></pre>
+
+<p><code>dbt test</code> runs every configured assertion. Custom generic tests and singular tests let you encode arbitrary business rules.</p>
+
+<h2>Jinja and Macros</h2>
+<p>Jinja templates make models DRY — generate SQL for many tables, handle environments, and reuse logic:</p>
+<pre><code>-- macros/generate_schema_name.sql — standard multi-env schema handling
+{% macro generate_schema_name(custom_schema_name, node) -%}
+  {% if target.name == 'prod' and custom_schema_name %}
+    {{ custom_schema_name | trim }}
+  {% elif custom_schema_name %}
+    {{ target.schema }}_{{ custom_schema_name | trim }}
+  {% else %}
+    {{ target.schema }}
+  {% endif %}
+{%- endmacro %}</code></pre>
+
+<div class="note">
+<strong>Guidance:</strong> start with plain SQL models and add Jinja only when repetition actually hurts. Over-templating makes models unreadable. The dbt-utils package covers most common needs (pivot, date spine, surrogate keys) without writing custom macros.
+</div>
+
+<h2>Seeds and Snapshots</h2>
+<ul>
+<li><strong>Seeds:</strong> CSV files loaded with <code>dbt seed</code> — ideal for small mapping/reference tables.</li>
+<li><strong>Snapshots:</strong> type-2 slowly-changing-dimension handling built in — track history of dimension attributes over time (e.g., customer tier changes).</li>
+</ul>
+
+<h2>dbt + BigQuery + Airflow Together</h2>
+<p>The production pattern on GCP:</p>
+<ol>
+<li>Airflow/Composer schedules: load raw data → BigQuery (bronze).</li>
+<li>Composer triggers <code>dbt run</code> (in a container or worker) building silver/gold models.</li>
+<li>Composer runs <code>dbt test</code> after the run; failure blocks downstream consumers.</li>
+<li>dbt docs (lineage graph, catalog) published for the team.</li>
+</ol>
+
+<p>dbt integrates with BigQuery via the <code>dbt-bigquery</code> adapter, which supports partitions, clustering, table/clone materializations, and BigQuery-specific incremental strategies (merge, insert_overwrite).</p>
+
+<h2>dbt vs Alternatives</h2>
+<table>
+<tr><th>Tool</th><th>Approach</th><th>Trade-off</th></tr>
+<tr><td>dbt</td><td>SQL transformations, code-first, warehouse-centric</td><td>Requires a warehouse; SQL only</td></tr>
+<tr><td>Spark/PySpark</td><td>Distributed transforms outside the warehouse</td><td>More power, more infrastructure, slower iteration</td></tr>
+<tr><td>Dataform</td><td>GCP-native SQL transformation (now part of BigQuery tooling)</td><td>Closer Google integration, smaller ecosystem</td></tr>
+<tr><td>SQLMesh / TPC</td><td>Alternative transformation frameworks</td><td>Newer; dbt has the larger community</td></tr>
+</table>
+
+<p>Use dbt for everything that can live as SQL in BigQuery. Reserve Spark for complex, non-SQL, or very-large-scale processing. This split — "SQL if possible, Spark when needed" — is the modern default.</p>
+
+<h2>Getting Started Checklist</h2>
+<ul>
+<li>Install dbt-core + dbt-bigquery; configure profiles.yml with dev/prod targets.</li>
+<li>Declare sources; add freshness checks.</li>
+<li>Build a staging layer (stg_* views), then marts (tables).</li>
+<li>Add tests to every column that matters.</li>
+<li>Version control everything; run dbt in CI on a dev database.</li>
+<li>Generate docs and share lineage.</li>
+</ul>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Create a dbt project against the public dataset (or a small dataset you load into BigQuery). Build: (1) two staging models that clean sources, (2) one incremental fact model partitioned by date, (3) one dimension model with a seed, (4) tests (not_null, unique, accepted_values), (5) a snapshot of a slowly-changing dimension. Run <code>dbt build</code>, fix failures, and review the docs site with its lineage graph.
+</div>
+
+<nav>
+  <a href="10-data-pipelines.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="12-aws-data-services-mapping.html">Next: AWS Data Services &amp; GCP Mapping &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

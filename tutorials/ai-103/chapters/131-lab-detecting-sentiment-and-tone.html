@@ -1,0 +1,160 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>131. Lab - Detecting Sentiment and Tone - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 131</span>
+<h1>Lab - Detecting Sentiment and Tone</h1>
+<p>Sentiment analysis answers a question every support team asks: is this message positive, negative, or neutral? Tone analysis goes one step further and describes the emotional register — frustrated, sarcastic, grateful, urgent. In this lab you will use a chat model for both, and you will learn why the model's ability to explain its judgment is often more valuable than the label itself.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>The environment and client setup from the earlier text-analysis labs.</li>
+<li>A deployed chat model with a known deployment name.</li>
+<li>A handful of realistic sample texts to analyze — review comments, support tickets, or social media posts work well.</li>
+</ul>
+
+<h2>Step 1: Single-Text Sentiment</h2>
+
+<div class="exercise">
+<h3>Exercise 1: Label one message</h3>
+<p>Create <code>sentiment.py</code>:</p>
+<pre><code>import os
+
+from dotenv import load_dotenv
+from openai import AzureOpenAI
+
+load_dotenv()
+
+client = AzureOpenAI(
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    api_key=os.getenv("AZURE_OPENAI_KEY"),
+    api_version="2024-06-01",
+)
+
+DEPLOYMENT = "YOUR_DEPLOYMENT_NAME"
+
+
+def analyze(text: str) -&gt; str:
+    response = client.chat.completions.create(
+        model=DEPLOYMENT,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You classify the sentiment of messages. Return the "
+                    "sentiment label (positive, negative, or neutral) and "
+                    "a one-sentence explanation quoting the words that "
+                    "justify it."
+                ),
+            },
+            {"role": "user", "content": text},
+        ],
+    )
+    return response.choices[0].message.content
+
+
+message = (
+    "I have called three times about this invoice and nobody has "
+    "answered. This is getting really frustrating."
+)
+print(analyze(message))</code></pre>
+<ol>
+<li>Run the script. You should see the label <code>negative</code> alongside a short explanation that points at words like "frustrating" and "nobody has answered".</li>
+<li>Swap in a positive message, such as a review praising fast shipping, and confirm the label flips and the explanation changes.</li>
+<li>Swap in a neutral message, such as "The package is scheduled for delivery tomorrow", and confirm it is classified neutral rather than positive or negative.</li>
+</ol>
+</div>
+
+<h2>Step 2: Add Tone Detection</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Sentiment and tone in one pass</h3>
+<p>Extend the prompt to ask for tone as well:</p>
+<pre><code>def analyze_tone(text: str) -&gt; str:
+    response = client.chat.completions.create(
+        model=DEPLOYMENT,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Analyze messages and report three things: a sentiment "
+                    "label (positive, negative, neutral), a tone label "
+                    "(for example: frustrated, sarcastic, grateful, urgent, "
+                    "neutral), and a one-sentence justification."
+                ),
+            },
+            {"role": "user", "content": text},
+        ],
+    )
+    return response.choices[0].message.content
+
+
+tricky = (
+    "Oh great, another 'important' update that fixes nothing and "
+    "breaks my workflow. Thanks for that."
+)
+print(analyze_tone(tricky))</code></pre>
+<ol>
+<li>Run the script on the sarcastic message. The model should detect <em>sarcasm</em> — a case where tone disagrees sharply with the surface words.</li>
+<li>Test a message where the words are polite but the meaning is urgent, such as "Would it be possible to look into this today? It is quite time sensitive."</li>
+<li>Observe how the justification explains the gap between the literal words and the tone.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>This is where a generative model pulls ahead of a simple polarity scorer. "Thanks for that" is positive vocabulary, but in context it is sarcastic. The model reasons over the full passage and its explanation lets a human verify the reasoning — something a numeric score alone cannot provide.</p>
+</div>
+
+<h2>Step 3: Score a Small Batch</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Loop over several messages</h3>
+<p>Add a list of messages and a loop that classifies each one:</p>
+<pre><code>batch = [
+    "The new dashboard is beautiful and the charts load instantly.",
+    "Please send the updated contract. The deadline is Friday.",
+    "Why is my account blocked again? I already verified my identity twice.",
+    "It arrived. Everything works as described.",
+    "No change to report on the migration.",
+]
+
+for i, msg in enumerate(batch, start=1):
+    print(f"\n--- Message {i} ---")
+    print(msg)
+    print(analyze(msg))</code></pre>
+<ol>
+<li>Run the script and review all five classifications. Note where the tone-only messages (urgent request, frustrated question) are labeled relative to their surface wording.</li>
+<li>Collect the results into a plain-text summary or a small CSV using Python's standard <code>csv</code> module if you want a reusable report.</li>
+<li>Re-run the script and compare the batch against the previous run. Labels should be stable, but the exact wording of explanations will vary.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>For high-volume, round-the-clock sentiment scoring, the dedicated Azure AI Language sentiment feature is cheaper and returns a standardized schema with confidence scores. Use this prompting approach when you want tone, justification, or custom categories that the prebuilt feature does not cover.</p>
+</div>
+
+<h2>Step 4: Ask for a Structured Report</h2>
+<p>To make the batch output machine-readable, combine this lab's analysis with the JSON techniques from the previous lab. Ask the model to return a JSON array of records with <code>sentiment</code>, <code>tone</code>, and <code>justification</code> fields, set <code>response_format={"type": "json_object"}</code>, and parse with <code>json.loads</code>. The result is a table your application can store or visualize directly.</p>
+
+<h2>Summary</h2>
+<p>You classified sentiment and tone with prompts, handled sarcasm and context-sensitive cases, scored a batch of messages, and learned how to shape the analysis into structured output. The same prompting pattern now applies to a different transformation — translation — which is the subject of the next lab.</p>
+<nav>
+<a href="130-lab-structured-json-output.html">&larr; Previous: Lab - Structured JSON Output</a><a href="132-lab-translating-text.html">Next: Lab - Translating Text &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

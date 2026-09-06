@@ -1,0 +1,125 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>90. Content Filters in Action - Harm Categories on the Support Agent - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 90</span>
+<h1>Content Filters in Action - Harm Categories on the Support Agent</h1>
+<p>In this chapter you will see what content filtering actually looks like on the support agent you have been building. Content filters classify text along several harm categories, assign each piece a severity level, and let you decide where to draw the block line. We will examine the harm categories, walk through what a filtered response looks like in code, and discuss how to tune the thresholds for a real application rather than leaving them at their defaults.</p>
+
+<h2>The Harm Categories</h2>
+<p>Azure's content filters screen text against a set of harm categories. Each category targets a different family of harmful content:</p>
+<table>
+<tr><th>Category</th><th>What it flags</th></tr>
+<tr><td>Hate and fairness</td><td>Attacks or discrimination against groups based on protected attributes</td></tr>
+<tr><td>Sexual</td><td>Sexual content, explicit or suggestive language, and sexual exploitation</td></tr>
+<tr><td>Violence</td><td>Descriptions or promotion of violence, injury, and weapons</td></tr>
+<tr><td>Self-harm</td><td>Content that encourages, describes, or plans self-injury</td></tr>
+</table>
+
+<p>Each category is scored by the safety model and reported on a severity scale, typically from 0 (safe) to 6 (extreme), with a configurable threshold for each category. You decide what happens above the threshold: block, flag for review, or log without interrupting the user.</p>
+
+<div class="note">
+<p>Severity is not the same as certainty. The filter reports how <em>severe</em> the detected content is, not merely whether it is present. This lets you allow mild or contextual content while blocking genuinely harmful output.</p>
+</div>
+
+<h2>What a Filtered Request Looks Like</h2>
+<p>When a content filter blocks a request, the API response tells you so. For a model deployment with filters enabled, a blocked input produces a response whose finish reason or error content indicates the filter fired:</p>
+<pre><code>{
+  "error": {
+    "code": "content_filter",
+    "message": "The response was filtered due to the prompt triggering"
+             "Azure OpenAI's content management policy."
+  }
+}
+</code></pre>
+<p>For an application that calls the safety service directly, you get a structured verdict for each category instead:</p>
+<pre><code>{
+  "categoriesAnalysis": [
+    {
+      "category": "Hate",
+      "severity": 2,
+      "severityLevel": "Low"
+    },
+    {
+      "category": "SelfHarm",
+      "severity": 0,
+      "severityLevel": "Safe"
+    }
+  ],
+  "action": "Accept",
+  "blocklistsMatch": []
+}
+</code></pre>
+
+<div class="tip">
+<p>Handle the content-filter error explicitly in your code. A filter block is a normal, expected outcome for a safety-aware application — not a crash. Map it to a friendly user message and log the category so you can review false positives.</p>
+</div>
+
+<h2>Seeing the Filters on the Support Agent</h2>
+<p>The support agent sits behind filters configured at the deployment level, so every request and every answer passes through them without the agent code being aware. To exercise them in the playground or your test harness, try prompts such as an insulting request, a request that asks the agent to produce self-harm content, or an aggressive demand that tries to coerce the agent. Each will return the content-filter block instead of a normal answer.</p>
+
+<div class="exercise">
+<h3>Test the filter from Python</h3>
+<p>Send a deliberately harmful test message to your deployed model and inspect how the client reports the block:</p>
+<pre><code>from openai import AzureOpenAI
+import os
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+try:
+    response = client.chat.completions.create(
+        model="YOUR_DEPLOYMENT_NAME",
+        messages=[
+            {"role": "user", "content": "YOUR_TEST_HARMFUL_MESSAGE"},
+        ],
+    )
+    print(response.choices[0].message.content)
+except Exception as ex:
+    print("Request blocked by content filters:")
+    print(ex)
+</code></pre>
+<p>Replace <code>YOUR_TEST_HARMFUL_MESSAGE</code> with a clear test phrase — for example a request to write threatening text. Do not use real user data for this kind of test.</p>
+</div>
+
+<h2>Tuning the Thresholds</h2>
+<p>The default thresholds are a starting point, not a final configuration. Tuning is an iterative process:</p>
+<ol>
+<li>Run a sample of real traffic through the filter and collect every block.</li>
+<li>Review the blocked examples by hand and separate true positives from false positives.</li>
+<li>Adjust the severity threshold per category until legitimate traffic passes while harmful traffic is blocked.</li>
+<li>Repeat after product changes — new features and new user communities change what your traffic looks like.</li>
+</ol>
+
+<div class="warn">
+<p>Do not disable a category because you saw a false positive. Lower that category's threshold or refine your blocklist instead. A disabled filter is a permanent hole that a single harmful request can exploit.</p>
+</div>
+
+<h2>Beyond Text: Blocklists and Custom Rules</h2>
+<p>Content filters handle broad harm categories; blocklists handle your specific vocabulary. If your product has a company-policy term list — competitor names in promotions, profanity in a family product, internal names in a public bot — you can define blocklists that match exact words or phrases and block on them independently of the severity model. Combining categories, blocklists, and custom thresholds gives you a layered policy that matches your business instead of a generic default.</p>
+
+<h2>Summary</h2>
+<p>Content filters classify traffic along harm categories — hate, sexual, violence, and self-harm — and score each on a severity scale with configurable thresholds. Blocked requests return a content-filter error your code should handle gracefully, and the safety service can return structured per-category verdicts for programmatic decisions. On the support agent you can test the filters directly, tune thresholds on real traffic, and extend the policy with custom blocklists. The next chapter covers prompt shields, the guardrail that defends against prompt injection.</p>
+<nav>
+<a href="89-introduction-to-guardrails-in-microsoft-foundry.html">&larr; Previous: Introduction to Guardrails in Microsoft Foundry</a><a href="91-prompt-shields.html">Next: Prompt Shields &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

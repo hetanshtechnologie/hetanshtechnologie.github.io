@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Container Orchestration Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:1000px;margin:24px auto;padding:0 16px}
+.cluster{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.node{background:#1e293b;border:2px solid #334155;border-radius:12px;padding:14px;width:200px;min-height:140px}
+.node-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.node-name{font-size:13px;font-weight:600;color:#f8fafc}
+.node-resources{display:flex;gap:8px;margin-bottom:8px}
+.resource-bar{flex:1;height:4px;background:#334155;border-radius:2px;overflow:hidden}
+.resource-fill{height:100%;border-radius:2px;transition:width .3s}
+.resource-label{font-size:9px;color:#94a3b8;text-align:center;margin-top:2px}
+.pods{display:flex;gap:4px;flex-wrap:wrap;min-height:40px}
+.pod{border-radius:6px;padding:4px 8px;font-size:10px;border:1px solid;cursor:pointer;transition:all .2s}
+.pod.running{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.pod.pending{border-color:#fbbf24;background:rgba(251,191,36,.1);color:#fbbf24}
+.pod.failed{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.pod.selected{box-shadow:0 0 10px rgba(56,189,248,.5);border-color:#38bdf8}
+.scenario-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin:16px 0;text-align:center}
+.scenario-card h3{margin-bottom:8px}
+.scenario-card p{color:#94a3b8;font-size:13px}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>Container Orchestration</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/15</div>
+<div class="hud-item"><span id="pods">8</span>Pods Running</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="cluster" id="cluster"></div>
+<div class="scenario-card">
+<h3 id="scenario-title">Orchestration Decision</h3>
+<p id="scenario-desc"></p>
+</div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Orchestration Master!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=15,answered=false;
+let nodes=[
+{name:"node-1",cpu:{used:60,total:100},mem:{used:40,total:100},pods:["web-1","api-1","cache-1"]},
+{name:"node-2",cpu:{used:85,total:100},mem:{used:70,total:100},pods:["web-2","api-2","worker-1","worker-2"]},
+{name:"node-3",cpu:{used:20,total:100},mem:{used:15,total:100},pods:["db-1"]}
+];
+const scenarios=[
+{desc:"New pod needs 30% CPU. Which node?",correct:"node-3 (20% used, enough capacity)",reason:"Scheduler places pods on nodes with sufficient resources."},
+{desc:"worker-2 on node-2 keeps crashing (CrashLoopBackOff).",correct:"node-2",reason:"Check node-2 logs first. CrashLoopBackOff is usually app-level."},
+{desc:"node-2 CPU at 85%. New deployment needs resources.",correct:"Scale up node-2 or add node-4",reason:"Overloaded nodes need either scale-up or new nodes."},
+{desc:"db-1 needs to be on a node with fast SSD.",correct:"node-3 (check storage class)",reason:"StatefulSets need storage-aware scheduling."},
+{desc:"3 replicas of web service, 2 nodes. Distribution?",correct:"Spread across nodes with anti-affinity",reason:"Anti-affinity rules spread replicas across nodes for HA."},
+{desc:"node-1 going down for maintenance. Pods?",correct:"Cordon node-1, drain pods to other nodes",reason:"Cordon + drain gracefully moves pods before maintenance."},
+{desc:"Pod resource request: 2Gi memory. node-3 has 15% used.",correct:"Schedule on node-3 (85% free)",reason:"node-3 has plenty of memory for the request."},
+{desc:"Deployment rollout stuck at 50%. New pods not ready.",correct:"Check readiness probe configuration",reason:"Readiness probe failures prevent rollout completion."},
+{desc:"Need to restart all pods in namespace without downtime.",correct:"Rolling restart deployment",reason:"Rolling restart replaces pods one at a time."},
+{desc:"Pod uses 5Gi but limit is 2Gi. What happens?",correct:"Pod gets OOMKilled",reason:"Exceeding memory limit triggers OOM kill."},
+{desc:"3 nodes, need HA for critical service.",correct:"Run 3 replicas with pod anti-affinity",reason:"HA requires replicas on different nodes with anti-affinity."},
+{desc:"DaemonSet ensures one pod per node. Adding node-4?",correct:"DaemonSet auto-schedules on new node",reason:"DaemonSets automatically add pods to new nodes."},
+{desc:"StatefulSet pod needs stable network identity.",correct:"Use headless Service with StatefulSet",reason:"StatefulSets need headless services for stable DNS."},
+{desc:"HPA wants to scale to 10 pods but only 3 nodes.",correct:"Cluster autoscaler adds nodes",reason:"HPA + cluster autoscaler handle demand spikes."},
+{desc:"Pod affinity: 'prefer same node as redis'.",correct:"Schedule near redis if possible",reason:"Soft affinity places pods together when resources allow."}
+];
+function renderCluster(){
+const el=document.getElementById('cluster');
+el.innerHTML=nodes.map((n,i)=>{
+const cpuPct=Math.round(n.cpu.used/n.cpu.total*100);
+const memPct=Math.round(n.mem.used/n.mem.total*100);
+const cpuColor=cpuPct>80?'#f87171':cpuPct>50?'#fbbf24':'#4ade80';
+const memColor=memPct>80?'#f87171':memPct>50?'#fbbf24':'#4ade80';
+return`<div class="node"><div class="node-header"><span class="node-name">${n.name}</span><span style="font-size:10px;color:${cpuColor}">${cpuPct}% CPU</span></div>
+<div class="node-resources"><div style="flex:1"><div class="resource-bar"><div class="resource-fill" style="width:${cpuPct}%;background:${cpuColor}"></div></div><div class="resource-label">CPU</div></div>
+<div style="flex:1"><div class="resource-bar"><div class="resource-fill" style="width:${memPct}%;background:${memColor}"></div></div><div class="resource-label">MEM</div></div></div>
+<div class="pods">${n.pods.map(p=>`<div class="pod running">${p}</div>`).join('')}</div></div>`;
+}).join('');
+document.getElementById('pods').textContent=nodes.reduce((a,n)=>a+n.pods.length,0);
+}
+function startRound(){
+answered=false;
+renderCluster();
+const s=scenarios[round%scenarios.length];
+document.getElementById('scenario-title').textContent=`Decision ${round+1}`;
+document.getElementById('scenario-desc').textContent=s.desc;
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+document.getElementById('choices').innerHTML=[
+'Schedule on node-1',
+'Schedule on node-2',
+'Schedule on node-3',
+'Add new node'
+].map(c=>`<button class="choice-btn" onclick="answer('${c}','${s.correct}','${s.reason}')">${c}</button>`).join('');
+}
+function answer(chosen,correct,reason){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct||correct.toLowerCase().includes(chosen.toLowerCase().replace('schedule on ',''));
+if(isCorrect)score+=10;else score=Math.max(0,score-3);
+document.querySelectorAll('.choice-btn').forEach(b=>{
+const btnText=b.textContent;
+if(correct.includes(btnText.replace('Schedule on ','')))b.classList.add('correct');
+else if(btnText===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+// Simulate resource changes
+nodes.forEach(n=>{
+n.cpu.used=Math.max(5,Math.min(95,n.cpu.used+Math.floor((Math.random()-.4)*20)));
+n.mem.used=Math.max(5,Math.min(95,n.mem.used+Math.floor((Math.random()-.4)*15)));
+});
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=reason;
+document.getElementById('score').textContent=score;
+renderCluster();
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;
+}
+function init(){score=0;round=0;nodes[0].cpu.used=60;nodes[0].mem.used=40;nodes[1].cpu.used=85;nodes[1].mem.used=70;nodes[2].cpu.used=20;nodes[2].mem.used=15;startRound();}
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>244. Fine Tune Azure OpenAI models - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 244</span>
+<h1>Fine Tune Azure OpenAI models</h1>
+<p>Prompting, and even few-shot examples, can only take a model so far. When an application needs a model to behave in a consistent, specialized way — a fixed output format, a particular tone, or knowledge of a closed domain — the next tool in the toolbox is fine-tuning. This chapter introduces fine-tuning as it exists on Azure OpenAI: what the service provides, how you prepare data for it, and how a fine-tuned model becomes a deployable endpoint.</p>
+
+<h2>What Azure OpenAI Offers for Fine-Tuning</h2>
+<p>Fine-tuning on Azure OpenAI means taking a base model, training it further on your own dataset, and getting back a private model customized for your task. The service handles the heavy lifting: it runs the training job on managed compute, keeps checkpoints, and exposes the finished model so you can deploy it like any other deployment.</p>
+<p>The pieces you interact with are:</p>
+<ul>
+<li><strong>Training files:</strong> JSONL datasets, uploaded to the resource, that teach the model your patterns.</li>
+<li><strong>Fine-tuning jobs:</strong> Long-running operations that consume a training file and produce a fine-tuned model.</li>
+<li><strong>The fine-tuned model:</strong> A deployable artifact with its own name, which you can turn into a deployment for production traffic.</li>
+</ul>
+
+<div class="note">
+<p>Fine-tuning is a paid, resource-intensive operation. It is the right tool when prompt engineering and retrieval have been tried and the model still does not match the required behavior — not the first thing you reach for. The next chapter gives a fuller picture of when it is and is not appropriate.</p>
+</div>
+
+<h2>Data Format: The Chat Completion Pattern</h2>
+<p>Azure OpenAI fine-tuning for chat models expects training data in JSONL format, one example per line. Each line describes a conversation: a list of messages with <code>role</code> and <code>content</code>, following the same structure the model already understands. A minimal example looks like this:</p>
+<pre><code>{"messages": [{"role": "system", "content": "You are a loan approval assistant."}, {"role": "user", "content": "Approve a loan for an applicant with a 760 credit score."}, {"role": "assistant", "content": "Approved. High credit score, no red flags."}]}
+{"messages": [{"role": "system", "content": "You are a loan approval assistant."}, {"role": "user", "content": "Approve a loan for an applicant with a 540 credit score and recent bankruptcy."}, {"role": "assistant", "content": "Declined. Bankruptcy within the last 24 months is disqualifying."}]}
+</code></pre>
+<p>A few quality rules make a dataset far more effective:</p>
+<ul>
+<li><strong>Cover the real input space:</strong> include the variety of user questions your app actually receives.</li>
+<li><strong>Keep answers consistent:</strong> the model will learn your style and standards, so every assistant message should be the model answer you want, not just any answer.</li>
+<li><strong>Include a system prompt:</strong> repeating it in every example anchors the model to the same behavior at inference time.</li>
+<li><strong>Watch the balance:</strong> a dataset dominated by one outcome teaches the model to over-predict it.</li>
+</ul>
+
+<h2>The Fine-Tuning Workflow</h2>
+<p>The lifecycle of a fine-tune has four stages, whether you drive them from the portal, the CLI, or the Python SDK:</p>
+<ol>
+<li><strong>Upload the training file.</strong> Your JSONL file must be uploaded to the resource before a job can use it.</li>
+<li><strong>Create the job.</strong> Point the job at the training file, choose a base model, and configure hyperparameters such as epochs.</li>
+<li><strong>Wait for completion.</strong> Training runs as a background job and can take from tens of minutes to hours depending on dataset size. The job reports status and, on success, a new model name.</li>
+<li><strong>Deploy the result.</strong> The fine-tuned model appears in the model list and can be deployed with the same steps you used for any other model.</li>
+</ol>
+
+<div class="tip">
+<p>Keep a small holdout set aside before you start. After the job finishes, send questions from that holdout to the fine-tuned model and to the base model, and compare them side by side. If the tuned model is not clearly better, the dataset, not the job, is usually the problem.</p>
+</div>
+
+<h2>Starting a Job with the Python SDK</h2>
+<p>For repeatable experiments, drive the process from code. The SDK mirrors the portal's steps: upload a file, create a job, poll its status, and finally read the model name:</p>
+<pre><code>import os
+import time
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+uploaded = client.files.create(
+    file=open("training_data.jsonl", "rb"),
+    purpose="fine-tune",
+)
+
+job = client.fine_tuning.jobs.create(
+    training_file=uploaded.id,
+    model="gpt-4o-mini",
+    suffix="loan-approval-v1",
+)
+
+print("Job id:", job.id)
+
+while True:
+    status = client.fine_tuning.jobs.retrieve(job.id)
+    print("Status:", status.status)
+    if status.status in ("succeeded", "failed", "cancelled"):
+        break
+    time.sleep(30)
+
+print("Fine-tuned model:", status.fine_tuned_model)
+</code></pre>
+
+<div class="warn">
+<p>Fine-tuning jobs consume quota and bill for training compute while they run. A job that spins on a large dataset for hours is real spend. Size the dataset to what you actually need, and cancel clearly-failed jobs promptly instead of letting them linger.</p>
+</div>
+
+<h2>After Training: Deploying and Using the Model</h2>
+<p>Once the job succeeds, the fine-tuned model becomes a first-class citizen. You deploy it from the Foundry or Azure OpenAI portal the same way you deploy any model, give it a deployment name, and call it exactly like a base model:</p>
+<pre><code>response = client.chat.completions.create(
+    model="YOUR_FINETUNED_DEPLOYMENT_NAME",
+    messages=[
+        {"role": "system", "content": "You are a loan approval assistant."},
+        {"role": "user", "content": "Approve a loan for a 700 credit score applicant."},
+    ],
+)
+print(response.choices[0].message.content)
+</code></pre>
+
+<h2>Summary</h2>
+<p>Fine-tuning on Azure OpenAI lets you train a base model on your own conversations and deploy the result as a private model. You saw the JSONL chat format, the four-stage workflow from upload to deployment, and how to drive it from the Python SDK. The following chapter steps back and gives the conceptual overview — what fine-tuning really changes about a model and how to decide whether you need it.</p>
+<nav>
+<a href="243-lab-python-using-a-model-to-generate-an-image.html">&larr; Previous: Lab - Python - Using a model to generate an image</a><a href="245-overview-of-fine-tuning-a-model.html">Next: Overview of Fine tuning a model &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

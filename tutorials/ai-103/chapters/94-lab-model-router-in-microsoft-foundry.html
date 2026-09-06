@@ -1,0 +1,159 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>94. Lab - Model Router in Microsoft Foundry - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 94</span>
+<h1>Lab - Model Router in Microsoft Foundry</h1>
+<p>In this lab you will build a working model router. You will create a simple routing service in Python that examines each request, decides which of two deployments should answer it, forwards the call, and records which route was chosen. This mirrors what Foundry's router does under the hood and gives you a clear mental model of the concepts from the previous chapter. When you finish, you will have a small reusable router you can extend with semantic rules.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>Python 3.9 or newer and VS Code.</li>
+<li>Two chat model deployments in your Foundry project — for example <code>gpt-4o-mini</code> as the fast/cheap route and <code>gpt-4o</code> as the powerful route.</li>
+<li>The endpoint and key for your Azure OpenAI resource.</li>
+<li>The <code>openai</code> Python SDK installed, as in earlier labs.</li>
+</ul>
+
+<div class="note">
+<p>If you only have one deployment, the lab still works — just configure the second route to point at the same deployment. The routing logic is what matters here.</p>
+</div>
+
+<h2>Designing the Router</h2>
+<p>The router makes one decision per request: which deployment should answer this message? For this lab we use a simple rule — short, factual messages go to the small model; long or complex requests go to the powerful model. The router checks the message length and a small set of keywords to make the decision, then calls the chosen deployment and logs the outcome.</p>
+
+<h2>Setting Up the Project</h2>
+<div class="exercise">
+<h3>Step 1 - Create the project folder</h3>
+<p>Create a folder named <code>ai103-model-router</code> and open it in VS Code. Create a Python file called <code>router.py</code>.</p>
+
+<h3>Step 2 - Set your credentials</h3>
+<p>In the integrated terminal, set the environment variables the script will read:</p>
+<pre><code>$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+
+<h3>Step 3 - Write the router</h3>
+<p>Paste the following code into <code>router.py</code>. Replace <code>YOUR_FAST_DEPLOYMENT</code> and <code>YOUR_POWERFUL_DEPLOYMENT</code> with the names of your two deployments:</p>
+<pre><code>from openai import AzureOpenAI
+import os
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+FAST = "YOUR_FAST_DEPLOYMENT"
+POWERFUL = "YOUR_POWERFUL_DEPLOYMENT"
+
+COMPLEX_KEYWORDS = ["refund", "contract", "cancel", "bug", "escalate"]
+
+
+def choose_route(message):
+    if len(message) &gt; 200:
+        return POWERFUL
+    for word in COMPLEX_KEYWORDS:
+        if word in message.lower():
+            return POWERFUL
+    return FAST
+
+
+def ask(message):
+    deployment = choose_route(message)
+    print(f"[route] {deployment}")
+    response = client.chat.completions.create(
+        model=deployment,
+        messages=[
+            {"role": "system", "content": "You are a concise support assistant."},
+            {"role": "user", "content": message},
+        ],
+    )
+    return response.choices[0].message.content
+
+
+if __name__ == "__main__":
+    while True:
+        msg = input("\nYour question (or 'quit'): ")
+        if msg.lower() == "quit":
+            break
+        print(ask(msg))
+</code></pre>
+
+<h3>Step 4 - Run and test the router</h3>
+<pre><code>python router.py
+</code></pre>
+<p>Send a short question such as <em>"What are your opening hours?"</em> and confirm the fast route is chosen. Then send a long or keyword-bearing message such as <em>"I need to cancel my contract and request a refund for the unused months"</em> and confirm the powerful route handles it.</p>
+</div>
+
+<h2>Recording Routing Decisions</h2>
+<p>A router that does not log its decisions is a router you cannot debug. Add structured logging of each decision so you can see the traffic mix later:</p>
+<pre><code>import json
+
+
+def ask(message):
+    deployment = choose_route(message)
+    decision = {
+        "message_length": len(message),
+        "route": deployment,
+        "keywords_hit": [w for w in COMPLEX_KEYWORDS if w in message.lower()],
+    }
+    print("[decision]", json.dumps(decision))
+    response = client.chat.completions.create(
+        model=deployment,
+        messages=[
+            {"role": "system", "content": "You are a concise support assistant."},
+            {"role": "user", "content": message},
+        ],
+    )
+    return response.choices[0].message.content
+</code></pre>
+
+<div class="tip">
+<p>In a production version, write this decision record to your application telemetry — for example Application Insights or a log workspace — instead of the console. That way you can chart the share of requests each route handles and spot when the powerful model is being overused.</p>
+</div>
+
+<h2>Adding a Capacity Fallback</h2>
+<p>The next improvement is a fallback: if the chosen deployment fails or is throttled, the router retries on the other deployment so the user still gets an answer. Wrap the call in a small retry loop:</p>
+<pre><code>def ask(message):
+    deployment = choose_route(message)
+    for attempt in (deployment, POWERFUL if deployment == FAST else FAST):
+        try:
+            response = client.chat.completions.create(
+                model=attempt,
+                messages=[
+                    {"role": "system", "content": "You are a concise support assistant."},
+                    {"role": "user", "content": message},
+                ],
+            )
+            return response.choices[0].message.content
+        except Exception as ex:
+            print(f"[fallback] {attempt} failed: {ex}")
+    return "I could not reach a model right now. Please try again."
+</code></pre>
+
+<div class="warn">
+<p>Fallbacks can mask real problems. If throttling is caused by a quota issue, the fallback keeps the user happy but the underlying cost or capacity problem remains. Always alert on fallback frequency rather than treating it as normal operation.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You built a working model router that picks a fast or powerful deployment based on request length and keywords, logs every routing decision, and falls back when the primary route fails. You also saw how the decision log feeds monitoring and how fallbacks protect users while surfacing capacity problems. This is the same pattern Foundry's router productizes for you. The next chapter is the section quiz.</p>
+<nav>
+<a href="93-model-router-in-microsoft-foundry.html">&larr; Previous: Model Router in Microsoft Foundry</a><a href="95-section-quiz.html">Next: Section Quiz &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

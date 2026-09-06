@@ -1,0 +1,93 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>150. Voice Live API - Demo - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 150</span>
+<h1>Voice Live API - Demo</h1>
+<p>This chapter walks through a Voice Live API session from connection to conversation. There is no exercise box here — instead you will follow a narrated demo, tracing exactly which messages cross the connection at each moment of a short voice call. By the end you should be able to picture the session flow well enough to design your own.</p>
+
+<h2>The Demo Scenario</h2>
+<p>Our demo is a booking assistant. The user speaks: "Do you have a table for two this evening?" The session must hear the sentence, understand the request, form an answer, and speak it back — all inside a single live connection, with no visible gap between the user stopping and the assistant starting.</p>
+
+<h2>Step 1 — Opening the Session</h2>
+<p>The demo starts with a connection request. The client sends a session configuration that states the parameters of the conversation:</p>
+<pre><code>{
+  "session_id": "booking-demo-01",
+  "audio_in": "wav-pcm-16khz-mono",
+  "audio_out": "wav-pcm-16khz-mono",
+  "recognition": { "language": "en-US" },
+  "synthesis": { "voice": "en-US-AriaNeural" },
+  "model": { "model_name": "the-deployed-conversation-model" }
+}</code></pre>
+<p>The service accepts, and from this point the channel is open. The configuration object is worth studying: it declares the audio formats, the recognition language, the voice that will speak back, and the model that will think — all decided before the first word.</p>
+
+<h2>Step 2 — The User Speaks</h2>
+<p>The user begins to talk. The client sends the audio in small chunks as they are captured. The service replies with recognition events that trail the audio by only a fraction of a second:</p>
+<pre><code>{ "event": "recognition_started", "session_id": "booking-demo-01" }
+{ "event": "transcript_partial", "text": "Do you have a" }
+{ "event": "transcript_partial", "text": "Do you have a table for two" }
+{ "event": "transcript_partial", "text": "Do you have a table for two this evening" }
+{ "event": "transcript_final", "text": "Do you have a table for two this evening?" }</code></pre>
+<p>Notice the three partial transcripts. Each replaces the previous one as more audio is heard, and the final event settles the sentence. A UI could show these partials live, exactly like the caption behavior you built in the realtime recognition lab.</p>
+
+<h2>Step 3 — The Model Responds</h2>
+<p>Once the final transcript is committed, the conversation model inside the session produces a response. The service emits the assistant's reply as text, along with the signals that orchestrate the audio:</p>
+<pre><code>{ "event": "assistant_message", "role": "assistant",
+  "content": "Yes, we have a table for two available at 7 this evening." }
+{ "event": "synthesis_started" }</code></pre>
+<p>This is the seam between understanding and speaking. The transcript became an assistant message, and the service is now committed to turning that message into audio.</p>
+
+<h2>Step 4 — The Assistant Speaks</h2>
+<p>Synthesis begins, and audio chunks stream back to the client:</p>
+<pre><code>{ "event": "audio_chunk", "data": "&lt;base64 audio bytes, part 1&gt;" }
+{ "event": "audio_chunk", "data": "&lt;base64 audio bytes, part 2&gt;" }
+{ "event": "audio_chunk", "data": "&lt;base64 audio bytes, part 3&gt;" }
+{ "event": "synthesis_done", "session_id": "booking-demo-01" }</code></pre>
+<p>The client plays each chunk as it arrives. Playback starts while the assistant is still "finishing its sentence," which is what makes the exchange feel natural instead of canned.</p>
+
+<h2>Step 5 — Handling an Interruption</h2>
+<p>Partway through the reply, the user interrupts: "Actually, make it eight." The service detects speech while it is still synthesizing and reacts:</p>
+<pre><code>{ "event": "synthesis_interrupted" }
+{ "event": "recognition_started", "session_id": "booking-demo-01" }
+{ "event": "transcript_final", "text": "Actually, make it eight." }</code></pre>
+<p>Two things happen in sequence: the audio synthesis is cut off, and the session pivots back to listening. The conversation continues from the new input — the user never had to wait for the assistant to finish before being heard. This interruption dance is the defining behavior of a live voice session and the reason it feels like talking to a person.</p>
+
+<h2>Step 6 — Closing the Session</h2>
+<p>When the conversation is over, the client sends a closing signal and the service confirms:</p>
+<pre><code>{ "event": "session_ended", "session_id": "booking-demo-01" }</code></pre>
+<p>The channel closes, and billing for the session stops. In a production app this is where you would save the transcript, attach the session to a CRM record, and free any resources the session held.</p>
+
+<h2>Key Takeaways from the Demo</h2>
+<ul>
+<li>Everything happens over one connection: audio in, recognition events, model messages, and audio out.</li>
+<li>Partials, assistant messages, and synthesis signals are all separate events you can react to independently.</li>
+<li>Interruption is not an error — it is a designed transition from synthesis back to recognition.</li>
+<li>Configuration upfront (voices, languages, formats) means the live phase is pure streaming.</li>
+</ul>
+
+<div class="tip">
+<p>When you prototype your own live voice session, log every event with a timestamp from the start. The event ordering you observe is the blueprint for your application logic, and it will save you from guessing which signal means what.</p>
+</div>
+
+<h2>Summary</h2>
+<p>The Voice Live API demo showed the full lifecycle of a realtime voice conversation: a configured session opens, user audio streams in as recognition events, the model replies, synthesized audio streams out, and interruptions pivot the session back to listening. In the next chapter you will compare this speech-native translation flow with doing the same job with a general language model.</p>
+<nav>
+<a href="149-voice-live-api-the-big-picture.html">&larr; Previous: Voice Live API - The Big Picture</a><a href="151-speech-translation-vs-llm-speech.html">Next: Speech Translation vs. LLM Speech &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

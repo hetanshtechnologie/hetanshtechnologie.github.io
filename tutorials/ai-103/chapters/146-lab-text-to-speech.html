@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>146. Lab - Text-to-Speech - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 146</span>
+<h1>Lab - Text-to-Speech</h1>
+<p>In this lab you will give your application a voice. You will use the Azure Speech SDK to synthesize a sentence into an audio file, then extend the script to control delivery with SSML, choosing a specific neural voice, a speaking rate, and a pause for dramatic effect. By the end you will have a reusable function that turns any string into speech audio.</p>
+
+<div class="exercise">
+<h3>Exercise: Synthesizing speech from Python</h3>
+
+<h3>Step 1 — Confirm your setup</h3>
+<p>This lab uses the same Speech resource and virtual environment as the previous labs. Verify the SDK is installed:</p>
+<pre><code>pip show azure-cognitiveservices-speech</code></pre>
+<p>If the package is missing, install it again as you did in the speech-to-text lab.</p>
+
+<h3>Step 2 — Write a basic synthesis script</h3>
+<p>Create <code>synthesize_speech.py</code>. The script reads the key and region from environment variables, renders the text with a named neural voice, and saves the result to an MP3 file.</p>
+<pre><code>import os
+
+import azure.cognitiveservices.speech as speechsdk
+
+SPEECH_KEY = os.environ.get("YOUR_SPEECH_KEY", "")
+SPEECH_REGION = os.environ.get("YOUR_SPEECH_REGION", "")
+VOICE_NAME = os.environ.get("VOICE_NAME", "en-US-JennyNeural")
+
+speech_config = speechsdk.SpeechConfig(
+    subscription=SPEECH_KEY,
+    region=SPEECH_REGION,
+)
+speech_config.speech_synthesis_voice_name = VOICE_NAME
+
+speech_config.set_speech_synthesis_output_format(
+    speechsdk.SpeechSynthesisOutputFormat.Audio24Khz160KBitRateMonoMp3
+)
+
+synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
+text = (
+    "Welcome to the speech and voice section of AI-103. "
+    "This audio was synthesized entirely by code."
+)
+
+result = synthesizer.speak_text_async(text).get()
+
+if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+    stream = speechsdk.AudioDataStream(result)
+    stream.save_to_file("welcome.mp3")
+    print("Saved to welcome.mp3")
+elif result.reason == speechsdk.ResultReason.Canceled:
+    cancellation = speechsdk.CancellationDetails(result)
+    print(f"Canceled: {cancellation.reason} — {cancellation.error_details}")</code></pre>
+
+<h3>Step 3 — Run it and listen</h3>
+<pre><code>python synthesize_speech.py</code></pre>
+<p>Open <code>welcome.mp3</code> in any player. You should hear a natural female neural voice reading your sentence.</p>
+
+<h3>Step 4 — Take control with SSML</h3>
+<p>Now create <code>synthesize_ssml.py</code>. Instead of plain text, it sends an SSML document that selects a voice, slows the pace, and inserts a pause. Note that angle brackets inside the XML must be escaped inside the HTML source of this page.</p>
+<pre><code>import os
+
+import azure.cognitiveservices.speech as speechsdk
+
+SPEECH_KEY = os.environ.get("YOUR_SPEECH_KEY", "")
+SPEECH_REGION = os.environ.get("YOUR_SPEECH_REGION", "")
+
+speech_config = speechsdk.SpeechConfig(
+    subscription=SPEECH_KEY,
+    region=SPEECH_REGION,
+)
+synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
+
+ssml = """&lt;speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis"
+         xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US"&gt;
+  &lt;voice name="en-US-AriaNeural"&gt;
+    &lt;mstts:express-as style="cheerful"&gt;
+      &lt;prosody rate="0.9"&gt;
+        Great work!&lt;break time="600ms"/&gt;
+        Your pipeline now has a voice.
+      &lt;/prosody&gt;
+    &lt;/mstts:express-as&gt;
+  &lt;/voice&gt;
+&lt;/speak&gt;"""
+
+result = synthesizer.speak_ssml_async(ssml).get()
+
+if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+    speechsdk.AudioDataStream(result).save_to_file("ssml_demo.mp3")
+    print("Saved to ssml_demo.mp3")
+else:
+    cancellation = speechsdk.CancellationDetails(result)
+    print(f"Canceled: {cancellation.reason} — {cancellation.error_details}")</code></pre>
+
+<h3>Step 5 — Compare the two outputs</h3>
+<pre><code>python synthesize_ssml.py</code></pre>
+<p>Play <code>ssml_demo.mp3</code> next to <code>welcome.mp3</code>. The second clip uses a different voice, speaks slightly slower, carries a cheerful tone, and pauses deliberately after the first phrase — all controlled by markup rather than by editing the audio file.</p>
+</div>
+
+<h2>Reading the Result</h2>
+<p>Note how the SDK returns a <code>SpeechSynthesisResult</code> whose reason tells you whether audio was produced. The <code>AudioDataStream</code> object is what lets you save the bytes to a file. For short clips, you can also access <code>result.audio_data</code> directly as a byte array and stream it to a speaker or a network connection.</p>
+
+<div class="tip">
+<p>You do not need to generate audio synchronously. The SDK supports an event model — <code>Synthesizing</code>, <code>SynthesisStarted</code>, <code>SynthesisCompleted</code> — that lets you start playing the beginning of a long narration before the end has been generated.</p>
+</div>
+
+<h2>Choosing the Right Voice</h2>
+<p>The voice name is simply a string such as <code>en-US-JennyNeural</code> or <code>en-GB-SoniaNeural</code>. You can list all available voices by calling the voices list endpoint and filtering by locale and gender. When you pick a voice, keep your audience in mind: the same sentence sounds different in a news anchor voice versus a conversational one, and matching the voice to the product's personality matters as much as the words themselves.</p>
+
+<div class="warn">
+<p>Custom neural voices are a governed resource. Training a voice on someone's recordings requires consent, and Microsoft enforces usage policies on custom voice deployment. If you plan to build a custom voice, review the responsible AI guidance for speech before uploading any recordings.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You synthesized audio from plain text with the Speech SDK, saved the output to an MP3 file, and then took control of voice, rate, tone, and pauses using an SSML document. TTS is now a drop-in building block for your applications. In the next chapter you will look at the other end of the voice arc again — how agents can invoke these same speech capabilities as tools through the Azure Speech MCP server.</p>
+<nav>
+<a href="145-text-to-speech.html">&larr; Previous: Text to Speech</a><a href="147-speech-as-an-agent-modality-the-azure-speech-mcp-server.html">Next: Speech as an Agent Modality the Azure Speech MCP Server &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,265 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crossword Puzzle</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body{background:#1a1a2e;color:#e0e0e0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:fadeIn .3s ease}
+.cell{width:36px;height:36px;text-align:center;font-size:18px;font-weight:bold;text-transform:uppercase;background:#2d2d44;border:1px solid #4a4a6a;color:#fff;outline:none;caret-color:#fbbf24}
+.cell:focus{background:#3d3d5c;box-shadow:0 0 0 2px #fbbf24}
+.cell.black{background:#111;pointer-events:none}
+.cell.correct{background:#166534;border-color:#22c55e}
+.cell.incorrect{background:#991b1b;border-color:#ef4444}
+.cell-number{position:absolute;top:1px;left:2px;font-size:9px;color:#aaa;pointer-events:none}
+.cell-container{position:relative;display:inline-block}
+.clue-item{cursor:pointer;padding:4px 8px;border-radius:4px;transition:background .15s}
+.clue-item:hover{background:#374151}
+.clue-item.active{background:#4b5563;font-weight:bold}
+</style>
+</head>
+<body>
+<a href="index.html" class="fixed top-4 left-4 text-purple-400 hover:text-purple-300 text-sm font-semibold z-10">&larr; Back to Games</a>
+<div class="max-w-4xl mx-auto px-4 py-8">
+  <h1 class="text-3xl font-bold mb-6 text-center bg-gradient-to-r from-teal-400 to-blue-500 bg-clip-text text-transparent">Crossword Puzzle</h1>
+  <div id="start-screen" class="text-center fade-in">
+    <p class="text-gray-400 mb-6">A 10x10 crossword puzzle. Click a cell to start filling in words!</p>
+    <button onclick="initGame()" class="px-8 py-3 bg-teal-600 hover:bg-teal-500 rounded-lg text-lg font-semibold transition">Start Puzzle</button>
+  </div>
+  <div id="game-screen" class="hidden fade-in">
+    <div class="flex justify-between items-center mb-4">
+      <div class="flex gap-2">
+        <button onclick="checkAnswers()" class="px-4 py-2 bg-green-600 hover:bg-green-500 rounded text-sm font-semibold transition">Check</button>
+        <button onclick="revealAll()" class="px-4 py-2 bg-red-600 hover:bg-red-500 rounded text-sm font-semibold transition">Reveal</button>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="timer-label" class="text-sm text-gray-400">Time:</span>
+        <span id="timer" class="text-lg font-bold text-yellow-400">0:00</span>
+      </div>
+    </div>
+    <div class="flex flex-col lg:flex-row gap-6">
+      <div class="flex-shrink-0 overflow-auto">
+        <div id="grid" class="inline-grid gap-0" style="grid-template-columns:repeat(10,36px)"></div>
+      </div>
+      <div class="flex-1 overflow-auto max-h-[400px]">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <h3 class="text-sm font-bold text-teal-400 mb-2">Across</h3>
+            <div id="across-clues" class="space-y-1 text-sm"></div>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-teal-400 mb-2">Down</h3>
+            <div id="down-clues" class="space-y-1 text-sm"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p id="feedback" class="text-center text-sm mt-4 h-5"></p>
+  </div>
+  <div id="result-screen" class="hidden text-center fade-in">
+    <h2 class="text-3xl font-bold mb-4 bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">Puzzle Complete!</h2>
+    <p id="result-time" class="text-xl text-gray-400 mb-6"></p>
+    <button onclick="initGame()" class="px-8 py-3 bg-teal-600 hover:bg-teal-500 rounded-lg text-lg font-semibold transition">New Puzzle</button>
+  </div>
+</div>
+<script>
+const ROWS=10,COLS=10;
+
+const words=[
+  {word:"ELEPHANT",clue:"Largest land animal",row:0,col:0,dir:"across"},
+  {word:"PLANET",clue:"Earth is one",row:1,col:3,dir:"across"},
+  {word:"OCEAN",clue:"Pacific is the largest",row:2,col:0,dir:"across"},
+  {word:"GUITAR",clue:"Six-stringed instrument",row:4,col:0,dir:"across"},
+  {word:"PYRAMID",clue:"Ancient Egyptian structure",row:5,col:3,dir:"across"},
+  {word:"ROBOT",clue:"Mechanical helper",row:7,col:0,dir:"across"},
+  {word:"MUSEUM",clue:"Place to view art and history",row:8,col:4,dir:"across"},
+  {word:"PUZZLE",clue:"Jigsaw is one kind",row:9,col:0,dir:"across"},
+  {word:"ELEGANT",clue:"Graceful and stylish",row:0,col:0,dir:"down"},
+  {word:"POLYGON",clue:"Shape with many sides",row:1,col:3,dir:"down"},
+  {word:"ORANGE",clue:"Citrus fruit, also a color",row:2,col:0,dir:"down"},
+  {word:"TRIANGLE",clue:"Three-sided shape",row:0,col:7,dir:"down"},
+  {word:"NUCLEAR",clue:"Relating to atomic energy",row:3,col:5,dir:"down"},
+  {word:"VOLCANO",clue:"Mountain that erupts",row:2,col:2,dir:"down"},
+  {word:"HORIZON",clue:"Where sky meets earth",row:3,col:3,dir:"down"}
+];
+
+let grid=[],solution=[],numberMap=[],cells=[],timerInterval=null,startTime=null,activeDir='across',activeClue=null;
+
+function initGame(){
+  grid=Array.from({length:ROWS},()=>Array(COLS).fill(''));
+  solution=Array.from({length:ROWS},()=>Array(COLS).fill(''));
+  numberMap=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+  cells=[];
+  let num=1;
+  words.forEach(w=>{
+    const r=w.row,c=w.col;
+    if(numberMap[r][c]===0){numberMap[r][c]=num;num++}
+    for(let i=0;i<w.word.length;i++){
+      const dr=w.dir==='down'?i:0,dc=w.dir==='across'?i:0;
+      solution[r+dr][c+dc]=w.word[i];
+    }
+  });
+  buildGrid();
+  buildClues();
+  clearInterval(timerInterval);startTime=Date.now();
+  timerInterval=setInterval(()=>{const s=Math.floor((Date.now()-startTime)/1000);const m=Math.floor(s/60);document.getElementById('timer').textContent=`${m}:${String(s%60).padStart(2,'0')}`},1000);
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('result-screen').classList.add('hidden');
+  document.getElementById('game-screen').classList.remove('hidden');
+  document.getElementById('feedback').textContent='';
+  selectClue(0,'across');
+}
+
+function buildGrid(){
+  const g=document.getElementById('grid');g.innerHTML='';cells=[];
+  for(let r=0;r<ROWS;r++){
+    cells[r]=[];
+    for(let c=0;c<COLS;c++){
+      const cont=document.createElement('div');
+      cont.className='cell-container';
+      if(solution[r][c]===''){
+        cont.innerHTML='<div class="cell black"></div>';
+        cells[r][c]=null;
+      } else {
+        const inp=document.createElement('input');
+        inp.className='cell';
+        inp.type='text';inp.maxLength=1;inp.dataset.row=r;inp.dataset.col=c;
+        const num=numberMap[r][c];
+        if(num>0) cont.innerHTML=`<span class="cell-number">${num}</span>`;
+        cont.appendChild(inp);
+        cells[r][c]=inp;
+        inp.addEventListener('input',function(){this.value=this.value.toUpperCase();moveCursor(r,c)});
+        inp.addEventListener('keydown',function(e){
+          if(e.key==='Backspace'&&!this.value){movePrev(r,c,e);e.preventDefault()}
+          else if(e.key==='ArrowRight'){moveTo(r,c+1);e.preventDefault()}
+          else if(e.key==='ArrowLeft'){moveTo(r,c-1);e.preventDefault()}
+          else if(e.key==='ArrowDown'){moveTo(r+1,c);e.preventDefault()}
+          else if(e.key==='ArrowUp'){moveTo(r-1,c);e.preventDefault()}
+          else if(e.key==='Tab'){e.preventDefault();cycleClue(e.shiftKey)}
+        });
+        inp.addEventListener('focus',()=>onFocusCell(r,c));
+      }
+      g.appendChild(cont);
+    }
+  }
+}
+
+function moveTo(r,c){
+  if(r>=0&&r<ROWS&&c>=0&&c<COLS&&cells[r][c]){cells[r][c].focus();cells[r][c].select()}
+}
+
+function moveCursor(r,c){
+  if(activeDir==='across') moveTo(r,c+1);
+  else moveTo(r+1,c);
+}
+
+function movePrev(r,c,e){
+  if(activeDir==='across') moveTo(r,c-1);
+  else moveTo(r-1,c);
+}
+
+function onFocusCell(r,c){
+  const num=numberMap[r][c];
+  const w=words.find(w=>w.row===r&&w.col===c&&w.dir===activeDir)||words.find(w=>w.row===r&&w.col===c);
+  if(w){activeDir=w.dir;activeClue=w;highlightClue(w)}
+}
+
+function buildClues(){
+  const ac=document.getElementById('across-clues');ac.innerHTML='';
+  const dn=document.getElementById('down-clues');dn.innerHTML='';
+  words.forEach((w,i)=>{
+    const d=document.createElement('div');
+    d.className='clue-item';
+    const num=numberMap[w.row][w.col];
+    d.textContent=`${num}. ${w.clue}`;
+    d.dataset.index=i;
+    d.onclick=()=>{activeDir=w.dir;activeClue=w;selectClue(i,w.dir);moveTo(w.row,w.col)};
+    if(w.dir==='across') ac.appendChild(d);else dn.appendChild(d);
+  });
+}
+
+function selectClue(idx,dir){
+  activeDir=dir;
+  document.querySelectorAll('.clue-item').forEach(c=>c.classList.remove('active'));
+  const list=dir==='across'?document.getElementById('across-clues'):document.getElementById('down-clues');
+  const items=list.querySelectorAll('.clue-item');
+  if(items[idx]) items[idx].classList.add('active');
+  activeClue=words.filter(w=>w.dir===dir)[idx];
+}
+
+function highlightClue(w){
+  const dirIdx=words.filter(x=>x.dir===w.dir).indexOf(w);
+  selectClue(dirIdx,w.dir);
+}
+
+function cycleClue(reverse){
+  const dirWords=words.filter(w=>w.dir===activeDir);
+  let idx=dirWords.indexOf(activeClue);
+  if(reverse) idx=(idx-1+dirWords.length)%dirWords.length;
+  else idx=(idx+1)%dirWords.length;
+  activeClue=dirWords[idx];
+  selectClue(idx,activeDir);
+  moveTo(activeClue.row,activeClue.col);
+}
+
+function checkAnswers(){
+  let allCorrect=true;
+  document.querySelectorAll('.cell:not(.black)').forEach(c=>{c.classList.remove('correct','incorrect')});
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      if(cells[r][c]&&solution[r][c]){
+        if(cells[r][c].value.toUpperCase()===solution[r][c]) cells[r][c].classList.add('correct');
+        else{cells[r][c].classList.add('incorrect');allCorrect=false}
+      }
+    }
+  }
+  if(allCorrect){endGame();return}
+  document.getElementById('feedback').innerHTML='<span class="text-yellow-400">Some cells are incorrect (shown in red). Keep trying!</span>';
+  setTimeout(()=>document.getElementById('feedback').textContent='',3000);
+}
+
+function revealAll(){
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      if(cells[r][c]&&solution[r][c]){
+        cells[r][c].value=solution[r][c];
+        cells[r][c].classList.remove('incorrect');
+        cells[r][c].classList.add('correct');
+      }
+    }
+  }
+  endGame();
+}
+
+function endGame(){
+  clearInterval(timerInterval);
+  const elapsed=Math.floor((Date.now()-startTime)/1000);
+  const m=Math.floor(elapsed/60),s=elapsed%60;
+  document.getElementById('game-screen').classList.add('hidden');
+  document.getElementById('result-screen').classList.remove('hidden');
+  document.getElementById('result-time').textContent=`Completed in ${m}:${String(s).padStart(2,'0')}`;
+}
+
+initGame();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

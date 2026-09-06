@@ -1,0 +1,154 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>239. Lab - Python - GPT 5 - Getting the entire response - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 239</span>
+<h1>Lab - Python - GPT 5 - Getting the entire response</h1>
+<p>In the previous labs you called the chat completion API and pulled one value out of the result — usually the assistant's message text. But the object the SDK returns holds much more than that single string: metadata, token usage, finish reasons, and sometimes several candidate responses. In this lab you will stop throwing that information away and learn to inspect the entire response object, so you can read exactly what the model produced and how much it cost.</p>
+
+<h2>Why the Full Response Matters</h2>
+<p>When you print a response directly with <code>print(response)</code>, most SDKs render a compact, human-readable summary. That hides almost everything. The actual object is a nested structure with several top-level fields, and each one is useful in production code:</p>
+<table>
+<tr><th>Field</th><th>What it holds</th></tr>
+<tr><td><code>id</code></td><td>A unique identifier for the request, useful for correlating logs and support calls.</td></tr>
+<tr><td><code>model</code></td><td>The deployment or model that produced the answer.</td></tr>
+<tr><td><code>created</code></td><td>A Unix timestamp of when the response was generated.</td></tr>
+<tr><td><code>choices</code></td><td>A list of candidate responses. Each choice contains a message, a finish reason, and an index.</td></tr>
+<tr><td><code>usage</code></td><td>Token counts: <code>prompt_tokens</code>, <code>completion_tokens</code>, and <code>total_tokens</code>.</td></tr>
+</table>
+
+<div class="tip">
+<p>Getting into the habit of inspecting the full response early saves debugging time later. When a deployment misbehaves, the first questions are usually "what finish reason did it return?" and "how many tokens did it consume?" — both live in the response object.</p>
+</div>
+
+<h2>Step 1: Set Up the Script</h2>
+<div class="exercise">
+<h3>Exercise 1: Print the complete response as JSON</h3>
+<ol>
+<li>Create a folder named <code>ai103-lab239</code> and open it in VS Code.</li>
+<li>Create a file called <code>full_response.py</code>.</li>
+<li>Set your endpoint and key as environment variables so the script stays free of hard-coded secrets:</li>
+</ol>
+<pre><code>$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+<ol start="4">
+<li>Paste this script and replace <code>YOUR_DEPLOYMENT_NAME</code> with your chat deployment name:</li>
+</ol>
+<pre><code>import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {"role": "system", "content": "You are a concise assistant."},
+        {"role": "user", "content": "Name three cloud computing benefits."},
+    ],
+)
+
+print(response.model_dump_json(indent=2))
+</code></pre>
+<ol start="5">
+<li>Run the script:</li>
+</ol>
+<pre><code>python full_response.py
+</code></pre>
+<p>The output is the complete response serialized as JSON. Scroll through it and locate the <code>choices</code> and <code>usage</code> sections.</p>
+</div>
+
+<h2>Step 2: Read Individual Fields</h2>
+<p>Now that you have seen the whole object, practice pulling specific values out of it. Each access follows the same pattern: navigate from <code>response</code> down through the nested structure.</p>
+<div class="exercise">
+<h3>Exercise 2: Extract the pieces you care about</h3>
+<p>Create <code>inspect_response.py</code> with this code:</p>
+<pre><code>import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {"role": "system", "content": "You are a concise assistant."},
+        {"role": "user", "content": "Summarize the Agile manifesto in one sentence."},
+    ],
+)
+
+choice = response.choices[0]
+print("Request id :", response.id)
+print("Model      :", response.model)
+print("Finish     :", choice.finish_reason)
+print("Role       :", choice.message.role)
+print("Content    :", choice.message.content)
+print("Prompt tokens     :", response.usage.prompt_tokens)
+print("Completion tokens :", response.usage.completion_tokens)
+print("Total tokens      :", response.usage.total_tokens)
+</code></pre>
+<pre><code>python inspect_response.py
+</code></pre>
+<p>Run the script and read each printed line. Note how the fields map one-to-one to the JSON you saw in Exercise 1.</p>
+</div>
+
+<div class="note">
+<p>The <code>finish_reason</code> value is worth watching. A normal response ends with <code>stop</code>. A value of <code>length</code> means the model hit the maximum token limit and the answer was cut off. If you see <code>content_filter</code>, the response was stopped by a safety filter — a sign you may need to rephrase the prompt or review your content filter settings.</p>
+</div>
+
+<h2>Step 3: Inspect Multiple Choices</h2>
+<p>The <code>n</code> parameter asks the model for several candidate answers in a single call. Each candidate appears as a separate entry in the <code>choices</code> list, so you can compare alternatives or pick the best one.</p>
+<div class="exercise">
+<h3>Exercise 3: Request three candidates</h3>
+<p>Modify <code>inspect_response.py</code> to pass <code>n=3</code> and then loop over every choice:</p>
+<pre><code>response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {"role": "system", "content": "You are a concise assistant."},
+        {"role": "user", "content": "Suggest a tagline for a coffee shop."},
+    ],
+    n=3,
+)
+
+for i, choice in enumerate(response.choices):
+    print(f"Candidate {i}: {choice.message.content}")
+    print(f"Finish reason: {choice.finish_reason}")
+</code></pre>
+<pre><code>python inspect_response.py
+</code></pre>
+<p>Run it a few times. Because sampling is random, the three candidates usually differ on every run — even for the same prompt.</p>
+</div>
+
+<div class="warn">
+<p>Each candidate in a multi-choice request consumes completion tokens. Setting <code>n</code> high is a quick way to multiply your token spend, so reserve it for cases where you genuinely need alternatives and always inspect the <code>usage</code> numbers afterward.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You learned that a chat completion response is a rich object, not a single string. You serialized the whole response to JSON, extracted the message, finish reason, and token usage field by field, and generated several candidate answers with <code>n=3</code>. This foundation makes the rest of the course easier, because every downstream pattern — including the monitoring you will read about next — depends on reading values out of the response object.</p>
+<nav>
+<a href="238-lab-python-gpt-5-system-messages.html">&larr; Previous: Lab - Python - GPT 5 - System Messages</a><a href="240-quick-note-on-monitoring-the-model-usage.html">Next: Quick note on monitoring the model usage &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

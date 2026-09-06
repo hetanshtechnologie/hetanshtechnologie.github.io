@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>189. Using Azure Document Intelligence - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 189</span>
+<h1>Using Azure Document Intelligence</h1>
+<p>Knowing what Azure Document Intelligence does is different from putting it to work. This chapter is the practical middle step: you will provision a Document Intelligence resource, call it from Python with the official SDK, analyze an invoice, and read the extracted fields out of the response. This is the same pattern the CloudXeus invoice agent will rely on in the coming chapters.</p>
+
+<h2>Provisioning the Resource</h2>
+<p>Create a Document Intelligence resource with the Azure CLI. The kind is <code>FormRecognizer</code> and the free tier is plenty for the labs in this course:</p>
+
+<pre><code>az cognitiveservices account create \
+    --name cloudxeus-docintel \
+    --resource-group cloudxeus-docs-rg \
+    --kind FormRecognizer \
+    --sku F0 \
+    --location eastus</code></pre>
+
+<p>Fetch the endpoint and one of the keys, then store them as environment variables:</p>
+
+<pre><code>$env:DOCUMENT_INTELLIGENCE_ENDPOINT = "https://cloudxeus-docintel.cognitiveservices.azure.com/"
+$env:DOCUMENT_INTELLIGENCE_KEY = "YOUR_KEY"</code></pre>
+
+<div class="warn">
+<p>Treat the key like a password. The labs read it from environment variables, and you should never commit it to source control or paste it into shared documents.</p>
+</div>
+
+<h2>Installing the Python SDK</h2>
+<p>The SDK package is <code>azure-ai-documentintelligence</code>. Install it in your lab environment:</p>
+
+<pre><code>pip install azure-ai-documentintelligence</code></pre>
+
+<p>The SDK's <code>DocumentIntelligenceClient</code> mirrors the REST API: you call <code>begin_analyze_document</code> with a model ID and a document, then wait for the polling operation to finish.</p>
+
+<h2>Analyzing an Invoice</h2>
+<div class="exercise">
+<h3>Exercise 1: Extract fields from an invoice with the prebuilt model</h3>
+<p>Create a folder named <code>ai103-lab189</code> with a file called <code>analyze_invoice.py</code> containing:</p>
+
+<pre><code>import os
+
+from azure.ai.documentintelligence import DocumentIntelligenceClient
+from azure.core.credentials import AzureKeyCredential
+
+endpoint = os.environ["DOCUMENT_INTELLIGENCE_ENDPOINT"]
+key = os.environ["DOCUMENT_INTELLIGENCE_KEY"]
+
+client = DocumentIntelligenceClient(
+    endpoint=endpoint,
+    credential=AzureKeyCredential(key),
+)
+
+with open("invoice.pdf", "rb") as fh:
+    poller = client.begin_analyze_document(
+        model_id="prebuilt-invoice",
+        analyze_request=fh,
+        content_type="application/pdf",
+    )
+
+result = poller.result()
+
+for document in result.documents:
+    fields = document.fields
+    print("Vendor:", fields.get("VendorName").value_string if fields.get("VendorName") else None)
+    print("Invoice ID:", fields.get("InvoiceId").value_string if fields.get("InvoiceId") else None)
+    print("Issue date:", fields.get("InvoiceDate").value_date if fields.get("InvoiceDate") else None)
+    print("Due date:", fields.get("DueDate").value_date if fields.get("DueDate") else None)
+    print("Total:", fields.get("InvoiceTotal").value_currency if fields.get("InvoiceTotal") else None)</code></pre>
+
+<p>Place an invoice file named <code>invoice.pdf</code> in the folder and run:</p>
+
+<pre><code>python analyze_invoice.py</code></pre>
+
+<p>If everything is configured correctly, the script prints the five fields. Try it with a scanned invoice as well — the prebuilt model runs OCR internally, so the same code works.</p>
+</div>
+
+<h2>Reading the Response</h2>
+<p>The analysis result is richer than a single field value. Useful things to read from it:</p>
+<ul>
+<li><code>fields</code> — the extracted named fields, each with a value and a <code>confidence</code> score.</li>
+<li><code>pages</code> — the OCR output per page: lines, words, and their polygon coordinates.</li>
+<li><code>tables</code> — detected cell grids with content and location, including multi-page tables.</li>
+<li><code>key_value_pairs</code> — label/value relationships found on forms.</li>
+</ul>
+
+<div class="tip">
+<p>Build a simple confidence check into the pipeline: when a field's <code>confidence</code> drops below a threshold such as 0.8, mark the document for human review instead of trusting the extracted value.</p>
+</div>
+
+<h2>Handling the Polling Pattern</h2>
+<p>Document analysis is asynchronous — the call returns quickly, and the result becomes available after the service finishes processing. The SDK hides this behind the <code>poller</code> object. For long documents, you may want to control the wait explicitly rather than blocking on the default polling:</p>
+
+<pre><code>poller = client.begin_analyze_document(
+    model_id="prebuilt-invoice",
+    analyze_request=fh,
+    content_type="application/pdf",
+    polling_interval=5,
+)
+result = poller.result(timeout=300)</code></pre>
+
+<p><code>polling_interval</code> sets how often the client checks status; <code>timeout</code> sets the maximum wait in seconds. In a production pipeline, consider running the analysis in a job queue rather than blocking a request thread.</p>
+
+<h2>Troubleshooting Common Errors</h2>
+<table>
+<tr><th>Error</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td><code>401</code></td><td>Missing or wrong key</td><td>Re-check the environment variable and resource key</td></tr>
+<tr><td><code>404</code> model not found</td><td>Wrong model id</td><td>Use a valid id such as <code>prebuilt-invoice</code> or your custom model id</td></tr>
+<tr><td><code>413</code> payload too large</td><td>Oversized file</td><td>Downsample the image or compress the PDF before sending</td></tr>
+<tr><td><code>415</code> unsupported media</td><td>File format not allowed</td><td>Submit PDF, PNG, or JPG</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You provisioned a Document Intelligence resource, installed the Python SDK, analyzed an invoice with the prebuilt model, and learned to read fields, confidence scores, pages, and tables from the response. You also saw how to tune polling and debug the common failure modes. The next chapter covers what happens when the service or the underlying model changes over time — managing model updates.</p>
+<nav>
+<a href="188-what-is-azure-document-intelligence.html">&larr; Previous: What is Azure Document Intelligence</a><a href="190-managing-model-updates.html">Next: Managing model updates &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

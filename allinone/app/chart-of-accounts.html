@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chart of Accounts — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Chart of Accounts</span>
+    </div>
+    <div>
+      <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+    </div>
+  </nav>
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">Chart of Accounts</h1>
+      <div class="flex gap-2">
+        <button onclick="loadDemoAccounts()" class="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-200">Load Demo Accounts</button>
+        <button onclick="showAddForm()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">+ Add Account</button>
+      </div>
+    </div>
+    <div id="alert"></div>
+    <div id="loading" class="text-gray-500 mb-4">Loading...</div>
+
+    <!-- Add/Edit Form -->
+    <div id="form-section" class="hidden bg-white rounded-xl shadow-sm border p-6 mb-6">
+      <h2 id="form-title" class="font-bold text-lg mb-4">Add Account</h2>
+      <form id="coa-form" class="grid grid-cols-2 gap-4">
+        <div><label class="block text-sm font-semibold mb-1">Code</label><input type="text" id="code" class="w-full border rounded-lg px-3 py-2 text-sm font-mono" required></div>
+        <div><label class="block text-sm font-semibold mb-1">Name</label><input type="text" id="acct_name" class="w-full border rounded-lg px-3 py-2 text-sm" required></div>
+        <div><label class="block text-sm font-semibold mb-1">Type</label><select id="acct_type" class="w-full border rounded-lg px-3 py-2 text-sm"><option value="asset">Asset</option><option value="liability">Liability</option><option value="income">Income</option><option value="expense">Expense</option><option value="equity">Equity</option></select></div>
+        <div class="flex items-end gap-2">
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">Save</button>
+          <button type="button" onclick="hideForm()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-300">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="accounts-section" class="hidden bg-white rounded-xl shadow-sm border overflow-x-auto"></div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let editId = null;
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin();
+      if (!user) return;
+      await loadAccounts();
+
+      document.getElementById('coa-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const data = { code: document.getElementById('code').value.trim(), name: document.getElementById('acct_name').value.trim(), type: document.getElementById('acct_type').value };
+        try {
+          const orgId = await getOrgId();
+          if (editId) {
+            const { error } = await erp.from('chart_of_accounts').update(data).eq('id', editId);
+            if (error) throw error;
+          } else {
+            const { error } = await erp.from('chart_of_accounts').insert({ ...data, org_id: orgId });
+            if (error) throw error;
+          }
+          showAlert(editId ? 'Account updated!' : 'Account created!', 'success');
+          hideForm(); await loadAccounts();
+        } catch (err) { showAlert(err.message, 'error'); }
+      });
+    });
+
+    async function loadAccounts() {
+      const orgId = await getOrgId();
+      if (!orgId) return;
+      const { data, error } = await erp.from('chart_of_accounts').select('*').eq('org_id', orgId).eq('is_active', true).order('code');
+      if (error) throw error;
+      document.getElementById('loading').classList.add('hidden');
+      const div = document.getElementById('accounts-section');
+      div.classList.remove('hidden');
+      if (!data || !data.length) {
+        div.innerHTML = '<div class="p-6 text-gray-500 text-center">No accounts yet. <button onclick="loadDemoAccounts()" class="text-blue-600 hover:underline font-semibold">Load demo accounts</button> or add your first account.</div>';
+        return;
+      }
+      div.innerHTML = `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b text-left"><th class="p-3 font-semibold">Code</th><th class="p-3 font-semibold">Name</th><th class="p-3 font-semibold">Type</th><th class="p-3 font-semibold">Actions</th></tr></thead><tbody>${data.map(a => `<tr class="border-b hover:bg-gray-50"><td class="p-3 font-mono text-xs">${escapeHtml(a.code)}</td><td class="p-3 font-medium">${escapeHtml(a.name)}</td><td class="p-3"><span class="badge ${a.type}">${a.type}</span></td><td class="p-3"><button onclick="editAccount(${a.id},'${escapeHtml(a.code)}','${escapeHtml(a.name)}','${a.type}')" class="text-blue-600 hover:underline text-xs mr-2">Edit</button><button onclick="deleteAccount(${a.id})" class="text-red-600 hover:underline text-xs">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    }
+
+    const DEMO_ACCOUNTS = [
+      { code: '10001', name: 'Cash', type: 'asset' },
+      { code: '10002', name: 'Bank Account', type: 'asset' },
+      { code: '10003', name: 'Accounts Receivable', type: 'asset' },
+      { code: '10004', name: 'Inventory', type: 'asset' },
+      { code: '10005', name: 'Fixed Assets', type: 'asset' },
+      { code: '10006', name: 'Prepaid Expenses', type: 'asset' },
+      { code: '20001', name: 'Accounts Payable', type: 'liability' },
+      { code: '20002', name: 'GST Payable', type: 'liability' },
+      { code: '20003', name: 'TDS Payable', type: 'liability' },
+      { code: '20004', name: 'Salary Payable', type: 'liability' },
+      { code: '20005', name: 'Loan Payable', type: 'liability' },
+      { code: '30001', name: 'Sales Revenue', type: 'income' },
+      { code: '30002', name: 'Service Revenue', type: 'income' },
+      { code: '30003', name: 'Interest Income', type: 'income' },
+      { code: '30004', name: 'Discount Received', type: 'income' },
+      { code: '40001', name: 'Cost of Goods Sold', type: 'expense' },
+      { code: '40002', name: 'Salary Expense', type: 'expense' },
+      { code: '40003', name: 'Rent Expense', type: 'expense' },
+      { code: '40004', name: 'Electricity Expense', type: 'expense' },
+      { code: '40005', name: 'Office Expense', type: 'expense' },
+      { code: '40006', name: 'Travel Expense', type: 'expense' },
+      { code: '40007', name: 'Legal & Professional', type: 'expense' },
+      { code: '40008', name: 'Depreciation', type: 'expense' },
+      { code: '40009', name: 'Advertising Expense', type: 'expense' },
+      { code: '50001', name: "Owner's Capital", type: 'equity' },
+      { code: '50002', name: 'Retained Earnings', type: 'equity' },
+      { code: '50003', name: 'Drawings', type: 'equity' }
+    ];
+
+    async function loadDemoAccounts() {
+      const orgId = await getOrgId();
+      if (!orgId) { showAlert('Save your organization first.', 'error'); return; }
+      const btn = event?.target || document.querySelector('button[onclick*="loadDemoAccounts"]');
+      if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+      try {
+        const { data: existing } = await erp.from('chart_of_accounts').select('code').eq('org_id', orgId);
+        const existingCodes = new Set((existing || []).map(a => a.code));
+        const toInsert = DEMO_ACCOUNTS.filter(a => !existingCodes.has(a.code)).map(a => ({ ...a, org_id: orgId }));
+        if (!toInsert.length) { showAlert('All demo accounts already exist!', 'success'); if (btn) { btn.disabled = false; btn.textContent = 'Load Demo Accounts'; } return; }
+        const { error } = await erp.from('chart_of_accounts').insert(toInsert);
+        if (error) throw error;
+        showAlert(toInsert.length + ' demo accounts loaded!', 'success');
+        await loadAccounts();
+      } catch (err) { showAlert(err.message, 'error'); }
+      if (btn) { btn.disabled = false; btn.textContent = 'Load Demo Accounts'; }
+    }
+
+    function showAddForm() { editId = null; document.getElementById('form-title').textContent = 'Add Account'; document.getElementById('coa-form').reset(); document.getElementById('form-section').classList.remove('hidden'); }
+    function hideForm() { document.getElementById('form-section').classList.add('hidden'); editId = null; }
+    function editAccount(id, code, name, type) { editId = id; document.getElementById('form-title').textContent = 'Edit Account'; document.getElementById('code').value = code; document.getElementById('acct_name').value = name; document.getElementById('acct_type').value = type; document.getElementById('form-section').classList.remove('hidden'); }
+    async function deleteAccount(id) { if (!confirm('Delete this account?')) return; try { await erp.from('chart_of_accounts').update({ is_active: false }).eq('id', id); showAlert('Account deleted.', 'success'); await loadAccounts(); } catch (err) { showAlert(err.message, 'error'); } }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

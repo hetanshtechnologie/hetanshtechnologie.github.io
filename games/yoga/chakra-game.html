@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chakra Matching Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:#1e293b;padding:12px 20px;display:flex;align-items:center;gap:15px;border-bottom:2px solid #334155}
+.topbar a{color:#60a5fa;text-decoration:none;font-size:18px}.topbar h1{font-size:20px}
+.container{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px 20px;gap:16px}
+.stats{display:flex;gap:14px;justify-content:center}
+.stat{background:#1e293b;padding:10px 16px;border-radius:12px;text-align:center;border:1px solid #334155}
+.stat .val{font-size:22px;font-weight:bold;color:#8b5cf6}.stat .lbl{font-size:11px;color:#94a3b8}
+.level-badge{background:linear-gradient(135deg,#8b5cf6,#ec4899);padding:6px 16px;border-radius:20px;font-size:13px;font-weight:600}
+.info-card{background:#1e293b;border-radius:16px;padding:24px;width:100%;max-width:600px;border:2px solid #334155;text-align:center}
+.instruction{font-size:14px;color:#94a3b8;margin-bottom:14px}
+.body-diagram{display:flex;flex-direction:column;align-items:center;gap:4px;margin:10px 0}
+.chakra-slot{width:200px;height:42px;border:2px dashed #334155;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;transition:.2s;font-size:13px}
+.chakra-slot.filled{border-style:solid}
+.chakra-slot .dot{width:14px;height:14px;border-radius:50%;flex-shrink:0}
+.chakra-slot.correct{border-color:#10b981;background:#064e3b}
+.chakra-slot.wrong{border-color:#ef4444;background:#7f1d1d}
+.chakra-pool{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;padding:12px;background:#0f172a;border-radius:12px;min-height:50px;margin:10px 0}
+.chakra-chip{padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;border:2px solid #475569;transition:.2s;display:flex;align-items:center;gap:6px;user-select:none}
+.chakra-chip:hover{border-color:#8b5cf6}.chakra-chip.used{opacity:.3;pointer-events:none}
+.chakra-chip .dot{width:12px;height:12px;border-radius:50%;flex-shrink:0}
+.feedback{font-size:15px;font-weight:600;min-height:24px}
+.btn{background:#3b82f6;color:#fff;border:none;padding:12px 32px;border-radius:12px;font-size:16px;cursor:pointer;font-weight:600;transition:.2s}
+.btn:hover{background:#2563eb}.btn-check{background:#10b981}.btn-check:hover{background:#059669}
+.progress-bar{width:100%;max-width:600px;height:8px;background:#334155;border-radius:4px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#8b5cf6,#ec4899);border-radius:4px;transition:width .5s}
+.mode-sel{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.mode-btn{background:#0f172a;border:2px solid #334155;padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;color:#e2e8f0;transition:.2s}
+.mode-btn:hover,.mode-btn.active{border-color:#8b5cf6;color:#8b5cf6}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>🔮 Chakra Matching Game</h1></div>
+<div class="container">
+<div class="stats">
+<div class="stat"><div class="val" id="score">0</div><div class="lbl">Score</div></div>
+<div class="stat"><div class="val" id="round">1</div><div class="lbl">Round</div></div>
+<div class="stat"><div class="val" id="best">0</div><div class="lbl">Best</div></div>
+</div>
+<div class="level-badge" id="levelBadge">Level 1 — Colors</div>
+<div class="info-card">
+<div class="mode-sel">
+<button class="mode-btn active" onclick="setMode(0,this)">Match Colors</button>
+<button class="mode-btn" onclick="setMode(1,this)">Match Locations</button>
+<button class="mode-btn" onclick="setMode(2,this)">Match Meanings</button>
+</div>
+<div class="instruction" id="instruction">Drag chakra colors to their correct position in the body</div>
+<div class="body-diagram" id="bodyDiagram"></div>
+<div class="chakra-pool" id="chakraPool"></div>
+<div class="feedback" id="feedback"></div>
+<div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
+<button class="btn btn-check" onclick="checkChakras()">Check</button>
+<button class="btn" onclick="newRound()">New Round</button>
+</div>
+</div>
+</div>
+<script>
+const chakras=[
+{name:'Crown',sanskrit:'Sahasrara',color:'#9333ea',location:'Top of head',meaning:'Spiritual connection',pos:0},
+{name:'Third Eye',sanskrit:'Ajna',color:'#6366f1',location:'Forehead center',meaning:'Intuition & insight',pos:1},
+{name:'Throat',sanskrit:'Vishuddha',color:'#3b82f6',location:'Throat',meaning:'Communication',pos:2},
+{name:'Heart',sanskrit:'Anahata',color:'#22c55e',location:'Heart center',meaning:'Love & compassion',pos:3},
+{name:'Solar Plexus',sanskrit:'Manipura',color:'#eab308',location:'Upper abdomen',meaning:'Personal power',pos:4},
+{name:'Sacral',sanskrit:'Svadhisthana',color:'#f97316',location:'Lower abdomen',meaning:'Creativity & emotion',pos:5},
+{name:'Root',sanskrit:'Muladhara',color:'#ef4444',location:'Base of spine',meaning:'Safety & grounding',pos:6}
+];
+let mode=0,level=1,score=0,round=1,best=0,slots=[],placed={},selectedChip=null;
+function setMode(m,el){mode=m;document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('active'));el.classList.add('active');
+document.getElementById('instruction').textContent=['Match chakra colors to their position','Match chakra locations to their position','Match chakra meanings to their position'][m];
+document.getElementById('levelBadge').textContent='Level 1 — '+['Colors','Locations','Meanings'][m];newRound()}
+function newRound(){
+placed={};selectedChip=null;document.getElementById('feedback').textContent='';
+const diagram=document.getElementById('bodyDiagram');diagram.innerHTML='';
+slots=[];
+const shuffled=[...chakras].sort(()=>Math.random()-.5);
+chakras.forEach((c,i)=>{
+const slot=document.createElement('div');slot.className='chakra-slot';
+slot.innerHTML='<div class="dot" style="background:'+c.color+'"></div><span>'+c.name+'</span>';
+slot.dataset.idx=i;slot.onclick=()=>placeInSlot(i);diagram.appendChild(slot);slots.push(slot)});
+const pool=document.getElementById('chakraPool');pool.innerHTML='';
+const shuffledPool=[...chakras].sort(()=>Math.random()-.5);
+shuffledPool.forEach(c=>{
+const chip=document.createElement('div');chip.className='chakra-chip';
+const displayText=mode===0?'<div class="dot" style="background:'+c.color+'"></div>'+c.color:
+mode===1?c.location:c.meaning;
+chip.innerHTML=displayText;chip.dataset.name=c.name;
+chip.onclick=()=>{if(chip.classList.contains('used'))return;document.querySelectorAll('.chakra-chip').forEach(x=>x.style.borderColor='#475569');chip.style.borderColor='#8b5cf6';selectedChip=chip};
+pool.appendChild(chip)});
+}
+function placeInSlot(i){
+if(!selectedChip||placed[i])return;
+const name=selectedChip.dataset.name;placed[i]=name;
+slots[i].innerHTML+='<span style="color:#8b5cf6;font-weight:600"> ← '+(
+mode===0?chakras.find(c=>c.name===name).color:mode===1?chakras.find(c=>c.name===name).location:chakras.find(c=>c.name===name).meaning)+'</span>';
+slots[i].classList.add('filled');selectedChip.classList.add('used');selectedChip.style.borderColor='#475569';selectedChip=null}
+function checkChakras(){
+let correct=0;
+chakras.forEach((c,i)=>{
+if(placed[i]===c.name){slots[i].classList.add('correct');slots[i].classList.remove('wrong');correct++}
+else if(placed[i]){slots[i].classList.add('wrong');slots[i].classList.remove('correct')}});
+const pct=Math.round(correct/7*100);if(pct>=70){score+=correct*15;level++}
+best=Math.max(best,score);document.getElementById('score').textContent=score;document.getElementById('best').textContent=best;round++;document.getElementById('round').textContent=round;
+document.getElementById('feedback').textContent=correct+'/7 chakras matched! '+pct+'%';
+document.getElementById('feedback').style.color=pct>=70?'#10b981':pct>=40?'#f59e0b':'#ef4444'}
+newRound();
+</script>
+</body></html>

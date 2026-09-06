@@ -1,0 +1,226 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pattern Match</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+  body { background: #0f172a; }
+  .card {
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 3px solid transparent;
+  }
+  .card:hover { transform: scale(1.05); }
+  .card.flipped {
+    border-color: #facc15;
+    box-shadow: 0 0 15px rgba(250,204,21,0.4);
+  }
+  .card.correct {
+    border-color: #22c55e;
+    box-shadow: 0 0 15px rgba(34,197,94,0.4);
+  }
+  .card.wrong {
+    border-color: #ef4444;
+    box-shadow: 0 0 15px rgba(239,68,68,0.4);
+    animation: shake 0.3s;
+  }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+  }
+  .card.hidden-card { background: #334155 !important; }
+</style>
+</head>
+<body class="min-h-screen text-white">
+<div class="max-w-lg mx-auto p-4">
+  <a href="index.html" class="inline-block mb-4 text-yellow-400 hover:text-yellow-300 transition">&larr; Back to Games</a>
+  <h1 class="text-3xl font-bold mb-2 text-center">Pattern Match</h1>
+  <p class="text-center text-gray-400 mb-4 text-sm">Watch the pattern, then recreate it!</p>
+  <div class="flex justify-center gap-4 mb-4 text-sm">
+    <span class="bg-gray-800 px-3 py-1 rounded">Round: <span id="round">1</span></span>
+    <span class="bg-gray-800 px-3 py-1 rounded">Score: <span id="score">0</span></span>
+    <span class="bg-gray-800 px-3 py-1 rounded">High: <span id="highScore">0</span></span>
+  </div>
+  <div id="status" class="text-center mb-4 text-lg font-semibold text-yellow-400 h-6"></div>
+  <div id="grid" class="mx-auto grid grid-cols-4 gap-3" style="width: fit-content;"></div>
+  <div class="flex justify-center mt-6">
+    <button id="startBtn" class="bg-green-600 hover:bg-green-500 px-6 py-3 rounded-lg font-bold text-lg transition">Start Game</button>
+  </div>
+</div>
+<script>
+(function(){
+  const colors = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#14b8a6'];
+  const grid = document.getElementById('grid');
+  const status = document.getElementById('status');
+  const startBtn = document.getElementById('startBtn');
+
+  let pattern = [];
+  let playerPattern = [];
+  let round = 1;
+  let score = 0;
+  let highScore = parseInt(localStorage.getItem('patternHighScore') || '0');
+  let showing = false;
+  let gameOver = false;
+
+  document.getElementById('highScore').textContent = highScore;
+
+  function init() {
+    for (let i = 0; i < 16; i++) {
+      const card = document.createElement('div');
+      card.className = 'card rounded-lg hidden-card';
+      card.style.width = '70px';
+      card.style.height = '70px';
+      card.dataset.index = i;
+      card.addEventListener('click', () => handleCardClick(i));
+      grid.appendChild(card);
+    }
+  }
+
+  function setStatus(msg) { status.textContent = msg; }
+
+  function generatePattern() {
+    pattern = [];
+    const len = Math.min(round + 2, 16);
+    const available = Array.from({length:16}, (_,i) => i);
+    for (let i = 0; i < len; i++) {
+      const idx = Math.floor(Math.random() * available.length);
+      pattern.push(available.splice(idx, 1)[0]);
+    }
+  }
+
+  function showPattern() {
+    showing = true;
+    playerPattern = [];
+    setStatus('Watch carefully...');
+    const cards = grid.querySelectorAll('.card');
+    cards.forEach(c => {
+      c.classList.remove('flipped','correct','wrong','hidden-card');
+      c.style.background = '#334155';
+    });
+
+    let showIdx = 0;
+    const flashInterval = setInterval(() => {
+      if (showIdx >= pattern.length) {
+        clearInterval(flashInterval);
+        setTimeout(() => hidePattern(), 300);
+        return;
+      }
+      const card = cards[pattern[showIdx]];
+      card.style.background = colors[showIdx % colors.length];
+      card.classList.add('flipped');
+      setTimeout(() => {
+        card.classList.remove('flipped');
+        card.style.background = '#334155';
+      }, 400);
+      showIdx++;
+    }, 600);
+  }
+
+  function hidePattern() {
+    showing = false;
+    setStatus(`Your turn! Click ${pattern.length} cards`);
+    const cards = grid.querySelectorAll('.card');
+    cards.forEach(c => {
+      c.style.background = '#334155';
+      c.classList.remove('flipped');
+    });
+  }
+
+  function handleCardClick(idx) {
+    if (showing || gameOver) return;
+    if (playerPattern.includes(idx)) return;
+
+    const card = grid.children[idx];
+    playerPattern.push(idx);
+    card.style.background = colors[playerPattern.length % colors.length];
+    card.classList.add('flipped');
+
+    if (playerPattern.length === pattern.length) {
+      checkAnswer();
+    }
+  }
+
+  function checkAnswer() {
+    showing = true;
+    const correct = pattern.every(p => playerPattern.includes(p));
+    const cards = grid.querySelectorAll('.card');
+
+    if (correct) {
+      score += pattern.length * 10;
+      document.getElementById('score').textContent = score;
+      pattern.forEach(p => cards[p].classList.add('correct'));
+      setStatus('Correct! + ' + (pattern.length * 10) + ' points');
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('patternHighScore', highScore);
+        document.getElementById('highScore').textContent = highScore;
+      }
+      setTimeout(() => {
+        round++;
+        document.getElementById('round').textContent = round;
+        startRound();
+      }, 1200);
+    } else {
+      gameOver = true;
+      pattern.forEach(p => cards[p].classList.add('wrong'));
+      playerPattern.forEach(p => {
+        if (!pattern.includes(p)) cards[p].classList.add('wrong');
+      });
+      setStatus('Wrong! Game Over. Final Score: ' + score);
+      startBtn.textContent = 'Play Again';
+      startBtn.classList.remove('bg-green-600','hover:bg-green-500');
+      startBtn.classList.add('bg-red-600','hover:bg-red-500');
+    }
+  }
+
+  function startRound() {
+    generatePattern();
+    showPattern();
+  }
+
+  function reset() {
+    grid.innerHTML = '';
+    pattern = [];
+    playerPattern = [];
+    round = 1;
+    score = 0;
+    gameOver = false;
+    showing = false;
+    document.getElementById('round').textContent = '1';
+    document.getElementById('score').textContent = '0';
+    setStatus('');
+    startBtn.textContent = 'Start Game';
+    startBtn.classList.remove('bg-red-600','hover:bg-red-500');
+    startBtn.classList.add('bg-green-600','hover:bg-green-500');
+    init();
+  }
+
+  startBtn.addEventListener('click', () => {
+    reset();
+    setTimeout(startRound, 300);
+  });
+
+  init();
+})();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

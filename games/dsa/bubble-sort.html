@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bubble Sort Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar a:hover{text-decoration:underline}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:900px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;align-items:center;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-bar span{font-size:1.1rem}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.4rem}
+.array-container{display:flex;gap:6px;justify-content:center;align-items:flex-end;height:320px;padding:20px;background:#1e293b;border-radius:12px;margin-bottom:20px;position:relative}
+.bar{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;transition:all .3s ease;border-radius:6px 6px 0 0;position:relative}
+.bar-inner{width:48px;border-radius:6px 6px 0 0;transition:all .4s ease}
+.bar-label{font-size:14px;font-weight:700;margin-bottom:6px;color:#e2e8f0}
+.bar-index{font-size:11px;color:#94a3b8;margin-top:4px}
+.bar.comparing .bar-inner{box-shadow:0 0 16px #facc15}
+.bar.swapping .bar-inner{box-shadow:0 0 16px #f4364c}
+.bar.sorted .bar-inner{opacity:.5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px;line-height:1.7}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-bottom:20px}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-primary:hover{background:#7dd3fc}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.btn-secondary:hover{background:#475569}
+.btn-success{background:#22c55e;color:#fff}
+.btn-success:hover{background:#4ade80}
+.btn-danger{background:#ef4444;color:#fff}
+.btn-danger:hover{background:#f87171}
+.choice-btn{display:block;width:100%;padding:12px 20px;margin-bottom:8px;background:#334155;color:#e2e8f0;border:2px solid #475569;border-radius:8px;font-size:1rem;cursor:pointer;text-align:left;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.choice-btn.correct{border-color:#22c55e;background:#14532d}
+.choice-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.hidden{display:none}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:16px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.log{background:#1e293b;border-radius:12px;padding:16px;max-height:150px;overflow-y:auto;font-family:monospace;font-size:13px;color:#94a3b8}
+.log-entry{padding:2px 0;border-bottom:1px solid #334155}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <a href="../index.html">&#8592; Home</a>
+  <h1>Bubble Sort Game</h1>
+</div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Round: <span class="score-val" id="round">1</span></span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="array-container" id="arrayContainer"></div>
+  <div class="instructions">
+    <h2>How to Play</h2>
+    <p>Watch the bubble sort animation. After each comparison, predict which two elements will be compared or swapped next. Correct answers earn points!</p>
+  </div>
+  <div id="messageArea"></div>
+  <div id="choicesArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startRound()">Start Round</button>
+    <button class="btn btn-secondary" id="stepBtn" onclick="stepSort()" class="hidden" style="display:none">Step</button>
+    <button class="btn btn-success" id="autoBtn" onclick="autoPlay()" style="display:none">Auto Play</button>
+    <button class="btn btn-secondary" id="resetBtn" onclick="resetGame()" style="display:none">New Array</button>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+<script>
+let arr=[], indices=[], score=0, round=1, streak=0, i=0, j=0, phase='idle', autoTimer=null;
+
+function rand(n,s=5,h=40){let a=[];while(a.length<n){let v=Math.floor(Math.random()*(h-s))+s;if(!a.includes(v))a.push(v)}return a}
+
+function render(highlights={}){
+  const c=document.getElementById('arrayContainer');c.innerHTML='';
+  const max=Math.max(...arr);
+  arr.forEach((v,idx)=>{
+    const bar=document.createElement('div');bar.className='bar';
+    if(highlights.comparing&&highlights.comparing.includes(idx))bar.classList.add('comparing');
+    if(highlights.swapping&&highlights.swapping.includes(idx))bar.classList.add('swapping');
+    if(highlights.sorted&&idx>=highlights.sorted)bar.classList.add('sorted');
+    const h=(v/max)*250;
+    bar.innerHTML=`<span class="bar-label">${v}</span><div class="bar-inner" style="height:${h}px;background:hsl(${200+idx*15},70%,50%)"></div><span class="bar-index">[${idx}]</span>`;
+    c.appendChild(bar);
+  });
+}
+
+function log(msg){
+  const l=document.getElementById('log');
+  l.innerHTML=`<div class="log-entry">Round ${round}: ${msg}</div>`+l.innerHTML;
+}
+
+function updateScore(correct){
+  if(correct){score+=10+streak*5;streak++}else{streak=0}
+  document.getElementById('score').textContent=score;
+  document.getElementById('streak').textContent=streak;
+}
+
+function startRound(){
+  arr=rand(6);
+  i=0;j=0;phase='compare';
+  render();
+  document.getElementById('startBtn').style.display='none';
+  document.getElementById('stepBtn').style.display='';
+  document.getElementById('autoBtn').style.display='';
+  document.getElementById('resetBtn').style.display='';
+  document.getElementById('round').textContent=round;
+  document.getElementById('messageArea').innerHTML='';
+  showQuestion();
+}
+
+function getStepInfo(){
+  if(i>=arr.length-1)return{done:true};
+  return{a:j,b:j+1,aVal:arr[j],bVal:arr[j+1],willSwap:arr[j]>arr[j+1],pass:i};
+}
+
+function showQuestion(){
+  const info=getStepInfo();
+  if(info.done){
+    render({sorted:0});
+    document.getElementById('messageArea').innerHTML='<div class="message correct">Sorting complete!</div>';
+    document.getElementById('choicesArea').innerHTML='';
+    log('Array sorted!');
+    round++;
+    document.getElementById('startBtn').style.display='';
+    document.getElementById('startBtn').textContent='Next Round';
+    document.getElementById('stepBtn').style.display='none';
+    document.getElementById('autoBtn').style.display='none';
+    if(autoTimer)clearInterval(autoTimer);
+    return;
+  }
+  const willSwap=info.willSwap;
+  let choices;
+  if(Math.random()>.5){
+    choices=[
+      {text:`Compare arr[${j}] and arr[${j+1}] → ${willSwap?'Will swap':'No swap'}`,correct:true},
+      {text:`Compare arr[${j}] and arr[${j+2>arr.length-1?j:j+2}] → swap`,correct:false},
+      {text:`Compare arr[${j+1}] and arr[${j}] → ${willSwap?'No swap':'Will swap'}`,correct:false}
+    ];
+  }else{
+    choices=[
+      {text:`Swap arr[${j}] (${arr[j]}) and arr[${j+1}] (${arr[j+1]})`,correct:willSwap},
+      {text:`No swap needed — already in order`,correct:!willSwap},
+      {text:`Swap arr[${j}] and arr[${j+2>arr.length-1?j:j+2}]`,correct:false}
+    ];
+  }
+  choices.sort(()=>Math.random()-.5);
+  let html='<p style="margin-bottom:8px;color:#94a3b8">Pass '+i+', Step: What happens next?</p>';
+  choices.forEach((c,idx)=>{
+    html+=`<button class="choice-btn" onclick="answer(${c.correct},this)">${c.text}</button>`;
+  });
+  document.getElementById('choicesArea').innerHTML=html;
+}
+
+function answer(correct,el){
+  document.querySelectorAll('.choice-btn').forEach(b=>b.disabled=true);
+  if(correct){
+    el.classList.add('correct');
+    document.getElementById('messageArea').innerHTML='<div class="message correct">Correct! +'+(10+streak*5)+' points</div>';
+    log('Correct: '+el.textContent);
+  }else{
+    el.classList.add('wrong');
+    document.getElementById('messageArea').innerHTML='<div class="message wrong">Wrong! The correct action was: '+(getStepInfo().willSwap?'Swap':'No swap')+'</div>';
+    log('Wrong: '+el.textContent);
+  }
+  updateScore(correct);
+  setTimeout(()=>stepSort(),800);
+}
+
+function stepSort(){
+  const info=getStepInfo();
+  if(info.done){showQuestion();return}
+  render({comparing:[j,j+1]});
+  if(arr[j]>arr[j+1]){
+    [arr[j],arr[j+1]]=[arr[j+1],arr[j]];
+    render({swapping:[j,j+1]});
+  }
+  j++;
+  if(j>=arr.length-1-i){j=0;i++}
+  document.getElementById('messageArea').innerHTML='';
+  setTimeout(()=>showQuestion(),500);
+}
+
+function autoPlay(){
+  if(autoTimer){clearInterval(autoTimer);autoTimer=null;document.getElementById('autoBtn').textContent='Auto Play';return}
+  document.getElementById('autoBtn').textContent='Pause';
+  autoTimer=setInterval(()=>{
+    const info=getStepInfo();
+    if(info.done){clearInterval(autoTimer);autoTimer=null;showQuestion();return}
+    stepSort();
+  },600);
+}
+
+function resetGame(){
+  if(autoTimer)clearInterval(autoTimer);
+  document.getElementById('startBtn').style.display='';
+  document.getElementById('startBtn').textContent='Start Round';
+  document.getElementById('stepBtn').style.display='none';
+  document.getElementById('autoBtn').style.display='none';
+  document.getElementById('resetBtn').style.display='none';
+  document.getElementById('choicesArea').innerHTML='';
+  document.getElementById('messageArea').innerHTML='';
+  render();
+}
+</script>
+</body>
+</html>

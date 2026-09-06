@@ -1,0 +1,153 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tic Tac Toe</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+  body { background: #0f172a; }
+  .cell {
+    width: 100px; height: 100px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.5rem; font-weight: bold;
+    border: 2px solid #334155;
+    cursor: pointer;
+    transition: background 0.2s;
+    user-select: none;
+  }
+  .cell:hover { background: #1e293b; }
+  .cell.x { color: #38bdf8; }
+  .cell.o { color: #f472b6; }
+</style>
+</head>
+<body class="min-h-screen text-white font-sans">
+<div class="max-w-lg mx-auto p-4">
+  <a href="index.html" class="text-gray-400 hover:text-white transition">&larr; Back to Games</a>
+  <h1 class="text-2xl font-bold text-center text-blue-400 mt-2 mb-4">Tic Tac Toe</h1>
+  <div class="flex justify-center gap-8 mb-4 text-sm">
+    <div>You (X): <span id="playerWins" class="font-bold text-sky-400">0</span></div>
+    <div>AI (O): <span id="aiWins" class="font-bold text-pink-400">0</span></div>
+    <div>Draws: <span id="draws" class="font-bold text-yellow-400">0</span></div>
+  </div>
+  <div id="status" class="text-center text-lg mb-3 h-6"></div>
+  <div class="flex justify-center">
+    <div class="grid grid-cols-3" id="board"></div>
+  </div>
+  <div class="flex justify-center mt-4">
+    <button id="restartBtn" class="bg-blue-500 hover:bg-blue-600 px-6 py-2 rounded-lg font-bold transition">Restart</button>
+  </div>
+</div>
+<script>
+let board, playerTurn, gameOver, scores = {player: 0, ai: 0, draw: 0};
+const winCombos = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const boardEl = document.getElementById('board');
+
+function init() {
+  board = Array(9).fill('');
+  playerTurn = true; gameOver = false;
+  document.getElementById('status').textContent = 'Your turn (X)';
+  render();
+}
+
+function render() {
+  boardEl.innerHTML = '';
+  board.forEach((v, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'cell' + (v === 'X' ? ' x' : v === 'O' ? ' o' : '');
+    cell.textContent = v;
+    cell.addEventListener('click', () => playerMove(i));
+    boardEl.appendChild(cell);
+  });
+}
+
+function playerMove(i) {
+  if (board[i] || !playerTurn || gameOver) return;
+  board[i] = 'X'; playerTurn = false; render();
+  if (checkWin('X')) { endGame('player'); return; }
+  if (board.every(c => c)) { endGame('draw'); return; }
+  document.getElementById('status').textContent = 'AI thinking...';
+  setTimeout(aiMove, 300);
+}
+
+function aiMove() {
+  if (gameOver) return;
+  const best = minimax(board, 0, false);
+  board[best.index] = 'O'; playerTurn = true; render();
+  if (checkWin('O')) { endGame('ai'); return; }
+  if (board.every(c => c)) { endGame('draw'); return; }
+  document.getElementById('status').textContent = 'Your turn (X)';
+}
+
+function minimax(b, depth, isMax) {
+  const winner = getWinner(b);
+  if (winner === 'O') return {score: 10 - depth};
+  if (winner === 'X') return {score: depth - 10};
+  if (b.every(c => c)) return {score: 0};
+  let best;
+  if (isMax) {
+    best = {score: -Infinity};
+    b.forEach((v, i) => {
+      if (!v) {
+        b[i] = 'O';
+        const s = minimax(b, depth + 1, false);
+        b[i] = '';
+        if (s.score > best.score) best = {score: s.score, index: i};
+      }
+    });
+  } else {
+    best = {score: Infinity};
+    b.forEach((v, i) => {
+      if (!v) {
+        b[i] = 'X';
+        const s = minimax(b, depth + 1, true);
+        b[i] = '';
+        if (s.score < best.score) best = {score: s.score, index: i};
+      }
+    });
+  }
+  return best;
+}
+
+function getWinner(b) {
+  for (const [a, c, d] of winCombos) {
+    if (b[a] && b[a] === b[c] && b[a] === b[d]) return b[a];
+  }
+  return null;
+}
+
+function checkWin(p) { return getWinner(board) === p; }
+
+function endGame(result) {
+  gameOver = true;
+  let msg;
+  if (result === 'player') { scores.player++; msg = 'You win!'; }
+  else if (result === 'ai') { scores.ai++; msg = 'AI wins!'; }
+  else { scores.draw++; msg = 'Draw!'; }
+  document.getElementById('playerWins').textContent = scores.player;
+  document.getElementById('aiWins').textContent = scores.ai;
+  document.getElementById('draws').textContent = scores.draw;
+  document.getElementById('status').textContent = msg;
+}
+
+document.getElementById('restartBtn').addEventListener('click', init);
+init();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

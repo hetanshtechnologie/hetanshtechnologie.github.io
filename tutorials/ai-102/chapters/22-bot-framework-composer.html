@@ -1,0 +1,171 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bot Framework Composer and Publishing - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 22</span>
+<h1>Bot Framework Composer and Publishing</h1>
+
+<h2>Bot Framework Composer Overview</h2>
+<p>Bot Framework Composer is an open-source, visual authoring tool for building conversational AI applications without writing code. While the Bot Framework SDK (Chapter 21) requires C# or Python programming, Composer provides a drag-and-drop canvas for designing conversation flows, a built-in language generation system for crafting bot responses, and integrated publishing capabilities. Composer generates standard Bot Framework SDK code under the hood — your visual design is compiled into C# or TypeScript that runs as a standard bot project. This makes Composer accessible to developers and non-developers alike, while still producing production-quality bots that can be deployed, scaled, and maintained using standard Azure tooling.</p>
+<p>On the AI-102 exam, Composer represents the visual/low-code approach to conversational AI. You should understand when to use Composer versus the SDK, how the visual designer works, what LG and adaptive dialogs are, and how to publish bots to Azure channels. The exam tests conceptual knowledge of Composer's architecture and its integration with Azure AI services rather than step-by-step Composer UI steps.</p>
+
+<h2>Visual Conversation Flow Design</h2>
+<p>The Composer designer canvas represents conversation flow as a directed graph of <strong>triggers</strong> and <strong>actions</strong>. A trigger defines when a block of conversation logic runs — for example, when a user sends a message containing specific keywords, when an intent is recognized by a LUIS model, when an event is received, or when a dialog starts or ends. Actions are the steps executed when a trigger fires — sending messages, asking questions, making HTTP calls, accessing properties, or invoking other dialogs. This event-driven model makes Composer flows more resilient to interruptions than the strictly sequential waterfall dialogs in the SDK.</p>
+<p>The Composer canvas shows each dialog as a separate sheet with its own trigger-actions tree. You can create <strong>bot responses</strong> inline using the LG template editor, configure <strong>input prompts</strong> with validation rules, add <strong>conditions</strong> with branching logic, and chain dialogs together. Composer includes built-in recognizers for LUIS (deprecated), Conversational Language Understanding (CLU), and regular expressions. You connect a recognizer to a trigger — when the recognizer identifies an intent, the associated trigger fires and executes its actions. This replaces the manual intent routing you would implement in the SDK with <code>switch</code> statements.</p>
+
+<h2>Language Generation (LG)</h2>
+<p>Language Generation (LG) is a template-based system for defining bot responses with variations, conditions, and structured outputs. Instead of hardcoding strings in C# or Python, you write LG templates in <code>.lg</code> files that Composer compiles into the bot. LG separates the conversation logic from the response text — you can update bot responses without touching code, support multiple languages by swapping LG files, and add variation so the bot does not repeat the same phrase every time.</p>
+
+<pre><code># LG template examples with conditions and structured responses
+
+# Simple response variation
+# welcomeGreeting - returns a random welcome message
+- Hello! Welcome to our support bot.
+- Hi there! How can I help you today?
+- Greetings! I'm here to assist with your Azure questions.
+
+# Conditional response based on user state
+# orderStatusTemplate(orderStatus) - returns status-specific message
+- IF: {@orderStatus == "shipped"}
+    - Your order has been shipped and is on its way! 
+      Track it at https://example.com/track
+- ELSEIF: {@orderStatus == "processing"}
+    - Your order is being processed. We'll notify you when it ships.
+- ELSEIF: {@orderStatus == "delivered"}
+    - Your order was delivered. Enjoy your purchase!
+- ELSE:
+    - I could not find your order status. Please check the order number.
+
+# Structured response with card attachment
+# productCard(productName, productPrice, productUrl)
+[Activity
+    Attachments = ${json(productCardJson(productName, productPrice, productUrl))}
+]
+
+# productCardJson(productName, productPrice, productUrl)
+- ```
+{
+  "type": "AdaptiveCard",
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "version": "1.5",
+  "body": [
+    { "type": "TextBlock", "text": "${productName}", "weight": "bolder", "size": "large" },
+    { "type": "TextBlock", "text": "Price: $${productPrice}" },
+    { "type": "Input.Number", "id": "quantity", "placeholder": "Enter quantity", "min": 1, "max": 99 }
+  ],
+  "actions": [
+    { "type": "Action.Submit", "title": "Add to Cart", "data": { "action": "addToCart", "product": "${productName}" } }
+  ]
+}
+```
+
+# Multi-language support
+# greeting_en
+- Hello!
+
+# greeting_es
+- ¡Hola!
+
+# greeting_fr
+- Bonjour !</pre></code>
+
+<div class="note">
+<p>LG offers powerful features for production bots. Use <code># templateName</code> to define a template, <code>- </code> for response variants (Composer picks one at random), <code>IF/ELSEIF/ELSE</code> for conditional branching, <code>${property}</code> to reference variables, and <code>[Activity]</code> to send structured activities like cards. You can import LG files from other bots, create reusable template collections, and use <code>Switch</code> for multi-branch conditions. The AI-102 exam expects you to read LG syntax and understand its purpose — separating response text from logic — rather than write full LG files.</p>
+</div>
+
+<h2>Adaptive Dialogs: Event-Driven Conversation Flow</h2>
+<p>Adaptive Dialogs are the runtime engine that powers Composer bots. Unlike waterfall dialogs (SDK) which execute a fixed sequence of steps, adaptive dialogs are event-driven — they wait for specific events (user message, intent recognized, activity received, interruption detected) and respond accordingly. This architecture handles interruptions naturally. If a user starts the booking flow but then asks "What can you do?" mid-flow, the adaptive dialog can answer the question and return to the booking flow without losing state. Waterfall dialogs would require explicit code to handle this.</p>
+<p>Adaptive dialogs use a <strong>dialog schema</strong> that defines the events, intents, and entities the dialog recognizes. The schema integrates with CLU or LUIS to map utterances to intents. Events include <code>OnIntent</code> (intent recognized), <code>OnMessage</code> (any user message), <code>OnConversationUpdate</code> (user joined/left), <code>OnActivity</code> (custom activity type), and <code>OnError</code> (error handling). Each event has a priority — higher priority events interrupt lower priority ones, which enables the natural interruption handling that makes adaptive dialogs powerful. Composer generates the adaptive dialog definitions as JSON files (<code>.dialog</code>) that the Bot Framework adaptive runtime interprets at run time.</p>
+
+<h2>Testing with Bot Framework Emulator</h2>
+<p>The Bot Framework Emulator is a desktop application for testing bots locally during development. It connects directly to your bot's local endpoint (<code>http://localhost:3978</code>) and provides a rich chat interface with detailed inspection capabilities. You can send messages, inspect activities (incoming and outgoing JSON), examine dialog state, view LG template resolutions, see recognizer results (intents and entities), and simulate different channel behaviors. The emulator also supports debugging with ngrok integration for testing Teams and other channel-specific features.</p>
+<p>To test a Composer bot, open the project in Composer and click the "Start Bot" button — Composer compiles the visual design into a runnable bot project and starts it on localhost. You then open the emulator, connect to the local endpoint, and interact with the bot. The emulator shows each turn's activity JSON, including the recognizer output, dialog events, and state changes. This is invaluable for debugging intent resolution, entity extraction, LG template rendering, and dialog flow correctness. The exam may ask about the emulator's role in the development lifecycle — know that it is the primary local testing tool and that it can simulate multiple users in separate conversations.</p>
+
+<h2>Publishing Bots to Azure App Service</h2>
+<p>Composer integrates publishing directly into the tool. When you publish a bot, Composer packages the compiled bot project, configures settings (endpoint URL, Microsoft App ID, App Password), deploys it to an Azure App Service, and registers the bot with the Bot Framework Service. The publishing process requires several Azure resources: an <strong>Azure App Service</strong> to host the bot, an <strong>Azure Bot</strong> resource for the bot registration (which contains the messaging endpoint URL, Microsoft App ID, and channels configuration), and optionally an <strong>Application Insights</strong> resource for telemetry.</p>
+<p>Composer supports publishing profiles — named configurations that store deployment settings for different environments (dev, test, production). Each profile specifies the Azure subscription, resource group, App Service name, Bot registration details, and Application Insights instrumentation key. Composer also supports <strong>provisioning</strong> — you can create the required Azure resources directly from the Composer interface during the first publish, or use pre-provisioned resources. For production, you typically pre-provision resources through ARM templates or Bicep and then publish through Composer or a CI/CD pipeline.</p>
+
+<h2>Connecting Bots to Channels</h2>
+<p>After publishing, you configure which channels your bot supports. The Bot Framework provides a channel adapter for each supported channel — Microsoft Teams, Web Chat, Direct Line, Slack, Facebook Messenger, Telegram, Twilio, Cortana, Alexa, and email. Each channel has different capabilities, limitations, and authentication requirements. The channel configuration is managed through the Azure Bot resource in the Azure portal.</p>
+
+<table>
+<tr><th>Channel</th><th>Auth Method</th><th>Key Considerations</th><th>Card Support</th></tr>
+<tr><td>Microsoft Teams</td><td>Microsoft Entra ID app registration</td><td>Requires app manifest upload, supports tabs and messaging extensions, no conversationUpdate for personal chats</td><td>Full Adaptive Card support, Action.Submit returns invoke activities</td></tr>
+<tr><td>Web Chat</td><td>Direct Line secret or token</td><td>Embedded via iframe in websites, uses Direct Line protocol, supports speech recognition in browser</td><td>Full Adaptive Card support</td></tr>
+<tr><td>Direct Line API</td><td>Secret or token (time-limited)</td><td>REST API protocol for custom clients, supports streaming, token generation for security</td><td>Full card support via JSON</td></tr>
+<tr><td>Slack</td><td>Slack app credentials</td><td>Requires Slack app creation, supports buttons and interactive messages with limited card rendering</td><td>Limited — legacy attachment format only</td></tr>
+<tr><td>Facebook Messenger</td><td>Facebook app secret and page token</td><td>Requires Facebook app and page, supports quick replies and generic templates</td><td>Facebook-specific attachment format (Generic Template, List Template)</td></tr>
+<tr><td>Twilio SMS</td><td>Twilio account SID and auth token</td><td>Text-only channel, no cards or buttons, 1600 character limit per message</td><td>No card support</td></tr>
+</table>
+
+<p><strong>Direct Line</strong> deserves special attention for the exam. It is the REST API protocol that underlies Web Chat and can be used by any custom client application. The <strong>Direct Line secret</strong> is the permanent authentication key for your bot's Direct Line channel. However, exposing the secret in a client application is a security risk — instead, you should generate a <strong>Direct Line token</strong> from your backend server using the secret. The token is time-limited (default 30 minutes, up to 30 days with refresh) and scoped to a single conversation. This pattern allows your client to authenticate without exposing the permanent secret.</p>
+
+<pre><code># Python - Direct Line token generation (server-side)
+import requests
+import os
+
+direct_line_secret = os.environ["DIRECT_LINE_SECRET"]
+
+def generate_token(user_id: str, conversation_id: str = None) -> dict:
+    """Generate a time-limited Direct Line token from the secret."""
+    url = "https://directline.botframework.com/v3/directline/tokens/generate"
+    headers = {"Authorization": f"Bearer {direct_line_secret}"}
+    payload = {"user": {"id": user_id}}
+
+    if conversation_id:
+        url = "https://directline.botframework.com/v3/directline/conversations/{conversation_id}/tokens"
+        # Token scoped to an existing conversation
+
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.json()
+
+# Response includes: token, expires_in, conversationId
+token_info = generate_token("user123")
+print(f"Token: {token_info['token']}")
+print(f"Expires in: {token_info['expires_in']} seconds")
+print(f"Conversation: {token_info['conversationId']}")</pre></code>
+
+<h2>Creating Bot Skills</h2>
+<p>Bot skills are reusable conversational components that can be shared across multiple bots. A skill exposes a set of actions that other bots (called <strong>skill consumers</strong>) can invoke. For example, you could build a "Booking Skill" that handles appointment scheduling and share it across a customer support bot, a sales bot, and an internal IT bot — each consumer bot simply invokes the skill and receives the result. Skills communicate using the <strong>Skill Protocol</strong>, which is built on the same Bot Framework activities but with additional headers for skill-to-skill routing and authentication.</p>
+<p>To create a skill, you build a standard bot in Composer or the SDK and mark it as a skill in the manifest. The skill manifest (<code>manifest.json</code>) defines the skill's name, endpoints, supported activities, and authentication requirements. The consumer bot adds the skill by specifying its manifest URL. Skills can be hosted on any endpoint that supports the Bot Framework protocol — Azure App Service, Container Apps, or even on-premises servers. Skills authenticate using the same Microsoft App ID and password mechanism as standard bots, with the consumer and skill each having their own App ID. The exam may ask about skills as a modularity pattern for enterprise bot ecosystems — recognize that skills promote reuse and separation of concerns.</p>
+
+<h2>Exercise: Design, Test, and Publish a Feedback Bot</h2>
+<ol>
+<li>Open Bot Framework Composer (download from https://aka.ms/bfcomposer if not installed). Create a new bot from the "Empty Bot" template.</li>
+<li>Create a new dialog called "CollectFeedback". Add a trigger for <code>OnBeginDialog</code> and add a series of <code>TextInput</code> actions that prompt for the user's name, feedback category (bug, feature request, general), and feedback description. Add validation — the name must not be empty, the category must be one of the three options.</li>
+<li>In the LG file (<code>common.lg</code>), create templates for the welcome message, each prompt, and a confirmation message. Use conditional LG to respond differently based on the feedback category — for a bug report, respond with "Thank you for reporting this bug. Our team will investigate." For a feature request, respond with "Great idea! We'll add this to our roadmap."</li>
+<li>Add an Adaptive Card that summarizes the submitted feedback — show the name, category, and description in a structured card with a FactSet.</li>
+<li>Test the bot locally using the built-in "Start Bot" in Composer. Open Bot Framework Emulator, connect to <code>http://localhost:3978/api/messages</code>, and run through the feedback collection flow. Verify that validation works, LG templates render correctly, and the Adaptive Card displays properly.</li>
+<li>Publish the bot to Azure. Create a publishing profile in Composer. Accept the default settings and let Composer provision an App Service, Azure Bot resource, and Application Insights instance. Verify the bot is running using the "Test in Web Chat" feature in the Azure portal.</li>
+<li>Configure the Web Chat and Microsoft Teams channels in the Azure Bot resource. Generate a Direct Line token from your backend and embed Web Chat in a test HTML page. Verify the bot works in both channels.</li>
+</ol>
+
+<div class="exam-tip">
+<h3>Exam Tip: Composer vs SDK, Channel Registration, Direct Line Tokens, Teams Considerations</h3>
+<p>The AI-102 exam expects you to choose between Composer and SDK based on scenario requirements. Use <strong>Composer</strong> when you need rapid prototyping, non-developer team members will maintain the bot, you need complex interruption handling (adaptive dialogs), or you want to separate response content (LG) from logic. Use the <strong>SDK</strong> when you need custom code integration, fine-grained control over middleware, advanced state management, or integration with non-standard authentication. For <strong>channel registration</strong>, remember that every bot needs an Azure Bot resource to communicate with channels — the resource stores the messaging endpoint URL and App ID. The <strong>Direct Line token</strong> pattern is critical: generate tokens server-side using the secret, never expose the secret to clients, and set appropriate token expiration. For <strong>Microsoft Teams</strong>, be aware that Teams bots require a manifest.json file uploaded to the Teams app catalog, the bot must support a minimum of the personal chat scope, and Teams uses invoke activities for Task Modules, Adaptive Card actions, and tab interactions. Teams does not send conversationUpdate for personal chats — use proactive messages or wait for the user's first message instead.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Bot Framework Composer provides a visual, low-code alternative to SDK-based bot development. Conversation flows are designed as trigger-action trees on a canvas, with LG templates handling response generation with variation and conditions. Adaptive dialogs provide event-driven execution that handles interruptions naturally — a significant advantage over waterfall dialogs. The emulator enables comprehensive local testing with full activity inspection. Publishing to Azure App Service and configuring channels makes the bot available to users through Teams, Web Chat, Slack, Facebook Messenger, and other platforms. Bot skills enable reusable conversational components across the enterprise. On the AI-102 exam, understand when Composer is the right choice, how LG and adaptive dialogs work conceptually, the Direct Line token security model, and channel-specific considerations — especially for Microsoft Teams. The next chapter covers CI/CD pipelines and container deployment for Azure AI solutions.</p>
+
+<nav>
+<a href="../index.html">&larr; Back to Index</a>
+<a href="23-cicd-containers.html">Next: CI/CD and Container Deployment &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

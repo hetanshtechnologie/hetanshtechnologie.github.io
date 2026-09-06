@@ -1,0 +1,195 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>173. Lab - AI Enrichment and Skillsets - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 173</span>
+<h1>Lab - AI Enrichment and Skillsets</h1>
+<p>In this lab you turn your keyword-only index into a semantic one. You will create a skillset that splits each document into chunks and embeds every chunk with a deployed embedding model, then attach it to a new indexer and verify that the index now holds vectors. When you finish, your search service can match on meaning, not just exact words.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li>The data source <code>docs-datasource</code> and the populated blob container.</li>
+<li>A <strong>deployed embedding model</strong>, for example <code>text-embedding-3-small</code>, in a Foundry or Azure OpenAI resource. Note its endpoint and a key with access to the deployment.</li>
+<li>The search service name, admin key, and resource group variables.</li>
+<li>The <code>azure-search</code> CLI extension installed.</li>
+</ul>
+
+<div class="warn">
+<p>Enrichment invokes paid services. Each chunk you embed is a separate model call billed against your embedding deployment, and the text-split step runs within the search service tier you chose. For the few sample documents in this lab the cost is trivial, but the pattern matters: review spending before running skillsets over large corpora.</p>
+</div>
+
+<h2>Step 1 - Create a Chunked Index</h2>
+<p>A skillset that splits and embeds needs an index where each <em>chunk</em> is its own document, not one document per blob. Save this as <code>index-chunked.json</code>:</p>
+<pre><code>{
+  "name": "docs-index-chunked",
+  "fields": [
+    { "name": "id", "type": "Edm.String", "key": true, "searchable": false, "retrievable": true },
+    { "name": "content", "type": "Edm.String", "searchable": true, "retrievable": true },
+    { "name": "embedding", "type": "Collection(Edm.Single)", "searchable": true, "retrievable": false, "dimensions": 1536, "vectorSearchConfiguration": "docs-vector-profile" },
+    { "name": "metadata_storage_name", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true },
+    { "name": "metadata_storage_path", "type": "Edm.String", "searchable": false, "filterable": true, "retrievable": true }
+  ],
+  "vectorSearch": {
+    "algorithmConfigurations": [
+      {
+        "name": "docs-hnsw",
+        "kind": "hnsw",
+        "hnswParameters": { "metric": "cosine", "m": 16, "efConstruction": 400, "efSearch": 500 }
+      }
+    ],
+    "profiles": [
+      { "name": "docs-vector-profile", "algorithm": "docs-hnsw" }
+    ]
+  }
+}
+</code></pre>
+<p>Create it with the same command pattern you used for the first index:</p>
+<pre><code>az search index create `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-index-chunked `
+  --index-json (Get-Content -Raw index-chunked.json)
+</code></pre>
+
+<h2>Step 2 - Write the Skillset</h2>
+<p>The skillset chains two skills. The split skill breaks each document's text into pages of a chosen length; the embedding skill turns each page into a 1536-dimension vector. Save this as <code>skillset.json</code>, replacing the model endpoint and key with your deployment values:</p>
+<pre><code>{
+  "name": "docs-skillset",
+  "description": "Chunks document text and embeds each chunk",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+      "name": "split-skill",
+      "context": "/document",
+      "textSplitMode": "pages",
+      "maximumPageLength": 3000,
+      "defaultLanguageCode": "en",
+      "inputs": [
+        { "name": "text", "source": "/document/content" }
+      ],
+      "outputs": [
+        { "name": "textItems", "targetName": "pages" }
+      ]
+    },
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "embed-skill",
+      "context": "/document/pages/*",
+      "resourceUri": "https://YOUR_OPENAI_ENDPOINT.openai.azure.com",
+      "deploymentId": "text-embedding-3-small",
+      "apiKey": "YOUR_OPENAI_KEY",
+      "inputs": [
+        { "name": "text", "source": "/document/pages/*/text" }
+      ],
+      "outputs": [
+        { "name": "embedding" }
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>Create the skillset:</p>
+<pre><code>az search skillset create `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-skillset `
+  --skillset-json (Get-Content -Raw skillset.json)
+</code></pre>
+
+<div class="tip">
+<p>The split skill also emits <code>document_common_ancestor_id</code> and a per-page <code>document_id</code> on each page. The indexer mappings below use those values to build stable chunk keys, which keeps each chunk a unique search document while still pointing back at the source file.</p>
+</div>
+
+<h2>Step 3 - Create the Enriched Indexer</h2>
+<p>The indexer now references the skillset and maps the enriched outputs into the chunked index. Save this as <code>indexer-enriched.json</code>:</p>
+<pre><code>{
+  "name": "docs-indexer-enriched",
+  "dataSourceName": "docs-datasource",
+  "targetIndexName": "docs-index-chunked",
+  "skillsetName": "docs-skillset",
+  "parameters": {
+    "batchSize": 10,
+    "maxFailedItems": 10,
+    "maxFailedItemsPerBatch": 10
+  },
+  "outputFieldMappings": [
+    { "sourceFieldName": "/document/pages/*/document_common_ancestor_id", "targetFieldName": "id" },
+    { "sourceFieldName": "/document/pages/*/text", "targetFieldName": "content" },
+    { "sourceFieldName": "/document/pages/*/embedding", "targetFieldName": "embedding" },
+    { "sourceFieldName": "/document/metadata_storage_name", "targetFieldName": "metadata_storage_name" },
+    { "sourceFieldName": "/document/metadata_storage_path", "targetFieldName": "metadata_storage_path" }
+  ]
+}
+</code></pre>
+<p>Create and run it:</p>
+<pre><code>az search indexer create `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-indexer-enriched `
+  --indexer-json (Get-Content -Raw indexer-enriched.json)
+
+az search indexer run `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-indexer-enriched
+</code></pre>
+
+<h2>Step 4 - Verify the Enrichment</h2>
+<p>Wait a few seconds, then check the run result and the document count. Because each blob is now split into multiple chunks, the count should be several times larger than your number of files:</p>
+<pre><code>az search indexer show `
+  --service-name $searchName `
+  --resource-group $rg `
+  --admin-key $adminKey `
+  --name docs-indexer-enriched
+
+az rest --method get `
+  --uri "https://$searchName.search.windows.net/indexes/docs-index-chunked/stats?api-version=2023-11-01" `
+  --headers "api-key=$adminKey"
+</code></pre>
+<p>Finally, pull one document and confirm the <code>embedding</code> field is populated with numbers:</p>
+<pre><code>az rest --method post `
+  --uri "https://$searchName.search.windows.net/indexes/docs-index-chunked/search?api-version=2023-11-01" `
+  --headers "api-key=$adminKey" `
+  --body '{"search": "*", "top": 1, "select": "id,content,metadata_storage_name"}'
+</code></pre>
+<p>Querying <code>*</code> matches everything; the returned document should have a short <code>content</code> — a chunk, not a whole file — which proves the split ran.</p>
+
+<div class="note">
+<p>If you see <code>errors</code> in the indexer's <code>lastResult</code>, the most frequent causes are a mistyped deployment name, a key that cannot reach the embedding deployment, or a region mismatch between the search service and the model resource. Fix the value in the skillset, then reset and rerun the indexer: <code>az search indexer reset</code> followed by <code>az search indexer run</code>.</p>
+</div>
+
+<h2>Troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
+<tr><td>Embedding skill errors on every document</td><td>Model endpoint, deployment, or key wrong</td><td>Verify the deployment id and key, then reset and rerun.</td></tr>
+<tr><td><code>Document count is 0</code></td><td>Indexer never ran or failed early</td><td>Check <code>lastResult</code>; run <code>az search indexer reset</code> then run again.</td></tr>
+<tr><td>Embedding dimension mismatch</td><td>Model output differs from <code>dimensions</code></td><td>Set <code>dimensions</code> to 1536 for <code>text-embedding-3-small</code>.</td></tr>
+<tr><td>Chunks missing</td><td>Text split output path wrong</td><td>Confirm the split output target <code>pages</code> matches the embedding skill's context.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You created a chunked index, a skillset that splits and embeds every document, and an enriched indexer that maps the skill outputs into the index. The index now stores meaningful chunks with vectors, ready for semantic and hybrid search. The next chapter shows how an agent uses this index to ground its answers.</p>
+<nav>
+<a href="172-ai-enrichment-and-skillsets.html">&larr; Previous: AI Enrichment and Skillsets</a><a href="174-connecting-azure-ai-search-to-an-agent.html">Next: Connecting Azure AI Search to an Agent &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

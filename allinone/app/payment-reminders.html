@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Reminders — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Payment Reminders</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">Auto Payment Reminders</h1>
+      <button onclick="sendRemindersNow()" class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700">&#128231; Send Reminders Now</button>
+    </div>
+    <div id="alert"></div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="font-bold text-lg mb-1">Active Reminders</h2>
+        <div id="active-count" class="text-3xl font-bold text-blue-600">0</div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="font-bold text-lg mb-1">Overdue Invoices</h2>
+        <div id="overdue-count" class="text-3xl font-bold text-red-600">0</div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-6">
+        <h2 class="font-bold text-lg mb-1">Last Sent</h2>
+        <div id="last-sent" class="text-sm text-gray-500">Never</div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border p-6 mb-6">
+      <h2 class="font-bold text-lg mb-4">Set Up Reminder</h2>
+      <form id="reminder-form" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div><label class="block text-sm font-semibold mb-1">Invoice</label>
+          <select id="rem-invoice" class="w-full border rounded px-3 py-2 text-sm">
+            <option value="">-- Select --</option>
+          </select></div>
+        <div><label class="block text-sm font-semibold mb-1">Party</label>
+          <select id="rem-party" class="w-full border rounded px-3 py-2 text-sm">
+            <option value="">-- Select --</option>
+          </select></div>
+        <div><label class="block text-sm font-semibold mb-1">Frequency</label>
+          <select id="rem-frequency" class="w-full border rounded px-3 py-2 text-sm">
+            <option value="daily">Daily</option>
+            <option value="weekly" selected>Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select></div>
+        <div><label class="block text-sm font-semibold mb-1">Type</label>
+          <select id="rem-type" class="w-full border rounded px-3 py-2 text-sm">
+            <option value="email">Email</option>
+            <option value="sms">SMS</option>
+            <option value="whatsapp">WhatsApp</option>
+          </select></div>
+        <div class="md:col-span-4"><button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold hover:bg-blue-700">Set Reminder</button></div>
+      </form>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="font-bold text-lg mb-4">Current Reminders</h2>
+      <div id="reminders-loading">Loading...</div>
+      <div id="reminders-table" class="hidden text-sm overflow-x-auto"></div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId = null;
+
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin(); if (!user) return;
+      orgId = await getOrgId(); if (!orgId) return;
+
+      const { data: invs } = await erp.from('invoices').select('id, invoice_no, parties(name)').eq('org_id', orgId).in('status',['sent','overdue']).order('created_at',{ascending:false}).limit(50);
+      const invSel = document.getElementById('rem-invoice');
+      (invs||[]).forEach(inv => { const o=document.createElement('option');o.value=inv.id;o.textContent=`${inv.invoice_no} - ${inv.parties?.name||''}`;invSel.appendChild(o); });
+
+      const { data: parties } = await erp.from('parties').select('id,name').eq('org_id',orgId).eq('is_active',true).in('type',['customer','both']).order('name');
+      const ptySel = document.getElementById('rem-party');
+      (parties||[]).forEach(p => { const o=document.createElement('option');o.value=p.id;o.textContent=p.name;ptySel.appendChild(o); });
+
+      await loadReminders();
+
+      document.getElementById('reminder-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        try {
+          const { error } = await erp.from('payment_reminders').insert({
+            org_id: orgId,
+            invoice_id: parseInt(document.getElementById('rem-invoice').value)||null,
+            party_id: parseInt(document.getElementById('rem-party').value)||null,
+            frequency: document.getElementById('rem-frequency').value,
+            reminder_type: document.getElementById('rem-type').value,
+            next_send_at: new Date().toISOString()
+          });
+          if (error) throw error;
+          showAlert('Reminder set!', 'success');
+          this.reset();
+          await loadReminders();
+        } catch (err) { showAlert(err.message, 'error'); }
+      });
+    });
+
+    async function loadReminders() {
+      const { data, error } = await erp.from('payment_reminders').select('*, invoices(invoice_no, total, status, due_date), parties(name, email)').eq('org_id', orgId).eq('is_active', true).order('created_at',{ascending:false});
+      if (error) return;
+
+      document.getElementById('active-count').textContent = (data||[]).length;
+      document.getElementById('reminders-loading').classList.add('hidden');
+
+      const div = document.getElementById('reminders-table'); div.classList.remove('hidden');
+      if (!data||!data.length) { div.innerHTML = '<div class="text-gray-500 text-center py-4">No reminders configured.</div>'; return; }
+
+      let lastSent = 'Never';
+      data.forEach(r => { if (r.last_sent_at && (!lastSent||lastSent==='Never'||new Date(r.last_sent_at)>new Date(lastSent))) lastSent = formatDateTime(r.last_sent_at); });
+      document.getElementById('last-sent').textContent = lastSent;
+
+      const invs = await erp.from('invoices').select('id',{count:'exact',head:true}).eq('org_id',orgId).in('status',['sent','overdue']);
+      document.getElementById('overdue-count').textContent = invs.count||0;
+
+      div.innerHTML = `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b text-left"><th class="p-3 font-semibold">Invoice</th><th class="p-3 font-semibold">Party</th><th class="p-3 font-semibold">Amount</th><th class="p-3 font-semibold">Frequency</th><th class="p-3 font-semibold">Type</th><th class="p-3 font-semibold">Last Sent</th><th class="p-3 font-semibold">Next Send</th><th class="p-3"></th></tr></thead><tbody>${data.map(r => `<tr class="border-b"><td class="p-3 font-mono text-xs">${escapeHtml(r.invoices?.invoice_no||'-')}</td><td class="p-3">${escapeHtml(r.parties?.name||'-')}</td><td class="p-3 font-medium">${formatCurrency(r.invoices?.total)}</td><td class="p-3 text-xs">${r.frequency}</td><td class="p-3 text-xs">${r.reminder_type}</td><td class="p-3 text-xs">${r.last_sent_at?formatDateTime(r.last_sent_at):'-'}</td><td class="p-3 text-xs">${r.next_send_at?formatDate(r.next_send_at):'Immediate'}</td><td class="p-3"><button onclick="deleteReminder(${r.id})" class="text-red-500 hover:underline text-xs">Stop</button></td></tr>`).join('')}</tbody></table>`;
+    }
+
+    async function deleteReminder(id) {
+      if (!confirm('Stop this reminder?')) return;
+      try { await erp.from('payment_reminders').update({is_active:false}).eq('id',id); showAlert('Reminder stopped.','success'); await loadReminders(); } catch(err) { showAlert(err.message,'error'); }
+    }
+
+    async function sendRemindersNow() {
+      const btn = document.querySelector('button[onclick="sendRemindersNow()"]');
+      btn.disabled = true; btn.textContent = 'Sending...';
+      try {
+        const res = await fetch('https://vgipghqejzbcoighktij.supabase.co/functions/v1/send-payment-reminders', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await res.json();
+        showAlert('Sent ' + (result.sent||0) + ' reminders.', 'success');
+        await loadReminders();
+      } catch(err) { showAlert(err.message, 'error'); }
+      btn.disabled = false; btn.textContent = '&#128231; Send Reminders Now';
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

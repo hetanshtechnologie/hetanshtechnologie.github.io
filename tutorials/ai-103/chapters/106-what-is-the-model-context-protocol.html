@@ -1,0 +1,119 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>106. What is the Model Context Protocol - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 106</span>
+<h1>What is the Model Context Protocol</h1>
+<p>So far your agents have called tools defined in their own code. The Model Context Protocol, or MCP, takes a different approach: it is an open, standardized way for an AI application to discover and call tools, resources, and prompts provided by <em>external</em> servers. Instead of embedding a function in your agent, you connect to a server that advertises capabilities, and your agent calls whatever the server offers. This chapter explains what MCP is, who the participants are, and what a conversation over the protocol looks like.</p>
+
+<h2>The Three Roles</h2>
+<p>MCP defines a clear separation of roles:</p>
+<ul>
+<li><strong>MCP host:</strong> the application where the AI runs and where the user interacts — for example, an IDE, a chat client, or your own Python agent.</li>
+<li><strong>MCP client:</strong> the component inside the host that establishes connections to one or more servers on the host's behalf.</li>
+<li><strong>MCP server:</strong> a process that exposes capabilities — tools, resources, and prompts — over the protocol. A single server can serve many clients.</li>
+</ul>
+
+<div class="note">
+<p>The distinction between host and client is subtle but important. Think of the host as the desktop app and the client as the connection code inside it. One host often manages several clients, each bound to a different server — your chat app might connect to a file server and a database server at the same time.</p>
+</div>
+
+<h2>What a Server Exposes</h2>
+<p>An MCP server exposes three kinds of capability:</p>
+<table>
+<tr><th>Primitive</th><th>Purpose</th><th>Example</th></tr>
+<tr><td><strong>Tools</strong></td><td>Functions the model can invoke, with an input schema</td><td>Query a database, send a message, translate text</td></tr>
+<tr><td><strong>Resources</strong></td><td>Data the client can read and give the model as context</td><td>A project file, a log, a configuration document</td></tr>
+<tr><td><strong>Prompts</strong></td><td>Reusable prompt templates the host can insert</td><td>A "summarize this document" workflow template</td></tr>
+</table>
+
+<p>Tools are the most common primitive in agent work — they give the model the power to <em>do</em> things. Resources feed the model with context. Prompts standardize recurring interactions.</p>
+
+<h2>How Discovery Works</h2>
+<p>The protocol's first phase is discovery. When a client connects, the server sends a description of its capabilities and announces which primitives it supports. The client can then request the list of tools. Each tool entry carries a name, a human-readable description, and a JSON Schema describing its arguments — the same metadata shape you have seen in LangChain's <code>@tool</code> decorators, but standardized across every server.</p>
+
+<pre><code>{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [
+      {
+        "name": "search_documents",
+        "description": "Search documents for a keyword.",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "keyword": {"type": "string"}
+          },
+          "required": ["keyword"]
+        }
+      }
+    ]
+  }
+}</code></pre>
+
+<p>The client passes this list to the model (for example, bound as tools). The model can then request a call exactly as it would call any other tool — the protocol is invisible to the model's reasoning.</p>
+
+<h2>How a Call Works</h2>
+<p>When the model decides a tool is needed, the client sends a call request over the established connection:</p>
+
+<pre><code>{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "search_documents",
+    "arguments": {"keyword": "invoice"}
+  }
+}</code></pre>
+
+<p>The server executes the tool and returns a result structure — usually one or more content blocks plus an <code>isError</code> flag:</p>
+
+<pre><code>{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "content": [
+      {"type": "text", "text": "Found 3 matching documents."}
+    ],
+    "isError": false
+  }
+}</code></pre>
+
+<p>The client turns this into a tool message and sends it back to the model, which reads the outcome and continues its reasoning — exactly the loop you built by hand in the LangChain and LangGraph chapters.</p>
+
+<h2>Transports</h2>
+<p>MCP defines how messages travel between client and server. Two transports dominate:</p>
+<ul>
+<li><strong>Streamable HTTP (and the older HTTP with SSE):</strong> client and server communicate over HTTP endpoints. Servers can be hosted anywhere — including Azure Container Apps — and clients can reach them over the network. This is the transport used for Azure-hosted MCP servers.</li>
+<li><strong>Stdio:</strong> the client launches the server as a local subprocess and communicates over standard input and output. Simple and secure, but the server runs on the same machine as the client.</li>
+</ul>
+
+<div class="tip">
+<p>Transport matters for security and topology. A stdio server is invisible to the network — ideal for local, private tools. An HTTP server can be shared by many clients and deployed at scale, but it must be protected with authentication before untrusted callers reach it.</p>
+</div>
+
+<h2>MCP in Context</h2>
+<p>MCP does not replace LangChain or LangGraph — it complements them. LangChain gives you the framework for building agents; MCP gives you a standard way to expose and consume tooling across organizational and network boundaries. You could attach an MCP connection as just another tool source inside a LangGraph agent, and nothing about the graph changes.</p>
+
+<h2>Summary</h2>
+<p>The Model Context Protocol is an open standard with three roles — host, client, and server — and three primitives: tools, resources, and prompts. Clients discover capabilities, models choose among them, and calls travel over HTTP or stdio transports using JSON-RPC messages. It is the industry's answer to the question of how AI applications connect to external systems in a reusable way. In the next chapter you will look at the design problems MCP was created to solve.</p>
+<nav>
+<a href="105-lab-building-an-agent-using-langgraph.html">&larr; Previous: Lab - Building an agent using LangGraph</a><a href="107-why-was-the-model-context-protocol-designed.html">Next: Why was the Model Context Protocol designed &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

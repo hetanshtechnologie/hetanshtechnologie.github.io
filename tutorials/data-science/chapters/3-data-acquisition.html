@@ -1,0 +1,129 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>3. Data Acquisition &amp; Collection - Data Science Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>3. Data Acquisition &amp; Collection</h1>
+<p class="tag">Chapter 3</p>
+
+<h2>Where Data Comes From</h2>
+<p>Every project starts with getting data into a form you can analyze. Common sources:</p>
+<table>
+<tr><th>Source</th><th>Examples</th><th>Typical Format</th></tr>
+<tr><td>Flat files</td><td>CSV, Excel, JSON, Parquet, log files</td><td>Files on disk or in cloud storage</td></tr>
+<tr><td>Databases</td><td>PostgreSQL, MySQL, SQLite, warehouses</td><td>SQL queries</td></tr>
+<tr><td>APIs</td><td>REST/GraphQL endpoints, public datasets</td><td>JSON/XML over HTTP</td></tr>
+<tr><td>Web</td><td>Public pages, review sites</td><td>HTML (scraped)</td></tr>
+<tr><td>Streaming</td><td>Clickstreams, IoT, financial feeds</td><td>Event streams (Kafka, WebSockets)</td></tr>
+<tr><td>Surveys/experiments</td><td>Questionnaires, lab logs</td><td>Structured tables</td></tr>
+</table>
+
+<h2>Reading Flat Files with pandas</h2>
+<pre><code>import pandas as pd
+
+# CSV
+df = pd.read_csv("data/sales.csv")
+
+# Excel (needs openpyxl: pip install openpyxl)
+df = pd.read_excel("data/sales.xlsx", sheet_name="2025")
+
+# JSON
+df = pd.read_json("data/events.json")
+
+# Parquet (fast columnar, pip install pyarrow)
+df = pd.read_parquet("data/events.parquet")
+
+# Inspect what you got
+print(df.shape)      # (rows, columns)
+print(df.head())
+print(df.dtypes)
+</code></pre>
+
+<div class="note">
+<strong>Always inspect before assuming:</strong> print <code>df.shape</code> and <code>df.dtypes</code> immediately. Files often contain extra header rows, encoding surprises, or unexpected delimiters. Use <code>sep=";"</code>, <code>encoding="utf-8-sig"</code>, or <code>skiprows=2</code> as needed.
+</div>
+
+<h2>Querying Databases</h2>
+<pre><code>import sqlite3
+import pandas as pd
+
+conn = sqlite3.connect("data/app.db")
+df = pd.read_sql_query("SELECT * FROM orders WHERE created_at &gt; '2025-01-01'", conn)
+conn.close()
+</code></pre>
+<p>For PostgreSQL and other servers, use connection strings and a driver such as <code>psycopg2</code> or <code>SQLAlchemy</code>. SQL itself is covered in depth in Chapter 9 — this chapter focuses on getting the data out.</p>
+
+<div class="warn">
+<strong>Never put credentials in code.</strong> Use environment variables or a secrets manager:
+<pre><code>import os
+DATABASE_URL = os.environ["DATABASE_URL"]
+</code></pre>
+</div>
+
+<h2>Fetching Data from APIs</h2>
+<p>Many services expose data over HTTP. The <code>requests</code> library makes calls easy:</p>
+<pre><code>import requests
+
+resp = requests.get(
+    "https://api.open-meteo.com/v1/forecast",
+    params={"latitude": 21.17, "longitude": 72.83, "hourly": "temperature_2m"}
+)
+resp.raise_for_status()          # raise on HTTP errors
+data = resp.json()               # parsed JSON
+df = pd.DataFrame(data["hourly"])
+</code></pre>
+<p>Public dataset catalogs you can start with:</p>
+<ul>
+<li><strong>Kaggle Datasets</strong> — kaggle.com/datasets (requires free account)</li>
+<li><strong>UCI Machine Learning Repository</strong> — archive.ics.uci.edu</li>
+<li><strong>Google Dataset Search</strong> — datasetsearch.research.google.com</li>
+<li><strong>Awesome Public Datasets</strong> — github.com/awesomedata/awesome-public-datasets</li>
+<li><strong>Open-Meteo / OpenWeatherMap</strong> — free weather APIs</li>
+<li><strong>Government open data</strong> — e.g., data.gov.in, data.gov</li>
+</ul>
+
+<div class="info">
+<strong>Respect the API:</strong> read the terms of service, use authentication tokens when required, and be polite with rate limits (a <code>time.sleep(0.5)</code> between calls is common). Public APIs are shared infrastructure.
+</div>
+
+<h2>Web Scraping (Carefully)</h2>
+<p>When no API exists, scraping can collect public data:</p>
+<pre><code>from bs4 import BeautifulSoup
+import requests
+
+resp = requests.get("https://example.com/reviews")
+soup = BeautifulSoup(resp.text, "html.parser")
+
+titles = [el.text.strip() for el in soup.select("h2.review-title")]
+print(titles[:5])
+</code></pre>
+
+<div class="warn">
+<strong>Scraping ethics:</strong> only scrape data you have permission to use. Check the site's terms, robots.txt, and the jurisdiction's data laws. Never scrape login-walled or personal data. For practice, prefer datasets or well-documented APIs.
+</div>
+
+<h2>Data Provenance &amp; Documentation</h2>
+<p>Record where each dataset came from, when you downloaded it, its version, and its license. This matters for reproducibility and for legal/ethical use of the data.</p>
+<pre><code># A tiny data source note you can keep beside your data
+# Source: Open-Meteo archive (CC-BY-4.0)
+# Downloaded: 2026-08-15
+# Columns: time (ISO8601), temperature_2m (degC), humidity (percent)
+</code></pre>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Choose two sources from different categories (e.g., an API and a CSV dataset). Load both into pandas, save each to <code>data/raw/</code>, and write a short <code>sources.md</code> documenting provenance and license. Verify with <code>df.info()</code> that column types look sane.
+</div>
+
+<nav>
+  <span></span>
+  <a href="../index.html">Back to Index</a>
+  <a href="4-data-wrangling.html">Next: Data Wrangling &amp; Cleaning &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

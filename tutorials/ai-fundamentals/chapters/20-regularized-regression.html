@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 20: Polynomial &amp; Regularized Regression | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 20</span>
+    <h1>Polynomial &amp; Regularized Regression</h1>
+
+    <p>A straight line is a poor fit for curves, and a curve trained without discipline memorizes its training data. This chapter gives you two tools: polynomial features to bend the line, and regularization to keep the bending honest. Together they turn linear regression into a genuinely capable workhorse.</p>
+
+    <h2>Polynomial Regression Intuition</h2>
+    <p>When a scatter plot shows a curve — sales rising then falling with price, say — a straight line underfits. The trick is to keep using a linear model but feed it <em>nonlinear features</em>. Instead of predicting from <code>x</code> alone, we create features <code>x, x^2, x^3, ...</code> and fit:</p>
+    <p><code>y_hat = w0 + w1*x + w2*x^2 + w3*x^3</code></p>
+    <p>This is still linear in the <em>parameters</em> — that is what makes it a linear regression — but the feature map lets the fitted curve turn. With degree 1 you get a line, degree 2 a parabola, degree 3 an S-curve. Higher degree means more bends, and more bends means more freedom to overfit.</p>
+
+    <h2>Polynomial Regression Implementation</h2>
+    <p>In scikit-learn you create the engineered features with <code>PolynomialFeatures</code> and feed them to a linear regression:</p>
+    <pre><code>import numpy as np
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+
+X = np.linspace(0, 10, 50).reshape(-1, 1)
+y = 3 * X.ravel()**2 + np.random.normal(0, 30, size=50)
+
+poly = PolynomialFeatures(degree=2)
+X_poly = poly.fit_transform(X)
+
+model = LinearRegression()
+model.fit(X_poly, y)
+print(model.coef_)  # w1, w2 for x and x**2</code></pre>
+    <p>Compare degrees 1, 3, and 10 on a validation split. You will watch training error fall while test error eventually rises — that hump is overfitting appearing before your eyes.</p>
+
+    <h2>Pipelines in Polynomial Regression</h2>
+    <p>Polynomial features often explode feature scales (<code>x^4</code> dwarfs <code>x</code>), so scaling must happen between transformation and fitting. A <code>Pipeline</code> bundles the steps into one object that can be trained and reused without leaking:</p>
+    <pre><code>from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+pipe = Pipeline([
+    ("poly", PolynomialFeatures(degree=3)),
+    ("scaler", StandardScaler()),
+    ("model", LinearRegression()),
+])
+pipe.fit(X, y)</code></pre>
+    <p>Pipelines guarantee the exact same transformations are applied at training and prediction time — a silent bug killer.</p>
+
+    <h2>Ridge Regression</h2>
+    <p>Ridge adds a penalty to the cost function proportional to the sum of squared weights:</p>
+    <p><code>J = MSE + alpha * sum(w_j^2)</code></p>
+    <p>The penalty <em>shrinks</em> every coefficient toward zero, never exactly to zero. Large <code>alpha</code> pushes harder, producing a smoother, more stable fit. Ridge shines when many features are modestly useful and you want to curb extreme coefficients without discarding features.</p>
+
+    <h2>Lasso and ElasticNet</h2>
+    <p>Lasso uses the sum of <em>absolute</em> weights instead of squares:</p>
+    <p><code>J = MSE + alpha * sum(|w_j|)</code></p>
+    <p>That sharp-cornered penalty drives some coefficients to exactly zero, so Lasso performs automatic feature selection — it silently drops the features that do not help. ElasticNet blends both penalties:</p>
+    <p><code>J = MSE + alpha * (r * sum(|w_j|) + (1 - r) * sum(w_j^2))</code></p>
+    <p>The <code>l1_ratio</code> parameter <code>r</code> controls the mix. ElasticNet is the practical favorite when many features are correlated, because pure Lasso can pick one feature from a correlated group and discard the rest arbitrarily.</p>
+    <pre><code>from sklearn.linear_model import Ridge, Lasso, ElasticNet
+models = {
+    "ridge": Ridge(alpha=1.0),
+    "lasso": Lasso(alpha=0.1),
+    "elastic": ElasticNet(alpha=0.1, l1_ratio=0.5),
+}</code></pre>
+
+    <h2>Types of Cross-Validation</h2>
+    <p>A single train/test split wastes data and its answer depends on luck. Cross-validation reuses every example for both training and testing:</p>
+    <ul>
+        <li><strong>k-fold:</strong> split the data into <code>k</code> equal folds; each fold becomes the test set once, the model trains on the rest. The reported score is the average across the <code>k</code> runs. Typical values are 5 or 10.</li>
+        <li><strong>Stratified k-fold:</strong> preserves the class proportions in every fold — essential for classification.</li>
+        <li><strong>Leave-One-Out:</strong> <code>k = n</code>, training on everything but one point each time. Expensive but nearly unbiased; good for tiny datasets.</li>
+        <li><strong>Time-series split:</strong> trains only on the past and tests on the future, preserving chronological order.</li>
+    </ul>
+    <pre><code>from sklearn.model_selection import cross_val_score
+scores = cross_val_score(pipe, X, y, cv=5, scoring="r2")
+print(scores.mean(), scores.std())</code></pre>
+
+    <h2>Cleaning the Dataset</h2>
+    <p>Before any model, the raw data needs hygiene (this was Chapter 16's theme). Drop duplicate rows, handle missing values (impute with the median, or drop if sparse), remove truly nonsensical values (negative price, a person aged 200), and convert categorical columns into a numeric form.</p>
+
+    <h2>EDA and Feature Engineering</h2>
+    <p>Explore before you model: histograms and box plots reveal skewed distributions; scatter matrices expose correlations and outliers. Feature engineering then creates new columns that capture structure — a <code>price_per_sqft</code> ratio, the log of a heavily skewed amount, the number of bathrooms squared. Every engineered feature is a hypothesis the model can test.</p>
+
+    <h2>Feature Selection</h2>
+    <p>Not every column deserves a weight. Filter methods score each feature against the target (<code>f_regression</code>, correlation), wrapper methods try subsets and keep the best, and embedded methods — like Lasso — select features while training. Fewer features mean faster training, simpler interpretation, and less noise for the model to memorize.</p>
+
+    <h2>Model Training</h2>
+    <p>With clean, well-chosen features, train a small portfolio of models — Ridge, Lasso, ElasticNet, and a plain LinearRegression as baseline — under identical cross-validation so their scores are comparable. Choose the simplest model whose score is statistically indistinguishable from the best; simplicity wins.</p>
+
+    <h2>Hyperparameter Tuning</h2>
+    <p>Regularization strength (<code>alpha</code>) and mix (<code>l1_ratio</code>) are not learned from data; you must try candidates. A grid search over a few sensible values, scored with cross-validation, finds the sweet spot. In Chapter 21 we will automate this with <code>GridSearchCV</code>; for now, a small manual loop over alpha values is enough to see how error changes.</p>
+
+    <h2>A Basic Simple Linear Regression Project</h2>
+    <p>End to end: load a single-feature dataset, split it, fit, and report MAE/RMSE on the test set. A classic starter is study hours versus score, or temperature versus ice cream sales. The deliverable is a slope, an intercept, and a one-line scatter-plus-line plot that shows the fit.</p>
+
+    <h2>Multiple Linear Regression Projects with Assumptions</h2>
+    <p>Multiple regression quietly assumes: a linear relationship, independence of errors, constant error variance (homoscedasticity), normally distributed errors, and no severe multicollinearity between features. You can check each with a residual plot (points should scatter randomly around zero, not form a funnel), a Q-Q plot of residuals, and a correlation matrix. When an assumption is violated, log-transform a feature or add a polynomial term.</p>
+
+    <h2>Basic Regression Project from Scratch: EDA and Feature Engineering</h2>
+    <p>Build a Boston-housing-style workflow yourself. Steps: load data; check shape and missing values; visualize the target's distribution and its relationship to the strongest features; engineer new features; standardize; split; fit a baseline; measure error. The discipline of doing this without a tutorial is what turns knowledge into skill.</p>
+
+    <h2>Model Training with Cross-Validation Using Lasso</h2>
+    <p>Lasso doubles as a feature selector, so train it under cross-validation and inspect which coefficients were pushed to zero. If Lasso zeroes out a column you believed in, either the feature is redundant with others or it was never predictive in the first place.</p>
+    <pre><code>from sklearn.linear_model import LassoCV
+lasso = LassoCV(cv=5, random_state=42).fit(X_train, y_train)
+print(lasso.alpha_)
+print(lasso.coef_)</code></pre>
+
+    <h2>Model Training with Ridge and ElasticNet with Cross-Validation</h2>
+    <p><code>RidgeCV</code> and <code>ElasticNetCV</code> scan their regularization parameters internally using cross-validation, so you hand them a grid and get back the best configuration plus a trained model. Compare the three CV-selected models' test RMSE; the differences between them tell you about the structure of your data (pure noise, correlated features, or irrelevant columns).</p>
+
+    <h2>Model Pickling in an ML Project</h2>
+    <p>Training is expensive; prediction should be cheap. The <code>joblib</code> (or <code>pickle</code>) module serializes the fitted model to disk so a server can reload it later without retraining:</p>
+    <pre><code>import joblib
+joblib.dump(pipe, "model.pkl")
+loaded = joblib.load("model.pkl")
+loaded.predict(new_X)</code></pre>
+    <p>Save the full pipeline, not just the final estimator, so preprocessing and prediction stay consistent.</p>
+
+    <h2>End-to-End ML Project Implementation</h2>
+    <p>A production-ready project has a folder structure: raw and processed data directories, a <code>src</code> package with modules for ingestion, cleaning, feature engineering, and training; configuration files for parameters; and a saved artifact. Version everything, log key decisions, and keep the pipeline rerunnable from one command. Chapter 29 will turn this into a full template.</p>
+
+    <h2>Project Deployment on AWS</h2>
+    <p>Once the model is saved, expose it. The common paths on AWS: wrap the pickled pipeline in a Flask or FastAPI app and run it on EC2; push the same app as a container to Amazon ECR and run it on Elastic Beanstalk; or host the serialized model on S3 and have a serverless function load it on demand. Whichever you choose, the model file is just an artifact — deployment is plumbing around it.</p>
+
+    <h2>Can Linear Regression Solve a Classifier Problem?</h2>
+    <p>Technically, yes — and it usually does it badly. If you code the classes as 0 and 1, a line can fit the numeric labels, but three things go wrong:</p>
+    <ul>
+        <li>Predictions fall outside [0, 1], giving absurd values like "0.3 probability" or "1.4".</li>
+        <li>A single outlier can drag the whole fitted line off course.</li>
+        <li>For more than two classes, numeric coding (1, 2, 3) imposes a false ordering between unrelated categories.</li>
+    </ul>
+    <p>The lesson is important: <em>your choice of model should follow your problem type</em>. For categorical outcomes you need a classifier with a probability output — which is exactly the subject of Chapter 21.</p>
+
+    <div class="note">
+        <strong>Bias–variance in one sentence:</strong> polynomial degree controls variance (freedom to bend), regularization alpha controls variance (penalty on bending), and both must be tuned against each other to find the generalization sweet spot.
+    </div>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> Generate a noisy sine curve (<code>y = sin(x) + noise</code>). Fit polynomial degrees 1, 3, 8, and 15, and record train vs test MSE for each. Now fit degrees 8 and 15 with Ridge (alpha = 10) and compare test errors. Write a paragraph explaining, in your own words, exactly how the penalty rescues the high-degree fits.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="19-linear-regression.html">Prev: Linear Regression</a>
+        <a href="21-logistic-regression.html">Next: Logistic Regression</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

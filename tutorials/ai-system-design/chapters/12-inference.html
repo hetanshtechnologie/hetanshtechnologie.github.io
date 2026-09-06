@@ -1,0 +1,82 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>12. Real-Time Inference Pipeline — AI System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>12. Real-Time Inference Pipeline</h1>
+<img src="../images/inference-pipeline.svg" alt="Real-time inference pipeline showing request flow through feature fetch, model eval, cache, and fallback">
+<p>Real-time inference requires an optimized pipeline that delivers predictions within strict latency budgets. Every millisecond counts.</p>
+<h2>Core Pipeline Components</h2>
+<pre><code># End-to-end inference flow (fraud detection example)
+1. Client sends transaction data (REST/gRPC)
+2. API Gateway: authenticate, validate, rate-limit
+3. Feature fetch: lookup user features from online feature store (Redis)
+4. Feature computation: compute real-time features (tx amount vs avg, location match)
+5. Cache check: has this exact transaction been scored recently?
+6. Model inference: run ensemble of 3 XGBoost models (50ms budget)
+7. Post-processing: apply business rules (amount > 10K → force review)
+8. Response: return fraud_score + explanation + action
+9. Async: log to Kafka for monitoring, feedback collection</code></pre>
+<h2>Micro-Batching</h2>
+<p>Micro-batching groups individual inference requests into small batches to improve GPU utilization and throughput, at the cost of some latency.</p>
+<pre><code># Micro-batching server logic
+Incoming requests go into a queue
+Every 10ms (or when queue reaches 32 requests):
+  Pop all requests from queue
+  Stack them into a batch tensor
+  Run model inference on the batch (GPU)
+  Map results back to individual responses
+  Return responses
+
+Latency added: avg 5ms (half of 10ms window)
+Throughput increase: 3-5x for small LLMs</code></pre>
+<h2>Fraud Detection Example</h2>
+<p>A complete real-time fraud detection system illustrates all the patterns:</p>
+<ul>
+<li><strong>Input:</strong> Transaction (amount, merchant, location, device, user_id, timestamp)</li>
+<li><strong>Latency requirement:</strong> p99 &lt; 200ms (the bank needs to approve/decline before the customer leaves the checkout page)</li>
+<li><strong>Scale:</strong> 5,000 TPS peak</li>
+</ul>
+<table>
+<tr><th>Component</th><th>Technology</th><th>Latency Budget</th></tr>
+<tr><td>API Gateway</td><td>Kong / Envoy</td><td>5ms</td></tr>
+<tr><td>Feature fetch</td><td>Redis (Feature Store)</td><td>15ms</td></tr>
+<tr><td>Feature computation</td><td>In-app computation</td><td>20ms</td></tr>
+<tr><td>Cache lookup</td><td>Redis</td><td>5ms</td></tr>
+<tr><td>Model inference (3 models)</td><td>Triton (XGBoost)</td><td>100ms (parallel)</td></tr>
+<tr><td>Post-processing &amp; rules</td><td>In-app</td><td>10ms</td></tr>
+<tr><td>Kafka logging</td><td>Async (non-blocking)</td><td>0ms added</td></tr>
+<tr><td>Total (p99)</td><td></td><td>~160ms ✅</td></tr>
+</table>
+<h2>Performance Optimization Checklist</h2>
+<ul>
+<li>[ ] Profile and budget latency per component</li>
+<li>[ ] Use gRPC instead of REST for inter-service calls (protobuf, streaming)</li>
+<li>[ ] Cache features, predictions, and model weights</li>
+<li>[ ] Use connection pooling for DB/cache/queue connections</li>
+<li>[ ] Micro-batch GPU inference requests</li>
+<li>[ ] Pre-compute expensive features (batch → feature store)</li>
+<li>[ ] Quantize models (FP16/INT8) if accuracy permits</li>
+<li>[ ] Use async logging to avoid blocking the response path</li>
+<li>[ ] Warm up models (pre-load, pre-run dummy inference)</li>
+<li>[ ] Auto-scale based on queue depth, not CPU</li>
+</ul>
+<div class="exercise"><strong>Exercise:</strong> Design a real-time content moderation API that detects toxic text and NSFW images. The API must return a verdict within 500ms for text-only content and 2s for images. Scale: 1,000 req/s. Identify each pipeline stage, assign latency budgets, describe the model serving strategy (separate or combined), and plan for graceful degradation if the image model is slow.</div>
+<nav><a href="11-indexing.html">&larr; Previous</a><a href="../index.html">Index</a><a href="13-data-freshness.html">Next: Data Freshness &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

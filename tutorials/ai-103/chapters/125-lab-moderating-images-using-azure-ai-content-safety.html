@@ -1,0 +1,155 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>125. Lab - Moderating images using Azure AI Content Safety - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 125</span>
+<h1>Lab - Moderating images using Azure AI Content Safety</h1>
+<p>In this lab you will send images to the Azure AI Content Safety resource you built in the previous chapter and read back the per-category severity scores. This is the code that powers the portal experience: any image your application accepts can be checked the same way before it is stored, displayed, or passed to a model. By the end you will have a script that moderates a local image and a threshold that decides whether it is allowed.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li><strong>Python 3.9 or newer</strong> and VS Code.</li>
+<li><strong>Your Content Safety resource</strong> from the previous lab, with endpoint and key set as environment variables.</li>
+<li>The <code>azure-ai-contentsafety</code> package installed.</li>
+<li>A test image, for example <code>sample_photo.jpg</code> from the section download.</li>
+</ul>
+
+<h2>Install the SDK</h2>
+<p>If you completed the text moderation lab, the SDK is already present. If not, install it now:</p>
+
+<pre><code>pip install azure-ai-contentsafety
+</code></pre>
+
+<h2>The Image Moderation Request</h2>
+<p>Image analysis follows the same shape as text analysis. The main differences are the options type and the way the image is supplied:</p>
+<ol>
+<li>Read the image file in binary mode.</li>
+<li>Wrap the bytes in an <code>ImageData</code> object.</li>
+<li>Put that inside an <code>AnalyzeImageOptions</code> request.</li>
+<li>Call <code>analyze_image</code> and read the per-category results.</li>
+</ol>
+
+<h2>Moderate an Image</h2>
+<div class="exercise">
+<h3>Step 1 - Create the project folder</h3>
+<p>Create a folder named <code>ai103-lab125</code> and open it in VS Code. Create a file called <code>moderate_image.py</code> and copy <code>sample_photo.jpg</code> into the folder.</p>
+
+<h3>Step 2 - Set your environment variables</h3>
+<pre><code>$env:CONTENT_SAFETY_ENDPOINT = "https://YOUR_CONTENT_SAFETY.cognitiveservices.azure.com/"
+$env:CONTENT_SAFETY_KEY = "YOUR_KEY"
+</code></pre>
+
+<h3>Step 3 - Paste the script</h3>
+<pre><code>from azure.ai.contentsafety import ContentSafetyClient
+from azure.ai.contentsafety.models import AnalyzeImageOptions, ImageData
+from azure.core.credentials import AzureKeyCredential
+import os
+
+endpoint = os.environ["CONTENT_SAFETY_ENDPOINT"]
+key = os.environ["CONTENT_SAFETY_KEY"]
+
+client = ContentSafetyClient(endpoint, AzureKeyCredential(key))
+
+with open("sample_photo.jpg", "rb") as image_file:
+    image_bytes = image_file.read()
+
+request = AnalyzeImageOptions(
+    image=ImageData(content=image_bytes),
+)
+
+response = client.analyze_image(request)
+
+for item in response.categories_analysis:
+    print(item.category, "- severity:", item.severity)
+</code></pre>
+
+<h3>Step 4 - Run the script</h3>
+<pre><code>python moderate_image.py
+</code></pre>
+<p>For a normal everyday photo, every category should report severity 0. Try the script again with a different image to see how the scores move.</p>
+</div>
+
+<h2>Reading the Results</h2>
+<p>The response mirrors the text moderation response. Each entry in <code>response.categories_analysis</code> reports one harm category and its severity on the 0-to-6 scale. A photo of a landscape scores 0 everywhere. Content that violates a category scores 1 through 6 depending on how severe the service judges it.</p>
+<ul>
+<li>Category names come from the <code>TextCategory</code>-style enums in the SDK, for example <code>Hate</code>, <code>Sexual</code>, <code>Violence</code>, and <code>SelfHarm</code>.</li>
+<li>Severity 0 means nothing of that kind was found.</li>
+<li>Higher severities indicate stronger signals of harmful content.</li>
+</ul>
+
+<h2>Deciding Whether to Allow the Image</h2>
+<p>Turn the scores into a decision with the same threshold pattern you used for text:</p>
+<pre><code>BLOCK_THRESHOLD = 2
+
+blocked = any(
+    item.severity is not None and item.severity >= BLOCK_THRESHOLD
+    for item in response.categories_analysis
+)
+
+if blocked:
+    print("Image blocked.")
+else:
+    print("Image allowed.")
+</code></pre>
+
+<div class="tip">
+<p>Log the category and severity with every decision. When you later tune thresholds, the logs tell you exactly which categories are producing false positives in your real traffic.</p>
+</div>
+
+<h2>Moderating Many Images</h2>
+<p>For a batch of images, loop and collect the verdicts:</p>
+<pre><code>for file_name in ["sample_photo.jpg", "other_photo.png"]:
+    with open(file_name, "rb") as image_file:
+        payload = AnalyzeImageOptions(
+            image=ImageData(content=image_file.read()),
+        )
+    result = client.analyze_image(payload)
+    worst = max(
+        (item.severity or 0 for item in result.categories_analysis),
+        default=0,
+    )
+    print(f"{file_name}: worst severity {worst}")
+</code></pre>
+
+<h2>Keeping Files Under the Limits</h2>
+<p>The image API has a maximum file size for analysis. If you run into a size error, resize the image before sending it:</p>
+<pre><code>pip install pillow
+</code></pre>
+
+<pre><code>from PIL import Image
+
+image = Image.open("sample_photo.jpg")
+image.thumbnail((1280, 1280))
+image.save("sample_photo_small.jpg", "JPEG")
+</code></pre>
+
+<h2>Troubleshooting Common Errors</h2>
+<table>
+<tr><th>Error you may see</th><th>Most likely cause</th><th>Fix</th></tr>
+<tr><td><code>400 Image too large</code></td><td>The file exceeds the API size limit.</td><td>Resize or recompress the image with Pillow.</td></tr>
+<tr><td><code>401 Invalid key</code></td><td>The endpoint or key is wrong.</td><td>Re-copy the key and reset the environment variables.</td></tr>
+<tr><td><code>InvalidRequest</code> for image</td><td>The resource kind is not Content Safety.</td><td>Verify the resource was created with <code>--kind ContentSafety</code>.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You have moderated images with the Azure AI Content Safety API. You read an image's bytes, sent them through <code>analyze_image</code>, read the severity score per category, and applied a threshold to make an allow or block decision. Combined with the text moderation and Prompt Shields work from earlier chapters, you now have a complete safety layer for both the content your models see and the content your users upload. The section quiz next checks your understanding of the whole section.</p>
+<nav>
+<a href="124-lab-building-an-azure-ai-content-safety-resource.html">&larr; Previous: Lab - Building an Azure AI Content Safety resource</a><a href="126-section-quiz.html">Next: Section Quiz &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Microservices Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-size:14px}
+.topbar h1{font-size:18px;color:#f8fafc}
+.hud{display:flex;justify-content:center;gap:32px;padding:16px;background:#1e293b;border-bottom:1px solid #334155}
+.hud-item{font-size:14px;color:#94a3b8}
+.hud-item span{color:#38bdf8;font-weight:700;font-size:20px;margin-right:4px}
+.game-area{max-width:1000px;margin:24px auto;padding:0 16px}
+.monolith{background:#1e293b;border:2px solid #f87171;border-radius:12px;padding:20px;margin:16px 0;position:relative}
+.monolith h3{color:#f87171;margin-bottom:12px;font-size:14px}
+.monolith-modules{display:flex;gap:8px;flex-wrap:wrap}
+.module{background:#334155;border-radius:8px;padding:8px 14px;font-size:12px;cursor:pointer;transition:all .2s;border:2px solid transparent;user-select:none}
+.module:hover{border-color:#38bdf8}
+.module.selected{border-color:#38bdf8;background:rgba(56,189,248,.1)}
+.module.assigned{opacity:.5;pointer-events:none;border-color:#4ade80}
+.services-zone{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin:16px 0}
+.service-bin{background:#1e293b;border:2px solid #334155;border-radius:12px;padding:14px;width:180px;min-height:100px;transition:all .2s}
+.service-bin h4{font-size:12px;color:#f8fafc;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.service-bin h4::before{content:'';width:8px;height:8px;border-radius:50%;display:inline-block}
+.service-bin:nth-child(1) h4::before{background:#4ade80}
+.service-bin:nth-child(2) h4::before{background:#38bdf8}
+.service-bin:nth-child(3) h4::before{background:#a78bfa}
+.service-bin:nth-child(4) h4::before{background:#fbbf24}
+.service-bin .modules{display:flex;gap:4px;flex-wrap:wrap;min-height:40px}
+.service-bin .modules .module{font-size:10px;padding:4px 8px}
+.choices{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.choice-btn{background:#334155;border:2px solid #475569;border-radius:10px;padding:10px 18px;color:#e2e8f0;cursor:pointer;font-size:13px;transition:all .2s}
+.choice-btn:hover{border-color:#38bdf8}
+.choice-btn.correct{border-color:#4ade80;background:rgba(74,222,128,.1);color:#4ade80}
+.choice-btn.wrong{border-color:#f87171;background:rgba(248,113,113,.1);color:#f87171}
+.feedback{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;display:none;text-align:center}
+.feedback.show{display:block}
+.next-btn{background:#38bdf8;color:#0f172a;border:none;border-radius:8px;padding:12px 28px;font-size:14px;font-weight:600;cursor:pointer;margin:16px auto;display:block}
+.dep-line{position:absolute;background:#334155;height:2px}
+.instruction{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;margin:16px 0;text-align:center}
+.instruction h3{font-size:15px;margin-bottom:6px}
+.instruction p{color:#94a3b8;font-size:13px}
+.game-over{display:none;text-align:center;padding:40px}
+.game-over h2{font-size:28px;color:#f8fafc;margin-bottom:12px}
+.game-over .final-score{font-size:48px;color:#38bdf8;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Back</a><h1>Microservices Decomposition</h1></div>
+<div class="hud">
+<div class="hud-item"><span id="score">0</span>Score</div>
+<div class="hud-item"><span id="round">1</span>/12</div>
+<div class="hud-item"><span id="services-count">0</span>Services</div>
+</div>
+<div class="game-area">
+<div id="game-content">
+<div class="instruction" id="instruction">
+<h3 id="inst-title">Decompose the Monolith</h3>
+<p id="inst-desc">Click modules to select them, then choose which service they belong to.</p>
+</div>
+<div class="monolith">
+<h3>Monolith Modules</h3>
+<div class="monolith-modules" id="monolith-modules"></div>
+</div>
+<div class="services-zone" id="services-zone"></div>
+<div class="choices" id="choices"></div>
+<div class="feedback" id="feedback"><h3 id="fb-title"></h3><p id="fb-text"></p></div>
+<button class="next-btn" id="next-btn" style="display:none" onclick="nextRound()">Next →</button>
+</div>
+<div class="game-over" id="game-over">
+<h2>Microservices Master!</h2>
+<div class="final-score" id="final-score">0</div>
+<p>points earned</p>
+<button class="next-btn" onclick="restart()">Play Again</button>
+</div>
+</div>
+<script>
+let score=0,round=0,maxRounds=12,answered=false;
+let selectedModules=[];
+const scenarios=[
+{title:"E-Commerce Monolith",modules:["User Auth","Product Catalog","Shopping Cart","Order Processing","Payment Gateway","Email Notifications","Inventory Mgmt","Search Engine","Review System","Analytics"],
+services:[{name:"Auth Service",modules:["User Auth"]},{name:"Product Service",modules:["Product Catalog","Search Engine"]},{name:"Order Service",modules:["Order Processing","Shopping Cart"]},{name:"Payment Service",modules:["Payment Gateway"]}],
+correctAssignments:{"User Auth":"Auth Service","Product Catalog":"Product Service","Shopping Cart":"Order Service","Order Processing":"Order Service","Payment Gateway":"Payment Service","Email Notifications":"Order Service","Inventory Mgmt":"Product Service","Search Engine":"Product Service","Review System":"Product Service","Analytics":"Order Service"},
+bestSplit:["Auth Service","Product Service","Order Service","Payment Service"]},
+{title:"Social Media Platform",modules:["User Profiles","News Feed","Messaging","Notifications","Content Upload","Ad Service","Analytics","Moderation","Search","Live Streaming"],
+services:[{name:"User Service",modules:["User Profiles","Search"]},{name:"Feed Service",modules:["News Feed","Content Upload"]},{name:"Chat Service",modules:["Messaging","Live Streaming"]},{name:"Notification Service",modules:["Notifications","Moderation"]}],
+correctAssignments:{"User Profiles":"User Service","News Feed":"Feed Service","Messaging":"Chat Service","Notifications":"Notification Service","Content Upload":"Feed Service","Ad Service":"Feed Service","Analytics":"Feed Service","Moderation":"Notification Service","Search":"User Service","Live Streaming":"Chat Service"},
+bestSplit:["User Service","Feed Service","Chat Service","Notification Service"]},
+{title:"Banking System",modules:["Account Mgmt","Transaction Processing","Loan Service","Card Management","Fraud Detection","Notifications","KYC Verification","Reporting","Bill Pay","Wire Transfer"],
+services:[{name:"Account Service",modules:["Account Mgmt","KYC Verification"]},{name:"Transaction Service",modules:["Transaction Processing","Wire Transfer"]},{name:"Card Service",modules:["Card Management","Fraud Detection"]},{name:"Notification Service",modules:["Notifications","Reporting"]}],
+correctAssignments:{"Account Mgmt":"Account Service","Transaction Processing":"Transaction Service","Loan Service":"Transaction Service","Card Management":"Card Service","Fraud Detection":"Card Service","Notifications":"Notification Service","KYC Verification":"Account Service","Reporting":"Notification Service","Bill Pay":"Transaction Service","Wire Transfer":"Transaction Service"},
+bestSplit:["Account Service","Transaction Service","Card Service","Notification Service"]}
+];
+function init(){score=0;round=0;startRound();}
+function startRound(){
+answered=false;selectedModules=[];
+const s=scenarios[round%scenarios.length];
+document.getElementById('inst-title').textContent=s.title;
+document.getElementById('inst-desc').textContent=`Identify ${s.bestSplit.length} logical service boundaries from the monolith.`;
+const modulesEl=document.getElementById('monolith-modules');
+modulesEl.innerHTML=s.modules.map((m,i)=>`<div class="module" id="mod-${i}" onclick="toggleModule('${m}',${i})">${m}</div>`).join('');
+const zone=document.getElementById('services-zone');
+zone.innerHTML=s.services.map((sv,i)=>`<div class="service-bin"><h4>${sv.name}</h4><div class="modules" id="svc-${i}"></div></div>`).join('');
+document.getElementById('services-count').textContent=s.services.length;
+document.getElementById('feedback').className='feedback';
+document.getElementById('next-btn').style.display='none';
+// Ask about which modules should be in which service
+const questionModules=s.modules.filter(m=>!Object.values(s.correctAssignments).includes(m));
+const askModule=s.modules[Math.floor(Math.random()*s.modules.length)];
+document.getElementById('choices').innerHTML=s.services.map(sv=>`<button class="choice-btn" onclick="answer('${askModule}','${sv.name}','${s.correctAssignments[askModule]}','${s.bestSplit.join(',')}')">${sv.name}</button>`).join('');
+// Update instruction
+document.getElementById('inst-desc').textContent=`"${askModule}" should go to which service?`;
+}
+function toggleModule(name,idx){
+if(answered)return;
+const el=document.getElementById('mod-'+idx);
+if(selectedModules.includes(name)){
+selectedModules=selectedModules.filter(m=>m!==name);
+el.classList.remove('selected');
+}else{
+selectedModules.push(name);
+el.classList.add('selected');
+}
+}
+function answer(chosen,correct,bestSplit){
+if(answered)return;answered=true;
+const isCorrect=chosen===correct;
+const pts=isCorrect?10:0;
+score+=pts;
+const fb=document.getElementById('feedback');
+fb.className='feedback show '+(isCorrect?'correct-fb':'wrong-fb');
+fb.style.borderColor=isCorrect?'#4ade80':'#f87171';
+document.getElementById('fb-title').textContent=isCorrect?'✓ Correct!':'✗ Wrong';
+document.getElementById('fb-text').textContent=`Best split: ${bestSplit}`;
+document.querySelectorAll('.choice-btn').forEach(b=>{
+if(b.textContent===correct)b.classList.add('correct');
+else if(b.textContent===chosen&&!isCorrect)b.classList.add('wrong');
+b.style.pointerEvents='none';
+});
+document.getElementById('score').textContent=score;
+document.getElementById('next-btn').style.display='block';
+}
+function nextRound(){
+round++;
+if(round>=maxRounds){
+document.getElementById('game-content').style.display='none';
+document.getElementById('game-over').style.display='block';
+document.getElementById('final-score').textContent=score;return;
+}
+document.getElementById('round').textContent=round+1;
+startRound();
+}
+function restart(){
+init();document.getElementById('game-content').style.display='block';document.getElementById('game-over').style.display='none';
+document.getElementById('round').textContent=1;document.getElementById('score').textContent=0;
+}
+init();
+</script>
+</body>
+</html>

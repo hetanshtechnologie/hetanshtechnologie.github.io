@@ -1,0 +1,132 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>3. SIEM Architecture &amp; Data Pipeline - SOAR &amp; SIEM Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>3. SIEM Architecture &amp; Data Pipeline</h1>
+<p class="tag">Chapter 3</p>
+
+<h2>Anatomy of a SIEM Data Pipeline</h2>
+<p>The heart of any SIEM is its data pipeline: the series of stages that move raw logs from source systems into normalized, searchable, actionable events. Understanding each stage matters because most SIEM problems — missing data, slow searches, bad correlations, alert gaps — are actually pipeline problems.</p>
+
+<table>
+<tr><th>Stage</th><th>Description</th><th>Example Technologies</th></tr>
+<tr><td>1. Log generation</td><td>Applications, OSes, network devices produce raw log records</td><td>syslog, Windows Event Log, JSON APIs, cloud audit logs</td></tr>
+<tr><td>2. Collection</td><td>Agents or forwarders pull or push logs to the SIEM</td><td>Winlogbeat, Filebeat, Splunk Universal Forwarder, Azure Agent, Syslog-ng</td></tr>
+<tr><td>3. Transport</td><td>Logs travel over the network, often with encryption and buffering</td><td>TLS, TCP/UDP, AMQP, Kafka, HTTP ingestion APIs</td></tr>
+<tr><td>4. Parse &amp; normalize</td><td>Raw text/JSON is parsed into structured fields on a common schema</td><td>CEF, LEEF, ECS, KV format, Grok, regex rules</td></tr>
+<tr><td>5. Enrich</td><td>Add context: geo-location, asset owner, user info, threat-intel tags</td><td>GeoIP, CMDB/asset DB, Active Directory, TI feeds</td></tr>
+<tr><td>6. Index / store</td><td>Normalized events are indexed and stored for fast search</td><td>Lucene/inverted index, columnar store, hot/warm/cold tiers</td></tr>
+<tr><td>7. Correlate &amp; alert</td><td>Rules process events in real time and emit alerts</td><td>Correlation engine, detection rules, alert rules</td></tr>
+<tr><td>8. Investigate</td><td>Analysts search, visualize, and pivot through the data</td><td>Query language, dashboards, notebooks</td></tr>
+</table>
+
+<h2>Common Log Sources</h2>
+<p>A SIEM is only as good as the data you feed it. The most important sources, roughly in order of security value:</p>
+<ul>
+<li><strong>Identity &amp; authentication:</strong> Active Directory/Entra ID, Okta, VPN, MFA — detect credential abuse, account lockouts, privilege changes.</li>
+<li><strong>Endpoints:</strong> Windows Event Logs (Security, Sysmon), EDR telemetry, Linux auditd — the primary host-level visibility.</li>
+<li><strong>Network:</strong> Firewalls, proxies, DNS, NetFlow — detect scanning, C2 beaconing, data exfiltration.</li>
+<li><strong>Servers &amp; applications:</strong> Web servers (IIS, nginx), databases, application logs — detect web attacks and data access.</li>
+<li><strong>Cloud:</strong> AWS CloudTrail, Azure Activity Log, Google Cloud Audit Logs — cloud-native events, API abuse, IAM changes.</li>
+<li><strong>Email:</strong> Exchange/M365 message tracking, email gateway logs — phishing detection.</li>
+<li><strong>Antivirus / EDR / EPP:</strong> Malware detections, blocked threats — high-fidelity signals.</li>
+</ul>
+
+<div class="note">
+<strong>Design Principle:</strong> Map log sources to the <em>use cases</em> you want to detect before building ingestion. If you cannot articulate what attack you will detect with a log source, question why you are collecting it. This keeps cost and noise under control.
+</div>
+
+<h2>Collection Methods</h2>
+<table>
+<tr><th>Method</th><th>How it Works</th><th>Pros</th><th>Cons</th></tr>
+<tr><td>Agent-based</td><td>Small program on the host ships logs to the SIEM</td><td>Rich data, encryption, stateful (resumes after outage)</td><td>Agent lifecycle management</td></tr>
+<tr><td>Agentless (push/pull)</td><td>Source sends syslog/API; SIEM polls APIs</td><td>No software on hosts; cloud-native</td><td>Depends on source reliability</td></tr>
+<tr><td>Syslog</td><td>Standard UDP/TCP/TLS protocol for network devices</td><td>Universal device support</td><td>Plain text, no guaranteed delivery (UDP)</td></tr>
+<tr><td>Cloud connectors</td><td>API-based connectors pull from cloud services</td><td>No on-prem footprint</td><td>API rate limits, polling latency</td></tr>
+<tr><td>Central log collectors</td><td>Fleet agents forward to a hub that ships to SIEM</td><td>Central config, scale, buffering</td><td>Extra hop to maintain</td></tr>
+</table>
+
+<h2>Normalization: Making Apples Comparable to Apples</h2>
+<p>Different systems record the same event differently. A firewall might call the source IP <code>src</code>, an endpoint <code>source_ip</code>, and a web server <code>client.ip</code>. Correlation is impossible without a <strong>common schema</strong>. Normalization solves this by mapping every vendor's fields into standard names and formats.</p>
+
+<p>The two dominant standardization efforts are:</p>
+<ul>
+<li><strong>Common Event Format (CEF)</strong> — an ArcSight-era key=value format still widely used: <code>CEF:0|Vendor|Product|Version|SignatureID|Name|Severity|src=10.0.0.5 dhost=www.corp.com</code></li>
+<li><strong>Elastic Common Schema (ECS)</strong> — a modern, open, JSON-based schema: <code>{"source": {"ip": "10.0.0.5"}, "destination": {"domain": "www.corp.com"}}</code></li>
+<li>Vendor-specific schemas such as the <strong>ASIM</strong> (Advanced SIEM Information Model) used by Microsoft Sentinel.</li>
+</ul>
+
+<pre><code># Example: three vendors, one normalized event
+# Firewall log:      src=10.0.0.5 dst=8.8.8.8 sport=52341 dport=443
+# Endpoint log:      Source IP: 10.0.0.5, Destination: 8.8.8.8:443
+# Proxy log:         {"client_ip":"10.0.0.5","host":"8.8.8.8","port":443}
+
+# After normalization (ECS-like):
+# {"source.ip":"10.0.0.5","destination.ip":"8.8.8.8","destination.port":443}</code></pre>
+
+<p>A single correlation rule can now run against all three sources because they share one schema. This is the single most important architectural decision in SIEM design.</p>
+
+<h2>Storage Architecture and Tiers</h2>
+<p>SIEM data grows fast, and storage cost dominates TCO. Mature deployments use tiered storage:</p>
+<table>
+<tr><th>Tier</th><th>Purpose</th><th>Speed</th><th>Cost</th></tr>
+<tr><td>Hot</td><td>Recent data (days) for fast interactive search and dashboards</td><td>RAM/SSD, milliseconds</td><td>Highest</td></tr>
+<tr><td>Warm</td><td>Recent weeks-months for investigation</td><td>Fast disk</td><td>Medium</td></tr>
+<tr><td>Cold / Long-term</td><td>Months-years for compliance, hunting, and legal hold</td><td>Object storage, minutes</td><td>Lowest</td></tr>
+</table>
+
+<p>Cloud-native SIEMs (Sentinel, Chronicle) blur these tiers by using cheap object storage with infinite retention and querying directly from it when needed. On-prem SIEMs require capacity planning; running out of space silently drops logs — a common cause of detection gaps.</p>
+
+<h2>Deployment Models</h2>
+<ul>
+<li><strong>On-premises:</strong> Full control, data residency guaranteed, but expensive to scale and operate.</li>
+<li><strong>SaaS / Cloud-native:</strong> No infrastructure, elastic scale, consumption-based pricing, rapid feature updates. Data leaves your premises unless configured otherwise.</li>
+<li><strong>Hybrid:</strong> On-prem collectors feed a cloud SIEM, or a split of on-prem and cloud. Common during migration and for data-residency requirements.</li>
+<li><strong>Open source:</strong> Elastic/Wazuh self-hosted — flexible and cheap, but the team owns uptime, tuning, and upgrades.</li>
+</ul>
+
+<div class="info">
+<strong>Decision Factors:</strong> Ingestion volume and cost, retention requirements, data residency, available skills, detection needs, and integration depth with existing cloud providers. Compute <em>per-GB-per-day</em> cost for your projected volume and retention before choosing.
+</div>
+
+<h2>Capacity Planning in Practice</h2>
+<p>A rough planning process:</p>
+<ol>
+<li>Estimate events per day per source (typical: 5,000–50,000 EPS for a mid-size enterprise).</li>
+<li>Estimate average event size after parsing (0.5–2 KB).</li>
+<li>Calculate storage = events/day × size × retention days × replication factor.</li>
+<li>Decide hot vs cold split and cost of each tier.</li>
+<li>Plan for spikes (e.g., ransomware events produce huge log bursts).</li>
+</ol>
+
+<pre><code># Back-of-envelope example
+EPS = 10_000                 # events per second average
+daily_events = EPS * 86400   # ≈ 864M events/day
+bytes_per_event = 1024
+daily_gb = daily_events * bytes_per_event / 1024**3   # ≈ 805 GB/day
+retention_days = 90
+total_gb = daily_gb * retention_days                  # ≈ 72 TB
+print(f"Need ~{total_gb/1000:.0f} TB for 90-day retention")</code></pre>
+
+<div class="warn">
+<strong>Common Pitfall:</strong> Under-provisioning collection bandwidth or storage. When the SIEM cannot keep up, it drops events silently, and the security team never knows what it missed. Alert on ingestion lag and storage utilization before they become incidents themselves.
+</div>
+
+<div class="exercise">
+<strong>Practice Task:</strong> List the top 10 log sources you would feed into a SIEM for a mid-size company (500 users, 50 servers, cloud-first). For each, name the collection method (agent/API/syslog), the estimated events-per-day, and one specific use case that source enables. Then calculate rough storage for a 180-day retention policy.
+</div>
+
+<nav>
+  <a href="2-siem-fundamentals.html">&larr; Previous</a>
+  <a href="../index.html">Back to Index</a>
+  <a href="4-siem-features.html">Next: SIEM Features &amp; Capabilities &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

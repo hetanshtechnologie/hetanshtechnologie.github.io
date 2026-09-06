@@ -1,0 +1,119 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>97. Introduction to LangChain - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 97</span>
+<h1>Introduction to LangChain</h1>
+<p>So far you have called models directly with the OpenAI SDK and configured agents inside Microsoft Foundry. This chapter introduces LangChain, a framework that sits on top of model APIs and gives you reusable building blocks for composing generative AI applications. LangChain is one of the most widely used orchestration frameworks, and understanding it prepares you for the agent labs that follow. We will look at what problem it solves, its core abstractions, and how it connects to your Foundry deployments.</p>
+
+<h2>What Problem LangChain Solves</h2>
+<p>Raw model calls work, but production applications repeat the same plumbing: constructing prompts, managing conversation history, retrying calls, parsing output, connecting retrieval, and wiring tools. Hand-written, this code tends to be copy-pasted across every feature and becomes hard to maintain. LangChain packages that plumbing into composable components, so you assemble an application from parts instead of writing each integration from scratch.</p>
+<p>That brings three concrete benefits:</p>
+<ul>
+<li><strong>Composition:</strong> chains combine prompts, models, and parsers into a single pipeline you can reuse.</li>
+<li><strong>Portability:</strong> models and tools are interchangeable — swap a deployment without rewriting the surrounding logic.</li>
+<li><strong>Tooling:</strong> built-in integrations for retrieval, memory, output parsing, and tracing, which you would otherwise build yourself.</li>
+</ul>
+
+<div class="note">
+<p>LangChain is a framework, not a model. It still calls your Foundry deployments under the hood. What it adds is structure around those calls, and that structure is what makes larger applications manageable.</p>
+</div>
+
+<h2>Installing LangChain</h2>
+<p>LangChain is distributed as several Python packages. For the examples in this section you need the core package plus the OpenAI integration, which works with Azure OpenAI endpoints:</p>
+
+<pre><code>pip install langchain langchain-openai openai
+</code></pre>
+
+<p>To point LangChain at a Foundry deployment, you configure an Azure OpenAI chat model with your endpoint, key, and deployment name. The deployment name is passed as the model identifier:</p>
+
+<pre><code>from langchain_openai import AzureChatOpenAI
+import os
+
+chat = AzureChatOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+    model="YOUR_DEPLOYMENT_NAME",
+    temperature=0.2,
+)
+</code></pre>
+
+<h2>The Core Building Blocks</h2>
+<p>LangChain applications are assembled from a small set of components. You will meet all of them in this section:</p>
+<table>
+<tr><th>Component</th><th>Role</th></tr>
+<tr><td>Models</td><td>Wrappers around chat and embedding deployments</td></tr>
+<tr><td>Messages</td><td>Structured system, user, assistant, and tool turns</td></tr>
+<tr><td>Prompts</td><td>Templates that turn variables into formatted instructions</td></tr>
+<tr><td>Output parsers</td><td>Convert model text into structured data such as JSON</td></tr>
+<tr><td>Chains</td><td>Sequences of steps that call models and transform results</td></tr>
+<tr><td>Tools</td><td>Functions the model can request, with schemas the model can read</td></tr>
+<tr><td>Memory</td><td>Conversation state carried across turns</td></tr>
+</table>
+
+<h2>A First LangChain Call</h2>
+<p>Once the chat model is configured, invoking it is straightforward. LangChain keeps the familiar message structure:</p>
+
+<pre><code>from langchain_core.messages import HumanMessage, SystemMessage
+
+messages = [
+    SystemMessage(content="You are a concise travel assistant."),
+    HumanMessage(content="Suggest one day itinerary in Barcelona."),
+]
+
+response = chat.invoke(messages)
+print(response.content)
+</code></pre>
+
+<div class="tip">
+<p><code>chat.invoke(...)</code> is synchronous and returns a single response. LangChain also offers <code>stream</code> for token-by-token output and <code>ainvoke</code> for asynchronous code. Starting with <code>invoke</code> keeps debugging simple.</p>
+</div>
+
+<h2>Composing a Chain</h2>
+<p>The real power shows up when you connect components. A minimal chain takes a user input, formats a prompt from it, calls the model, and passes the result through an output parser — all in one expression:</p>
+
+<pre><code>from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+prompt = ChatPromptTemplate.from_template(
+    "You are a helpful assistant. Answer in two sentences: {question}"
+)
+
+chain = prompt | chat | StrOutputParser()
+
+answer = chain.invoke({"question": "What is the water cycle?"})
+print(answer)
+</code></pre>
+
+<p>The pipe operator (<code>|</code>) is LangChain's way of composing: the prompt produces a formatted message, the model produces an AI response, and the parser extracts plain text. Each stage's output is the next stage's input, and the whole pipeline is a single callable.</p>
+
+<div class="note">
+<p>Keep the chain design in mind for the coming labs. LangChain agents are built from the same components — a model, prompts, tools, and memory — but add a decision loop so the model can call tools and keep working until it finishes.</p>
+</div>
+
+<h2>LangChain and Foundry Together</h2>
+<p>LangChain and Microsoft Foundry complement each other rather than compete. Foundry gives you managed deployments, guardrails, evaluation, and observability; LangChain gives you a flexible framework for composing prompts, tools, and memory around those deployments. A common production shape is: Foundry hosts the model and the safety layer, while LangChain wires the application logic and connects retrieval and tools.</p>
+
+<h2>Summary</h2>
+<p>LangChain is an orchestration framework that packages the repeated plumbing of generative AI into composable components. You installed it, configured a chat model against a Foundry deployment, made a first call, and composed a prompt-model-parser chain with the pipe operator. The next chapter digs into the components that matter most for agents: the core pieces of a LangChain agent.</p>
+<nav>
+<a href="96-code-and-resources-download-for-this-section.html">&larr; Previous: Code and resources download for this section</a><a href="98-langchain-agent-core-components.html">Next: LangChain Agent Core Components &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

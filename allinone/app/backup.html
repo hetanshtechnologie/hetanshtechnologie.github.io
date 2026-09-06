@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Backup & Restore — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}td{padding:6px 10px;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Backup & Restore</span>
+    </div>
+    <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+  </nav>
+  <div class="max-w-5xl mx-auto p-6">
+    <!-- Actions -->
+    <div class="bg-white rounded-xl shadow-sm border p-6 mb-6">
+      <h2 class="text-lg font-bold mb-4">Data Backup</h2>
+      <p class="text-sm text-gray-500 mb-4">Backup exports all ERP data (accounts, parties, products, invoices, inventory, journal entries, etc.) as a single JSON file stored in Supabase Storage. Backups are private to your organization.</p>
+      <div class="flex gap-3 flex-wrap">
+        <button onclick="createBackup()" id="btn-backup" class="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 flex items-center gap-2">
+          <span id="btn-text">&#128190; Create Backup Now</span>
+          <span id="btn-spinner" class="hidden"><svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg></span>
+        </button>
+        <button onclick="refreshList()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-300">&#x21bb; Refresh</button>
+      </div>
+      <div id="backup-result" class="mt-4 hidden"></div>
+    </div>
+
+    <!-- Backup History -->
+    <div class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-lg font-bold mb-4">Backup History</h2>
+      <div id="loading" class="text-center text-gray-400 py-4 text-sm">Loading...</div>
+      <div id="history-content" class="hidden overflow-x-auto"></div>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let orgId;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const user = await requireLogin(); if(!user) return;
+      orgId = await getOrgId(); if(!orgId) return;
+      await refreshList();
+    });
+
+    async function createBackup() {
+      const btn = document.getElementById('btn-backup');
+      const txt = document.getElementById('btn-text');
+      const spin = document.getElementById('btn-spinner');
+      btn.disabled = true; txt.textContent = 'Creating...'; spin.classList.remove('hidden');
+
+      const { data, error } = await supabase.functions.invoke('create-backup', { body: { org_id: orgId } });
+      const resultDiv = document.getElementById('backup-result');
+      resultDiv.classList.remove('hidden');
+
+      if (error) {
+        resultDiv.innerHTML = `<div class="p-3 bg-red-50 text-red-700 rounded text-sm">Backup failed: ${escapeHtml(error.message)}</div>`;
+      } else if (data && data.success) {
+        resultDiv.innerHTML = `<div class="p-3 bg-green-50 text-green-700 rounded text-sm">
+          Backup completed: <strong>${escapeHtml(data.file_name)}</strong> &mdash;
+          ${data.tables} tables, ${data.records} records, ${(data.size_bytes/1024).toFixed(1)} KB.
+          <a href="${data.file_url}" target="_blank" class="underline ml-2">Download</a>
+        </div>`;
+        await refreshList();
+      } else {
+        resultDiv.innerHTML = `<div class="p-3 bg-red-50 text-red-700 rounded text-sm">Backup failed: ${escapeHtml(data?.error||'Unknown error')}</div>`;
+      }
+
+      btn.disabled = false; txt.textContent = '&#128190; Create Backup Now'; spin.classList.add('hidden');
+    }
+
+    async function refreshList() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('history-content').classList.add('hidden');
+      const { data, error } = await erp.from('org_backups').select('*').eq('org_id', orgId).order('created_at', { ascending: false }).limit(20);
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('history-content').classList.remove('hidden');
+
+      if (error) {
+        document.getElementById('history-content').innerHTML = `<div class="text-red-500 text-sm">Error: ${escapeHtml(error.message)}</div>`;
+        return;
+      }
+
+      let rows = (data||[]).map(b => {
+        const statusClass = b.status === 'completed' ? 'bg-green-100 text-green-700' : b.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700';
+        return `<tr class="border-b text-sm">
+          <td>${formatDateTime(b.created_at)}</td>
+          <td>${escapeHtml(b.file_name)}</td>
+          <td class="text-right">${b.record_count||0}</td>
+          <td class="text-right">${b.file_size ? (b.file_size/1024).toFixed(1)+' KB' : '-'}</td>
+          <td><span class="px-2 py-0.5 rounded text-xs font-medium ${statusClass}">${b.status}</span></td>
+          <td>${b.file_url ? `<a href="${b.file_url}" target="_blank" class="text-blue-600 hover:underline text-xs">Download</a>` : ''}</td>
+          <td><button onclick="deleteBackup(${b.id})" class="text-red-500 hover:underline text-xs">Delete</button></td>
+        </tr>`;
+      }).join('');
+
+      document.getElementById('history-content').innerHTML = `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b"><th class="text-left p-2 font-semibold">Date</th><th class="text-left p-2 font-semibold">File</th><th class="text-right p-2 font-semibold">Records</th><th class="text-right p-2 font-semibold">Size</th><th class="text-left p-2 font-semibold">Status</th><th class="text-left p-2 font-semibold"></th><th class="text-left p-2 font-semibold"></th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="text-center text-gray-400 py-6">No backups yet</td></tr>'}</tbody></table>`;
+    }
+
+    async function deleteBackup(id) {
+      if (!confirm('Delete this backup record? (Storage file will remain)')) return;
+      await erp.from('org_backups').delete().eq('id', id);
+      await refreshList();
+    }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

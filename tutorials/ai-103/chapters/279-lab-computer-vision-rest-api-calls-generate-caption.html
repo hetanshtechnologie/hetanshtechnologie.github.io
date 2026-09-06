@@ -1,0 +1,120 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>279. Lab - Computer Vision - REST API Calls - Generate caption - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 279</span>
+<h1>Lab - Computer Vision - REST API Calls - Generate caption</h1>
+<p>You have now generated captions from Python and explored requests from Visual Studio Code. In this lab you make the caption call in its purest form: raw REST, with no SDK and no helper script. You will send an HTTP POST to the Image Analysis endpoint with the <code>caption</code> feature and read the JSON that comes back. This is exactly the traffic your Python code produced under the hood, and it is the fastest way to understand what the service expects and returns.</p>
+
+<h2>Anatomy of the Request</h2>
+<p>Every caption request has the same shape:</p>
+<ul>
+<li>A <strong>POST</strong> to <code>/computervision/imageanalysis:analyze</code> on your resource endpoint.</li>
+<li>A query string with the API version and the requested feature: <code>?api-version=2024-02-01&amp;features=caption</code>.</li>
+<li>Two headers: <code>Content-Type</code> telling the service how the image is provided, and <code>Ocp-Apim-Subscription-Key</code> carrying your key.</li>
+<li>A body containing the image, either as raw bytes or as a public URL in JSON.</li>
+</ul>
+
+<h2>Generate a Caption with cURL</h2>
+<p>From a terminal, sending an image URL is a single command. Fill in your own endpoint and key:</p>
+
+<pre><code>curl -X POST \
+  "https://YOUR_ENDPOINT/computervision/imageanalysis:analyze?api-version=2024-02-01&amp;features=caption" \
+  -H "Content-Type: application/json" \
+  -H "Ocp-Apim-Subscription-Key: YOUR_KEY" \
+  -d '{"url": "https://upload.wikimedia.org/wikipedia/commons/1/1e/Cat_and_dog.jpg"}'</code></pre>
+
+<p>You can also send a file on your machine. cURL reads the file and streams its bytes as the request body:</p>
+
+<pre><code>curl -X POST \
+  "https://YOUR_ENDPOINT/computervision/imageanalysis:analyze?api-version=2024-02-01&amp;features=caption" \
+  -H "Content-Type: application/octet-stream" \
+  -H "Ocp-Apim-Subscription-Key: YOUR_KEY" \
+  --data-binary "@C:\path\to\test.jpg"</code></pre>
+
+<h2>Generate a Caption with REST Client</h2>
+<p>The same request in your <code>vision.http</code> file, reusing the variables from the previous lab:</p>
+
+<pre><code>### Generate caption from a URL
+POST {{endpoint}}computervision/imageanalysis:analyze?api-version=2024-02-01&amp;features=caption
+Content-Type: application/json
+Ocp-Apim-Subscription-Key: {{key}}
+
+{
+  "url": "{{imageUrl}}"
+}
+
+### Generate caption from a local file
+POST {{endpoint}}computervision/imageanalysis:analyze?api-version=2024-02-01&amp;features=caption
+Content-Type: application/octet-stream
+Ocp-Apim-Subscription-Key: {{key}}
+
+< C:\path\to\test.jpg</code></pre>
+
+<h2>Read the Response</h2>
+<p>A successful call returns JSON. The caption is in the <code>captionResult</code> block:</p>
+
+<pre><code>{
+  "metadata": {"width": 640, "height": 480},
+  "captionResult": {
+    "text": "a dog and a cat lying together on a sofa",
+    "confidence": 0.92
+  }
+}</code></pre>
+
+<div class="exercise">
+<h3>Exercise 1: Send and verify a caption request</h3>
+<ol>
+<li>Run the cURL command (or the REST Client request) against a public image URL.</li>
+<li>Confirm the response status is 200 and the body contains <code>captionResult</code>.</li>
+<li>Change the URL in the body to a different public image and send again. Compare the two captions.</li>
+<li>Switch the request to send a local file via <code>--data-binary</code> or <code>&lt;</code>, and verify the same response shape.</li>
+<li>Remove the <code>features=caption</code> parameter and send once more. Note that the caption block disappears from the response.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>If the response has no <code>captionResult</code>, the request was valid but the caption feature was not requested. The features query parameter controls exactly which analysis runs and which blocks appear in the response.</p>
+</div>
+
+<h2>Requesting Both Captions and Tags</h2>
+<p>Separate features with commas to get both blocks in one call:</p>
+
+<pre><code>curl -X POST \
+  "https://YOUR_ENDPOINT/computervision/imageanalysis:analyze?api-version=2024-02-01&amp;features=caption,tags" \
+  -H "Content-Type: application/json" \
+  -H "Ocp-Apim-Subscription-Key: YOUR_KEY" \
+  -d '{"url": "https://upload.wikimedia.org/wikipedia/commons/1/1e/Cat_and_dog.jpg"}'</code></pre>
+
+<p>This response contains both <code>captionResult</code> and <code>tagsResult</code>. The JSON grows with each feature you add, which is why production code requests only what it needs.</p>
+
+<h2>Troubleshooting</h2>
+<ul>
+<li><strong>Authentication failed (401):</strong> verify the key header is spelled <code>Ocp-Apim-Subscription-Key</code> and the value matches exactly.</li>
+<li><strong>Invalid endpoint (404):</strong> confirm the endpoint includes the scheme and host, and that the path <code>computervision/imageanalysis:analyze</code> is correct.</li>
+<li><strong>Bad request (400):</strong> the JSON body is malformed or the image URL is unreachable from Azure.</li>
+<li><strong>Unsupported feature (400):</strong> the feature name in the query string is misspelled or not available in the API version you chose.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>You generated image captions with raw REST calls using both cURL and REST Client, read the <code>captionResult</code> JSON, and combined caption and tags in a single request. The pattern extends directly to the other features, which you will call in the next lab.</p>
+<nav>
+<a href="278-lab-visual-studio-code-making-api-calls.html">&larr; Previous: Lab - Visual Studio Code - Making API calls</a><a href="280-lab-computer-vision-rest-api-calls-other-features.html">Next: Lab - Computer Vision - REST API Calls - Other features &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

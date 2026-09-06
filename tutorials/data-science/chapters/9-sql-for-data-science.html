@@ -1,0 +1,142 @@
+<!DOCTYPE html><html lang="en"><head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>9. SQL for Data Science - Data Science Tutorial</title><link rel="stylesheet" href="../styles.css"></head><body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>9. SQL for Data Science</h1>
+<p class="tag">Chapter 9</p>
+
+<h2>Why Data Scientists Need SQL</h2>
+<p>Most business data lives in relational databases and warehouses. Even with pandas skills, you will reach for SQL because the data is too large to copy, or because it lives behind a warehouse that only answers SQL. SQL is the most transferable data skill — every BI tool, warehouse, and many pipelines speak it.</p>
+
+<h2>Core Query Shape</h2>
+<pre><code>SELECT city, COUNT(*) AS customers, AVG(spend) AS avg_spend
+FROM customers
+WHERE plan = 'enterprise'
+GROUP BY city
+HAVING AVG(spend) &gt; 500
+ORDER BY avg_spend DESC
+LIMIT 10;
+</code></pre>
+<p>Execution order (conceptual): <code>FROM</code> &rarr; <code>WHERE</code> &rarr; <code>GROUP BY</code> &rarr; <code>HAVING</code> &rarr; <code>SELECT</code> &rarr; <code>ORDER BY</code> &rarr; <code>LIMIT</code>. This explains why you cannot use an alias defined in <code>SELECT</code> inside <code>WHERE</code> but can in <code>ORDER BY</code>.</p>
+
+<h2>Filtering &amp; NULLs</h2>
+<pre><code>SELECT * FROM orders
+WHERE created_at &gt;= '2026-01-01'
+  AND status IN ('paid', 'shipped')
+  AND discount IS NOT NULL;      -- NULLs need IS NULL / IS NOT NULL
+</code></pre>
+
+<h2>Joins</h2>
+<table>
+<tr><th>Join</th><th>Rows returned</th></tr>
+<tr><td>INNER JOIN</td><td>Only rows that match in both tables</td></tr>
+<tr><td>LEFT JOIN</td><td>All rows from the left table, matched rows from the right (NULL where missing)</td></tr>
+<tr><td>RIGHT JOIN</td><td>All rows from the right table (mirror of LEFT)</td></tr>
+<tr><td>FULL OUTER JOIN</td><td>All rows from both</td></tr>
+</table>
+<pre><code>SELECT o.order_number, o.total, c.full_name
+FROM orders o
+LEFT JOIN customers c ON c.id = o.customer_id
+WHERE c.full_name IS NULL;   -- orders with no customer
+</code></pre>
+<div class="warn">
+<strong>Cardinality check:</strong> a JOIN that multiplies rows (one-to-many joined to another one-to-many) inflates aggregates. After joining, verify <code>COUNT(*)</code> against expectations before trusting your numbers.
+</div>
+
+<h2>Aggregation</h2>
+<pre><code>SELECT
+  date_trunc('month', created_at) AS month,
+  COUNT(*)                         AS orders,
+  SUM(total)                       AS revenue,
+  AVG(total)                       AS avg_order,
+  MIN(total)                       AS min_order,
+  MAX(total)                       AS max_order
+FROM orders
+GROUP BY 1
+ORDER BY 1;
+</code></pre>
+
+<h2>Window Functions</h2>
+<p>Window functions compute over a set of rows <em>without collapsing them</em> — perfect for rankings, running totals, and comparisons.</p>
+<pre><code>SELECT
+  order_number, customer_id, total,
+  ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY created_at) AS order_num,
+  SUM(total) OVER (PARTITION BY customer_id)                      AS lifetime_value,
+  LAG(total)  OVER (PARTITION BY customer_id ORDER BY created_at) AS prev_order,
+  total - LAG(total) OVER (PARTITION BY customer_id ORDER BY created_at) AS delta,
+  RANK()      OVER (ORDER BY total DESC)                          AS rank
+FROM orders;
+</code></pre>
+
+<h2>CTEs (Common Table Expressions)</h2>
+<p>CTEs make complex queries readable and reusable:</p>
+<pre><code>WITH cohort AS (
+  SELECT customer_id, MIN(created_at)::date AS first_order_date
+  FROM orders GROUP BY customer_id
+)
+SELECT
+  date_trunc('month', c.first_order_date) AS cohort_month,
+  COUNT(DISTINCT c.customer_id)           AS customers,
+  COUNT(DISTINCT o.customer_id)           AS retained
+FROM cohort c
+LEFT JOIN orders o ON o.customer_id = c.customer_id
+  AND date_trunc('month', o.created_at) = date_trunc('month', c.first_order_date) + INTERVAL '1 month'
+GROUP BY 1;
+</code></pre>
+
+<h2>SQL vs pandas</h2>
+<table>
+<tr><th>SQL</th><th>pandas</th></tr>
+<tr><td>SELECT col</td><td>df[["col"]]</td></tr>
+<tr><td>WHERE</td><td>df[df["col"] &gt; 5]</td></tr>
+<tr><td>GROUP BY</td><td>df.groupby(...).agg(...)</td></tr>
+<tr><td>ORDER BY</td><td>df.sort_values(...)</td></tr>
+<tr><td>JOIN</td><td>df.merge(...)</td></tr>
+<tr><td>WINDOW</td><td>df.groupby(...).transform / .rank()</td></tr>
+<tr><td>DISTINCT</td><td>df.drop_duplicates()</td></tr>
+</table>
+
+<h2>Querying with pandas-sql combo</h2>
+<pre><code>import sqlite3, pandas as pd
+conn = sqlite3.connect("data/app.db")
+
+# pull a subset to pandas, then analyze
+df = pd.read_sql_query("""
+  SELECT c.city, o.total, o.created_at
+  FROM orders o JOIN customers c ON c.id = o.customer_id
+  WHERE o.created_at >= '2025-01-01'
+""", conn)
+conn.close()
+</code></pre>
+
+<div class="info">
+<strong>BigQuery in the browser:</strong> for large public data, Google BigQuery's free tier lets you practice SQL on real datasets (e.g., GA4 sample data, GitHub commits) with no setup — an excellent playground to master warehouse SQL and window functions.
+</div>
+
+<h2>Query Performance Habits</h2>
+<ul>
+<li>Filter (<code>WHERE</code>) before joining and aggregating where possible.</li>
+<li>Only <code>SELECT</code> the columns you need.</li>
+<li>Use <code>EXPLAIN</code> on warehouses to see the plan.</li>
+<li>In BigQuery, partition and cluster tables by the columns you filter most.</li>
+<li>Prefer <code>COUNT(DISTINCT ...)</code> over joining to dedupe.</li>
+</ul>
+
+<div class="exercise">
+<strong>Practice Task:</strong> Load any public dataset into SQLite, then write and run: (1) a query with a JOIN, (2) a monthly aggregate with window functions for running totals, and (3) a cohort retention CTE. Compare the result of query (1) with the pandas equivalent using <code>merge</code>.
+</div>
+
+<nav>
+  <span></span>
+  <a href="../index.html">Back to Index</a>
+  <a href="10-ml-fundamentals.html">Next: Machine Learning Fundamentals &rarr;</a>
+</nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

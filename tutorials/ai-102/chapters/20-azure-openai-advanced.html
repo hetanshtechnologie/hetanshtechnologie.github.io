@@ -1,0 +1,386 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azure OpenAI: Advanced Patterns - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 20</span>
+<h1>Azure OpenAI: Advanced Patterns</h1>
+
+<h2>DALL-E: Generating Images from Text Descriptions</h2>
+<p>DALL-E 3 is the image generation model available through Azure OpenAI. It creates high-quality images from natural language descriptions, supporting styles from photorealistic to cartoon and oil painting. The API accepts a text prompt and returns one or more generated images as URLs or base64-encoded data. DALL-E 3 also supports image editing through <strong>inpainting</strong> — you provide an existing image with a transparent mask region, and the model fills in the masked area based on a text description. This allows you to replace objects, add elements, or extend backgrounds in existing images.</p>
+<p>Prompt design for DALL-E follows different rules than text generation. Be specific about the subject, style, medium, lighting, color palette, composition, and mood. Instead of "a cat," use "a photorealistic orange tabby cat sitting on a wooden desk in a sunlit room, shallow depth of field, warm tones, 8K resolution." The model handles negative prompts poorly — instead of saying "no people," describe what you want without mentioning people. Each generated image varies slightly due to the model's stochastic nature; if you need consistency, include a seed parameter or generate multiple images and select the best match.</p>
+
+<pre><code># Python - DALL-E image generation
+import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2024-10-21"
+)
+
+response = client.images.generate(
+    model="dall-e-3",
+    prompt="A photorealistic orange tabby cat sitting on a wooden desk "
+           "in a sunlit modern office, shallow depth of field, warm morning light",
+    n=1,
+    size="1024x1024",
+    quality="hd",
+    style="vivid"
+)
+
+image_url = response.data[0].url
+revised_prompt = response.data[0].revised_prompt
+print(f"Generated image URL: {image_url}")
+print(f"Revised prompt: {revised_prompt}")
+
+# Download and save the image
+import requests
+img_data = requests.get(image_url).content
+with open("generated_image.png", "wb") as f:
+    f.write(img_data)
+print("Image saved as generated_image.png")</pre></code>
+
+<div class="note">
+<p>The API response includes a <code>revised_prompt</code> field — this is the prompt that DALL-E actually used after rewriting your input for safety and quality. Microsoft automatically revises prompts to remove harmful content and to optimize image quality. You can compare the original and revised prompts to understand how DALL-E interprets your description. The revised prompt is also useful as a prompt engineering learning tool.</p>
+</div>
+
+<h2>Function Calling: Structured API Calls from GPT</h2>
+<p>Function calling allows GPT models to detect when they should call external functions and return structured JSON arguments for those calls. Instead of generating unstructured text, the model outputs a function name and a JSON object with the parameters, which your application parses and executes. This enables AI-powered features like order placement, database queries, calendar management, and API orchestration — all driven by natural language.</p>
+<p>To use function calling, you define one or more <strong>tools</strong> (formerly called functions) in the API request. Each tool has a name, description, and a JSON Schema defining its parameters. When the model determines that a function should be called, it returns a response with <code>finish_reason="tool_calls"</code> instead of <code>"stop"</code>. Your application executes the function with the provided arguments and sends the result back as a tool response message. The model then generates a final response incorporating the function result.</p>
+
+<pre><code># Python - function calling for order management
+import os
+import json
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2024-10-21"
+)
+
+# Define tools that the model can call
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_order_status",
+            "description": "Get the status of a customer order by order ID",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {
+                        "type": "string",
+                        "description": "The order ID (e.g., ORD-12345)"
+                    }
+                },
+                "required": ["order_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_order",
+            "description": "Cancel an existing order",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {
+                        "type": "string",
+                        "description": "The order ID to cancel"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Reason for cancellation"
+                    }
+                },
+                "required": ["order_id", "reason"]
+            }
+        }
+    }
+]
+
+# Simulated function implementations
+def get_order_status(order_id):
+    statuses = {
+        "ORD-1001": "Shipped",
+        "ORD-1002": "Processing",
+        "ORD-1003": "Delivered"
+    }
+    return json.dumps({"order_id": order_id,
+                       "status": statuses.get(order_id, "Not Found")})
+
+def cancel_order(order_id, reason):
+    return json.dumps({"order_id": order_id,
+                       "status": "Cancelled",
+                       "reason": reason})
+
+messages = [
+    {"role": "system", "content": "You are a helpful order management assistant."},
+    {"role": "user", "content": "What is the status of order ORD-1001?"}
+]
+
+response = client.chat.completions.create(
+    model="gpt-4o-deployment",
+    messages=messages,
+    tools=tools,
+    tool_choice="auto"
+)
+
+choice = response.choices[0]
+message = choice.message
+
+if choice.finish_reason == "tool_calls":
+    for tool_call in message.tool_calls:
+        func_name = tool_call.function.name
+        args = json.loads(tool_call.function.arguments)
+
+        if func_name == "get_order_status":
+            result = get_order_status(**args)
+        elif func_name == "cancel_order":
+            result = cancel_order(**args)
+
+        messages.append(message)
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": result
+        })
+
+    # Second call with function results
+    response = client.chat.completions.create(
+        model="gpt-4o-deployment",
+        messages=messages,
+        tools=tools
+    )
+    print(response.choices[0].message.content)
+else:
+    print(message.content)</pre></code>
+
+<h2>Embeddings: Converting Text to Vectors</h2>
+<p>Embeddings are vector representations of text that capture semantic meaning. Azure OpenAI provides the <code>text-embedding-3-large</code> and <code>text-embedding-3-small</code> models, which convert text strings into arrays of floating-point numbers (vectors). Similar texts produce similar vectors — the cosine similarity between two embedding vectors indicates their semantic similarity. Embeddings are the foundation of semantic search, clustering, recommendation systems, and anomaly detection.</p>
+<p>To use embeddings, you send a text string to the embeddings API and receive a vector (default dimension 3072 for large, 1536 for small). You can reduce dimensions by setting the <code>dimensions</code> parameter — the model supports dimensional reduction from 3072 down to any size, with the smaller size trading accuracy for storage and compute efficiency. After generating embeddings, you store them in a vector database (like Azure AI Search with vector support or Cosmos DB with vector search) for similarity-based retrieval.</p>
+
+<pre><code># Python - generating and using embeddings
+from openai import AzureOpenAI
+import numpy as np
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2024-10-21"
+)
+
+def get_embedding(text: str) -> list[float]:
+    response = client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text,
+        dimensions=1536  # reduced from 3072 for efficiency
+    )
+    return response.data[0].embedding
+
+# Generate embeddings for documents
+documents = [
+    "Azure AI Search provides full-text search and AI enrichment",
+    "Document Intelligence extracts structured data from forms",
+    "Content Safety moderates text and images for harmful content",
+    "Computer Vision analyzes images for objects and text"
+]
+
+doc_embeddings = [get_embedding(doc) for doc in documents]
+
+# Search query
+query = "How do I moderate harmful user content?"
+query_embedding = get_embedding(query)
+
+# Compute cosine similarity
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+similarities = [
+    (doc, cosine_similarity(query_embedding, emb))
+    for doc, emb in zip(documents, doc_embeddings)
+]
+similarities.sort(key=lambda x: x[1], reverse=True)
+
+print("Top matching documents:")
+for doc, score in similarities:
+    print(f"  {score:.4f}: {doc}")</pre></code>
+
+<h2>RAG: Retrieval Augmented Generation</h2>
+<p>Retrieval Augmented Generation (RAG) is an architecture that combines a retrieval system (search) with a generation system (GPT). Instead of relying solely on the model's training data, RAG retrieves relevant documents from a knowledge base and includes them in the prompt as context. This grounds the model's answers in factual, up-to-date information and eliminates hallucination for the covered topics. RAG is the standard approach for building knowledge-base Q&A systems, customer support chatbots, and enterprise search assistants.</p>
+<p>The RAG workflow has four steps. First, <strong>indexing</strong> — chunk your documents into segments (typically 512-1024 tokens each) and compute embeddings for each chunk. Store the chunks and their embeddings in a vector database. Second, <strong>retrieval</strong> — when a user asks a question, compute the query's embedding and perform a vector similarity search to find the most relevant chunks. Third, <strong>augmentation</strong> — insert the retrieved chunks into a prompt template alongside the user's question. Fourth, <strong>generation</strong> — send the augmented prompt to GPT and return the answer.</p>
+
+<pre><code># Python - RAG pattern with Azure AI Search + Azure OpenAI
+import os
+from openai import AzureOpenAI
+from azure.search.documents import SearchClient
+from azure.core.credentials import AzureKeyCredential
+
+openai_client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2024-10-21"
+)
+
+search_client = SearchClient(
+    endpoint=os.environ["AI_SEARCH_ENDPOINT"],
+    index_name="knowledge-base",
+    credential=AzureKeyCredential(os.environ["AI_SEARCH_KEY"])
+)
+
+def rag_answer(question: str) -> str:
+    # Step 1: Generate embedding for the question
+    query_embedding = openai_client.embeddings.create(
+        model="text-embedding-3-small",
+        input=question
+    ).data[0].embedding
+
+    # Step 2: Retrieve relevant documents via vector search
+    search_results = search_client.search(
+        search_text=None,
+        vector_queries=[{
+            "kind": "vector",
+            "vector": query_embedding,
+            "fields": "content_vector",
+            "k": 3
+        }],
+        select=["content", "title"],
+        top=3
+    )
+
+    # Step 3: Build the augmented prompt
+    context = "\n\n".join([
+        f"Source: {doc['title']}\n{doc['content']}"
+        for doc in search_results
+    ])
+
+    system_message = (
+        "You are an Azure AI expert assistant. Answer the user's question "
+        "based on the provided context. If the context does not contain "
+        "enough information to answer, say 'I cannot find that information "
+        "in the available sources.' Cite the source title when referencing "
+        "specific information."
+    )
+
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": f"Context:\n{context}\n\n"
+                                    f"Question: {question}"}
+    ]
+
+    # Step 4: Generate the answer
+    response = openai_client.chat.completions.create(
+        model="gpt-4o-deployment",
+        messages=messages,
+        temperature=0.3,
+        max_tokens=800
+    )
+
+    return response.choices[0].message.content
+
+print(rag_answer("What is the content filtering process in Azure Content Safety?"))</pre></code>
+
+<h2>Fine-Tuning: Customizing GPT Models</h2>
+<p>Fine-tuning creates a customized version of a GPT model by training it on your own dataset. Unlike RAG, which retrieves external context at inference time, fine-tuning embeds knowledge and behavior patterns into the model weights during training. This makes the model inherently better at your specific task — it learns the vocabulary, writing style, domain knowledge, and response structure from your training data. Fine-tuning is appropriate when you have a consistent, well-defined task with sufficient high-quality training data (at least hundreds of examples).</p>
+<p>The fine-tuning process involves preparing training data in the chat completions format — a JSONL file where each line is a conversation with system, user, and assistant messages. You upload the file to Azure OpenAI, submit a fine-tuning job, and wait for the job to complete. The resulting model is deployed as a custom model deployment with its own endpoint. Fine-tuning costs are based on training tokens — you pay for the tokens processed during training in addition to the base model's inference costs. Fine-tuned models inherit the base model's context window but may have reduced ability on unrelated tasks (catastrophic forgetting), so only fine-tune for the specific task.</p>
+
+<pre><code># Preparing fine-tuning data (JSONL format)
+training_examples = [
+    {
+        "messages": [
+            {"role": "system", "content": "Classify customer support "
+             "tickets into categories: Billing, Technical, Account, Other."},
+            {"role": "user", "content": "My credit card was charged twice "
+             "for the same subscription."},
+            {"role": "assistant", "content": "Billing"}
+        ]
+    },
+    {
+        "messages": [
+            {"role": "system", "content": "Classify customer support "
+             "tickets into categories: Billing, Technical, Account, Other."},
+            {"role": "user", "content": "I cannot log in to my account "
+             "after changing my password."},
+            {"role": "assistant", "content": "Account"}
+        ]
+    }
+]
+
+import json
+with open("training_data.jsonl", "w") as f:
+    for example in training_examples:
+        f.write(json.dumps(example) + "\n")
+
+# Submit fine-tuning job
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2024-10-21"
+)
+
+response = client.fine_tuning.jobs.create(
+    training_file=client.files.create(
+        file=open("training_data.jsonl", "rb"),
+        purpose="fine-tune"
+    ).id,
+    model="gpt-35-turbo",
+    suffix="ticket-classifier"
+)
+
+job_id = response.id
+print(f"Fine-tuning job submitted: {job_id}")
+
+# Check job status
+import time
+while True:
+    job = client.fine_tuning.jobs.retrieve(job_id)
+    print(f"Status: {job.status}")
+    if job.status in ["succeeded", "failed", "cancelled"]:
+        break
+    time.sleep(30)
+
+print(f"Fine-tuned model: {job.fine_tuned_model}")</pre></code>
+
+<h2>Exercise: Build a RAG-Based Question Answering System</h2>
+<p>Build a complete RAG system that answers questions about Azure AI services using Azure AI Search as the vector store and GPT-4o for generation.</p>
+<ol>
+<li>Create or use an existing Azure OpenAI resource with gpt-4o and text-embedding-3-small deployed. Create an Azure AI Search resource at the Basic tier.</li>
+<li>Prepare a set of 10-15 short documents about Azure AI services (you can extract summaries from the previous chapters). Each document should be 2-5 paragraphs.</li>
+<li>Write a Python script that chunks each document, generates embeddings, and uploads both the text and embeddings to an Azure AI Search index with vector search enabled. The index schema should include fields for id, title, content, and content_vector (Collection(Edm.Single) with dimensions 1536).</li>
+<li>Implement the RAG pipeline: receive a question, generate its embedding, perform a vector search with k=3, build an augmented prompt with the retrieved context, and call GPT-4o for the answer.</li>
+<li>Test with at least five questions. For each question, print the retrieved source documents and the generated answer. Verify that the answers are grounded in the provided context.</li>
+<li>Compare the results with and without RAG — ask a question that the base model might hallucinate (e.g., a specific detail from your custom documents) and observe the difference in accuracy.</li>
+<li>Add metadata filtering to the vector search — for example, filter by a "service" field so the search only retrieves documents about a specific Azure AI service.</li>
+</ol>
+
+<div class="exam-tip">
+<h3>Exam Tip: RAG vs. Fine-Tuning, Embeddings Model Selection, Token Optimization</h3>
+<p>The AI-102 exam frequently tests the difference between RAG and fine-tuning. Use <strong>RAG</strong> when you need to ground answers in specific, changing, or large-scale knowledge bases — it does not require training, is easy to update (just update the index), and the model always has access to the latest information. Use <strong>fine-tuning</strong> when you need to teach the model a consistent behavior pattern, output format, or domain vocabulary — it requires training data but produces faster inference (no retrieval step) and can learn nuances that RAG cannot capture. You can combine both — fine-tune for behavior and use RAG for knowledge. For <strong>embeddings model selection</strong>, use text-embedding-3-large (3072 dimensions) for maximum accuracy, text-embedding-3-small (1536 dimensions) for cost-sensitive applications, and consider the <code>dimensions</code> parameter to reduce storage costs while retaining most of the accuracy. For <strong>token optimization</strong>, chunk documents strategically — smaller chunks (256-512 tokens) improve retrieval precision while larger chunks (512-1024 tokens) provide more context for generation. Include document titles and metadata in the retrieved chunks so the model can cite sources. Use the <code>max_tokens</code> parameter to limit response length and avoid exceeding the model's context window when many chunks are retrieved.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Advanced Azure OpenAI patterns extend beyond basic chat completions. DALL-E generates images from text descriptions with support for inpainting and style control. Function calling enables structured API orchestration — the model outputs function names and arguments that your application executes. Embeddings convert text to semantic vectors for similarity search, clustering, and retrieval. RAG combines vector search with GPT generation to produce grounded, factual answers based on a knowledge base. Fine-tuning customizes model behavior through training on domain-specific data. Each pattern has distinct strengths — RAG for knowledge grounding, fine-tuning for behavioral consistency, function calling for automation, and embeddings for semantic understanding. On the AI-102 exam, focus on choosing between RAG and fine-tuning, understanding embeddings model tradeoffs, and optimizing token usage across all patterns. The next chapter covers the Bot Framework SDK for building conversational AI applications.</p>
+
+<nav>
+<a href="../index.html">&larr; Back to Index</a>
+<a href="21-bot-framework-sdk.html">Next: Bot Framework SDK: Dialogs and Cards &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

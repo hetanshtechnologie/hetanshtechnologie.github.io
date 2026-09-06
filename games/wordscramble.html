@@ -1,0 +1,268 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Word Scramble</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+  body { background: #0f172a; }
+  .scramble-letter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 56px;
+    background: #1e293b;
+    border: 2px solid #475569;
+    border-radius: 8px;
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #facc15;
+    margin: 0 3px;
+    transition: transform 0.2s;
+  }
+  .scramble-letter:hover { transform: translateY(-3px); }
+  @keyframes pop { 0%{transform:scale(1)} 50%{transform:scale(1.15)} 100%{transform:scale(1)} }
+  .pop { animation: pop 0.3s; }
+</style>
+</head>
+<body class="min-h-screen text-white">
+<div class="max-w-xl mx-auto p-4">
+  <a href="index.html" class="inline-block mb-4 text-yellow-400 hover:text-yellow-300 transition">&larr; Back to Games</a>
+  <h1 class="text-3xl font-bold mb-2 text-center">Word Scramble</h1>
+  <div class="flex justify-center gap-4 mb-4 text-sm">
+    <span class="bg-gray-800 px-3 py-1 rounded">Score: <span id="score">0</span></span>
+    <span class="bg-gray-800 px-3 py-1 rounded">Word: <span id="wordCount">1</span>/20</span>
+    <span class="bg-gray-800 px-3 py-1 rounded">Time: <span id="timer" class="font-mono">30</span>s</span>
+  </div>
+  <div id="categoryTag" class="text-center mb-3 text-sm text-gray-400"></div>
+  <div id="scrambled" class="flex justify-center mb-4 flex-wrap"></div>
+  <div id="hintArea" class="text-center mb-3 text-gray-400 text-sm">
+    <button id="hintBtn" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm transition">Show Hint (-5pts)</button>
+    <span id="hintText" class="ml-2 text-yellow-300"></span>
+  </div>
+  <div class="flex justify-center mb-4">
+    <input id="answerInput" type="text" placeholder="Type your answer..."
+      class="bg-gray-800 border border-gray-600 rounded-lg px-4 py-3 text-lg w-full max-w-sm focus:outline-none focus:border-yellow-400 text-center" autocomplete="off" />
+  </div>
+  <div class="flex justify-center gap-3 mb-4">
+    <button id="submitBtn" class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded font-semibold transition">Submit</button>
+    <button id="skipBtn" class="bg-gray-600 hover:bg-gray-500 px-6 py-2 rounded font-semibold transition">Skip</button>
+    <button id="restartBtn" class="bg-green-600 hover:bg-green-500 px-6 py-2 rounded font-semibold transition">Restart</button>
+  </div>
+  <div id="feedback" class="text-center text-lg font-semibold h-6 mb-2"></div>
+  <div id="gameEnd" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
+    <div class="bg-gray-800 rounded-xl p-8 text-center shadow-2xl">
+      <h2 class="text-2xl font-bold text-yellow-400 mb-3">Game Over!</h2>
+      <p class="mb-1">Final Score: <span id="finalScore" class="font-bold"></span></p>
+      <p class="mb-1">Correct: <span id="correctCount" class="font-bold"></span>/20</p>
+      <p class="mb-4">Accuracy: <span id="accuracy" class="font-bold"></span>%</p>
+      <button id="playAgainBtn" class="bg-green-600 hover:bg-green-500 px-6 py-2 rounded font-semibold transition">Play Again</button>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  const words = [
+    {word:'elephant',category:'Animals'},
+    {word:'giraffe',category:'Animals'},
+    {word:'penguin',category:'Animals'},
+    {word:'dolphin',category:'Animals'},
+    {word:'cheetah',category:'Animals'},
+    {word:'butterfly',category:'Animals'},
+    {word:'kangaroo',category:'Animals'},
+    {word:'chocolate',category:'Food'},
+    {word:'spaghetti',category:'Food'},
+    {word:'avocado',category:'Food'},
+    {word:'pancake',category:'Food'},
+    {word:'broccoli',category:'Food'},
+    {word:'sandwich',category:'Food'},
+    {word:'australia',category:'Countries'},
+    {word:'portugal',category:'Countries'},
+    {word:'thailand',category:'Countries'},
+    {word:'canada',category:'Countries'},
+    {word:'brazil',category:'Countries'},
+    {word:'japan',category:'Countries'},
+    {word:'guitar',category:'Music'},
+    {word:'harmony',category:'Music'},
+    {word:'rhythm',category:'Music'},
+    {word:'melody',category:'Music'},
+    {word:'violin',category:'Music'},
+    {word:'trumpet',category:'Music'},
+    {word:'telescope',category:'Science'},
+    {word:'molecule',category:'Science'},
+    {word:'volcano',category:'Science'},
+    {word:'photon',category:'Science'},
+    {word:'gravity',category:'Science'},
+    {word:'astronomy',category:'Science'},
+    {word:'rainbow',category:'Nature'},
+    {word:'mountain',category:'Nature'},
+    {word:'waterfall',category:'Nature'},
+    {word:'thunder',category:'Nature'},
+    {word:'glacier',category:'Nature'},
+    {word:'horizon',category:'Nature'},
+    {word:'library',category:'Places'},
+    {word:'hospital',category:'Places'},
+    {word:'airport',category:'Places'},
+    {word:'museum',category:'Places'},
+    {word:'theater',category:'Places'},
+    {word:'universe',category:'Space'},
+    {word:'satellite',category:'Space'},
+    {word:'asteroid',category:'Space'},
+    {word:'nebula',category:'Space'},
+    {word:'comet',category:'Space'},
+  ];
+
+  const scrambledEl = document.getElementById('scrambled');
+  const answerInput = document.getElementById('answerInput');
+  const feedback = document.getElementById('feedback');
+  const timerEl = document.getElementById('timer');
+  const gameEnd = document.getElementById('gameEnd');
+
+  let currentWords, currentIdx, score, correctAnswers, timerVal, timerInterval, wordOrder, hintUsed;
+
+  function shuffleArray(arr) {
+    for (let i = arr.length-1; i > 0; i--) {
+      const j = Math.floor(Math.random()*(i+1));
+      [arr[i],arr[j]] = [arr[j],arr[i]];
+    }
+    return arr;
+  }
+
+  function scramble(word) {
+    let arr = word.split('');
+    for (let i = arr.length-1; i > 0; i--) {
+      const j = Math.floor(Math.random()*(i+1));
+      [arr[i],arr[j]] = [arr[j],arr[i]];
+    }
+    if (arr.join('') === word && word.length > 1) {
+      [arr[0],arr[1]] = [arr[1],arr[0]];
+    }
+    return arr.join('');
+  }
+
+  function showWord() {
+    if (currentIdx >= currentWords.length) {
+      endGame();
+      return;
+    }
+    const w = currentWords[currentIdx];
+    document.getElementById('categoryTag').textContent = 'Category: ' + w.category;
+    document.getElementById('wordCount').textContent = currentIdx + 1;
+    const sc = scramble(w.word);
+    scrambledEl.innerHTML = '';
+    for (const ch of sc) {
+      const span = document.createElement('span');
+      span.className = 'scramble-letter';
+      span.textContent = ch.toUpperCase();
+      scrambledEl.appendChild(span);
+    }
+    answerInput.value = '';
+    feedback.textContent = '';
+    feedback.className = 'text-center text-lg font-semibold h-6 mb-2';
+    hintUsed = false;
+    document.getElementById('hintText').textContent = '';
+    answerInput.focus();
+    timerVal = 30;
+    timerEl.textContent = timerVal;
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+      timerVal--;
+      timerEl.textContent = timerVal;
+      if (timerVal <= 0) {
+        clearInterval(timerInterval);
+        feedback.textContent = 'Time\'s up! The word was: ' + w.word.toUpperCase();
+        feedback.className = 'text-center text-lg font-semibold h-6 mb-2 text-red-400';
+        feedback.classList.add('pop');
+        currentIdx++;
+        setTimeout(showWord, 1500);
+      }
+    }, 1000);
+  }
+
+  function handleSubmit() {
+    if (currentIdx >= currentWords.length) return;
+    const answer = answerInput.value.trim().toLowerCase();
+    const correct = currentWords[currentIdx].word.toLowerCase();
+    clearInterval(timerInterval);
+
+    if (answer === correct) {
+      let pts = 10;
+      if (!hintUsed) pts += 5;
+      pts += Math.floor(timerVal / 3);
+      score += pts;
+      correctAnswers++;
+      document.getElementById('score').textContent = score;
+      feedback.textContent = `Correct! +${pts} points`;
+      feedback.className = 'text-center text-lg font-semibold h-6 mb-2 text-green-400';
+    } else {
+      feedback.textContent = `Wrong! The word was: ${correct.toUpperCase()}`;
+      feedback.className = 'text-center text-lg font-semibold h-6 mb-2 text-red-400';
+    }
+    feedback.classList.add('pop');
+    currentIdx++;
+    setTimeout(showWord, 1500);
+  }
+
+  function endGame() {
+    clearInterval(timerInterval);
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('correctCount').textContent = correctAnswers;
+    document.getElementById('accuracy').textContent = Math.round((correctAnswers/20)*100);
+    gameEnd.classList.remove('hidden');
+  }
+
+  function reset() {
+    currentWords = shuffleArray([...words]).slice(0, 20);
+    currentIdx = 0;
+    score = 0;
+    correctAnswers = 0;
+    hintUsed = false;
+    document.getElementById('score').textContent = '0';
+    gameEnd.classList.add('hidden');
+    showWord();
+  }
+
+  document.getElementById('submitBtn').addEventListener('click', handleSubmit);
+  answerInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleSubmit(); });
+  document.getElementById('skipBtn').addEventListener('click', () => {
+    clearInterval(timerInterval);
+    const w = currentWords[currentIdx];
+    feedback.textContent = `Skipped! The word was: ${w.word.toUpperCase()}`;
+    feedback.className = 'text-center text-lg font-semibold h-6 mb-2 text-yellow-400';
+    currentIdx++;
+    setTimeout(showWord, 1200);
+  });
+  document.getElementById('hintBtn').addEventListener('click', () => {
+    if (currentIdx >= currentWords.length || hintUsed) return;
+    const w = currentWords[currentIdx].word;
+    hintUsed = true;
+    document.getElementById('hintText').textContent = 'First letter: ' + w[0].toUpperCase();
+    score = Math.max(0, score - 5);
+    document.getElementById('score').textContent = score;
+  });
+  document.getElementById('restartBtn').addEventListener('click', reset);
+  document.getElementById('playAgainBtn').addEventListener('click', reset);
+
+  reset();
+})();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

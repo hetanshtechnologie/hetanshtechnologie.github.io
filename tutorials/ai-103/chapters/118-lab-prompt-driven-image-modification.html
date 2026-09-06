@@ -1,0 +1,124 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>118. Lab - Prompt-driven image modification - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 118</span>
+<h1>Lab - Prompt-driven image modification</h1>
+<p>In this lab you will modify an existing image by describing the change in words. You will send a local photo to an image model that supports editing, along with an instruction such as "swap the sky to sunset colors," and save the modified picture to disk. This is the same technique used behind product try-on tools, background switchers, and quick design mockups.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li><strong>Python 3.9 or newer</strong> and VS Code.</li>
+<li><strong>An image model deployment that supports editing</strong>, such as <code>gpt-image-1</code>.</li>
+<li>Your <strong>endpoint URL</strong> and <strong>API key</strong> as environment variables.</li>
+<li>The <code>openai</code> and <code>requests</code> packages installed.</li>
+<li>An input image, for example <code>sample_room.jpg</code> from the section download.</li>
+</ul>
+
+<div class="note">
+<p>Editing support varies by model. Check the documentation of the image model you deployed to confirm that it accepts an input image. If your deployment does not support it, deploy a model that does before continuing.</p>
+</div>
+
+<h2>How the Request Is Structured</h2>
+<p>An editing request reuses the <code>images.generate</code> method, but the call includes an extra <code>image</code> argument containing the original picture. The prompt then describes the change rather than the whole scene:</p>
+<pre><code>result = client.images.generate(
+    model="YOUR_IMAGE_DEPLOYMENT_NAME",
+    prompt="Replace the plain curtains with teal velvet curtains",
+    image=[{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}],
+    size="1024x1024",
+)
+</code></pre>
+<p>The image is passed as a base64 data URI, exactly the way you attached images to chat messages in the vision lab.</p>
+
+<h2>Run a Prompt-Driven Edit</h2>
+<div class="exercise">
+<h3>Step 1 - Create the project folder</h3>
+<p>Create a folder named <code>ai103-lab118</code> and open it in VS Code. Create a file called <code>edit_prompt.py</code> and copy <code>sample_room.jpg</code> into the folder.</p>
+
+<h3>Step 2 - Set your environment variables</h3>
+<pre><code>$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+
+<h3>Step 3 - Paste the script</h3>
+<p>Paste the following code and replace <code>YOUR_IMAGE_DEPLOYMENT_NAME</code> with your deployment's name:</p>
+<pre><code>from openai import AzureOpenAI
+import os
+import base64
+import requests
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+with open("sample_room.jpg", "rb") as image_file:
+    image_data = base64.b64encode(image_file.read()).decode("utf-8")
+
+result = client.images.generate(
+    model="YOUR_IMAGE_DEPLOYMENT_NAME",
+    prompt="Replace the plain curtains with teal velvet curtains",
+    image=[{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}],
+    size="1024x1024",
+)
+
+url = result.data[0].url
+with open("edited_room.png", "wb") as out_file:
+    out_file.write(requests.get(url).content)
+
+print("Saved to edited_room.png")
+</code></pre>
+
+<h3>Step 4 - Run the script</h3>
+<pre><code>python edit_prompt.py
+</code></pre>
+<p>Open <code>edited_room.png</code> and compare it with the original. The curtains should be changed while the rest of the room stays recognizable.</p>
+</div>
+
+<h2>Experimenting with Instructions</h2>
+<p>Editing quality depends heavily on how you phrase the change. Try these variations to feel the difference:</p>
+<ul>
+<li><strong>Global change:</strong> "Repaint the walls a warm cream color."</li>
+<li><strong>Object swap:</strong> "Replace the sofa with a leather armchair."</li>
+<li><strong>Atmosphere change:</strong> "Make the room feel brighter, morning light through the window."</li>
+<li><strong>Preservation hint:</strong> "Keep the layout and furniture identical, only change the floor to light wood."</li>
+</ul>
+
+<div class="tip">
+<p>State both what to change and what to keep. Prompts that describe the desired end state ("the curtains are now teal velvet") tend to produce cleaner edits than vague commands ("make it nicer").</p>
+</div>
+
+<h2>Handling the Response</h2>
+<p>Just like pure generation, the edit call returns each image in <code>result.data</code>. Depending on the model, the image arrives as a <code>url</code> or as <code>b64_json</code>. The download logic you wrote in the generation lab works here unchanged, so reuse it when you want a robust script.</p>
+
+<h2>Troubleshooting Common Errors</h2>
+<table>
+<tr><th>Error you may see</th><th>Most likely cause</th><th>Fix</th></tr>
+<tr><td><code>400 image is required</code></td><td>The <code>image</code> argument was omitted.</td><td>Include the input image as an <code>image_url</code> part in the list.</td></tr>
+<tr><td><code>Model does not support editing</code></td><td>The deployment is generation-only.</td><td>Deploy a model documented as supporting input images.</td></tr>
+<tr><td><code>FileNotFoundError</code></td><td>The image path is wrong.</td><td>Confirm <code>sample_room.jpg</code> is in the folder you run from.</td></tr>
+</table>
+
+<h2>Summary</h2>
+<p>You have modified an existing image by describing the change in words. You passed the original picture as a base64 data URI, sent it through the <code>images.generate</code> call together with a change-focused prompt, and saved the result. The next lab adds a mask so you can control exactly which region of the image gets rewritten.</p>
+<nav>
+<a href="117-image-editing-with-generative-models.html">&larr; Previous: Image editing with generative models</a><a href="119-lab-mask-based-image-modification.html">Next: Lab - Mask-based image modification &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 10: Concurrency &amp; Memory Management | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 10</span>
+    <h1>Concurrency &amp; Memory Management</h1>
+
+    <p>Modern computers have many cores, yet naive programs use one at a time. This chapter explains how to make Python work in parallel — with threads for I/O-bound work and processes for CPU-bound work — and how Python manages the memory those programs use. You will build a multithreaded web scraper and a multiprocessing data pipeline along the way.</p>
+
+    <h2>Processes vs Threads</h2>
+    <p>A <strong>process</strong> is a running program with its own memory space, its own file descriptors, and its own interpreter. A <strong>thread</strong> is a lightweight execution path inside a process; all threads of a process share the same memory.</p>
+    <ul>
+      <li>Processes are isolated: one crashing does not usually take others down, but starting one is expensive.</li>
+      <li>Threads are cheap to start and can share data directly, but shared data needs careful locking.</li>
+      <li>CPU-bound work (heavy math) benefits from processes, because Python threads are limited by the Global Interpreter Lock.</li>
+      <li>I/O-bound work (waiting on networks, files, or databases) benefits from threads, because the waiting time can be used by other threads.</li>
+    </ul>
+
+    <div class="note">
+      <strong>The Global Interpreter Lock (GIL):</strong> CPython ensures only one thread runs Python bytecode at a time. Pure-math threads therefore cannot speed up CPU work — the GIL serializes them. Processes bypass the GIL because each has its own interpreter. For waiting on I/O, threads release the GIL and genuinely overlap.
+    </div>
+
+    <h2>Multithreading with the threading Module</h2>
+    <h3>Creating and Starting Threads</h3>
+    <pre><code>import threading
+import time
+
+def work(name, delay):
+    time.sleep(delay)
+    print(f"thread {name} finished")
+
+t1 = threading.Thread(target=work, args=("A", 2))
+t2 = threading.Thread(target=work, args=("B", 1))
+
+t1.start()
+t2.start()
+t1.join()
+t2.join()
+print("both threads done")</code></pre>
+
+    <h3>Race Conditions and Locks</h3>
+    <p>When two threads mutate the same value without coordination, updates can be lost. A <strong>lock</strong> lets only one thread enter the protected section at a time.</p>
+    <pre><code>import threading
+
+balance = 100
+lock = threading.Lock()
+
+def withdraw(amount):
+    global balance
+    with lock:                       # acquire before touching balance
+        if balance &gt;= amount:
+            balance -= amount
+
+threads = [threading.Thread(target=withdraw, args=(30,)) for _ in range(5)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+print("final balance:", balance)</code></pre>
+
+    <div class="info">
+      <strong>Why the lock matters:</strong> Without it, two threads can both read the current balance, both compute a new value, and both write — one update vanishes. Locks serialize the critical section so each read-modify-write completes atomically.
+    </div>
+
+    <h2>Multiprocessing with the multiprocessing Module</h2>
+    <h3>Process and Pool</h3>
+    <pre><code>import multiprocessing as mp
+
+def square(x):
+    return x * x
+
+if __name__ == "__main__":
+    with mp.Pool(processes=4) as pool:
+        results = pool.map(square, range(10))
+    print(results)</code></pre>
+    <p><code>Process</code> launches one named task; <code>Pool</code> distributes many tasks over a fixed set of workers. Because each process has its own memory, results come back through queues or shared objects, not plain global variables.</p>
+
+    <h3>Sharing State Between Processes</h3>
+    <pre><code>import multiprocessing as mp
+
+def add_one(shared_value, lock):
+    with lock:
+        shared_value.value += 1
+
+if __name__ == "__main__":
+    lock = mp.Lock()
+    counter = mp.Value("i", 0)
+    procs = [mp.Process(target=add_one, args=(counter, lock)) for _ in range(8)]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join()
+    print("shared counter:", counter.value)</code></pre>
+
+    <h2>Thread and Process Pools via concurrent.futures</h2>
+    <p>The <code>concurrent.futures</code> module offers a uniform interface: swap <code>ThreadPoolExecutor</code> for <code>ProcessPoolExecutor</code> and change almost nothing else.</p>
+    <pre><code>from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+def slow_add(a, b):
+    return a + b
+
+with ThreadPoolExecutor(max_workers=4) as pool:
+    results = list(pool.map(slow_add, range(5), range(5)))
+print(results)
+
+with ProcessPoolExecutor(max_workers=4) as pool:
+    results = list(pool.map(slow_add, range(5), range(5)))
+print(results)</code></pre>
+
+    <h2>Use Case: Multithreaded Web Scraping</h2>
+    <p>Fetching many pages is dominated by network wait, so threads are the right tool. Here each thread downloads a page's text with <code>urllib</code> and records its length.</p>
+    <pre><code>import threading
+import urllib.request
+
+urls = ["https://example.com"] * 10
+results = {}
+lock = threading.Lock()
+
+def fetch(url, idx):
+    with urllib.request.urlopen(url) as resp:
+        body = resp.read()
+    with lock:
+        results[idx] = len(body)
+
+threads = [threading.Thread(target=fetch, args=(urls[i], i)) for i in range(len(urls))]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+
+print(sorted(results.items()))</code></pre>
+
+    <div class="note">
+      <strong>A scraper caution:</strong> Always respect a site's rules — read <code>robots.txt</code>, limit request rates, and add a delay between requests. Scraping that hammer a server is both rude and often against terms of service. A polite version of this example would sleep briefly between fetches.
+    </div>
+
+    <h2>Use Case: Multiprocessing for Number Crunching</h2>
+    <p>Computing hashes of many files is CPU-bound, so processes give a real speedup. Each worker computes a checksum and returns it.</p>
+    <pre><code>import hashlib
+from concurrent.futures import ProcessPoolExecutor
+
+def sha256_hex(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+chunks = [f"sample-{i}" for i in range(20)]
+
+if __name__ == "__main__":
+    with ProcessPoolExecutor(max_workers=4) as pool:
+        digests = list(pool.map(sha256_hex, chunks))
+    print(digests[:3])</code></pre>
+
+    <h2>Memory Allocation, Deallocation, and Garbage Collection</h2>
+    <p>Python manages memory automatically. When an object is created, space is allocated from a private heap; when no references point to it anymore, it becomes garbage.</p>
+    <h3>Reference Counting and Generational GC</h3>
+    <ul>
+      <li><strong>Reference counting</strong> frees an object the moment its reference count hits zero — this is why many objects vanish immediately when you rebind a variable.</li>
+      <li><strong>Garbage collection</strong> handles reference cycles (two objects pointing at each other) that counting cannot see. The <code>gc</code> module runs collection in three generations; young objects are collected often, old ones rarely.</li>
+    </ul>
+    <pre><code>import gc
+import sys
+
+def make_cycle():
+    a = {}
+    b = {}
+    a["other"] = b
+    b["other"] = a
+    return a, b
+
+make_cycle()
+collected = gc.collect()
+print("objects collected:", collected)</code></pre>
+
+    <h3>Best Practices</h3>
+    <ul>
+      <li>Prefer generators over giant lists when you only need one item at a time — they stream instead of filling memory.</li>
+      <li>Release big data structures (<code>del df</code> or just reassign) when a pipeline stage no longer needs them.</li>
+      <li>Work in chunks (Pandas <code>chunksize</code>, file line-by-line) for datasets larger than memory.</li>
+      <li>Profile before optimizing: <code>memory_profiler</code> or the <code>tracemalloc</code> module show where memory actually goes.</li>
+      <li>Close files, connections, and sockets with context managers so their resources are released promptly.</li>
+    </ul>
+
+    <div class="info">
+      <strong>Rule of thumb recap:</strong> Waiting on the network or disk? Use threads. Crunching numbers? Use processes. Never share mutable state between threads without a lock, and keep shared data between processes minimal — passing results through <code>pool.map</code> is almost always simpler than trying to share memory.
+    </div>
+
+    <div class="exercise">
+      <strong>Practice exercise:</strong> Write a program that hashes 50 short strings with SHA-256, first serially, then with a <code>ProcessPoolExecutor</code> using 4 workers. Time both with <code>time.perf_counter()</code> and print the speedup. Next, simulate I/O: write a function that sleeps for 0.2 seconds and returns its argument squared, and run 20 such calls with a <code>ThreadPoolExecutor</code>, comparing wall time against the serial version. Then answer in a comment: why does the thread version win the sleeping test but not the hashing test?
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="9-databases-logging.html">Prev: Databases &amp; Logging</a>
+        <a href="11-flask.html">Next: Web Development with Flask</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

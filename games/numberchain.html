@@ -1,0 +1,273 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Number Chain - Brain Games</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.grid-cell { width: 50px; height: 50px; border: 1px solid #334155; display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; transition: background 0.1s; user-select: none; }
+.grid-cell:hover { background: #1e3a5f; }
+.grid-cell.endpoint { font-size: 1.1rem; color: white; border-radius: 6px; }
+.grid-cell.path { border-radius: 0; }
+.size-btn { padding: 6px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: all 0.15s; }
+.size-btn.active { background: #3b82f6; }
+.size-btn:not(.active) { background: #374151; }
+</style>
+</head>
+<body class="min-h-screen text-white font-sans">
+<div class="container mx-auto px-4 py-6">
+  <div class="flex items-center justify-between mb-4">
+    <a href="index.html" class="text-blue-400 hover:text-blue-300 text-sm">&larr; Back to Games</a>
+    <h1 class="text-2xl font-bold text-blue-400">Number Chain</h1>
+    <button onclick="newGame()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-semibold">Restart</button>
+  </div>
+
+  <div class="flex gap-4 justify-center mb-4 text-sm bg-gray-800 rounded-lg px-4 py-2 inline-flex mx-auto">
+    <span>⏱ <span id="timer">0:00</span></span>
+    <span>🔗 Moves: <span id="moves">0</span></span>
+    <span>📊 Pairs: <span id="pairsDone">0</span>/<span id="pairsTotal">0</span></span>
+  </div>
+
+  <div class="flex gap-2 justify-center mb-4">
+    <button class="size-btn active" onclick="setSize(5)">5x5</button>
+    <button class="size-btn" onclick="setSize(6)">6x6</button>
+    <button class="size-btn" onclick="setSize(7)">7x7</button>
+  </div>
+
+  <div class="flex justify-center mb-4">
+    <button onclick="clearPaths()" class="bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded text-sm">Clear Paths</button>
+  </div>
+
+  <div class="flex justify-center overflow-auto">
+    <div id="board" class="inline-grid gap-0"></div>
+  </div>
+
+  <div id="winMsg" class="hidden text-center mt-6">
+    <p class="text-green-400 text-xl font-bold">🎉 All Chains Connected!</p>
+    <p class="text-gray-400 mt-2">Time: <span id="finalTime"></span> | Moves: <span id="finalMoves"></span></p>
+  </div>
+</div>
+
+<script>
+const COLORS = ['#ef4444','#3b82f6','#22c55e','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#14b8a6','#a855f7'];
+let SIZE, pairs, grid, paths, currentPath, moves, timer, seconds, gameWon, dragging;
+
+function newGame() {
+  clearInterval(timer);
+  seconds = 0; moves = 0; gameWon = false; dragging = false;
+  document.getElementById('moves').textContent = '0';
+  document.getElementById('timer').textContent = '0:00';
+  document.getElementById('winMsg').classList.add('hidden');
+  generatePuzzle();
+  renderBoard();
+  timer = setInterval(() => {
+    seconds++;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    document.getElementById('timer').textContent = m + ':' + String(s).padStart(2, '0');
+  }, 1000);
+}
+
+function setSize(s) {
+  SIZE = s;
+  document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  newGame();
+}
+
+function generatePuzzle() {
+  grid = Array.from({length: SIZE}, () => Array(SIZE).fill(-1));
+  paths = Array.from({length: SIZE}, () => Array(SIZE).fill(-1));
+  const numPairs = Math.min(SIZE - 1, 8);
+  pairs = [];
+  const used = new Set();
+
+  for (let i = 0; i < numPairs; i++) {
+    let r1, c1, r2, c2, attempts = 0;
+    do {
+      r1 = Math.floor(Math.random() * SIZE);
+      c1 = Math.floor(Math.random() * SIZE);
+      r2 = Math.floor(Math.random() * SIZE);
+      c2 = Math.floor(Math.random() * SIZE);
+      attempts++;
+    } while (
+      attempts < 500 && (
+        used.has(r1 + ',' + c1) || used.has(r2 + ',' + c2) ||
+        (r1 === r2 && c1 === c2) ||
+        Math.abs(r1 - r2) + Math.abs(c1 - c2) < 2
+      )
+    );
+    if (attempts >= 500) continue;
+    used.add(r1 + ',' + c1);
+    used.add(r2 + ',' + c2);
+    grid[r1][c1] = i;
+    grid[r2][c2] = i;
+    pairs.push({ id: i, r1, c1, r2, c2 });
+  }
+
+  document.getElementById('pairsTotal').textContent = pairs.length;
+  document.getElementById('pairsDone').textContent = '0';
+}
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.style.gridTemplateColumns = 'repeat(' + SIZE + ', 50px)';
+  let html = '';
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const val = grid[r][c];
+      const pathVal = paths[r][c];
+      let style = '';
+      let cls = 'grid-cell';
+
+      if (val >= 0) {
+        style = 'background:' + COLORS[val % COLORS.length] + '; border-radius:6px; color:white;';
+        html += '<div class="' + cls + ' endpoint" style="' + style + '" onmousedown="startDrag(' + r + ',' + c + ')" onmouseenter="drag(' + r + ',' + c + ')" onmouseup="endDrag()">' + (val + 1) + '</div>';
+      } else if (pathVal >= 0) {
+        style = 'background:' + COLORS[pathVal % COLORS.length] + '44; border-color:' + COLORS[pathVal % COLORS.length] + '66;';
+        html += '<div class="' + cls + ' path" style="' + style + '" onmousedown="startDrag(' + r + ',' + c + ')" onmouseenter="drag(' + r + ',' + c + ')" onmouseup="endDrag()"></div>';
+      } else {
+        html += '<div class="' + cls + '" onmousedown="startDrag(' + r + ',' + c + ')" onmouseenter="drag(' + r + ',' + c + ')" onmouseup="endDrag()"></div>';
+      }
+    }
+  }
+  board.innerHTML = html;
+}
+
+function startDrag(r, c) {
+  if (gameWon) return;
+  dragging = true;
+  const val = grid[r][c];
+  if (val >= 0) {
+    clearPairPath(val);
+    currentPath = { pairId: val, cells: [[r, c]] };
+    paths[r][c] = val;
+  } else if (paths[r][c] >= 0) {
+    const pid = paths[r][c];
+    clearPairPath(pid);
+    const pair = pairs[pid];
+    currentPath = { pairId: pid, cells: [[pair.r1, pair.c1]] };
+    paths[pair.r1][pair.c1] = pid;
+  } else {
+    currentPath = null;
+  }
+  renderBoard();
+}
+
+function drag(r, c) {
+  if (!dragging || !currentPath || gameWon) return;
+  const cells = currentPath.cells;
+  const last = cells[cells.length - 1];
+  const dr = Math.abs(r - last[0]);
+  const dc = Math.abs(c - last[1]);
+  if (dr + dc !== 1) return;
+
+  if (paths[r][c] === currentPath.pairId) {
+    if (cells.length > 1 && cells[cells.length - 2][0] === r && cells[cells.length - 2][1] === c) {
+      paths[cells[cells.length - 1][0]][cells[cells.length - 1][1]] = -1;
+      cells.pop();
+      renderBoard();
+    }
+    return;
+  }
+
+  if (paths[r][c] >= 0 || (grid[r][c] >= 0 && grid[r][c] !== currentPath.pairId)) return;
+
+  if (grid[r][c] === currentPath.pairId) {
+    cells.push([r, c]);
+    paths[r][c] = currentPath.pairId;
+    moves++;
+    document.getElementById('moves').textContent = moves;
+    checkComplete();
+    currentPath = null;
+    dragging = false;
+    renderBoard();
+    return;
+  }
+
+  if (paths[r][c] === -1 && grid[r][c] === -1) {
+    cells.push([r, c]);
+    paths[r][c] = currentPath.pairId;
+    renderBoard();
+  }
+}
+
+function endDrag() {
+  if (currentPath) {
+    const pair = pairs[currentPath.pairId];
+    const last = currentPath.cells[currentPath.cells.length - 1];
+    if (last[0] !== pair.r2 || last[1] !== pair.c2) {
+      currentPath.cells.forEach(([r,c]) => { paths[r][c] = -1; });
+      paths[pair.r1][pair.c1] = currentPath.pairId;
+    }
+  }
+  dragging = false;
+  currentPath = null;
+  renderBoard();
+}
+
+document.addEventListener('mouseup', endDrag);
+
+function clearPairPath(pid) {
+  for (let r = 0; r < SIZE; r++)
+    for (let c = 0; c < SIZE; c++)
+      if (paths[r][c] === pid) paths[r][c] = -1;
+}
+
+function clearPaths() {
+  paths = Array.from({length: SIZE}, () => Array(SIZE).fill(-1));
+  pairs.forEach(p => { paths[p.r1][p.c1] = p.id; });
+  renderBoard();
+}
+
+function checkComplete() {
+  let done = 0;
+  for (let r = 0; r < SIZE; r++)
+    for (let c = 0; c < SIZE; c++)
+      if (paths[r][c] >= 0 || grid[r][c] >= 0) {}
+  pairs.forEach(p => {
+    let connected = false;
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
+        if (paths[r][c] === p.id) connected = true;
+    if (connected) done++;
+  });
+  document.getElementById('pairsDone').textContent = done;
+  if (done === pairs.length) {
+    let filled = true;
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
+        if (paths[r][c] === -1 && grid[r][c] === -1) filled = false;
+    if (filled) {
+      gameWon = true;
+      clearInterval(timer);
+      document.getElementById('finalTime').textContent = document.getElementById('timer').textContent;
+      document.getElementById('finalMoves').textContent = moves;
+      document.getElementById('winMsg').classList.remove('hidden');
+    }
+  }
+}
+
+SIZE = 5;
+newGame();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

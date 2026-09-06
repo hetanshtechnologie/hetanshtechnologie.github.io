@@ -1,0 +1,87 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>15. Fault Tolerance — AI System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>15. Fault Tolerance</h1>
+<p>AI systems must handle failures gracefully. Unlike traditional services where a 500 error is acceptable, AI systems often serve critical decisions (fraud detection, medical triage, autonomous driving) where failing open or returning a wrong answer has real consequences.</p>
+<h2>Redundancy</h2>
+<p>Deploy multiple replicas of every component across availability zones or regions.</p>
+<ul>
+<li><strong>Inference replicas:</strong> Minimum 2+ behind a load balancer. If one fails, traffic shifts to others.</li>
+<li><strong>Feature store replicas:</strong> Redis cluster with replicas. Read replicas serve if primary is slow.</li>
+<li><strong>Cross-region:</strong> Active/passive or active/active across regions for disaster recovery.</li>
+</ul>
+<h2>Retry Strategies</h2>
+<p>Transient failures (network blips, DB timeouts, GPU OOM) should be retried. But naive retries can overload the system.</p>
+<pre><code># Exponential backoff with jitter
+def retry_with_backoff(fn, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except TransientError as e:
+            if attempt == max_retries - 1:
+                raise  # final attempt failed
+            wait = (2 ** attempt) * 0.1  # 100ms, 200ms, 400ms
+            wait += random.uniform(0, 0.05)  # jitter
+            time.sleep(wait)</code></pre>
+<h2>Circuit Breakers</h2>
+<p>When a downstream service (e.g., feature store, embedding API) is consistently failing, stop calling it to prevent cascading failures.</p>
+<pre><code># Circuit breaker states for AI inference
+CLOSED: Normal operation. Requests flow to feature store.
+  If 5 consecutive failures → transition to OPEN
+
+OPEN: Requests bypass feature store. Use default features.
+  After 30 seconds → transition to HALF_OPEN
+
+HALF_OPEN: Allow 1 test request to feature store.
+  If success → transition to CLOSED
+  If failure → transition to OPEN, wait longer (exponential backoff)</code></pre>
+<h2>Fallback Models</h2>
+<p>When the primary model is unavailable (GPU failure, model corruption, timeout), serve a fallback.</p>
+<table>
+<tr><th>Fallback Tier</th><th>Description</th><th>Latency</th><th>Accuracy</th></tr>
+<tr><td>Primary</td><td>Large ensemble or deep model</td><td>100ms</td><td>Best</td></tr>
+<tr><td>Fallback 1</td><td>Smaller distilled model (same architecture)</td><td>25ms</td><td>Good</td></tr>
+<tr><td>Fallback 2</td><td>Rule-based or heuristic (e.g., average prediction)</td><td>5ms</td><td>Moderate</td></tr>
+<tr><td>Fallback 3</td><td>Default safe response (e.g., "approve with manual review")</td><td>0ms</td><td>Conservative</td></tr>
+</table>
+<pre><code># Fallback chain logic
+def predict(request):
+    try:
+        return primary_model.predict(request)  # 100ms
+    except ModelError:
+        try:
+            return fallback_model.predict(request)  # 25ms
+        except ModelError:
+            try:
+                return rule_based_predict(request)  # 5ms
+            except:
+                return DEFAULT_RESPONSE  # safe default</code></pre>
+<h2>Graceful Degradation</h2>
+<p>When parts of the system fail, degrade features rather than failing entirely:</p>
+<ul>
+<li><strong>No personalization:</strong> Use generic recommendations instead of personalized ones.</li>
+<li><strong>No real-time features:</strong> Fall back to cached batch features.</li>
+<li><strong>No embedding model:</strong> Fall back to keyword search.</li>
+<li><strong>No GPU:</strong> Fall back to CPU (slower but functional).</li>
+</ul>
+<div class="exercise"><strong>Exercise:</strong> Design the fault tolerance architecture for an AI-powered medical triage system that recommends urgency levels for emergency room patients. The system uses: a large LLM (GPU, 2s latency, best accuracy), a smaller BERT model (CPU, 200ms), and a rule-based system (instant). Describe the fallback chain, circuit breaker thresholds, what happens if the LLM is slow, and how you ensure the system never returns a "less urgent" recommendation than warranted.</div>
+<nav><a href="14-deployment.html">&larr; Previous</a><a href="../index.html">Index</a><a href="16-monitoring.html">Next: Monitoring &amp; Observability &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

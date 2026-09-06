@@ -1,0 +1,83 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>12. Fault Tolerance — ML System Design</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../index.html" style="display:inline-block;margin-bottom:12px;font-size:.9rem;">&larr; Back to Index</a>
+<h1>12. Fault Tolerance</h1>
+<p>ML systems must handle failures gracefully. Unlike traditional services where failing with a 500 error may be acceptable, ML systems often serve critical decisions where a wrong answer or no answer has real consequences.</p>
+<h2>Replication</h2>
+<p>Deploy multiple copies of every critical component.</p>
+<ul>
+<li><strong>Inference replicas:</strong> Minimum 2 per model, deployed across availability zones.</li>
+<li><strong>Feature store replicas:</strong> Redis replication with automatic failover.</li>
+<li><strong>Model registry:</strong> Store model artifacts in redundant blob storage (S3 with cross-region replication).</li>
+</ul>
+<h2>Retry Strategies</h2>
+<pre><code># Retry with exponential backoff + jitter
+def predict_with_retry(request, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return inference_client.predict(request)
+        except (NetworkError, TimeoutError) as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = (2 ** attempt) * 0.1  # 100ms, 200ms, 400ms
+            wait += random.uniform(0, wait * 0.5)  # jitter
+            time.sleep(wait)</code></pre>
+<h2>Fallback Models</h2>
+<p>A tiered fallback strategy ensures the system always returns a prediction.</p>
+<table>
+<tr><th>Tier</th><th>Model</th><th>Latency</th><th>Accuracy</th></tr>
+<tr><td>Primary</td><td>Deep ensemble (3 models)</td><td>150ms</td><td>Best (AUC 0.95)</td></tr>
+<tr><td>Fallback 1</td><td>Single XGBoost model</td><td>30ms</td><td>Good (AUC 0.92)</td></tr>
+<tr><td>Fallback 2</td><td>Rule-based heuristic</td><td>5ms</td><td>Moderate (AUC 0.85)</td></tr>
+<tr><td>Fallback 3</td><td>Default safe response</td><td>0ms</td><td>Conservative (always approve/deny)</td></tr>
+</table>
+<pre><code># Fallback chain
+def predict(request):
+    for model in [primary, fallback_xgb, fallback_rules]:
+        try:
+            return model.predict(request)
+        except:
+            continue
+    return DEFAULT_RESPONSE  # safe default</code></pre>
+<h2>Circuit Breaker</h2>
+<p>Stop calling a downstream service when it is failing, allowing it time to recover.</p>
+<pre><code># Circuit breaker for feature store
+if circuit_breaker.state == "OPEN":
+    return default_features()  # skip feature store, use cached defaults
+
+try:
+    features = feature_store.get_features(user_id)
+    circuit_breaker.record_success()
+    return features
+except:
+    circuit_breaker.record_failure()
+    if circuit_breaker.failure_count > THRESHOLD:
+        circuit_breaker.open()  # stop calling for 30 seconds
+    return default_features()</code></pre>
+<h2>Monitoring for Faults</h2>
+<ul>
+<li><strong>Health checks:</strong> Periodic pings to all components.</li>
+<li><strong>Graceful degradation indicators:</strong> Track how often fallbacks are used.</li>
+<li><strong>Automated rollback:</strong> If error rate spikes after new model deployment, automatically route traffic to previous version.</li>
+</ul>
+<div class="exercise"><strong>Exercise:</strong> Design the fault tolerance architecture for an ML-powered medical triage system. The primary model is a large LLM (GPU, 2s). Design a 4-tier fallback chain, circuit breaker thresholds, and graceful degradation strategy. How do you ensure the system never recommends a less urgent triage than warranted?</div>
+<nav><a href="11-scalability.html">&larr; Previous</a><a href="../index.html">Index</a><a href="13-monitoring.html">Next: Monitoring &amp; Drift Detection &rarr;</a></nav>
+</div>  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body></html>

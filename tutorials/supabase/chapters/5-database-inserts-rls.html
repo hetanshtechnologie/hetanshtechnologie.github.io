@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chapter 5: Database Inserts and RLS - Supabase Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+
+    <span class="tag">Chapter 5</span>
+    <h1>Database: Inserts and RLS</h1>
+
+    <h2>Tables and Schemas</h2>
+    <p>Before you insert data, you need a table to hold it. Supabase gives you two ways to create tables: the Dashboard's table editor and raw SQL via the SQL Editor. The Dashboard editor is great for beginners — you pick column names, types, defaults, and constraints with a visual interface. But for anything serious, you will want to write SQL. It is repeatable, version-controllable, and far more expressive. You can create a table in seconds with the SQL Editor:</p>
+    <pre><code>CREATE TABLE posts (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  title TEXT NOT NULL,
+  content TEXT,
+  user_id UUID NOT NULL REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT now()
+);</code></pre>
+    <p>This creates a <code>posts</code> table with an auto-incrementing primary key, a required title, optional content, a foreign key linking each row to an authenticated user, and a default timestamp. The <code>user_id</code> column is critical — it ties every row to the person who created it, which is how Row Level Security knows who owns what.</p>
+
+    <h2>Inserting Data</h2>
+    <p>With a table ready, you insert rows using the Supabase JavaScript client's <code>.insert()</code> method. The simplest call passes an object:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .insert({ title: 'Hello World', content: 'My first post', user_id: user.id })
+  .select();</code></pre>
+    <p>The <code>.select()</code> at the end tells Supabase to return the newly inserted row. Without it, you get back nothing but a success signal. Always call <code>.select()</code> if you need the inserted data — for example, to get the auto-generated <code>id</code> or <code>created_at</code>.</p>
+    <p>You can insert multiple rows at once by passing an array:</p>
+    <pre><code>const { data, error } = await supabase
+  .from('posts')
+  .insert([
+    { title: 'Post One', content: 'First content', user_id: user.id },
+    { title: 'Post Two', content: 'Second content', user_id: user.id }
+  ])
+  .select();</code></pre>
+    <p>Batch inserts are transactional — either all rows succeed or none do. Use them when seeding data or importing in bulk, but keep payloads reasonable (a few hundred rows at most) to avoid timeout issues.</p>
+
+    <h2>Row Level Security (RLS)</h2>
+    <p>RLS is the single most important security feature Supabase offers. It is a PostgreSQL feature that restricts which rows a user can see, insert, update, or delete based on a policy expression. Without RLS, every authenticated user — and even anonymous users — can read and write every row in your table. That is almost never what you want.</p>
+    <p>Think of RLS as a WHERE clause that Postgres appends to every query automatically. When a user requests rows, Postgres checks the policy; if the row does not satisfy the policy expression, it is invisible to that user. This gives you tenant isolation (users see only their own data), data privacy (users cannot read each other's records), and a security layer that cannot be bypassed by the client.</p>
+
+    <div class="note">
+      <strong>Important:</strong> RLS is <em>off</em> by default on every new table. You must explicitly enable it. A table without RLS is fully open to anyone who can reach your API — a common and dangerous oversight.
+    </div>
+
+    <h2>Enabling RLS</h2>
+    <p>In the Supabase Dashboard, open your table and toggle "Enable RLS". Or, more permanently, run this SQL in the SQL Editor:</p>
+    <pre><code>ALTER TABLE posts ENABLE ROW LEVEL SECURITY;</code></pre>
+    <p>That single line locks down the table. Now <em>nobody</em> can read or write — not even authenticated users — until you create at least one policy. This is a good safety position: start locked and open only what you need.</p>
+
+    <h2>Creating RLS Policies</h2>
+    <p>A policy is a rule that says "allow operation X when condition Y is true." Policies have two key clauses:</p>
+    <ul>
+      <li><strong>USING</strong> — determines which rows are visible or targeted (used for SELECT, UPDATE, DELETE).</li>
+      <li><strong>WITH CHECK</strong> — determines whether a new or modified row is allowed (used for INSERT, UPDATE).</li>
+    </ul>
+    <p>The classic example: users can insert only their own posts.</p>
+    <pre><code>CREATE POLICY "Users can insert their own posts"
+ON posts FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);</code></pre>
+    <p>This says: when an authenticated user tries to insert a row, check that the <code>user_id</code> on the new row matches their authenticated user ID. If it does not, the insert is rejected.</p>
+    <p>For SELECT, you use USING instead:</p>
+    <pre><code>CREATE POLICY "Users can view their own posts"
+ON posts FOR SELECT
+TO authenticated
+USING (auth.uid() = user_id);</code></pre>
+    <p>Now users can only see rows where <code>user_id</code> matches their own. The same pattern extends to UPDATE and DELETE: USING filters which rows can be targeted, and WITH CHECK (on UPDATE) validates the final row.</p>
+
+    <h2>Common Pitfalls</h2>
+    <ul>
+      <li><strong>Forgetting to enable RLS.</strong> Your table is wide open until you flip that switch. Always verify RLS is on before deploying.</li>
+      <li><strong>Overly permissive policies.</strong> Using <code>USING (true)</code> or <code>TO public</code> when you meant <code>TO authenticated</code> can leak data. Be explicit about roles.</li>
+      <li><strong>Policy order.</strong> Policies are additive — if any policy allows access, the row is accessible. If you have a permissive policy and a restrictive one, the permissive one wins. Design policies to be mutually exclusive or use <code>USING (false)</code> as a base deny.</li>
+    </ul>
+
+    <pre><code>// Full client-side example with auth context
+const { data: { user } } = await supabase.auth.getUser();
+
+const { data, error } = await supabase
+  .from('posts')
+  .insert({ title: 'My Post', content: 'Content here', user_id: user.id })
+  .select();
+
+if (error) console.error('Insert failed', error);
+else console.log('Inserted', data);</code></pre>
+
+    <div class="exercise">
+      <strong>Exercise:</strong> Create a table called <code>notes</code> with columns <code>id</code>, <code>title</code>, <code>body</code>, <code>user_id</code>, and <code>created_at</code>. Enable RLS on it. Write a policy so authenticated users can insert only their own notes. Then write a JavaScript snippet that inserts a note and logs the returned data.
+    </div>
+
+    <nav>
+      <a href="../index.html">Back to Index</a>
+      <a href="4-auth.html">&laquo; Previous: Authentication</a>
+      <a href="6-database-select-join.html">Next: Database Select and Join &raquo;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

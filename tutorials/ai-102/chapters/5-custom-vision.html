@@ -1,0 +1,309 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Custom Vision: Classification and Detection - AI-102 Exam Prep</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 5</span>
+<h1>Custom Vision: Classification and Detection</h1>
+
+<h2>When to Use Custom Vision</h2>
+<p>Azure AI Vision's prebuilt models recognize thousands of common objects, scenes, and concepts. However, many real-world applications require identifying specialized items that the prebuilt models have not been trained on. Custom Vision fills this gap by allowing you to train your own image classifiers and object detectors using your labeled images.</p>
+<p>Custom Vision is the right choice when your problem involves domain-specific categories like manufacturing defects, retail product variants, medical conditions in X-rays, specific animal breeds, vehicle models, or proprietary inventory items. It is also appropriate when you need to distinguish between subtle visual differences that generic models would group together, such as different grades of lumber or types of fabric texture.</p>
+<p>Do not use Custom Vision when the prebuilt Vision API already covers your needs, when you need real-time processing at very high throughput without managing model training, or when you have fewer than 15-20 images per category, because the model will not generalize well with so little data.</p>
+
+<h2>Image Classification vs. Object Detection</h2>
+<p>Custom Vision supports two primary project types. Image classification assigns a single label or multiple labels to the entire image. Object detection identifies the location of objects within an image using bounding boxes and can detect multiple instances of the same or different objects in a single image.</p>
+<p>Choose image classification when you need to categorize an entire scene or image. Examples include sorting photos by location type (beach, mountain, city), grading product quality (pass, fail), or identifying which plant species appears in a photo. Image classification is faster to label because you only assign tags to each image rather than drawing bounding boxes around objects.</p>
+<p>Choose object detection when the location of the object matters or when multiple objects of different types appear in the same image. Examples include counting vehicles in a parking lot, detecting defects at specific positions on a manufactured part, locating text regions in a scanned document, or identifying multiple animal species in a wildlife camera image. Object detection requires more effort to label but provides richer information.</p>
+
+<table>
+<tr><th>Characteristic</th><th>Image Classification</th><th>Object Detection</th></tr>
+<tr><td>Output</td><td>Label(s) for the entire image</td><td>Labels + bounding boxes per object</td></tr>
+<tr><td>Labeling effort</td><td>Tags per image</td><td>Bounding boxes per object per image</td></tr>
+<tr><td>Use case</td><td>Scene categorization, quality grading</td><td>Object counting, spatial analysis</td></tr>
+<tr><td>Multi-object images</td><td>One label if multiclass, multiple if multilabel</td><td>Multiple labels with positions</td></tr>
+<tr><td>Training time</td><td>Faster, simpler</td><td>Slower, more computationally intensive</td></tr>
+</table>
+
+<div class="note">
+<p>Within image classification, you can choose between multiclass (each image has exactly one label) and multilabel (each image can have multiple labels). Multiclass is simpler and often more accurate when categories are mutually exclusive. Multilabel works well when images naturally contain multiple subjects.</p>
+</div>
+
+<h2>Creating a Custom Vision Service Resource</h2>
+<p>Custom Vision is a separate Azure service with its own resource type. You can create a Custom Vision resource in the Azure portal by searching for "Custom Vision" and selecting it from the marketplace. Unlike other AI services, Custom Vision has two separate endpoints: one for training and one for prediction. Each endpoint can have its own resource with its own pricing tier.</p>
+<p>For development and learning, create a Free F0 training resource (2 training hours per month) and a Free F0 prediction resource (5,000 predictions per month). For production, use Standard S0 for both training and prediction. S0 has no hourly training limits and provides higher throughput for predictions.</p>
+<pre><code># Create Custom Vision training resource
+az cognitiveservices account create \
+    --name cv-training-ai102 \
+    --resource-group rg-ai102-study \
+    --kind CustomVision.Training \
+    --sku F0 \
+    --location westus
+
+# Create Custom Vision prediction resource
+az cognitiveservices account create \
+    --name cv-prediction-ai102 \
+    --resource-group rg-ai102-study \
+    --kind CustomVision.Prediction \
+    --sku F0 \
+    --location westus
+
+# List training keys
+az cognitiveservices account keys list \
+    --name cv-training-ai102 \
+    --resource-group rg-ai102-study
+
+# List prediction keys
+az cognitiveservices account keys list \
+    --name cv-prediction-ai102 \
+    --resource-group rg-ai102-study</code></pre>
+
+<h2>Labeling Images for Training</h2>
+<p>The quality of your training data directly determines the quality of your model. Custom Vision expects a minimum of 15 images per tag for classification and 30 images per tag for object detection, though more images almost always improve results. Images should represent the full range of variations the model will encounter in production: different lighting conditions, angles, backgrounds, sizes, orientations, and occlusion levels.</p>
+<p>For image classification, upload images to the Custom Vision portal and assign tags to each image. You can tag individual images or select multiple images and apply the same tag to all of them. The portal supports drag-and-drop uploads and bulk tagging.</p>
+<p>For object detection, upload images and draw bounding boxes around each object instance. The portal provides a visual editor where you draw rectangles on the image and assign a tag to each rectangle. Be precise with bounding boxes — include the entire object but minimize the background area inside the box. Overlapping objects should each have their own bounding box.</p>
+<p>For the exam, remember that you can also import labeled images through the Custom Vision SDK, which is useful for automating the labeling pipeline when you have existing annotations in formats like COCO JSON or Pascal VOC XML.</p>
+
+<div class="exam-tip">
+<h3>Exam Tip: Training Data Balance</h3>
+<p>Exam questions often test your understanding of balanced datasets. If you train a classifier with 100 images of "cat" and only 10 images of "dog," the model will be biased toward predicting "cat" even when the evidence is ambiguous. The solution is to balance the number of images per tag, use data augmentation (rotation, scaling, cropping) to generate synthetic variants, or collect more images for the underrepresented classes. Custom Vision applies automatic data augmentation during training, but the base dataset should still be approximately balanced.</p>
+</div>
+
+<h2>Training a Classification Model in the Portal</h2>
+<p>The Custom Vision portal at customvision.ai provides a graphical interface for managing projects, uploading images, tagging, training, and evaluating models. To train a classification model, create a new project, select "Classification" as the project type, choose either "Multiclass" or "Multilabel," and upload your tagged images. Click the "Train" button to start training with either "Quick Training" (faster, less accurate) or "Advanced Training" (slower, more accurate, billed in training hours).</p>
+<p>The portal displays training progress and, upon completion, shows the evaluation results including precision, recall, and average precision metrics. You can also perform a quick test by uploading an image the model has not seen before and reviewing the predicted tags and confidence scores.</p>
+
+<h2>Training a Classification Model with the Python SDK</h2>
+<p>For automated training pipelines, use the Custom Vision SDK. The following Python example creates a project, uploads images, tags them, and trains a classification model:</p>
+
+<pre><code>import os
+from azure.cognitiveservices.vision.customvision.training import CustomVisionTrainingClient
+from azure.cognitiveservices.vision.customvision.training.models import ImageFileCreateEntry, Tag
+from msrest.authentication import ApiKeyCredentials
+
+training_key = os.environ["CUSTOMVISION_TRAINING_KEY"]
+training_endpoint = os.environ["CUSTOMVISION_TRAINING_ENDPOINT"]
+prediction_key = os.environ["CUSTOMVISION_PREDICTION_KEY"]
+prediction_resource_id = os.environ["CUSTOMVISION_PREDICTION_RESOURCE_ID"]
+
+# Authenticate
+credentials = ApiKeyCredentials(in_headers={"Training-key": training_key})
+trainer = CustomVisionTrainingClient(training_endpoint, credentials)
+
+# Create a new project
+project = trainer.create_project("Fruit Classifier")
+
+# Create tags
+tag_apple = trainer.create_tag(project.id, "Apple")
+tag_banana = trainer.create_tag(project.id, "Banana")
+tag_orange = trainer.create_tag(project.id, "Orange")
+
+# Upload images
+base_dir = "training_images"
+image_list = []
+
+for tag_name, tag_id in [("Apple", tag_apple.id), ("Banana", tag_banana.id), ("Orange", tag_orange.id)]:
+    tag_dir = os.path.join(base_dir, tag_name)
+    for filename in os.listdir(tag_dir):
+        with open(os.path.join(tag_dir, filename), "rb") as f:
+            image_bytes = f.read()
+        image_list.append(
+            ImageFileCreateEntry(name=filename, contents=image_bytes, tag_ids=[tag_id])
+        )
+
+# Upload in batches of 64
+for i in range(0, len(image_list), 64):
+    batch = image_list[i:i+64]
+    upload_result = trainer.create_images_from_files(project.id, images=batch)
+    print(f"Uploaded batch {i//64 + 1}: {len(batch)} images")
+
+# Train the model
+print("Training started...")
+iteration = trainer.train_project(project.id, training_type="Advanced")
+while iteration.status != "Completed":
+    iteration = trainer.get_iteration(project.id, iteration.id)
+    print(f"Training status: {iteration.status}")
+
+print(f"Training completed. Iteration ID: {iteration.id}")
+
+# Publish the model to the prediction endpoint
+trainer.publish_iteration(
+    project.id,
+    iteration.id,
+    "fruit-classifier-model",
+    prediction_resource_id
+)
+print("Model published to prediction endpoint.")</code></pre>
+
+<h2>Training an Object Detection Model in the Portal</h2>
+<p>Object detection training in the portal follows the same general workflow as classification, with one critical difference: you must draw bounding boxes around each object. After uploading images to a new project set to "Object Detection" type, click on each image and drag rectangles around the objects you want to detect. Assign a tag to each bounding box. The portal displays the bounding box coordinates as you draw.</p>
+<p>After tagging, click "Train" and select "Advanced Training" for object detection. Training takes longer than classification because the model must learn both object identity and spatial location. The evaluation metrics include mean Average Precision (mAP), which is the primary metric for object detection quality.</p>
+
+<h2>Training an Object Detection Model with the SDK</h2>
+<p>For object detection, you must provide region information (bounding box coordinates) when uploading images. The region is specified as left, top, width, and height, each normalized to the range [0, 1] relative to the image dimensions.</p>
+
+<pre><code>from azure.cognitiveservices.vision.customvision.training.models import (
+    ImageFileCreateEntry, Region, ImageUrlCreateEntry
+)
+
+# For object detection, include region with each tagged image
+image_entries = []
+
+# Example: upload an image with a bounding box for "Dog"
+with open("dog_photo.jpg", "rb") as f:
+    image_bytes = f.read()
+
+region = Region(
+    tag_id=tag_dog.id,
+    left=0.1,    # 10% from left edge
+    top=0.2,     # 20% from top edge
+    width=0.7,   # 70% of image width
+    height=0.6   # 60% of image height
+)
+
+entry = ImageFileCreateEntry(
+    name="dog_001.jpg",
+    contents=image_bytes,
+    regions=[region]
+)
+image_entries.append(entry)
+
+# Upload and train
+trainer.create_images_from_files(project.id, images=image_entries)
+
+iteration = trainer.train_project(project.id, training_type="Advanced")
+while iteration.status != "Completed":
+    iteration = trainer.get_iteration(project.id, iteration.id)
+    time.sleep(1)
+
+trainer.publish_iteration(project.id, iteration.id, "od-model", prediction_resource_id)</code></pre>
+
+<h2>Evaluating Model Metrics</h2>
+<p>After training, Custom Vision provides evaluation metrics on a held-out test set (automatically selected from your uploaded images). The key metrics depend on the project type.</p>
+<p>For classification, the primary metrics are precision and recall. Precision (also called accuracy) measures how many of the model's predictions were correct: <code>TP / (TP + FP)</code>. Recall measures how many of the actual positive cases the model found: <code>TP / (TP + FN)</code>. The F1 score is the harmonic mean of precision and recall. The portal also shows a per-tag precision and recall breakdown.</p>
+<p>For object detection, the primary metric is mean Average Precision (mAP), computed at an intersection-over-union (IoU) threshold of 0.50 (or 0.75 for stricter evaluation). mAP@0.50 measures how well the predicted bounding boxes overlap with the ground truth boxes, averaged across all object classes. A higher mAP indicates more accurate localization. The exam does not require you to calculate these metrics, but you should understand what they represent and how to interpret them for model improvement.</p>
+
+<table>
+<tr><th>Metric</th><th>Classification</th><th>Object Detection</th><th>Interpretation</th></tr>
+<tr><td>Precision</td><td>Yes</td><td>Per class</td><td>How many predicted positives are correct</td></tr>
+<tr><td>Recall</td><td>Yes</td><td>Per class</td><td>How many actual positives were found</td></tr>
+<tr><td>F1 Score</td><td>Yes</td><td>Per class</td><td>Harmonic mean of precision and recall</td></tr>
+<tr><td>mAP</td><td>No</td><td>Yes</td><td>Mean Average Precision across classes</td></tr>
+<tr><td>AP per class</td><td>No</td><td>Yes</td><td>Average Precision for a single class</td></tr>
+</table>
+
+<div class="note">
+<p>A precision-recall trade-off is inherent in all classification systems. Increasing confidence thresholds improves precision but reduces recall. The evaluation metrics in the portal use a default probability threshold of 50%. You can adjust this threshold when calling the prediction API to suit your application's needs. For a medical screening application, you might accept lower precision to achieve higher recall (not missing diseases). For a content moderation system, you might accept lower recall to achieve higher precision (avoiding false positives).</p>
+</div>
+
+<h2>Publishing and Consuming a Custom Vision Model</h2>
+<p>After training, you must publish an iteration before it can be called through the prediction API. Publishing assigns a published name to the iteration and makes it available at a fixed prediction endpoint URL. You can publish multiple iterations under different names for A/B testing or staged rollouts.</p>
+<p>To call the prediction endpoint, use the Custom Vision prediction SDK with the prediction key and endpoint URL. The following example shows how to call a published classification model:</p>
+
+<pre><code># Python - calling a published classification model
+from azure.cognitiveservices.vision.customvision.prediction import CustomVisionPredictionClient
+from msrest.authentication import ApiKeyCredentials
+
+prediction_key = os.environ["CUSTOMVISION_PREDICTION_KEY"]
+prediction_endpoint = os.environ["CUSTOMVISION_PREDICTION_ENDPOINT"]
+project_id = "your-project-id"
+published_name = "fruit-classifier-model"
+
+credentials = ApiKeyCredentials(in_headers={"Prediction-key": prediction_key})
+predictor = CustomVisionPredictionClient(prediction_endpoint, credentials)
+
+with open("test_fruit.jpg", "rb") as f:
+    image_data = f.read()
+
+results = predictor.classify_image(project_id, published_name, image_data)
+
+for prediction in results.predictions:
+    print(f"{prediction.tag_name}: {prediction.probability:.2%}")</code></pre>
+
+<pre><code>// C# - calling a published object detection model
+using Microsoft.Azure.CognitiveServices.Vision.CustomVision.Prediction;
+using Microsoft.Azure.CognitiveServices.Vision.CustomVision.Prediction.Models;
+
+var predictionKey = Environment.GetEnvironmentVariable("CUSTOMVISION_PREDICTION_KEY");
+var predictionEndpoint = Environment.GetEnvironmentVariable("CUSTOMVISION_PREDICTION_ENDPOINT");
+var projectId = Guid.Parse("your-project-id");
+var publishedName = "od-model";
+
+var credentials = new ApiKeyServiceClientCredentials(predictionKey);
+var client = new CustomVisionPredictionClient(credentials)
+{
+    Endpoint = predictionEndpoint
+};
+
+using var imageStream = File.OpenRead("test_dog.jpg");
+var result = client.DetectImage(projectId, publishedName, imageStream);
+
+foreach (var prediction in result.Predictions)
+{
+    var box = prediction.BoundingBox;
+    Console.WriteLine($"Detected: {prediction.TagName} " +
+        $"({prediction.Probability:P2}) " +
+        $"at [{box.Left:F3}, {box.Top:F3}, {box.Width:F3}, {box.Height:F3}]");
+}</code></pre>
+
+<h2>Exporting Models for Offline Use</h2>
+<p>Custom Vision supports exporting trained models to several formats for execution at the edge or in offline environments. Supported export formats include TensorFlow (saved model and frozen graph), ONNX (for Windows ML or ONNX Runtime), CoreML (for Apple devices), Dockerfile (for container deployment), and VAIDK (for Vision AI Development Kit).</p>
+<p>To export a model, select the iteration in the Custom Vision portal and click "Export." Then choose the target platform. The exported model includes the model architecture, trained weights, and a label file. You load the model using the corresponding framework and pass images for inference without making network calls.</p>
+<p>On the exam, remember that export is only available for certain project types and domains. Compact domains (compact classification and compact object detection) support exporting. General (non-compact) domains do not. When a scenario requires offline inference or edge deployment, you must select a compact domain during project creation.</p>
+
+<h2>Tips for Building Quality Training Datasets</h2>
+<p>The success of your Custom Vision model depends almost entirely on the quality and diversity of your training data. Follow these guidelines to maximize model accuracy.</p>
+<p>Collect images that represent the full range of production conditions. If your model will classify products on a conveyor belt, include images taken under factory lighting, different conveyor belt speeds (motion blur), and different camera angles. Do not rely on web images alone — capture real images from the deployment environment.</p>
+<p>Use negative samples. For classification, include images that do not belong to any of your target tags. Upload them without any tag, and the model learns to produce low confidence when it encounters unfamiliar content. For object detection, include images without any objects — the model should learn not to produce false positives on empty backgrounds.</p>
+<p>Apply data augmentation. Custom Vision automatically applies basic augmentation during training, but you can improve results by manually augmenting your dataset with rotations (up to 30 degrees), horizontal flips, brightness adjustments, and random crops. The Python Imaging Library (Pillow) is useful for this.</p>
+<p>Avoid ambiguous or inconsistent tagging. If a single training image could be labeled with multiple tags and you are using multiclass classification, the model will be confused. Ensure that each image clearly belongs to its assigned tag. For object detection, ensure bounding boxes are precise and consistent in size relative to the object.</p>
+<p>Monitor overfitting. If your training metrics are very high but the model performs poorly on new images, you are overfitting. Solutions include adding more training data, applying stronger regularization, or reducing model complexity by switching to a compact domain. Early stopping is built into Custom Vision training, so you do not need to manage it yourself.</p>
+
+<div class="exercise">
+<h3>Exercise: Train a Custom Classifier for a Real-World Scenario</h3>
+<p>Imagine you are building a quality inspection system for a bakery that produces three types of pastries: croissants, muffins, and scones. The system must classify each item on a conveyor belt to route it to the correct packaging line.</p>
+<ol>
+<li>Create a Custom Vision project in the portal set to Multiclass Classification.</li>
+<li>Collect at least 20 images per pastry type. Search online for free stock photos or take photos yourself. Ensure variety in lighting, angle, and background.</li>
+<li>Upload the images and assign the correct tags: Croissant, Muffin, Scone.</li>
+<li>Train the model using Advanced Training. Note the training time and the precision/recall metrics.</li>
+<li>Test the model with at least 5 new images per type that were not part of the training set.</li>
+<li>Record the confidence scores. Are there any misclassifications? What patterns do the errors follow?</li>
+<li>Improve the model by adding 10 more images to the weakest-performing tag and retraining.</li>
+<li>Export the model to TensorFlow format and verify the exported files.</li>
+</ol>
+<p>Write a short report (one paragraph) explaining which images caused misclassifications and how you would improve the dataset further.</p>
+</div>
+
+<h2>Custom Vision Pitfalls to Avoid</h2>
+<p>Several common mistakes lead to poor Custom Vision models. Using too few images per tag is the most frequent issue. The portal will train with as few as 5 images, but the model will not generalize. Using images that are too similar to each other within a tag also hurts — if all your muffin photos are on a white plate, the model might learn to recognize "white plate" instead of "muffin." Include diverse backgrounds.</p>
+<p>Another mistake is training with images that contain multiple taggable objects for a multiclass project. If a photo contains both a croissant and a muffin, you should either exclude it or switch to multilabel. For object detection, failing to tag all instances of an object in an image teaches the model that those instances are negative examples, which directly harms recall.</p>
+<p>Finally, remember that the prediction endpoint is separate from the training endpoint. You must create a prediction resource, publish the iteration, and use the prediction key in your application code. Many developers forget this step and receive 403 Forbidden errors when trying to call the prediction API with the training key.</p>
+
+<div class="exam-tip">
+<h3>Exam Tip: Custom Vision Scenarios</h3>
+<p>The exam often presents a scenario with a description of images and asks whether Image Classification or Object Detection is appropriate. Look for keywords: if the requirement mentions "location," "position," "bounding box," "coordinates," or "counting," it is object detection. If it mentions "categorize," "sort," "classify," or "determine if," it is classification. Also note that Custom Vision requires a compact domain for model export; if the scenario mentions edge or offline deployment, compact is the only option.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Custom Vision lets you train custom image classifiers and object detectors using your own labeled images. Classification assigns tags to entire images, while object detection provides both tags and bounding boxes for individual objects within an image. Training requires a balanced dataset with a minimum of 15-30 images per tag. After training, you evaluate the model using precision, recall, and mAP metrics, publish the iteration, and consume it through the prediction API. Models can be exported to TensorFlow, ONNX, CoreML, and Docker for offline or edge deployment. The quality of your training data determines the quality of your model — invest effort in collecting diverse, well-labeled images. The next chapter covers the Face API for facial detection and recognition.</p>
+
+<nav>
+<a href="4-computer-vision.html">&larr; Previous: Azure AI Vision: Image Analysis</a>
+<a href="6-face-api.html">Next: Face API: Detection and Recognition &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

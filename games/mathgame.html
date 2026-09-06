@@ -1,0 +1,186 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Math Challenge</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body{background:#0f0c29;background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);color:#e0e0e0;font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+.btn-opt{transition:all .15s}
+.btn-opt:hover{transform:scale(1.05);filter:brightness(1.2)}
+.btn-opt:active{transform:scale(0.95)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:fadeIn .3s ease}
+@keyframes float-num{0%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-40px)}}
+.float-num{position:absolute;font-weight:bold;animation:float-num .8s ease forwards;pointer-events:none}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.shake{animation:shake .3s}
+</style>
+</head>
+<body>
+<a href="index.html" class="fixed top-4 left-4 text-blue-400 hover:text-blue-300 text-sm font-semibold z-10">&larr; Back to Games</a>
+<div class="max-w-2xl mx-auto px-4 py-8">
+  <div id="start-screen" class="text-center fade-in">
+    <h1 class="text-4xl font-bold mb-4 bg-gradient-to-r from-yellow-400 to-red-500 bg-clip-text text-transparent">Math Challenge</h1>
+    <p class="text-gray-400 mb-8">Solve as many problems as you can in 60 seconds!</p>
+    <div class="flex flex-col items-center gap-4">
+      <p class="text-gray-300 font-medium">Select Difficulty:</p>
+      <div class="flex gap-3 flex-wrap justify-center">
+        <button onclick="startGame('easy')" class="px-6 py-3 bg-green-600 hover:bg-green-500 rounded-lg font-semibold transition">Easy (+ &minus;)</button>
+        <button onclick="startGame('medium')" class="px-6 py-3 bg-yellow-600 hover:bg-yellow-500 rounded-lg font-semibold transition">Medium (+ &minus; &times;)</button>
+        <button onclick="startGame('hard')" class="px-6 py-3 bg-red-600 hover:bg-red-500 rounded-lg font-semibold transition">Hard (+ &minus; &times; &divide;)</button>
+      </div>
+    </div>
+  </div>
+  <div id="game-screen" class="hidden fade-in">
+    <div class="flex justify-between items-center mb-4">
+      <div>
+        <span class="text-sm text-gray-400">Difficulty: <span id="diff-label" class="text-white font-semibold"></span></span>
+      </div>
+      <div class="flex items-center gap-4">
+        <span class="text-sm text-gray-400">Streak: <span id="streak" class="text-orange-400 font-bold">0</span></span>
+        <span id="timer" class="text-lg font-bold text-yellow-400">60</span>
+      </div>
+    </div>
+    <div class="w-full h-2 bg-gray-700 rounded mb-6"><div id="progress-bar" class="h-2 bg-yellow-500 rounded transition-all duration-300" style="width:100%"></div></div>
+    <div class="relative">
+      <div id="question-card" class="bg-gray-800 rounded-xl p-8 mb-6 shadow-lg text-center">
+        <p id="problem" class="text-4xl font-bold text-white mb-2"></p>
+      </div>
+    </div>
+    <div id="options" class="grid grid-cols-2 gap-3 mb-4"></div>
+    <p id="feedback" class="text-center text-sm mt-4 h-6"></p>
+  </div>
+  <div id="result-screen" class="hidden text-center fade-in">
+    <h2 class="text-3xl font-bold mb-6 bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">Time's Up!</h2>
+    <div class="bg-gray-800 rounded-xl p-6 mb-6 shadow-lg">
+      <p id="final-score" class="text-5xl font-bold text-white mb-2"></p>
+      <div class="grid grid-cols-3 gap-4 text-center mt-4">
+        <div><p id="r-correct" class="text-2xl font-bold text-green-400">0</p><p class="text-xs text-gray-500">Correct</p></div>
+        <div><p id="r-wrong" class="text-2xl font-bold text-red-400">0</p><p class="text-xs text-gray-500">Wrong</p></div>
+        <div><p id="r-streak" class="text-2xl font-bold text-orange-400">0</p><p class="text-xs text-gray-500">Best Streak</p></div>
+      </div>
+    </div>
+    <button onclick="showStart()" class="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg text-lg font-semibold transition">Play Again</button>
+  </div>
+</div>
+<script>
+let difficulty='easy',timeLeft=60,score=0,wrongCount=0,correctCount=0,streak=0,bestStreak=0,timer=null,answered=false;
+
+function showStart(){document.getElementById('start-screen').classList.remove('hidden');document.getElementById('game-screen').classList.add('hidden');document.getElementById('result-screen').classList.add('hidden')}
+
+function generateProblem(){
+  let a,b,op,ans;
+  const ops=difficulty==='easy'?['+','-']:difficulty==='medium'?['+','-','*']:['+','-','*','/'];
+  op=ops[Math.floor(Math.random()*ops.length)];
+  switch(op){
+    case'+':a=rand(1,50);b=rand(1,50);ans=a+b;break;
+    case'-':a=rand(5,99);b=rand(1,a);ans=a-b;break;
+    case'*':a=rand(2,12);b=rand(2,12);ans=a*b;break;
+    case'/':b=rand(2,12);ans=rand(2,12);a=b*ans;break;
+  }
+  const wrong=new Set();
+  while(wrong.size<3){
+    let w=ans+rand(-10,10);
+    if(w!==ans&&w>=0)wrong.add(w);
+  }
+  let opts=[ans,...wrong];
+  shuffle(opts);
+  return{a,b,op,ans,opts};
+}
+
+function rand(min,max){return Math.floor(Math.random()*(max-min+1))+min}
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]}}
+
+let currentProblem;
+
+function showProblem(){
+  answered=false;
+  currentProblem=generateProblem();
+  const opSymbol={'+':'+', '-':'&minus;', '*':'&times;', '/':'&divide;'}[currentProblem.op];
+  document.getElementById('problem').innerHTML=`${currentProblem.a} ${opSymbol} ${currentProblem.b} = ?`;
+  const opts=document.getElementById('options');
+  opts.innerHTML='';
+  currentProblem.opts.forEach(v=>{
+    const b=document.createElement('button');
+    b.className='btn-opt w-full py-4 bg-gray-700 hover:bg-gray-600 rounded-lg text-xl font-bold transition';
+    b.textContent=v;
+    b.onclick=()=>checkAnswer(v,b);
+    opts.appendChild(b);
+  });
+  document.getElementById('feedback').textContent='';
+}
+
+function checkAnswer(val,btn){
+  if(answered)return;
+  answered=true;
+  const correct=val===currentProblem.ans;
+  const buttons=document.querySelectorAll('#options button');
+  buttons.forEach(b=>{
+    b.disabled=true;
+    if(parseInt(b.textContent)===currentProblem.ans) b.classList.replace('bg-gray-700','bg-green-600');
+  });
+  if(correct){
+    correctCount++;streak++;
+    score+=10+streak*2;
+    if(streak>bestStreak)bestStreak=streak;
+    document.getElementById('streak').textContent=streak;
+    document.getElementById('feedback').innerHTML=`<span class="text-green-400">+${10+streak*2} pts!</span>`;
+    btn.classList.add('bg-green-500');
+  } else {
+    wrongCount++;streak=0;
+    document.getElementById('streak').textContent=streak;
+    document.getElementById('feedback').innerHTML=`<span class="text-red-400">Wrong! Answer: ${currentProblem.ans}</span>`;
+    btn.classList.add('bg-red-500','shake');
+  }
+  setTimeout(showProblem,800);
+}
+
+function startGame(diff){
+  difficulty=diff;
+  timeLeft=60;score=0;correctCount=0;wrongCount=0;streak=0;bestStreak=0;
+  document.getElementById('diff-label').textContent=diff.charAt(0).toUpperCase()+diff.slice(1);
+  document.getElementById('streak').textContent='0';
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('result-screen').classList.add('hidden');
+  document.getElementById('game-screen').classList.remove('hidden');
+  showProblem();
+  clearInterval(timer);
+  timer=setInterval(()=>{
+    timeLeft--;
+    document.getElementById('timer').textContent=timeLeft;
+    document.getElementById('progress-bar').style.width=`${(timeLeft/60)*100}%`;
+    if(timeLeft<=10) document.getElementById('timer').classList.add('text-red-400');
+    else document.getElementById('timer').classList.remove('text-red-400');
+    if(timeLeft<=0){clearInterval(timer);endGame()}
+  },1000);
+}
+
+function endGame(){
+  document.getElementById('game-screen').classList.add('hidden');
+  document.getElementById('result-screen').classList.remove('hidden');
+  document.getElementById('final-score').textContent=`${score} points`;
+  document.getElementById('r-correct').textContent=correctCount;
+  document.getElementById('r-wrong').textContent=wrongCount;
+  document.getElementById('r-streak').textContent=bestStreak;
+}
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

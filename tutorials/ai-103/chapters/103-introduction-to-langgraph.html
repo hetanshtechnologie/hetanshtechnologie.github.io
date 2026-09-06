@@ -1,0 +1,122 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>103. Introduction to LangGraph - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 103</span>
+<h1>Introduction to LangGraph</h1>
+<p>LangChain's agent executor works well for simple tool loops, but many real applications need more control: branching, retries, cycles, checkpoints, and human approvals in the middle of a run. LangGraph is a framework, built on top of LangChain, that models agents as graphs. Instead of a hidden loop, you explicitly define nodes and edges — which makes complex behavior understandable, testable, and resumable. This chapter introduces the graph model and the vocabulary you need to build with it.</p>
+
+<h2>The Graph Mental Model</h2>
+<p>A LangGraph application is a directed graph. Work flows through <em>nodes</em>, and <em>edges</em> decide which node runs next. A node is any Python function that takes the current state and returns an update. An edge is a rule that decides the next node based on the state. The graph is compiled into a runnable object, and invoking it walks the state through the graph until a terminal condition is reached.</p>
+
+<div class="note">
+<p>Compare this with the agent executor from the previous chapters. There, the loop was built in: call model, run tools, repeat. In LangGraph, <em>you</em> draw that loop. The framework does not assume a particular pattern — it gives you the machinery to express any pattern you can imagine.</p>
+</div>
+
+<h2>State: The Heart of the Graph</h2>
+<p>Every node reads and updates a shared <em>state</em>. State is a typed object — typically a Pydantic model or a <code>TypedDict</code> — that travels through the graph and accumulates changes. For an agent, state usually holds the conversation messages, the list of tool calls so far, and the final answer.</p>
+
+<pre><code>from typing import Annotated, TypedDict
+from langgraph.graph.message import add_messages
+
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]
+    tool_calls: list</code></pre>
+
+<p>The <code>Annotated[list, add_messages]</code> annotation tells LangGraph how to merge updates from different nodes: new messages are appended rather than replacing the list. This reducer pattern is how LangGraph combines multiple state updates without losing information.</p>
+
+<h2>Nodes and Edges</h2>
+<p>A node is a plain function. It receives the current state and returns a dictionary of state updates:</p>
+
+<pre><code>def call_model(state: AgentState) -&gt; dict:
+    response = model.invoke(state["messages"])
+    return {"messages": [response]}
+
+def run_tools(state: AgentState) -&gt; dict:
+    outputs = []
+    for call in state["messages"][-1].tool_calls:
+        result = TOOL_EXECUTOR.invoke(call)
+        outputs.append(result)
+    return {"messages": outputs}</code></pre>
+
+<p>Edges connect nodes. A <em>normal edge</em> always goes from A to B. A <em>conditional edge</em> runs a routing function that looks at the state and returns the name of the next node:</p>
+
+<pre><code>def should_continue(state: AgentState) -&gt; str:
+    last = state["messages"][-1]
+    if last.tool_calls:
+        return "tools"
+    return "end"</code></pre>
+
+<p>Routing functions are what turn a linear chain into an agent. The model either requested tools — route to the tool node — or it produced a final answer — route to the end.</p>
+
+<h2>Building the Agent Graph</h2>
+<p>You assemble nodes and edges into a graph and compile it:</p>
+
+<pre><code>from langgraph.graph import StateGraph, START, END
+
+graph = StateGraph(AgentState)
+graph.add_node("model", call_model)
+graph.add_node("tools", run_tools)
+graph.add_edge(START, "model")
+graph.add_conditional_edges("model", should_continue, {"tools": "tools", "end": END})
+graph.add_edge("tools", "model")
+
+agent = graph.compile()</code></pre>
+
+<p>Read the edges aloud and the agent's behavior is obvious: start at the model; if the model wants tools, run them, then go back to the model; if the model answers, stop. This explicit structure is why LangGraph applications are easier to reason about than loop-based agents.</p>
+
+<h2>Checkpoints: State with Memory</h2>
+<p>A unique capability of LangGraph is <em>checkpointing</em>. When you compile the graph with a checkpointer, every step's state is saved. That unlocks three powerful features:</p>
+<ul>
+<li><strong>Time travel:</strong> rerun a graph from any earlier step to inspect or branch from that point.</li>
+<li><strong>Persistence:</strong> pause a run, wait for input (such as a human approval), then resume.</li>
+<li><strong>Multi-turn memory:</strong> give each conversation a thread ID so a later turn can reload the full prior state.</li>
+</ul>
+
+<pre><code>from langgraph.checkpoint.memory import InMemorySaver
+
+agent = graph.compile(checkpointer=InMemorySaver())
+config = {"configurable": {"thread_id": "session-001"}}
+result = agent.invoke({"messages": [{"role": "user", "content": "Hi"}]}, config)</code></pre>
+
+<p>The <code>thread_id</code> groups state across calls. Sending a second message with the same thread ID continues the same conversation, because the checkpointer restored the previous state before the run started.</p>
+
+<h2>Human-in-the-Loop</h2>
+<p>Because runs can be interrupted, LangGraph supports human approvals naturally. You mark an edge as interruptible; the graph stops before that node, exposes the pending update, and waits. A person reviews the tool call or the draft answer, approves or edits it, and the run continues. This is invaluable for workflows where a model should not act on its own — sending an email, charging a payment, or modifying a database.</p>
+
+<div class="tip">
+<p>The phrase <em>graph</em> can sound abstract, but you have already used the underlying ideas. The agent executor you built in the earlier lab is, functionally, a graph with two nodes and a conditional edge. LangGraph simply lets you open the hood.</p>
+</div>
+
+<h2>When to Reach for LangGraph</h2>
+<p>Choose LangGraph when your workflow is more than a single loop:</p>
+<ul>
+<li>Different user intents must take different paths (router-style behavior).</li>
+<li>Human review is required at specific steps.</li>
+<li>Conversations must resume reliably across sessions.</li>
+<li>You need visibility into each stage and the ability to replay or fork a run.</li>
+<li>Multiple agents cooperate, each owning a subgraph.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>LangGraph models agent behavior as an explicit graph of nodes and edges operating on a shared state. Conditional edges create the agent loop, checkpoints add persistence and resumability, and interruptions enable human-in-the-loop workflows. It is a more expressive foundation than the fixed agent executor, at the cost of a little more design up front. In the next chapter you will map the pieces of a concrete LangGraph agent implementation.</p>
+<nav>
+<a href="102-tracing-langchain-agents-with-opentelemetry-and-application-insights.html">&larr; Previous: Tracing LangChain Agents with OpenTelemetry and Application Insights</a><a href="104-building-an-agent-using-langgraph-implementation-overview.html">Next: Building an agent using LangGraph - Implementation overview &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

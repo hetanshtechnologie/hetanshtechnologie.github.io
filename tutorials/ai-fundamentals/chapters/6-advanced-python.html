@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 6: Advanced Python: Dunders, Iterators &amp; Decorators | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 6</span>
+    <h1>Advanced Python: Dunders, Iterators &amp; Decorators</h1>
+
+    <p>Python hides a lot of machinery behind double-underscore methods and function objects. Once you understand that machinery, your own classes can behave like built-ins, your loops can stream huge datasets, and your functions can wrap other functions. This chapter pulls back the curtain.</p>
+
+    <h2>Magic (Dunder) Methods</h2>
+    <p>Dunder methods are the special methods with double underscores, like <code>__init__</code>. Python calls them automatically when you use certain syntax. For example, <code>len(x)</code> actually invokes <code>x.__len__()</code>, and <code>str(x)</code> invokes <code>x.__str__()</code>.</p>
+    <pre><code>class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __str__(self):
+        return f"({self.x}, {self.y})"
+
+    def __repr__(self):
+        return f"Point({self.x}, {self.y})"
+
+p = Point(3, 4)
+print(str(p))    # (3, 4)
+print(repr(p))   # Point(3, 4)</code></pre>
+    <p><code>__str__</code> controls how humans see an object; <code>__repr__</code> provides an unambiguous, often reproducible representation.</p>
+
+    <h2>Operator Overloading</h2>
+    <p>Operator overloading lets <code>+</code>, <code>-</code>, <code>==</code>, and other operators work with your classes. Define the dunder and Python rewires the operator:</p>
+    <pre><code>class Money:
+    def __init__(self, amount):
+        self.amount = amount
+
+    def __add__(self, other):
+        return Money(self.amount + other.amount)
+
+    def __eq__(self, other):
+        return self.amount == other.amount
+
+    def __lt__(self, other):
+        return self.amount &lt; other.amount
+
+    def __repr__(self):
+        return f"${self.amount}"
+
+a = Money(10)
+b = Money(5)
+print(a + b)     # $15
+print(a == Money(10))   # True
+print(b &lt; a)     # True</code></pre>
+    <p>Common operators and their dunders: <code>+</code> is <code>__add__</code>, <code>-</code> is <code>__sub__</code>, <code>==</code> is <code>__eq__</code>, and the comparison family shares <code>__lt__</code>, <code>__le__</code>, and so on.</p>
+
+    <h2>Custom Exception Classes</h2>
+    <p>Sometimes the built-in errors are too generic. Create a subclass of <code>Exception</code> to raise and catch errors that mean something in your domain:</p>
+    <pre><code>class NegativeBalanceError(Exception):
+    pass
+
+class Wallet:
+    def __init__(self, balance):
+        self.balance = balance
+
+    def spend(self, amount):
+        if amount &gt; self.balance:
+            raise NegativeBalanceError(
+                f"Can't spend {amount}, only {self.balance} available")
+        self.balance -= amount
+
+w = Wallet(20)
+try:
+    w.spend(50)
+except NegativeBalanceError as err:
+    print("Blocked:", err)   # Blocked: Can't spend 50, only 20 available</code></pre>
+    <div class="note">
+        <strong>Good practice:</strong> give custom exceptions descriptive names and a useful message. Catch the specific exception, not a bare <code>except:</code>, so unrelated bugs stay visible.
+    </div>
+
+    <h2>Complete OOP Practice</h2>
+    <ol>
+        <li>Create a <code>Vector</code> class supporting <code>+</code>, <code>-</code>, and scalar multiplication via <code>__mul__</code>.</li>
+        <li>Add a <code>Temperature</code> class storing degrees in Celsius with <code>__str__</code> and a <code>__add__</code> that returns the mean-style sum.</li>
+        <li>Define an <code>InsufficientStockError</code> and raise it from a <code>Warehouse</code> class when stock runs out.</li>
+    </ol>
+
+    <h2>Iterators: __iter__ and __next__</h2>
+    <p>An <strong>iterator</strong> is an object that yields items one at a time. Python's <code>for</code> loop just calls <code>iter()</code> once and then <code>next()</code> repeatedly until <code>StopIteration</code> is raised. You can build your own:</p>
+    <pre><code>class Countdown:
+    def __init__(self, start):
+        self.current = start
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.current &lt; 0:
+            raise StopIteration
+        value = self.current
+        self.current -= 1
+        return value
+
+for n in Countdown(3):
+    print(n)   # 3, 2, 1, 0</code></pre>
+    <p>Any object with <code>__iter__</code> and <code>__next__</code> can be looped over, passed to <code>list()</code>, or used with <code>sum()</code> — it plugs into every Python tool that expects an iterable.</p>
+    <div class="info">
+        <strong>Why lazy?</strong> Iterators produce values on demand, so an iterator over a billion numbers consumes almost no memory. Libraries like Pandas rely on this for reading huge files in chunks.
+    </div>
+
+    <h2>Generators and yield</h2>
+    <p>A <strong>generator</strong> is a function with <code>yield</code> instead of <code>return</code>. Each call to <code>next()</code> runs the function up to the next <code>yield</code>, pauses, and resumes later — preserving all local variables between calls:</p>
+    <pre><code>def squares_up_to(limit):
+    n = 1
+    while n * n &lt;= limit:
+        yield n * n
+        n += 1
+
+for s in squares_up_to(30):
+    print(s)   # 1, 4, 9, 16, 25</code></pre>
+    <p>Generators are the easiest way to write your own iterator, and they make infinite sequences practical because nothing is computed until requested:</p>
+    <pre><code>def counting():
+    n = 0
+    while True:
+        yield n
+        n += 1
+
+gen = counting()
+print(next(gen))   # 0
+print(next(gen))   # 1</code></pre>
+    <p>Generator expressions look like list comprehensions but use parentheses and stay lazy:</p>
+    <pre><code>total = sum(n * n for n in range(1, 101))</code></pre>
+
+    <h2>Function Copies, Closures and Decorators</h2>
+    <p>In Python, functions are values like any other. They can be assigned, passed around, and returned from other functions.</p>
+    <h3>Function copies and references</h3>
+    <pre><code>def shout(text):
+    return text.upper()
+
+speaker = shout              # a second reference, not a call
+print(speaker("hi"))         # HI
+print(shout is speaker)      # True - same function object</code></pre>
+    <h3>Closures</h3>
+    <p>A <strong>closure</strong> is a function that remembers variables from the scope where it was defined, even after that scope has ended:</p>
+    <pre><code>def make_multiplier(factor):
+    def multiply(x):
+        return x * factor
+    return multiply
+
+double = make_multiplier(2)
+triple = make_multiplier(3)
+print(double(10))   # 20
+print(triple(10))   # 30</code></pre>
+    <p>Each call to <code>make_multiplier</code> creates a fresh <code>multiply</code> that keeps its own <code>factor</code> alive.</p>
+    <h3>Decorators</h3>
+    <p>A <strong>decorator</strong> is a function that takes another function and returns a wrapped version of it. The <code>@</code> syntax is shorthand for "pass this function through the decorator".</p>
+    <pre><code>def log_call(func):
+    def wrapper(*args, **kwargs):
+        print("Calling", func.__name__)
+        return func(*args, **kwargs)
+    return wrapper
+
+@log_call
+def add(a, b):
+    return a + b
+
+print(add(3, 4))   # Calling add / 7</code></pre>
+    <p>Decorators are how libraries add features — timing, caching, access checks — without touching the original function body.</p>
+
+    <h2>Advanced Practice Questions</h2>
+    <ol>
+        <li>Write a <code>Timer</code> context decorator that prints how many seconds a decorated function took.</li>
+        <li>Build a generator <code>fibonacci()</code> that yields Fibonacci numbers forever; use <code>next()</code> to print the first ten.</li>
+        <li>Create a <code>Limited</code> class whose <code>__next__</code> stops cleanly after a set number of items.</li>
+        <li>Add <code>__eq__</code> and <code>__hash__</code> to a <code>Student</code> class so two students with the same roll number are considered equal and can be stored in sets.</li>
+    </ol>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> Combine the ideas: write a <code>@timed</code> decorator, use it on a generator-based function that yields the first 100 square numbers, and wrap the whole thing in a custom exception if the limit is negative. Then verify the timing message appears exactly once per call.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="5-oop-python.html">Prev: Object-Oriented Python</a>
+        <a href="7-numpy-pandas.html">Next: NumPy &amp; Pandas: The Data Workhorses</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

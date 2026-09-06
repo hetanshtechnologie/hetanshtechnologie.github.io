@@ -1,0 +1,131 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>84. Lab - Enabling Continuous Evaluation on an Agent - Adding Application Insights - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 84</span>
+<h1>Lab - Enabling Continuous Evaluation on an Agent - Adding Application Insights</h1>
+<p>Continuous evaluation scores a sample of your production agent traffic against evaluators on an ongoing basis, so you can watch response quality drift before it becomes a problem. The prerequisite is telemetry plumbing: the agent must emit traces, and those traces must land somewhere queryable. In this lab you will create an Application Insights resource, connect it to your Foundry project, and verify that agent traces arrive. With the plumbing in place, the next chapter's lab builds the continuous evaluation on top of it.</p>
+
+<h2>Objectives</h2>
+<ul>
+<li>Create an Application Insights resource in Azure.</li>
+<li>Connect the resource to your Foundry project.</li>
+<li>Confirm the agent emits traces that Application Insights receives.</li>
+<li>Run a quick query to prove the telemetry is stored.</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>A Foundry project with an agent that has at least one published version.</li>
+<li>Azure CLI (<code>az</code>) installed and signed in, or portal access to create the resource.</li>
+</ul>
+
+<h2>Step 1: Create the Application Insights Resource</h2>
+<p>Application Insights is a standard Azure resource. Create it in the same region as your Foundry project so telemetry travels a short, fast path.</p>
+
+<div class="exercise">
+<h3>Create App Insights with the Azure CLI</h3>
+<p>Open a terminal and run the following, replacing the placeholders:</p>
+<pre><code>az resource create \
+  --resource-group YOUR-RESOURCE-GROUP \
+  --resource-type "Microsoft.Insights/components" \
+  --name ai103-insights \
+  --location eastus2 \
+  --properties "{\"Application_Type\":\"web\"}"
+</code></pre>
+<p>Or, if you prefer the portal: search for <strong>Application Insights</strong>, click <strong>Create</strong>, choose the same resource group and region as your Foundry project, name it <code>ai103-insights</code>, and create it.</p>
+</div>
+
+<div class="tip">
+<p>The resource's <em>instrumentation key</em> or connection string identifies it to writers. You rarely need it by hand when connecting through Foundry — the portal links the resources for you — but note that it is visible on the resource's <em>Overview</em> or <em>Properties</em> page.</p>
+</div>
+
+<h2>Step 2: Connect Foundry to Application Insights</h2>
+
+<div class="exercise">
+<h3>Add the connection to your project</h3>
+<ol>
+<li>Open your Foundry project and go to the <strong>Connections</strong> section.</li>
+<li>Click <strong>New connection</strong> and choose <strong>Application Insights</strong>.</li>
+<li>Select the <code>ai103-insights</code> resource you created (or enter the connection string manually).</li>
+<li>Give the connection a name such as <code>appinsights-prod</code> and create it.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>This connection is what lets Foundry write agent telemetry into Application Insights. Without it, traces stop at the portal's internal store and are not queryable in Application Insights — which means no durable history and no continuous evaluation data.</p>
+</div>
+
+<h2>Step 3: Generate Some Agent Traffic</h2>
+<p>Telemetry has nothing to capture until the agent runs. Open your agent in the Foundry playground and have a short conversation — two or three turns is enough. Then, if your workflow from earlier chapters is still published, run it once as well. Every model call, tool invocation, and workflow step is a trace candidate.</p>
+
+<div class="exercise">
+<h3>Create the traffic</h3>
+<ol>
+<li>Open the agent's playground and send a message such as <code>What is the status of my order AC-88231?</code></li>
+<li>Send one follow-up message.</li>
+<li>Run the <code>intake-pipeline</code> workflow once with a test message.</li>
+</ol>
+</div>
+
+<h2>Step 4: Verify the Traces Arrive</h2>
+<p>Wait a minute for telemetry to flush, then check Application Insights.</p>
+
+<div class="exercise">
+<h3>Query the telemetry</h3>
+<ol>
+<li>Open the <code>ai103-insights</code> resource in the Azure portal.</li>
+<li>Go to <strong>Logs</strong> and run this query:</li>
+</ol>
+<pre><code>traces
+| where timestamp &gt; ago(1h)
+| project timestamp, message
+| order by timestamp desc
+</code></pre>
+<ol start="3">
+<li>If you see rows, the plumbing works — your agent's activity is now stored and queryable.</li>
+<li>Run a second query that looks at how the platform categorizes events:</li>
+</ol>
+<pre><code>dependencies
+| where timestamp &gt; ago(1h)
+| summarize count() by type, target
+</code></pre>
+</div>
+
+<div class="warn">
+<p>If nothing appears, the usual suspects are: the agent ran before the connection was created, the connection points at a different resource, or telemetry has not finished flushing. Re-run the traffic after verifying the connection, then wait a couple of minutes before querying again.</p>
+</div>
+
+<div class="tip">
+<p>KQL queries like the ones above are the everyday way to inspect AI workloads. If you ever need to answer "what happened with this customer yesterday," the trace log lets you reconstruct the exact prompts, responses, and tool calls that occurred.</p>
+</div>
+
+<h2>Step 5: Confirm the Connection on the Agent</h2>
+<p>Finally, make sure the agent itself is set to emit telemetry to this connection. In the agent's configuration, look for the telemetry or monitoring setting and confirm it references the Application Insights connection you created.</p>
+
+<div class="note">
+<p>The next chapter's lab assumes exactly this state: an Application Insights resource connected to the project, and an agent emitting traces into it. Everything you built here is the foundation for creating and running the continuous evaluation itself.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You created an Application Insights resource, connected it to your Foundry project, generated real agent and workflow traffic, and verified with KQL queries that the telemetry arrives. The agent's behavior is now recorded in a durable, queryable store. With the instrumentation in place, you are ready for the next lab, where you will create the continuous evaluation and start measuring response quality on an ongoing basis.</p>
+<nav>
+<a href="83-evaluators-the-measuring-instruments-of-ai-quality.html">&larr; Previous: Evaluators - The Measuring Instruments of AI Quality</a><a href="85-lab-enabling-continuous-evaluation-on-an-agent-creating-the-evaluation.html">Next: Lab - Enabling Continuous Evaluation on an Agent -Creating the evaluation &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

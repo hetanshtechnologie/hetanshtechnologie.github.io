@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Products — All-in-One ERP</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>body{font-family:'Inter',sans-serif;background:#f1f5f9;}</style>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+</head>
+<body>
+  <nav class="bg-white shadow-sm border-b px-6 py-3 flex justify-between items-center">
+    <div class="flex items-center gap-4">
+      <a href="dashboard.html" class="text-blue-600 font-bold text-lg">&larr; Dashboard</a>
+      <span class="text-gray-400">|</span>
+      <span class="font-semibold">Products</span>
+    </div>
+    <div>
+      <button onclick="signOut()" class="text-sm text-red-500 hover:underline">Logout</button>
+    </div>
+  </nav>
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">Products</h1>
+      <button onclick="showAddForm()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">+ Add Product</button>
+    </div>
+    <div id="alert"></div>
+    <div id="loading" class="text-gray-500 mb-4">Loading...</div>
+
+    <div id="form-section" class="hidden bg-white rounded-xl shadow-sm border p-6 mb-6">
+      <h2 id="form-title" class="font-bold text-lg mb-4">Add Product</h2>
+      <form id="product-form" class="grid grid-cols-2 gap-4">
+        <div><label class="block text-sm font-semibold mb-1">Name</label><input type="text" id="name" class="w-full border rounded-lg px-3 py-2 text-sm" required></div>
+        <div><label class="block text-sm font-semibold mb-1">SKU</label><input type="text" id="sku" class="w-full border rounded-lg px-3 py-2 text-sm font-mono"></div>
+        <div><label class="block text-sm font-semibold mb-1">HSN Code</label><input type="text" id="hsn" class="w-full border rounded-lg px-3 py-2 text-sm font-mono"></div>
+        <div><label class="block text-sm font-semibold mb-1">Unit</label><select id="unit" class="w-full border rounded-lg px-3 py-2 text-sm"><option value="nos">Nos</option><option value="kg">Kg</option><option value="m">Meter</option><option value="box">Box</option><option value="ltr">Litre</option></select></div>
+        <div><label class="block text-sm font-semibold mb-1">MRP (₹)</label><input type="number" id="mrp" class="w-full border rounded-lg px-3 py-2 text-sm" step="0.01"></div>
+        <div><label class="block text-sm font-semibold mb-1">Selling Price (₹)</label><input type="number" id="sp" class="w-full border rounded-lg px-3 py-2 text-sm" step="0.01"></div>
+        <div><label class="block text-sm font-semibold mb-1">Purchase Price (₹)</label><input type="number" id="pp" class="w-full border rounded-lg px-3 py-2 text-sm" step="0.01"></div>
+        <div><label class="block text-sm font-semibold mb-1">GST Rate (%)</label><input type="number" id="gst_rate" class="w-full border rounded-lg px-3 py-2 text-sm" step="0.01"></div>
+        <div><label class="block text-sm font-semibold mb-1">Category</label><input type="text" id="category" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+        <div><label class="block text-sm font-semibold mb-1">Brand</label><input type="text" id="brand" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+        <div class="col-span-2 flex gap-2">
+          <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">Save</button>
+          <button type="button" onclick="hideForm()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-300">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="products-section" class="hidden bg-white rounded-xl shadow-sm border overflow-x-auto"></div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/erp.js"></script>
+  <script>
+    let editId = null;
+    document.addEventListener('DOMContentLoaded', async function() {
+      const user = await requireLogin();
+      if (!user) return;
+      await loadProducts();
+      document.getElementById('product-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const data = {
+          name: document.getElementById('name').value.trim(),
+          sku: document.getElementById('sku').value.trim() || null,
+          hsn_code: document.getElementById('hsn').value.trim() || null,
+          unit: document.getElementById('unit').value,
+          mrp: parseFloat(document.getElementById('mrp').value) || null,
+          selling_price: parseFloat(document.getElementById('sp').value) || null,
+          purchase_price: parseFloat(document.getElementById('pp').value) || null,
+          gst_rate: parseFloat(document.getElementById('gst_rate').value) || 0,
+          category: document.getElementById('category').value.trim(),
+          brand: document.getElementById('brand').value.trim()
+        };
+        try {
+          const orgId = await getOrgId();
+          if (editId) {
+            const { error } = await erp.from('products').update(data).eq('id', editId);
+            if (error) throw error;
+          } else {
+            const { error } = await erp.from('products').insert({ ...data, org_id: orgId });
+            if (error) throw error;
+          }
+          showAlert(editId ? 'Product updated!' : 'Product created!', 'success');
+          hideForm(); await loadProducts();
+        } catch (err) { showAlert(err.message, 'error'); }
+      });
+    });
+
+    async function loadProducts() {
+      const orgId = await getOrgId();
+      if (!orgId) return;
+      const { data, error } = await erp.from('products').select('*').eq('org_id', orgId).eq('is_active', true).order('name');
+      if (error) throw error;
+      document.getElementById('loading').classList.add('hidden');
+      const div = document.getElementById('products-section'); div.classList.remove('hidden');
+      if (!data || !data.length) { div.innerHTML = '<div class="p-6 text-gray-500 text-center">No products yet.</div>'; return; }
+      div.innerHTML = `<table class="w-full text-sm"><thead><tr class="bg-gray-50 border-b text-left"><th class="p-3 font-semibold">Name</th><th class="p-3 font-semibold">SKU</th><th class="p-3 font-semibold">HSN</th><th class="p-3 font-semibold">MRP</th><th class="p-3 font-semibold">Selling</th><th class="p-3 font-semibold">GST</th><th class="p-3 font-semibold">Variants</th><th class="p-3 font-semibold">Actions</th></tr></thead><tbody>${data.map(p => `<tr class="border-b hover:bg-gray-50"><td class="p-3 font-medium">${escapeHtml(p.name)}</td><td class="p-3 text-xs font-mono">${escapeHtml(p.sku || '-')}</td><td class="p-3 text-xs font-mono">${escapeHtml(p.hsn_code || '-')}</td><td class="p-3">${formatCurrency(p.mrp)}</td><td class="p-3">${formatCurrency(p.selling_price)}</td><td class="p-3">${p.gst_rate}%</td><td class="p-3"><a href="product-variants.html?product_id=${p.id}" class="text-purple-600 hover:underline text-xs font-semibold">Variants</a></td><td class="p-3"><button onclick="editProduct(${p.id})" class="text-blue-600 hover:underline text-xs mr-2">Edit</button><button onclick="deleteProduct(${p.id})" class="text-red-600 hover:underline text-xs">Delete</button></td></tr>`).join('')}</tbody></table>`;
+    }
+
+    function showAddForm() { editId = null; document.getElementById('form-title').textContent = 'Add Product'; document.getElementById('product-form').reset(); document.getElementById('form-section').classList.remove('hidden'); }
+    function hideForm() { document.getElementById('form-section').classList.add('hidden'); editId = null; }
+    async function editProduct(id) {
+      const { data: p, error } = await erp.from('products').select('*').eq('id', id).single();
+      if (error || !p) return;
+      editId = id; document.getElementById('form-title').textContent = 'Edit Product';
+      document.getElementById('name').value = p.name; document.getElementById('sku').value = p.sku || '';
+      document.getElementById('hsn').value = p.hsn_code || ''; document.getElementById('unit').value = p.unit || 'nos';
+      document.getElementById('mrp').value = p.mrp || ''; document.getElementById('sp').value = p.selling_price || '';
+      document.getElementById('pp').value = p.purchase_price || ''; document.getElementById('gst_rate').value = p.gst_rate || '';
+      document.getElementById('category').value = p.category || ''; document.getElementById('brand').value = p.brand || '';
+      document.getElementById('form-section').classList.remove('hidden');
+    }
+    async function deleteProduct(id) { if (!confirm('Delete this product?')) return; try { await erp.from('products').update({ is_active: false }).eq('id', id); showAlert('Deleted.', 'success'); await loadProducts(); } catch (err) { showAlert(err.message, 'error'); } }
+  </script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

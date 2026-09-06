@@ -1,0 +1,233 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hitori Puzzle</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Games">
+<link rel="apple-touch-icon" href="icon-192.svg">
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+body { background: #0f172a; }
+.hitori-cell {
+  width: 52px; height: 52px;
+  display: flex; align-items: center; justify-content: center;
+  background: #f1f5f9; border: 1px solid #94a3b8;
+  font-size: 1.125rem; font-weight: bold; cursor: pointer;
+  transition: all 0.2s; user-select: none; color: #1e293b;
+}
+.hitori-cell.shaded {
+  background: #0f172a; color: #475569; border-color: #334155;
+}
+.hitori-cell.selected {
+  outline: 3px solid #3b82f6; outline-offset: -3px;
+}
+.hitori-cell:hover {
+  outline: 2px solid #60a5fa; outline-offset: -2px;
+}
+</style>
+</head>
+<body class="min-h-screen text-white">
+<div class="max-w-3xl mx-auto px-4 py-6">
+  <div class="flex items-center justify-between mb-6">
+    <a href="index.html" class="text-blue-400 hover:text-blue-300 text-sm flex items-center">
+      <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Back to Games
+    </a>
+    <h1 class="text-2xl font-bold">Hitori</h1>
+    <div></div>
+  </div>
+
+  <div class="flex flex-wrap gap-4 mb-4 justify-center items-center">
+    <div class="flex gap-2">
+      <button onclick="setLevel(5)" id="lv-5" class="px-3 py-1 rounded text-sm bg-green-600 text-white">5x5</button>
+      <button onclick="setLevel(6)" id="lv-6" class="px-3 py-1 rounded text-sm bg-gray-600 text-white">6x6</button>
+      <button onclick="setLevel(7)" id="lv-7" class="px-3 py-1 rounded text-sm bg-gray-600 text-white">7x7</button>
+    </div>
+    <div class="bg-gray-800 px-4 py-2 rounded text-sm">Time: <span id="timer" class="font-mono text-yellow-400">00:00</span></div>
+    <button onclick="undoShade()" class="px-3 py-1 rounded bg-gray-600 hover:bg-gray-500 text-sm">Undo</button>
+    <button onclick="newPuzzle()" class="px-4 py-1 rounded bg-blue-600 hover:bg-blue-500 text-sm">New Puzzle</button>
+  </div>
+
+  <div class="text-center mb-4 text-gray-400 text-sm">
+    <p>Click cells to shade/unshade. Remove duplicates: no repeated numbers in any row/column (whitespace separate shaded cells). Shaded cells can't be adjacent. All white cells must connect.</p>
+  </div>
+
+  <div class="flex justify-center mb-4 overflow-x-auto">
+    <div id="board"></div>
+  </div>
+
+  <div class="flex justify-center mt-2">
+    <button onclick="checkSolution()" class="px-6 py-2 rounded-lg bg-green-600 hover:bg-green-500 font-bold">Check Solution</button>
+  </div>
+</div>
+
+<script>
+const PUZZLES_5 = [
+  { grid: [[5,3,1,4,2],[4,2,5,1,3],[1,5,4,2,3],[2,4,3,5,1],[3,1,2,4,5]], shaded: [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
+  { grid: [[1,2,3,4,5],[3,1,2,5,4],[5,3,4,2,1],[2,5,1,3,4],[4,1,5,3,2]], shaded: [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
+  { grid: [[4,2,1,3,5],[1,5,3,4,2],[3,1,5,2,4],[2,4,3,5,1],[5,3,4,1,2]], shaded: [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] },
+  { grid: [[2,4,3,1,5],[5,1,4,3,2],[3,5,2,4,1],[4,3,5,2,1],[1,2,1,5,3]], shaded: [[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0],[0,0,0,0,0]] }
+];
+
+const PUZZLES_6 = [
+  { grid: [[4,6,1,3,5,2],[6,3,5,2,4,1],[1,5,4,6,2,3],[3,2,6,4,1,5],[5,4,2,1,3,6],[2,1,3,5,6,4]], shaded: [[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0]] },
+  { grid: [[2,4,6,5,1,3],[5,1,3,2,6,4],[4,6,2,3,5,1],[1,3,5,6,4,2],[6,5,4,1,3,2],[3,2,1,4,2,5]], shaded: [[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0],[0,0,0,0,0,0]] }
+];
+
+const PUZZLES_7 = [
+  { grid: [[3,1,7,5,4,6,2],[7,5,2,6,3,1,4],[1,6,4,2,7,5,3],[5,2,6,4,1,3,7],[4,3,1,7,2,5,6],[6,7,5,3,2,4,1],[2,4,3,1,5,7,6]], shaded: [[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0]] },
+  { grid: [[5,2,4,1,7,3,6],[1,6,3,4,5,2,7],[7,4,6,2,3,5,1],[3,1,5,6,2,7,4],[4,7,2,3,6,1,5],[6,3,1,7,4,5,2],[2,5,7,5,1,4,3]], shaded: [[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0],[0,0,0,0,0,0,0]] }
+];
+
+let gridSize = 5, puzzle, grid, shaded, timerInterval, seconds, history;
+
+function setLevel(n) {
+  gridSize = n;
+  ['5','6','7'].forEach(l => {
+    document.getElementById('lv-'+l).className = parseInt(l)===n ? 'px-3 py-1 rounded text-sm bg-green-600 text-white' : 'px-3 py-1 rounded text-sm bg-gray-600 text-white';
+  });
+  newPuzzle();
+}
+
+function newPuzzle() {
+  clearInterval(timerInterval);
+  seconds = 0; history = [];
+  document.getElementById('timer').textContent = '00:00';
+  timerInterval = setInterval(() => {
+    seconds++;
+    const m = String(Math.floor(seconds/60)).padStart(2,'0');
+    const s = String(seconds%60).padStart(2,'0');
+    document.getElementById('timer').textContent = m+':'+s;
+  }, 1000);
+
+  const puzzles = gridSize===5 ? PUZZLES_5 : gridSize===6 ? PUZZLES_6 : PUZZLES_7;
+  puzzle = puzzles[Math.floor(Math.random()*puzzles.length)];
+  grid = puzzle.grid.map(r => [...r]);
+  shaded = puzzle.shaded.map(r => [...r]);
+  render();
+}
+
+function render() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  const table = document.createElement('div');
+  table.style.display = 'grid';
+  table.style.gridTemplateColumns = `repeat(${gridSize}, 52px)`;
+  table.style.gap = '0';
+
+  for (let r=0; r<gridSize; r++) {
+    for (let c=0; c<gridSize; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'hitori-cell';
+      if (shaded[r][c]) cell.classList.add('shaded');
+      cell.textContent = grid[r][c];
+      const row = r, col = c;
+      cell.onclick = () => {
+        history.push({r:row, c:col, was: shaded[row][col]});
+        shaded[row][col] = shaded[row][col] ? 0 : 1;
+        render();
+      };
+      table.appendChild(cell);
+    }
+  }
+  board.appendChild(table);
+}
+
+function undoShade() {
+  if (history.length === 0) return;
+  const last = history.pop();
+  shaded[last.r][last.c] = last.was;
+  render();
+}
+
+function checkSolution() {
+  const n = gridSize;
+  let whiteCells = [];
+  for (let r=0; r<n; r++) {
+    for (let c=0; c<n; c++) {
+      if (!shaded[r][c]) whiteCells.push([r,c]);
+    }
+  }
+
+  if (whiteCells.length === 0) { alert('No white cells!'); return; }
+
+  // Check adjacency
+  for (const [r,c] of whiteCells) {
+    if (r>0 && !shaded[r-1][c]) {
+      if (r+1<n && !shaded[r+1][c]) { alert('White cells too connected or adjacent shaded cells!'); return; }
+    }
+    if (c>0 && !shaded[r][c-1]) {
+      if (c+1<n && !shaded[r][c+1]) { alert('White cells too connected or adjacent shaded cells!'); return; }
+    }
+  }
+
+  // Check no adjacent shaded
+  for (let r=0; r<n; r++) {
+    for (let c=0; c<n; c++) {
+      if (shaded[r][c]) {
+        if (r>0 && shaded[r-1][c]) { alert('Shaded cells cannot be adjacent!'); return; }
+        if (c>0 && shaded[r][c-1]) { alert('Shaded cells cannot be adjacent!'); return; }
+      }
+    }
+  }
+
+  // Check no duplicates in rows/cols
+  for (let r=0; r<n; r++) {
+    let seen = {};
+    for (let c=0; c<n; c++) {
+      if (!shaded[r][c]) {
+        if (seen[grid[r][c]]) { alert('Duplicate in row '+(r+1)+': '+grid[r][c]); return; }
+        seen[grid[r][c]] = true;
+      }
+    }
+  }
+  for (let c=0; c<n; c++) {
+    let seen = {};
+    for (let r=0; r<n; r++) {
+      if (!shaded[r][c]) {
+        if (seen[grid[r][c]]) { alert('Duplicate in column '+(c+1)+': '+grid[r][c]); return; }
+        seen[grid[r][c]] = true;
+      }
+    }
+  }
+
+  // Check connectivity via BFS
+  let visited = new Set();
+  let queue = [whiteCells[0]];
+  visited.add(whiteCells[0][0]+','+whiteCells[0][1]);
+  while (queue.length > 0) {
+    const [r,c] = queue.shift();
+    for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+      const nr = r+dr, nc = c+dc;
+      const key = nr+','+nc;
+      if (nr>=0 && nr<n && nc>=0 && nc<n && !shaded[nr][nc] && !visited.has(key)) {
+        visited.add(key);
+        queue.push([nr,nc]);
+      }
+    }
+  }
+  if (visited.size !== whiteCells.length) { alert('White cells are not all connected!'); return; }
+
+  clearInterval(timerInterval);
+  alert('Congratulations! Solved in '+document.getElementById('timer').textContent+'!');
+}
+
+newPuzzle();
+</script>
+<div id="pwa-install" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:none">
+<button onclick="installPWA()" style="background:#38bdf8;color:#0f172a;border:none;padding:10px 18px;border-radius:20px;font-weight:bold;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.4)">Install App</button>
+</div>
+<script>
+var deferredPrompt;
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();deferredPrompt=e;document.getElementById("pwa-install").style.display="block";});
+function installPWA(){if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt.userChoice.then(function(r){if(r.outcome==="accepted")document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});}
+window.addEventListener("appinstalled",function(){document.getElementById("pwa-install").style.display="none";deferredPrompt=null;});
+if("serviceWorker" in navigator){navigator.serviceWorker.register("sw.js").catch(function(){});}
+</script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>172. AI Enrichment and Skillsets - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 172</span>
+<h1>AI Enrichment and Skillsets</h1>
+<p>So far your index stores raw extracted text. That is enough for keyword search, but not for the semantic search RAG needs. AI enrichment changes the picture: during indexing, a pipeline of <strong>skills</strong> transforms each document — extracting entities, recognizing language, splitting text, and computing embeddings — so the resulting index carries meaning, not just words. This chapter explains what skillsets are, which built-in skills matter for RAG, and how the enrichment pipeline fits inside the indexer.</p>
+
+<h2>What a Skillset Is</h2>
+<p>A skillset is a collection of AI operations that run on each document as the indexer processes it. Every skill takes input fields, does one focused job, and produces output fields. Skillsets attach to an indexer, and the indexer orchestrates them in the order you declare them. The outputs can be written to the index, or stored in a <strong>knowledge store</strong> — a separate Azure Storage location that keeps the enriched structures for later use.</p>
+<p>Enrichment changes the pipeline from <em>copy text into the index</em> to <em>extract, understand, transform, and then store</em>. The skills run in sequence, so one skill's output can feed the next skill's input.</p>
+
+<div class="note">
+<p>A skill never modifies the original source document. Enrichment produces new derived fields that live in the index or the knowledge store. The blob in storage stays untouched, which keeps the pipeline safe to re-run.</p>
+</div>
+
+<h2>Built-In Skills You Will Use</h2>
+<p>Azure AI Search ships a catalog of prebuilt skills. The ones that matter most for RAG fall into four groups:</p>
+<table>
+<tr><th>Skill</th><th>What it does</th><th>Why RAG cares</th></tr>
+<tr><td>Document Extraction</td><td>Pulls text and layout from PDFs, Office files, and images (OCR)</td><td>Makes scanned and structured documents searchable</td></tr>
+<tr><td>Language Detection / Entity Recognition</td><td>Detects language, names, organizations, locations</td><td>Enables metadata filters and topic grounding</td></tr>
+<tr><td>Text Split</td><td>Splits long text into chunks of a target size</td><td>Produces the chunks that get embedded and retrieved</td></tr>
+<tr><td>AzureOpenAIEmbedding</td><td>Embeds a chunk with a deployed embedding model</td><td>Creates the vector field that powers semantic search</td></tr>
+</table>
+<p>Each skill consumes <code>context</code> — usually the whole document or one chunk of it — and emits outputs under a structured path such as <code>/document/content</code> or <code>/document/chunks/*</code>.</p>
+
+<h2>How Skills Flow Through the Pipeline</h2>
+<p>A typical RAG skillset chains skills in this order:</p>
+<ol>
+<li><strong>Extract</strong> text from the source file with the document extraction skill.</li>
+<li><strong>Split</strong> the extracted text into overlapping chunks with the text split skill.</li>
+<li><strong>Embed</strong> each chunk with the embedding skill, producing a vector per chunk.</li>
+<li><strong>Map</strong> the chunk text and vectors into the index fields via output field mappings.</li>
+</ol>
+<p>The indexer definition is what ties this together. Skillsets are referenced by name from the indexer, and <strong>outputFieldMappings</strong> tell the indexer where each skill output lands in the index — for example, the embedding skill's vector output flowing into the index's <code>embedding</code> field.</p>
+
+<div class="warn">
+<p>Enrichment costs money. Each skill invocation that calls an AI service — document intelligence for extraction or an OpenAI deployment for embeddings — is billed by that service. A large document collection with OCR and embedding can accumulate noticeable charges, so design skillsets to skip enrichment when it is not needed, and always set chunk sizes deliberately to control embedding calls.</p>
+</div>
+
+<h2>Text Split: The Skill Everything Hangs On</h2>
+<p>Chunking quality drives retrieval quality. The text split skill splits content on a chosen <code>pageSize</code> (in characters or tokens) with an optional <code>overlap</code> so context survives chunk boundaries. Typical settings for RAG:</p>
+<ul>
+<li><strong>pageSize</strong> around 800 tokens — small enough to keep answers focused.</li>
+<li><strong>overlap</strong> of about 15 percent — keeps a sentence that spans a boundary in both chunks.</li>
+<li><strong>splittingMode</strong> of <code>pages</code> for text or <code>definedLength</code> when you need exact sizes.</li>
+</ul>
+<p>There is no universally correct size. Short chunks retrieve more precisely but lose surrounding context; long chunks keep context but dilute relevance. Your chunking parameters should be tuned against real questions from your domain.</p>
+
+<h2>The Knowledge Store</h2>
+<p>Besides the index, a skillset can write its enriched output to a knowledge store — a projection of the enriched documents into Azure Tables or Blob Storage. This is useful when you want the enriched data for other systems, dashboards, or re-indexing without re-running the skills. Think of it as a by-product of indexing rather than the search path itself.</p>
+
+<div class="tip">
+<p>When a RAG answer seems wrong, inspect the chunks rather than blaming the model. Search the knowledge store or log the retrieved chunks. If the right information is not inside them, the split size, overlap, or embedding model — not the chat model — is what needs adjusting.</p>
+</div>
+
+<h2>Skillsets in the Enrichment Lab</h2>
+<p>The next lab puts these ideas into practice. You will attach a text-split skill to chunk your PDFs and an embedding skill to vectorize each chunk, then re-run the indexer so every document gains an embedding field. After that, your index supports the hybrid search that real RAG systems use.</p>
+
+<h2>Summary</h2>
+<p>A skillset is an ordered list of AI skills that enrich documents during indexing. Document extraction makes content readable, text split turns it into chunks, and embedding turns each chunk into a vector. Skill outputs flow into the index through output field mappings, and a knowledge store can keep enriched structures for other consumers. In the next chapter you build this exact pipeline on your own index.</p>
+<nav>
+<a href="171-lab-azure-ai-search-queries.html">&larr; Previous: Lab - Azure AI Search - Queries</a><a href="173-lab-ai-enrichment-and-skillsets.html">Next: Lab - AI Enrichment and Skillsets &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

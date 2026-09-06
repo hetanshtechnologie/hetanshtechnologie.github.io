@@ -1,0 +1,154 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>114. Lab - Sending Images as Context - Vision Input on Chat Models - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 114</span>
+<h1>Lab - Sending Images as Context - Vision Input on Chat Models</h1>
+<p>In this lab you will teach a deployed chat model to look at a picture. Chat models that support vision accept images as part of the conversation context: alongside the text message you send, you attach one or more images, and the model considers everything together when it composes its answer. This is the same capability that powers features such as "describe this screenshot" or "read the text from this document photo." By the end of the lab you will have a Python script that loads a local image, sends it to a Foundry deployment, and prints the model's description of what it sees.</p>
+
+<h2>What You Need Before Starting</h2>
+<ul>
+<li><strong>Python 3.9 or newer</strong> and VS Code, from the earlier chapters.</li>
+<li><strong>A vision-capable chat model deployed</strong> in Microsoft Foundry, such as <code>gpt-4o</code> or <code>gpt-4o-mini</code>.</li>
+<li>Your <strong>endpoint URL</strong> and <strong>API key</strong> for that deployment, stored as environment variables.</li>
+<li>A sample image file, for example <code>sample_building.jpg</code> from the section download.</li>
+</ul>
+
+<div class="note">
+<p>Not every chat model can accept images. Older text-only models will reject an image attachment or simply ignore it. If your deployment errors when you send the image, switch to a model family that is documented as supporting vision input.</p>
+</div>
+
+<h2>Installing the OpenAI Python SDK</h2>
+<p>Your Python code talks to the deployment through the <code>openai</code> package, the same client library you used in earlier labs. If you have not installed it in your current environment yet, open a terminal in VS Code and run:</p>
+
+<pre><code>pip install openai
+</code></pre>
+
+<h2>Preparing an Image for the API</h2>
+<p>The chat API does not accept a file path directly. You must read the image bytes and encode them so the model can receive them. The standard approach is to:</p>
+<ol>
+<li>Open the image file in binary mode.</li>
+<li>Base64-encode the bytes into a string.</li>
+<li>Wrap that string in a data URI such as <code>data:image/jpeg;base64,AAAA...</code>.</li>
+</ol>
+<p>Python's <code>base64</code> module and a one-line format string do all of this for you.</p>
+
+<h2>Send the Image to the Chat Model</h2>
+<div class="exercise">
+<h3>Step 1 - Create the project folder</h3>
+<p>Create a folder named <code>ai103-lab114</code> and open it in VS Code. Inside it, create a new Python file called <code>vision_chat.py</code>. Copy <code>sample_building.jpg</code> from the section download into the same folder.</p>
+
+<h3>Step 2 - Set your environment variables</h3>
+<p>In the integrated terminal, set your endpoint and key. Replace the placeholder values with the ones from your Foundry deployment:</p>
+<pre><code>$env:AZURE_OPENAI_ENDPOINT = "https://YOUR-RESOURCE.openai.azure.com/"
+$env:AZURE_OPENAI_KEY = "YOUR_KEY"
+</code></pre>
+
+<h3>Step 3 - Paste the script</h3>
+<p>Paste the following code into <code>vision_chat.py</code>. Replace <code>YOUR_DEPLOYMENT_NAME</code> with the name of your vision-capable deployment:</p>
+<pre><code>from openai import AzureOpenAI
+import os
+import base64
+
+client = AzureOpenAI(
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+    api_key=os.environ["AZURE_OPENAI_KEY"],
+    api_version="2025-01-01-preview",
+)
+
+with open("sample_building.jpg", "rb") as image_file:
+    image_data = base64.b64encode(image_file.read()).decode("utf-8")
+
+response = client.chat.completions.create(
+    model="YOUR_DEPLOYMENT_NAME",
+    messages=[
+        {"role": "system", "content": "You answer questions about images in a few concise sentences."},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe what you see in this image."},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{image_data}"},
+                },
+            ],
+        },
+    ],
+)
+
+print(response.choices[0].message.content)
+</code></pre>
+
+<h3>Step 4 - Run the script</h3>
+<pre><code>python vision_chat.py
+</code></pre>
+<p>You should see a natural-language description of the building photo printed to the console.</p>
+</div>
+
+<h2>Why the Message Content Is a List</h2>
+<p>Notice that the user message in the previous step is not a simple string. Its <code>content</code> is an array of parts, and each part has a <code>type</code>. The array can hold any mix of text parts and image parts, which lets you ask detailed questions while the image is right there in the context:</p>
+<ul>
+<li>A <code>text</code> part carries the instruction or question.</li>
+<li>An <code>image_url</code> part carries the picture, either as a data URI or as a public web URL.</li>
+</ul>
+<p>Order matters: the parts are read in the order you list them, so place the question before the image if you want the model to interpret them in that order.</p>
+
+<h2>Sending More Than One Image</h2>
+<p>You can attach multiple images in a single request by adding more <code>image_url</code> parts. The model can then compare pictures, which is useful for tasks like checking two documents or spotting differences. A short example:</p>
+<pre><code>messages=[
+    {"role": "system", "content": "You compare images and summarize differences."},
+    {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Compare these two images."},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{first_image}"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{second_image}"}},
+        ],
+    },
+]
+</code></pre>
+
+<h2>Understanding the Response</h2>
+<p>The response structure is identical to a text-only chat response. The useful fields are:</p>
+<ul>
+<li><code>response.choices[0].message.content</code> — the model's description or answer.</li>
+<li><code>response.usage.prompt_tokens</code> — tokens consumed by your text and the encoded image.</li>
+<li><code>response.usage.completion_tokens</code> — tokens in the generated answer.</li>
+</ul>
+<p>Image tokens can be significant: a large picture is converted into many tokens, which affects both latency and cost. Using the smallest image that still contains the details you need keeps requests fast and cheap.</p>
+
+<h2>Troubleshooting Common Errors</h2>
+<table>
+<tr><th>Error you may see</th><th>Most likely cause</th><th>Fix</th></tr>
+<tr><td><code>404</code> or <code>model not found</code></td><td>The deployment name does not match.</td><td>Check the <code>model</code> argument against the exact deployment name in Foundry.</td></tr>
+<tr><td><code>400 Invalid image</code></td><td>The image format or data URI is malformed.</td><td>Confirm the file is JPEG or PNG and that the MIME type in the data URI matches the file.</td></tr>
+<tr><td><code>Model does not support vision</code></td><td>The deployment is a text-only model.</td><td>Deploy a vision-capable model such as <code>gpt-4o</code> and use its name.</td></tr>
+<tr><td><code>Image too large</code></td><td>The encoded image exceeds the API limit.</td><td>Resize or compress the image before sending it.</td></tr>
+</table>
+
+<div class="tip">
+<p>If your image is a public web URL, you can pass it directly as <code>{"type": "image_url", "image_url": {"url": "https://example.com/photo.jpg"}}</code> without any base64 encoding. Local files, and anything sensitive, should always be sent as a data URI instead.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You have sent your first image to a chat model and received a text description in return. You learned to base64-encode a local file, attach it as an <code>image_url</code> part inside a message array, send multiple images in one call, and read the token usage from the response. In the next chapters you will flip the direction of travel: instead of asking a model to interpret an image, you will ask it to create one.</p>
+<nav>
+<a href="113-code-and-resources-download-for-this-section.html">&larr; Previous: Code and resources download for this section</a><a href="115-using-models-to-generate-images.html">Next: Using models to generate images &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

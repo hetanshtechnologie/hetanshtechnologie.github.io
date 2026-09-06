@@ -1,0 +1,122 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>46. Lab - Retrieval Augmented Generation - Data Preparation - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 46</span>
+<h1>Lab - Retrieval Augmented Generation - Data Preparation</h1>
+<p>Before any text can be searched or embedded, it has to be extracted from its source documents, cleaned, and split into chunks. This lab does exactly that for the CloudXeus support material. By the end you will have a JSONL file, <code>chunks.jsonl</code>, where every line is one chunk of text plus metadata that the search index can consume in the next labs.</p>
+
+<h2>About the Data</h2>
+<p>Gather a small set of CloudXeus documents. If you have your own PDFs, put up to a dozen of them in <code>data/source</code>. If not, create a few short text files that read like support material, for example an FAQ about a fictional <code>CloudXeus EdgeCam 300</code> security camera. The pipeline is identical either way; only the source files change.</p>
+
+<div class="note">
+<p>Aim for a few hundred kilobytes total. This keeps the free search tier and quick indexing runs comfortable while still giving you meaningful chunks to search.</p>
+</div>
+
+<h2>Extracting Text</h2>
+<p>For PDFs we use <code>pypdf</code> to pull the text out of each page. The script below walks the source folder and produces one string per PDF, keeping the filename so we can trace chunks back to their origin.</p>
+
+<pre><code>from pathlib import Path
+from pypdf import PdfReader
+
+SOURCE_DIR = Path("data/source")
+
+def extract_pdfs(folder: Path) -&gt; list[dict]:
+    docs = []
+    for pdf_path in sorted(folder.glob("*.pdf")):
+        reader = PdfReader(str(pdf_path))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        docs.append({"title": pdf_path.stem, "source": pdf_path.name, "text": text})
+    return docs</code></pre>
+
+<h2>Cleaning the Text</h2>
+<p>Extracted text is full of stray whitespace, awkward line breaks, and odd unicode. A short cleaning pass normalizes it so chunking works on real sentences rather than fragments.</p>
+
+<pre><code>import re
+
+def clean_text(text: str) -&gt; str:
+    text = text.replace("\r\n", "\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[^\S\n]+", " ", text)
+    return text.strip()</code></pre>
+
+<h2>Chunking the Documents</h2>
+<p>Chunks are the units of retrieval: too large and they are vague, too small and they lack context. A useful default is to aim for roughly 400 to 600 words per chunk with a small overlap so a topic that straddles a boundary is still captured.</p>
+
+<pre><code>def chunk_text(text: str, chunk_words: int = 450, overlap_words: int = 50) -&gt; list[str]:
+    words = text.split()
+    chunks = []
+    start = 0
+    while start &lt; len(words):
+        end = min(start + chunk_words, len(words))
+        chunks.append(" ".join(words[start:end]))
+        if end == len(words):
+            break
+        start = end - overlap_words
+    return chunks</code></pre>
+
+<h2>Writing Chunks to JSONL</h2>
+<p>Each chunk becomes a JSON line with an id, the source title, and the cleaned text. The JSONL format is easy for the indexing script to stream later.</p>
+
+<pre><code>import json
+
+def build_chunks(docs: list[dict]) -&gt; list[dict]:
+    records = []
+    for doc in docs:
+        chunks = chunk_text(clean_text(doc["text"]))
+        for i, chunk in enumerate(chunks):
+            records.append({
+                "id": f"{doc['source']}-{i:03d}",
+                "title": doc["title"],
+                "source": doc["source"],
+                "content": chunk,
+            })
+    return records</code></pre>
+
+<h2>Running the Pipeline</h2>
+<div class="exercise">
+<h3>Exercise &mdash; Generate the Chunk File</h3>
+<ol>
+<li>Save the code blocks above into <code>scripts/prepare_data.py</code>, keeping the imports at the top and adding these calls at the bottom:</li>
+</ol>
+<pre><code>docs = extract_pdfs(SOURCE_DIR)
+records = build_chunks(docs)
+out = Path("data/chunks.jsonl")
+with out.open("w", encoding="utf-8") as fh:
+    for record in records:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+print(f"Wrote {len(records)} chunks to {out}")</code></pre>
+<ol start="2">
+<li>Run <code>python scripts/prepare_data.py</code> from the project root.</li>
+<li>Confirm the output: it should print the number of chunks, and <code>data/chunks.jsonl</code> should exist.</li>
+<li>Inspect the first lines with <code>Get-Content data\chunks.jsonl -TotalCount 2</code> (Windows) or <code>head -n 2 data/chunks.jsonl</code> (macOS/Linux).</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>If a PDF yields little or no text, the pages may be scanned images. Run such a file through an OCR tool or replace it with a text version for now; OCR is a separate topic covered later in the course.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Your source documents are now extracted, cleaned, and split into uniform chunks stored in <code>data/chunks.jsonl</code>. Each chunk carries the metadata the search index will need. In the next lab you create the Azure AI Search resource and define the index schema that will hold these chunks and their vectors.</p>
+<nav>
+<a href="45-lab-retrieval-augmented-generation-overview.html">&larr; Previous: Lab - Retrieval Augmented Generation - Overview</a><a href="47-lab-retrieval-augmented-generation-azure-ai-search.html">Next: Lab - Retrieval Augmented Generation - Azure AI Search &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

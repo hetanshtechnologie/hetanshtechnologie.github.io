@@ -1,0 +1,101 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>70. Understanding State Conversations, Session Context, and Memory - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 70</span>
+<h1>Understanding State Conversations, Session Context, and Memory</h1>
+<p>Ask a model a question and it answers. Ask a follow-up that depends on the first answer and the model seems to remember &mdash; but only because your code sent the earlier turns back to it. This chapter untangles the vocabulary people use when they talk about agent memory: state, conversations, sessions, context, and memory. Getting these straight is the difference between an agent that seems to remember and one that actually does.</p>
+
+<h2>Models Are Stateless</h2>
+<p>Every call to a chat model is independent. The model has no knowledge that a previous request from the same client ever happened. What looks like memory is really input: whatever conversation history your code includes in the request. If you send only the latest user message, the model answers with no idea what came before.</p>
+
+<div class="note">
+<p>This is the single most important idea in the section. Statelessness is not a bug you must fight; it is a design that keeps the model simple and makes memory a problem your application can control explicitly.</p>
+</div>
+
+<h2>State: What the Agent Knows at a Moment</h2>
+<p><strong>State</strong> is the complete set of information an agent has access to at any point in a run: the system instructions, the conversation history, any variables set during the session, and the results of tool calls. State is a snapshot. Two identical requests with different state produce different behavior, and the same state applied to two requests makes behavior reproducible.</p>
+
+<h2>Conversation History</h2>
+<p>In practical API terms, the conversation is the list of messages you send: <code>system</code>, <code>user</code>, <code>assistant</code>, and <code>tool</code> entries in order. The model reads this list and continues from it.</p>
+<ul>
+<li>History grows with every turn.</li>
+<li>You control what is in it: you can trim it, summarize it, or keep only recent turns.</li>
+<li>What you include is what the model sees; nothing more.</li>
+</ul>
+<p>Conversation history is therefore your first and simplest memory mechanism, bounded by the context window.</p>
+
+<h2>Session Context</h2>
+<p>A <strong>session</strong> is a container for one logical interaction with a user &mdash; one chat thread, one customer support case, one window of a web app. Session context is the working data tied to that container: the user id, the topic being discussed, the current order id, and the accumulated conversation.</p>
+<table>
+<tr><th>Concept</th><th>Scope</th><th>Lives where</th></tr>
+<tr><td>Conversation history</td><td>One chat thread</td><td>In the request messages you send</td></tr>
+<tr><td>Session context</td><td>One user interaction</td><td>In memory, a cache, or a store keyed by session id</td></tr>
+<tr><td>Persistent memory</td><td>Across sessions</td><td>In a durable database</td></tr>
+</table>
+
+<h2>Context Window: The Room You Have</h2>
+<p>The context window is the token budget for everything in a single request: system prompt, conversation history, tool definitions, tool results, and the answer being generated. Context window and memory are different things:</p>
+<ul>
+<li>The context window is a limit you can run out of.</li>
+<li>Memory is anything you keep outside the window and bring back when needed.</li>
+</ul>
+<p>Good agent design treats the context window as scarce space. You do not stuff all of history into it; you curate what is relevant to the current turn.</p>
+
+<h2>Working Memory vs Long-Term Memory</h2>
+<p>It helps to borrow the two-layered model humans use:</p>
+<table>
+<tr><th>Type</th><th>What it holds</th><th>Example</th></tr>
+<tr><td>Working memory</td><td>What is active right now, in the context window</td><td>The current order id during a support conversation</td></tr>
+<tr><td>Long-term memory</td><td>What persists across sessions</td><td>The customer's shipping preference, saved from last week</td></tr>
+</table>
+<p>Working memory is cheap but volatile: it exists only while the conversation is alive. Long-term memory is durable but must be explicitly stored, retrieved, and scoped.</p>
+
+<h2>Memory vs Context</h2>
+<p>The pair is easy to confuse, so pin it down:</p>
+<ul>
+<li><strong>Context</strong> is what the model sees at generation time &mdash; always a subset of what exists.</li>
+<li><strong>Memory</strong> is what the system retains &mdash; the superset that can be recalled into context.</li>
+</ul>
+<p>Every turn your code moves selected memory into context. Choosing what to move, and when to stop moving it, is the craft of agent memory.</p>
+
+<div class="tip">
+<p>When you design an agent, ask three questions about every piece of information: Does this turn need it? Will later turns in this session need it? Will a future session need it? The answers tell you whether the information belongs in the context window, in session state, or in persistent storage.</p>
+</div>
+
+<h2>Where State Lives</h2>
+<p>State can live at several layers, and each layer has different durability:</p>
+<table>
+<tr><th>Layer</th><th>Durability</th><th>Typical use</th></tr>
+<tr><td>In-memory in your process</td><td>Lives until the process stops</td><td>Session scratchpad, current tool state</td></tr>
+<tr><td>Cache</td><td>Lives minutes to hours</td><td>Session context across serverless instances</td></tr>
+<tr><td>Database</td><td>Lives indefinitely</td><td>Long-term memory, user preferences, audit</td></tr>
+</table>
+<p>Serverless platforms make this concrete: a function instance can disappear at any time, so anything you truly want to keep must live outside the process.</p>
+
+<div class="warn">
+<p>Never store secrets or personal data in memory you cannot scope. If two users share a session store, one user's orders can leak into the other's context. Memory must always be scoped to its owner, whether that is a user, a tenant, or a session id.</p>
+</div>
+
+<h2>Summary</h2>
+<p>Model calls are stateless, so memory is built by your code: conversation history rides in the request, session context binds working data to one interaction, and persistent memory survives across sessions. The context window caps what the model sees at any moment, which is why memory must be curated rather than dumped. The next chapter examines the lifecycle of memory and the types and scope an agent needs.</p>
+<nav>
+<a href="69-what-are-the-objectives-we-are-going-to-cover-in-this-section.html">&larr; Previous: What are the objectives we are going to cover in this section</a><a href="71-how-memory-works-the-memory-lifecycle-memory-types-and-scope.html">Next: How Memory Works The Memory Lifecycle, Memory Types, and Scope &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

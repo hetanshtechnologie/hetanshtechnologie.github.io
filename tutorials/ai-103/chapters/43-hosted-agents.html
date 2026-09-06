@@ -1,0 +1,100 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>43. Hosted agents - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 43</span>
+<h1>Hosted agents</h1>
+<p>In the previous chapter you built a conversational agent in code, wiring up function tool calling by hand. That gives you total control, but it also puts you in charge of the plumbing: the request loop, conversation state, tool dispatch, and error handling. Hosted agents take a different path. Instead of writing the orchestration loop yourself, you describe the agent &mdash; its instructions, model, and tools &mdash; and the platform runs it for you. Microsoft Foundry offers exactly this kind of managed agent service, and in this chapter you will learn what hosted agents are, how they are put together, and when they beat hand-built agents.</p>
+
+<h2>What Is a Hosted Agent</h2>
+<p>An agent, at its core, is a system that decides how to answer a user request and can take actions beyond generating text. Every agent combines four things:</p>
+<ul>
+<li><strong>A model</strong> that reasons about the request and chooses next steps.</li>
+<li><strong>Instructions</strong> that define the agent's role, tone, and boundaries.</li>
+<li><strong>Tools</strong> the agent can call, such as search, code execution, or your own APIs.</li>
+<li><strong>A runtime</strong> that drives the loop: send to model, detect a tool call, run the tool, feed the results back, and repeat until the model produces a final answer.</li>
+</ul>
+<p>In a <em>code-first</em> agent you build the runtime yourself, as you did in the function tool calling lab. In a <em>hosted</em> agent the platform supplies the runtime. You provide the first three ingredients as configuration, and the service handles execution, retries, sessions, and state for you.</p>
+
+<h2>The Parts of a Hosted Agent</h2>
+<p>When you create a hosted agent in Foundry, you define roughly the following:</p>
+<ul>
+<li><strong>Identity and instructions:</strong> the system message that sets the agent's personality, scope, and guardrails.</li>
+<li><strong>Model deployment:</strong> the deployed chat model the agent will reason with.</li>
+<li><strong>Tools:</strong> an allow-list of capabilities. Common hosted tools include file search over uploaded documents, a sandboxed code interpreter, grounding through an Azure AI Search index, and calls to your own REST APIs.</li>
+<li><strong>Threads:</strong> persistent conversation history that the service stores for you, so multi-turn conversations stay coherent without you managing messages.</li>
+<li><strong>Settings:</strong> sampling parameters such as temperature, plus limits on steps and token usage.</li>
+</ul>
+
+<div class="note">
+<p>The hosted runtime owns the conversation. When a user sends a follow-up question, the service retrieves the thread's history automatically, so your application code stays thin: create a thread, send a message, read the response.</p>
+</div>
+
+<h2>The Microsoft Foundry Agent Service</h2>
+<p>Foundry organizes hosted agents around three concepts that mirror other Azure resources:</p>
+<ul>
+<li><strong>Agent hub:</strong> a container that groups agents and shared configuration, similar to how a workspace groups models and datasets.</li>
+<li><strong>Agent project:</strong> the scoped unit where you define agents, tools, and evaluations.</li>
+<li><strong>Agent deployment:</strong> a deployed, running instance of an agent that exposes a chat endpoint your application calls.</li>
+</ul>
+<p>You can manage hosted agents through the Foundry portal or through the Agents SDK. A minimal SDK definition looks like this:</p>
+
+<pre><code>from azure.ai.projects import AIProjectClient
+from azure.identity import DefaultAzureCredential
+
+project = AIProjectClient.from_connection_string(
+    conn_str="YOUR_PROJECT_CONNECTION_STRING",
+    credential=DefaultAzureCredential(),
+)
+
+agent = project.agents.create_agent(
+    model="YOUR_CHAT_MODEL_DEPLOYMENT",
+    name="cloudxeus-support",
+    instructions="You are a friendly support agent for CloudXeus. "
+                 "Use your tools to find information before answering.",
+    tools=[{"type": "file_search"}],
+)
+print("Agent created:", agent.id)</code></pre>
+
+<h2>Hosted Agents vs Code-First Agents</h2>
+<table>
+<tr><th>Aspect</th><th>Hosted Agent</th><th>Code-First Agent</th></tr>
+<tr><td>Runtime</td><td>Managed by the platform</td><td>You write and host it</td></tr>
+<tr><td>Conversation state</td><td>Threads stored for you</td><td>You manage history</td></tr>
+<tr><td>Tools</td><td>Curated set plus OpenAPI and MCP</td><td>Anything you can run in code</td></tr>
+<tr><td>Control</td><td>Configuration level</td><td>Full code control</td></tr>
+<tr><td>Telemetry</td><td>Built in</td><td>You wire it yourself</td></tr>
+<tr><td>Best for</td><td>Rapid, standard use cases</td><td>Complex custom orchestration</td></tr>
+</table>
+<p>Use a hosted agent when your requirements fit the built-in toolset and you want to move fast. Build your own when you need custom control flow, unusual runtimes, or deep integration with existing code.</p>
+
+<div class="tip">
+<p>A practical middle path is to start hosted and add a custom OpenAPI tool for the one capability you need. You keep the managed runtime while extending the agent with your own business logic. Later chapters show how OpenAPI tools plug into Foundry agents.</p>
+</div>
+
+<div class="warn">
+<p>Hosted agents run in a shared managed environment. For workloads with strict compliance or data-residency requirements, check the data location and processing options for the agent service before you commit, and always treat the agent's tool access as attack surface.</p>
+</div>
+
+<h2>Summary</h2>
+<p>A hosted agent is a model, a set of instructions, and a tool list driven by a platform-managed runtime. Microsoft Foundry packages these as agent hubs, projects, and deployments, and gives you both a portal and an SDK to create and manage them. Choose hosted agents for speed and simplicity, and reserve code-first agents for cases that genuinely need custom orchestration. In the next chapter you turn to a technique that makes these agents far more useful: grounding their answers in your own data with Retrieval Augmented Generation.</p>
+<nav>
+<a href="42-lab-function-tool-calling-defining-the-application.html">&larr; Previous: Lab - Function Tool Calling - Defining the application</a><a href="44-introduction-to-retrieval-augmented-generation.html">Next: Introduction to Retrieval Augmented Generation &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

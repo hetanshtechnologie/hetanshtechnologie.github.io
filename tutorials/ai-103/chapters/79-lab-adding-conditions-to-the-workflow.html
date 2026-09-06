@@ -1,0 +1,137 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>79. Lab - Adding conditions to the workflow - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 79</span>
+<h1>Lab - Adding conditions to the workflow</h1>
+<p>Your intake pipeline now produces structured data — including an <code>is_urgent</code> flag. In this lab you will make the workflow act on that data by adding a condition node that routes each ticket down one of two paths: urgent tickets get a faster, more direct reply and an alert; normal tickets follow the standard path. This is where the pipeline stops being a straight line and becomes a real decision-making process.</p>
+
+<h2>Objectives</h2>
+<ul>
+<li>Add a condition node to the intake workflow.</li>
+<li>Branch on the structured <code>is_urgent</code> field.</li>
+<li>Create distinct output paths for urgent and standard tickets.</li>
+<li>Run the workflow with both urgent and non-urgent inputs to verify the branches.</li>
+</ul>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>The <code>intake-pipeline</code> workflow with structured output from the previous lab.</li>
+<li>IntakeAgent and ResolverAgent versions that produce the <code>is_urgent</code> field.</li>
+</ul>
+
+<h2>Step 1: Add the Condition Node</h2>
+
+<div class="exercise">
+<h3>Insert a branching point</h3>
+<ol>
+<li>Open the <code>intake-pipeline</code> workflow.</li>
+<li>Drag a <strong>Condition</strong> node onto the canvas, between IntakeAgent and ResolverAgent.</li>
+<li>Draw an edge from the IntakeAgent node into the Condition node.</li>
+<li>Open the Condition node's settings and configure a test against the structured field:</li>
+</ol>
+<pre><code>Condition: $\{nodes.intake_agent.output.is_urgent} == true
+</code></pre>
+</div>
+
+<div class="note">
+<p>A condition node has two exits: the <em>true</em> path, taken when the test evaluates to true, and the <em>false</em> path, taken otherwise. Data that arrives at the condition is passed along whatever path is chosen, so both branches can access IntakeAgent's summary.</p>
+</div>
+
+<h2>Step 2: Build the Two Branches</h2>
+<p>Give each branch its own version of the reply. Urgent tickets need a prompt that produces a more direct, acknowledgment-heavy reply; standard tickets keep the existing ResolverAgent prompt.</p>
+
+<div class="exercise">
+<h3>Create the urgent path</h3>
+<ol>
+<li>Drag a second <strong>Agent</strong> node onto the canvas and name it <code>UrgentResolver</code>.</li>
+<li>Select ResolverAgent's published version for it.</li>
+<li>Add a note in its prompt that this reply is for an urgent, high-priority ticket:</li>
+</ol>
+<pre><code>Original customer message:
+$\{inputs.customer_message}
+
+Intake summary:
+$\{nodes.intake_agent.output.summary}
+
+The ticket is marked URGENT. Acknowledge the impact, state that
+it is being escalated to the on-call team, and keep the reply
+shorter than usual.
+</code></pre>
+<ol start="4">
+<li>Draw an edge from the Condition node's <strong>true</strong> exit to the UrgentResolver node.</li>
+</ol>
+</div>
+
+<div class="exercise">
+<h3>Wire the standard path</h3>
+<ol>
+<li>Draw an edge from the Condition node's <strong>false</strong> exit to the existing ResolverAgent node.</li>
+<li>Leave the ResolverAgent node's prompt unchanged so standard tickets keep the standard reply.</li>
+</ol>
+</div>
+
+<div class="warn">
+<p>It is easy to connect a node to the wrong condition exit. Check the arrow labels on the canvas: the <em>true</em> branch must go to the urgent handler and the <em>false</em> branch to the standard handler. A single swapped edge silently routes every urgent ticket through the slow path.</p>
+</div>
+
+<h2>Step 3: Update the Output Node</h2>
+<p>The workflow now has two possible sources for the draft reply, so the output node must pick up whichever one ran.</p>
+
+<div class="exercise">
+<h3>Expose both outcomes</h3>
+<ol>
+<li>Open the <strong>Output</strong> node.</li>
+<li>Add an output field <code>draft_reply</code> and bind it to the standard ResolverAgent's output.</li>
+<li>Add an output field <code>urgent_reply</code> and bind it to UrgentResolver's output.</li>
+<li>Draw edges from both agent nodes into the Output node.</li>
+<li>Save the workflow. The run will produce whichever reply field corresponds to the branch that executed.</li>
+</ol>
+</div>
+
+<h2>Step 4: Test Both Branches</h2>
+
+<div class="exercise">
+<h3>Verify routing with two runs</h3>
+<ol>
+<li>Run the workflow with the urgent message from earlier labs (the down virtual machine). Confirm <code>is_urgent</code> is true and <code>urgent_reply</code> is populated.</li>
+<li>Run the workflow again with a non-urgent message:</li>
+</ol>
+<pre><code>Our blob storage account shows a 403 error since this morning.
+Not urgent, but we do need help by end of day. Account BA-44590.
+</code></pre>
+<ol start="3">
+<li>Confirm <code>is_urgent</code> is false and <code>draft_reply</code> (the standard path) is populated.</li>
+<li>Compare the two replies and confirm the urgent one acknowledges escalation while the standard one does not.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>Conditions can test more than booleans. You can compare strings, check that a field is missing, or combine several tests with <code>and</code> / <code>or</code>. A useful follow-up: add a second condition that routes tickets without an <code>account_id</code> into a branch that asks the customer for their account number.</p>
+</div>
+
+<h2>Step 5: Review Run History</h2>
+<p>Open the workflow's run history. Each run should show the condition node in the executed path, along with which agent produced the reply. This audit trail is one of the main reasons to build pipelines as workflows: you can prove which branch handled each ticket and why.</p>
+
+<h2>Summary</h2>
+<p>You added a condition node that branches the intake pipeline on the structured <code>is_urgent</code> field, built separate urgent and standard reply paths, and verified both branches with realistic runs. The workflow now makes decisions, not just calls. With the pipeline complete, the next chapters step back from the portal to the platform concerns that keep such workloads running: quotas, scaling, cost, and monitoring.</p>
+<nav>
+<a href="78-lab-capturing-intakeagent-s-output-as-structured-data.html">&larr; Previous: Lab - Capturing IntakeAgent's Output as Structured Data</a><a href="80-managing-quotas-scaling-rate-limits-and-cost.html">Next: Managing Quotas, Scaling, Rate Limits, and Cost &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

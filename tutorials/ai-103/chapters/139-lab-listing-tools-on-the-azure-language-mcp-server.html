@@ -1,0 +1,146 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6374660382454241" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-2SCWN3EXD0"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-2SCWN3EXD0');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>139. Lab - Listing Tools on the Azure Language MCP Server - AI-103</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../" style="display:inline-block;margin-bottom:16px;color:#1565c0;text-decoration:none;">&larr; Back to Tutorials</a>
+<span class="tag">Chapter 139</span>
+<h1>Lab - Listing Tools on the Azure Language MCP Server</h1>
+<p>Every MCP session begins the same way: connect, initialize, and ask the server what it can do. The <code>tools/list</code> call is that question, and the answer — the tool catalog with descriptions and input schemas — is the contract your agent builds on. In this lab you will fetch that catalog from the Azure Language MCP server, inspect the schema of each tool, and practice reading a schema the way a model would.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+<li>A deployed Azure Language MCP server with its URL and access key.</li>
+<li>Your Python environment with the MCP SDK installed:</li>
+</ul>
+<pre><code>pip install mcp httpx</code></pre>
+
+<h2>Step 1: Fetch the Tool Catalog</h2>
+
+<div class="exercise">
+<h3>Exercise 1: List tools and their descriptions</h3>
+<p>Create <code>mcp_list_tools.py</code>:</p>
+<pre><code>import asyncio
+
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+SERVER_URL = "http://YOUR_SERVER_FQDN/sse"
+ACCESS_KEY = "YOUR_GENERATED_KEY"
+
+
+async def main():
+    read, write = await sse_client(SERVER_URL, headers={
+        "Authorization": f"Bearer {ACCESS_KEY}",
+    })
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        tools = await session.list_tools()
+        print(f"Connected. {len(tools.tools)} tool(s) exposed:\n")
+        for tool in tools.tools:
+            print(f"- {tool.name}")
+            print(f"  {tool.description}\n")
+
+
+asyncio.run(main())</code></pre>
+<ol>
+<li>Run the script. You should see the server's language tools — translation, language detection, sentiment, entity extraction, and PII redaction, depending on the server version.</li>
+<li>Count the tools and compare with the expected catalog from the lecture chapter. Any difference is a version difference, not a problem.</li>
+</ol>
+</div>
+
+<div class="tip">
+<p>Discovery failure means transport or authentication trouble: the server is unreachable, the endpoint path is wrong, or the access key is missing or invalid. Success at this step proves the connection layer is sound and moves the problem to the call layer.</p>
+</div>
+
+<h2>Step 2: Print the Input Schemas</h2>
+
+<div class="exercise">
+<h3>Exercise 2: Read each tool's argument contract</h3>
+<p>Extend the script to print the full JSON schema of every tool:</p>
+<pre><code>import json
+
+        for tool in tools.tools:
+            print(f"=== {tool.name} ===")
+            print(json.dumps(tool.inputSchema, indent=2))
+            print()</code></pre>
+<ol>
+<li>Run the script and study the schema of <code>translate_text</code>. It should declare <code>text</code> and <code>to</code> as required string properties, with an optional <code>from</code> property.</li>
+<li>Compare that with the schema for <code>detect_language</code> or <code>analyze_sentiment</code>, which should require only <code>text</code>.</li>
+<li>Note any <code>required</code> arrays, descriptions, and defaults — these are the details a model uses to build a correct call.</li>
+</ol>
+</div>
+
+<div class="note">
+<p>The schema is the source of truth for tool calling. When a model or a human passes the wrong argument name or type, the failure usually traces back to the schema — which is why printing it is the first debugging move.</p>
+</div>
+
+<h2>Step 3: Build a Helper That Finds a Tool by Name</h2>
+
+<div class="exercise">
+<h3>Exercise 3: Look up a tool before calling it</h3>
+<p>Add a lookup helper that returns a tool and its required fields:</p>
+<pre><code>def find_tool(tools, name: str):
+    for tool in tools.tools:
+        if tool.name == name:
+            return tool
+    return None
+
+
+        translate = find_tool(tools, "translate_text")
+        if translate is None:
+            print("translate_text not found. Available tools:")
+            for tool in tools.tools:
+                print(" -", tool.name)
+        else:
+            required = translate.inputSchema.get("required", [])
+            props = list(translate.inputSchema.get("properties", {}).keys())
+            print("translate_text requires:", required)
+            print("declared properties:", props)</code></pre>
+<ol>
+<li>Run the script. The helper should report the required fields of <code>translate_text</code>.</li>
+<li>Change the requested name to <code>translate</code> and rerun. The helper should fall back to printing the full catalog, mirroring the diagnostic path you would follow in a real agent.</li>
+</ol>
+</div>
+
+<h2>Step 4: Simulate What a Model Sees</h2>
+<p>A model does not read the catalog like a human — it receives the tool names, descriptions, and schemas as its tool definitions, then predicts which tool and arguments fit the user's request. To simulate that, print a compact, model-style summary of the catalog:</p>
+<pre><code>def summarize(tools) -&gt; str:
+    lines = []
+    for tool in tools.tools:
+        props = ", ".join(tool.inputSchema.get("properties", {}).keys())
+        lines.append(f"{tool.name}: {tool.description} | args: {props}")
+    return "\n".join(lines)
+
+
+        print("Model-facing summary:")
+        print(summarize(tools))</code></pre>
+<ol>
+<li>Run the script and read the summary. Decide which tool you would choose to translate a sentence, detect a language, or score sentiment.</li>
+<li>Now use that same mental decision as the expected behavior of an agent: the description and args are precisely the signal the model uses, so vague descriptions here directly degrade agent performance.</li>
+</ol>
+
+<div class="tip">
+<p>If you ever find an agent calling the wrong tool, the fix is usually in the catalog, not in the agent: make descriptions unambiguous and distinct, and name arguments consistently with the tool's purpose.</p>
+</div>
+
+<h2>Summary</h2>
+<p>You connected to the Azure Language MCP server, fetched its tool catalog with <code>tools/list</code>, printed and interpreted the input schemas, built a lookup helper, and reproduced the model's view of the catalog. Discovery is the layer where transport and authentication problems surface first, so this lab doubles as the diagnostic foundation for every MCP integration that follows.</p>
+<nav>
+<a href="138-lab-using-the-azure-mcp-language-server.html">&larr; Previous: Lab - Using the Azure MCP Language Server</a><a href="140-lab-translating-text-with-azure-translator.html">Next: Lab - Translating Text with Azure Translator &rarr;</a>
+</nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/access.js"></script>
+<script src="../../js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

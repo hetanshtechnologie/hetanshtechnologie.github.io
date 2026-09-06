@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Big-O Complexity Game</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:'Segoe UI',sans-serif;min-height:100vh}
+.topbar{background:#1e293b;padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid #334155}
+.topbar a{color:#38bdf8;text-decoration:none;font-weight:600}
+.topbar h1{font-size:1.2rem;color:#f1f5f9}
+.container{max-width:800px;margin:0 auto;padding:24px}
+.score-bar{display:flex;justify-content:space-between;background:#1e293b;border-radius:12px;padding:16px 24px;margin-bottom:20px}
+.score-val{color:#38bdf8;font-weight:700;font-size:1.3rem}
+.algo-card{background:#1e293b;border-radius:12px;padding:24px;margin-bottom:20px}
+.algo-card h2{color:#38bdf8;margin-bottom:12px;font-size:1.2rem}
+.algo-code{background:#0f172a;border-radius:8px;padding:16px;font-family:'Fira Code',monospace;font-size:.9rem;color:#e2e8f0;overflow-x:auto;margin-bottom:16px}
+.algo-desc{color:#94a3b8;line-height:1.6}
+.complexity-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
+.complexity-btn{padding:14px;border:3px solid #334155;border-radius:10px;background:#1e293b;color:#e2e8f0;font-size:1rem;font-weight:700;cursor:pointer;transition:all .2s;text-align:center}
+.complexity-btn:hover{border-color:#38bdf8;background:#1e3a5f}
+.complexity-btn.selected{border-color:#38bdf8;background:#1e3a5f}
+.complexity-btn.correct{border-color:#22c55e;background:#14532d}
+.complexity-btn.wrong{border-color:#ef4444;background:#7f1d1d}
+.btn-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:16px 0}
+.btn{padding:10px 24px;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
+.btn-primary{background:#38bdf8;color:#0f172a}
+.btn-secondary{background:#334155;color:#e2e8f0}
+.message{text-align:center;font-size:1.1rem;padding:12px;border-radius:8px;margin-bottom:12px}
+.message.correct{background:#14532d;color:#4ade80}
+.message.wrong{background:#7f1d1d;color:#fca5a5}
+.instructions{background:#1e293b;border-radius:12px;padding:20px;margin-bottom:20px}
+.instructions h2{color:#38bdf8;margin-bottom:8px}
+.progress-bar{display:flex;gap:6px;justify-content:center;margin-bottom:20px}
+.progress-dot{width:12px;height:12px;border-radius:50%;background:#334155;transition:all .3s}
+.progress-dot.correct{background:#22c55e}
+.progress-dot.wrong{background:#ef4444}
+.progress-dot.current{background:#38bdf8;box-shadow:0 0 8px #38bdf8}
+.hint{background:#1e293b;border-radius:8px;padding:12px;color:#facc15;font-size:.9rem;margin-bottom:12px;display:none}
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">&#8592; Home</a><h1>Big-O Complexity Game</h1></div>
+<div class="container">
+  <div class="score-bar">
+    <span>Score: <span class="score-val" id="score">0</span></span>
+    <span>Question: <span class="score-val" id="qNum">1</span>/10</span>
+    <span>Streak: <span class="score-val" id="streak">0</span> &#128293;</span>
+  </div>
+  <div class="progress-bar" id="progressBar"></div>
+  <div class="algo-card" id="algoCard"></div>
+  <div class="complexity-grid" id="complexityGrid"></div>
+  <div class="hint" id="hint"></div>
+  <div id="messageArea"></div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="startBtn" onclick="startGame()">Start Game</button>
+    <button class="btn btn-secondary" id="nextBtn" onclick="nextQ()" style="display:none">Next Question</button>
+    <button class="btn btn-secondary" id="hintBtn" onclick="showHint()" style="display:none">Hint</button>
+  </div>
+</div>
+<script>
+const questions=[
+  {name:'Linear Search',code:`for (i = 0; i < n; i++)\n  if (arr[i] == target)\n    return i;`,desc:'Search through an unsorted array element by element.',answer:'O(n)',hint:'Visits each element once.'},
+  {name:'Binary Search',code:`while (lo <= hi)\n  mid = (lo+hi)/2\n  if (arr[mid]==target) return mid\n  else if (arr[mid]<target) lo=mid+1\n  else hi=mid-1`,desc:'Search sorted array by repeatedly halving the search space.',answer:'O(log n)',hint:'Each step cuts the problem in half.'},
+  {name:'Bubble Sort',code:`for (i = 0; i < n; i++)\n  for (j = 0; j < n-i-1; j++)\n    if (arr[j] > arr[j+1])\n      swap(arr[j], arr[j+1])`,desc:'Repeatedly swap adjacent elements if they are in wrong order.',answer:'O(n^2)',hint:'Two nested loops over the array.'},
+  {name:'Merge Sort',code:`function mergeSort(arr)\n  mid = n/2\n  left = mergeSort(arr[0..mid])\n  right = mergeSort(arr[mid..n])\n  return merge(left, right)`,desc:'Divide array in half, sort each half, merge results.',answer:'O(n log n)',hint:'Log n levels of recursion, n work per level.'},
+  {name:'Quick Sort',code:`function quickSort(arr, lo, hi)\n  pivot = partition(arr, lo, hi)\n  quickSort(arr, lo, pivot-1)\n  quickSort(arr, pivot+1, hi)`,desc:'Partition around pivot, sort sub-arrays recursively.',answer:'O(n log n)',hint:'Average case: balanced partitions.'},
+  {name:'Factorial',code:`function factorial(n)\n  if (n <= 1) return 1\n  return n * factorial(n-1)`,desc:'Compute n! recursively.',answer:'O(n)',hint:'One recursive call per decrement of n.'},
+  {name:'Fibonacci (recursive)',code:`function fib(n)\n  if (n <= 1) return n\n  return fib(n-1) + fib(n-2)`,desc:'Compute nth Fibonacci number recursively.',answer:'O(2^n)',hint:'Each call branches into two more calls.'},
+  {name:'Matrix Multiply',code:`for (i = 0; i < n; i++)\n  for (j = 0; j < n; j++)\n    for (k = 0; k < n; k++)\n      C[i][j] += A[i][k]*B[k][j]`,desc:'Naive n x n matrix multiplication.',answer:'O(n^3)',hint:'Three nested loops, each over n.'},
+  {name:'Power of 2',code:`function power(base, exp)\n  if (exp == 0) return 1\n  return base * power(base, exp-1)`,desc:'Compute base^exp recursively.',answer:'O(n)',hint:'exp recursive calls.'},
+  {name:'Hash Table Lookup',code:`key = hash(input)\nreturn table[key]`,desc:'Direct access using a hash function.',answer:'O(1)',hint:'Direct index access — constant time.'},
+  {name:'Stack Push/Pop',code:`function push(stack, val)\n  stack[top] = val\n  top++\n\nfunction pop(stack)\n  top--\n  return stack[top]`,desc:'Push and pop operations on a stack.',answer:'O(1)',hint:'Single operation, no loops.'},
+  {name:'Queue Enqueue/Dequeue',code:`function enqueue(q, val)\n  q.rear = val\n  rear++\n\nfunction dequeue(q)\n  val = q.front\n  front++`,desc:'Enqueue and dequeue on a queue.',answer:'O(1)',hint:'Direct pointer manipulation.'},
+  {name:'Insertion into BST',code:`function insert(root, val)\n  if (root == null) return new Node(val)\n  if (val < root.val)\n    root.left = insert(root.left, val)\n  else\n    root.right = insert(root.right, val)`,desc:'Insert a value into a Binary Search Tree.',answer:'O(log n)',hint:'Each comparison eliminates half (balanced tree).'},
+
+];
+
+let qIdx=0,score=0,streak=0,answered=false,order=[];
+
+function shuffle(){order=[...Array(questions.length).keys()].sort(()=>Math.random()-.5).slice(0,10)}
+
+function renderProgress(){
+  const el=document.getElementById('progressBar');el.innerHTML='';
+  for(let i=0;i<10;i++){
+    const d=document.createElement('div');d.className='progress-dot';
+    if(i<qIdx)d.classList.add(order[i]<questions.length?'correct':'');
+    if(i===qIdx)d.classList.add('current');
+    el.appendChild(d);
+  }
+}
+
+function renderQuestion(){
+  const q=questions[order[qIdx]];
+  document.getElementById('algoCard').innerHTML=`<h2>${q.name}</h2><div class="algo-code"><pre>${q.code}</pre></div><div class="algo-desc">${q.desc}</div>`;
+  const options=['O(1)','O(log n)','O(n)','O(n log n)','O(n^2)','O(n^3)','O(2^n)'];
+  const grid=document.getElementById('complexityGrid');grid.innerHTML='';
+  options.forEach(opt=>{
+    const btn=document.createElement('button');btn.className='complexity-btn';btn.textContent=opt;
+    btn.onclick=()=>{if(answered)return;checkAnswer(opt,q.answer,btn)};
+    grid.appendChild(btn);
+  });
+  document.getElementById('hint').style.display='none';
+}
+
+function checkAnswer(selected,correct,btn){
+  if(answered)return;answered=true;
+  document.querySelectorAll('.complexity-btn').forEach(b=>b.style.pointerEvents='none');
+  const ok=selected===correct;
+  btn.classList.add(ok?'correct':'wrong');
+  if(!ok)document.querySelectorAll('.complexity-btn').forEach(b=>{if(b.textContent===correct)b.classList.add('correct')});
+  document.getElementById('messageArea').innerHTML=`<div class="message ${ok?'correct':'wrong'}">${ok?'Correct! +'+(10+streak*5)+' points':'Wrong! Answer: '+correct}</div>`;
+  if(ok){score+=10+streak*5;streak++}else{streak=0}
+  document.getElementById('score').textContent=score;
+  document.getElementById('streak').textContent=streak;
+  renderProgress();
+  document.getElementById('nextBtn').style.display='';
+  document.getElementById('hintBtn').style.display='none';
+}
+
+function startGame(){
+  shuffle();qIdx=0;score=0;streak=0;answered=false;
+  document.getElementById('startBtn').style.display='none';
+  document.getElementById('nextBtn').style.display='none';
+  document.getElementById('hintBtn').style.display='';
+  document.getElementById('qNum').textContent=1;
+  renderProgress();renderQuestion();
+}
+
+function nextQ(){
+  qIdx++;answered=false;
+  if(qIdx>=10){
+    document.getElementById('algoCard').innerHTML=`<h2>Game Over!</h2><p style="font-size:1.2rem;margin-top:12px">Final Score: <strong style="color:#38bdf8">${score}</strong></p>`;
+    document.getElementById('complexityGrid').innerHTML='';
+    document.getElementById('nextBtn').style.display='none';
+    document.getElementById('hintBtn').style.display='none';
+    document.getElementById('startBtn').style.display='';document.getElementById('startBtn').textContent='Play Again';
+    document.getElementById('messageArea').innerHTML='';
+    renderProgress();return;
+  }
+  document.getElementById('qNum').textContent=qIdx+1;
+  document.getElementById('nextBtn').style.display='none';
+  document.getElementById('hintBtn').style.display='';
+  document.getElementById('messageArea').innerHTML='';
+  renderProgress();renderQuestion();
+}
+
+function showHint(){
+  const q=questions[order[qIdx]];
+  const h=document.getElementById('hint');h.textContent='Hint: '+q.hint;h.style.display='block';
+}
+
+function resetAll(){}
+</script>
+</body>
+</html>

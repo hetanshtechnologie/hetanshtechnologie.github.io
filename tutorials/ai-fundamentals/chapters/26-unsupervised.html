@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 26: Unsupervised Learning &amp; Dimensionality | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 26</span>
+    <h1>Unsupervised Learning &amp; Dimensionality</h1>
+
+    <p>Everything so far has been supervised: the data carried a label we learned to predict. Unsupervised learning removes the label entirely and asks the algorithm to discover structure on its own. This chapter covers the two pillars of unsupervised work — dimensionality reduction (led by PCA) and clustering (K-means, hierarchical, and DBSCAN) — plus the curse of dimensionality that motivates both.</p>
+
+    <h2>Introduction to Unsupervised Machine Learning</h2>
+    <p>In supervised learning the target guides the model. In unsupervised learning there is no target; the algorithm must find patterns from the input alone. Two broad families exist:</p>
+    <ul>
+        <li><strong>Clustering:</strong> group similar points together so points in the same group are closer to each other than to points in other groups. Used for customer segmentation, image compression, and organizing search results.</li>
+        <li><strong>Dimensionality reduction:</strong> compress many features into fewer while preserving as much information as possible. Used for visualization, noise removal, and speeding up other algorithms.</li>
+    </ul>
+    <p>Unsupervised methods are also the standard pre-processing companions to supervised pipelines — clusters can become new features, and reduced dimensions can become the input to a classifier.</p>
+
+    <h2>The Curse of Dimensionality</h2>
+    <p>Intuition built in 2D and 3D fails as the number of features grows. Consider a unit cube in d dimensions: the fraction of its volume near the boundary grows explosively with d. Similarly, in high-dimensional space almost every point is far from every other point, so distances stop being informative and "nearest" loses meaning.</p>
+    <ul>
+        <li>Data becomes sparse: fixed datasets look tiny when spread across hundreds of features.</li>
+        <li>Distance-based models (KNN, clustering) degrade because distances all converge toward similar values.</li>
+        <li>Training time and overfitting risk both rise, since the model has more free parameters to fit.</li>
+    </ul>
+    <p>The remedy is to keep only the features that matter, either by selecting a subset of the originals or by extracting new, smaller features from them.</p>
+
+    <h2>Feature Selection and Feature Extraction</h2>
+    <ul>
+        <li><strong>Feature selection</strong> picks a subset of the original columns and drops the rest. It is interpretable — you keep real measurements — but you can only remove, never create. Common tools: correlation filtering, variance thresholding, and mutual information.</li>
+        <li><strong>Feature extraction</strong> builds new features as combinations of the old ones. It can shrink dimensions dramatically and remove redundant information, but the new features lose their original meaning. PCA is the classic example.</li>
+    </ul>
+    <p>Both are dimensionality reduction; they differ in whether the surviving features are original or synthesized.</p>
+
+    <h2>PCA Geometric Intuition</h2>
+    <p>Principal Component Analysis (PCA) rotates the data to a new coordinate system aligned with its directions of greatest spread, then keeps only the first few coordinates.</p>
+    <ul>
+        <li>The first principal component points along the direction of maximum variance — the long axis of a cloud of points.</li>
+        <li>The second principal component is perpendicular to the first and captures the next largest variance, and so on.</li>
+        <li>Each component is uncorrelated with the others, so no information is counted twice.</li>
+    </ul>
+    <p>Picture a scatter of points shaped like a stretched ellipse. PCA finds the ellipse's long axis (component 1) and short axis (component 2). Dropping component 2 collapses the ellipse onto a line, losing little because the short axis held little spread.</p>
+
+    <h2>PCA Math Intuition: Projection and Variance Maximization</h2>
+    <p>Formally, PCA seeks a unit vector <code>w</code> such that projecting every point onto <code>w</code> maximizes the variance of the projected values. The projection of a point <code>x</code> onto <code>w</code> is the scalar dot product <code>x . w</code>, and the variance of those projections over the dataset is:</p>
+    <pre><code>Var(proj) = w.T * S * w</code></pre>
+    <p>where <code>S</code> is the covariance matrix of the centered data and <code>w.T</code> is the transpose of <code>w</code>. Maximizing this variance subject to <code>w</code> having unit length turns out to be an eigen-problem: the optimal <code>w</code> is the eigenvector of <code>S</code> belonging to its largest eigenvalue. The eigenvalue tells you how much variance that component explains.</p>
+
+    <h2>Eigen-Decomposition on the Covariance Matrix</h2>
+    <p>The recipe for PCA is short:</p>
+    <ol>
+        <li>Center the data by subtracting each feature's mean.</li>
+        <li>Compute the covariance matrix <code>S</code> of the centered data.</li>
+        <li>Decompose <code>S</code> into eigenvectors <code>w1, w2, ..., wk</code> and eigenvalues <code>l1, l2, ..., lk</code>.</li>
+        <li>Order the eigenpairs by eigenvalue, largest first; the top <code>m</code> eigenvectors are the first <code>m</code> principal components.</li>
+        <li>Project the centered data onto those <code>m</code> vectors to get the reduced representation.</li>
+    </ol>
+    <p>The ratio <code>l1 / sum(l)</code> tells you what fraction of the total variance the first component captures. In practice you keep enough components to cover 90–95% of the total variance.</p>
+
+    <h2>PCA Implementation</h2>
+    <pre><code>from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+pca = PCA(n_components=2)          # keep two components
+X_reduced = pca.fit_transform(X_scaled)
+print(pca.explained_variance_ratio_)   # share of variance per component</code></pre>
+    <p>Scale the features before PCA — otherwise a feature measured in large units dominates the covariance matrix regardless of how informative it is. The reduced two-column matrix can now be plotted directly as a scatter of points.</p>
+
+    <h2>K-Means Clustering Geometric Intuition</h2>
+    <p>K-means partitions the data into K clusters, each represented by its center (the mean of its points). The algorithm alternates two steps until nothing moves:</p>
+    <ol>
+        <li><strong>Assignment:</strong> assign every point to the nearest center (usually by squared Euclidean distance).</li>
+        <li><strong>Update:</strong> recompute each center as the mean of the points assigned to it.</li>
+    </ol>
+    <p>Geometrically you are sliding cluster centers around until each center sits at the "center of mass" of its territory. The final clusters are convex regions bounded by straight lines — K-means cannot find crescent or donut shapes.</p>
+
+    <h2>How to Find K Values: Elbow and Silhouette</h2>
+    <p>K-means needs K as input, and choosing K is part of the job.</p>
+    <ul>
+        <li><strong>Elbow method:</strong> run K-means for K = 2, 3, 4, ... and plot the total within-cluster sum of squares (inertia) against K. Inertia always falls as K grows, but the "elbow" is the point where the drop flattens — that K is a good choice.</li>
+        <li><strong>Silhouette score:</strong> for each point, compare its distance to its own cluster (cohesion) with its distance to the nearest other cluster (separation). Scores near +1 mean well-separated clusters; near 0 means overlapping; negative means misassigned. The K with the highest average silhouette is often the best.</li>
+    </ul>
+    <div class="note">
+        <strong>Heads up:</strong> the elbow is a visual judgment, not a law. If two K values both look reasonable, prefer the smaller one — simpler clusters are usually more useful for business decisions.
+    </div>
+
+    <h2>The Random Initialization Trap and K-Means++</h2>
+    <p>K-means starts from random centers, and a bad start can park a center in an empty region or leave two centers fighting over one cluster while another cluster is ignored. The result is a poor local minimum. Two defenses exist:</p>
+    <ul>
+        <li><strong>Multiple restarts:</strong> run K-means many times from different random seeds and keep the run with the lowest inertia.</li>
+        <li><strong>K-means++:</strong> choose the first center uniformly, then pick each next center with probability proportional to its squared distance from the already-chosen centers. This spreads the initial centers apart and almost always lands near a good solution. It is the default (<code>init="k-means++"</code>) in scikit-learn.</li>
+    </ul>
+
+    <h2>K-Means Clustering Implementation</h2>
+    <pre><code>from sklearn.cluster import KMeans
+
+kmeans = KMeans(n_clusters=3, init="k-means++", n_init=10, random_state=42)
+labels = kmeans.fit_predict(X_scaled)
+print(kmeans.inertia_)          # total within-cluster distance
+print(kmeans.cluster_centers_)  # the final centers</code></pre>
+    <p>The <code>labels</code> array holds each point's cluster id, ready for analysis, plotting, or as a new categorical feature.</p>
+
+    <h2>Hierarchical Clustering</h2>
+    <p>Hierarchical clustering builds a tree of clusters rather than a flat partition. There are two directions:</p>
+    <ul>
+        <li><strong>Agglomerative (bottom-up):</strong> start with every point as its own cluster, then repeatedly merge the two closest clusters until one remains.</li>
+        <li><strong>Divisive (top-down):</strong> start with one cluster and recursively split it.</li>
+    </ul>
+    <p>The tree of merges is called a <strong>dendrogram</strong>. To get a flat partition, cut the dendrogram horizontally at some height — clusters below the cut become the final groups. The choice of "distance between clusters" (linkage) matters: single linkage joins by the closest pair (good for elongated shapes, sensitive to noise), complete linkage by the farthest pair (compact clusters), and Ward's method by the increase in within-cluster variance.</p>
+
+    <h2>Agglomerative Clustering Implementation</h2>
+    <pre><code>from scipy.cluster.hierarchy import dendrogram, linkage
+from sklearn.cluster import AgglomerativeClustering
+
+agg = AgglomerativeClustering(n_clusters=3, linkage="ward")
+labels = agg.fit_predict(X_scaled)
+
+Z = linkage(X_scaled, method="ward")   # for the dendrogram
+dendrogram(Z)</code></pre>
+    <p>Read the dendrogram from the bottom up: tall vertical gaps between groups indicate natural separations; the height where you cut determines the number of clusters.</p>
+
+    <h2>K-Means vs Hierarchical Clustering</h2>
+    <ul>
+        <li><strong>Speed:</strong> K-means is fast and scales to millions of points; hierarchical clustering builds a full tree and struggles past a few tens of thousands of points.</li>
+        <li><strong>K input:</strong> K-means requires K up front; hierarchical clustering gives you the whole dendrogram and lets you choose K afterward.</li>
+        <li><strong>Shapes:</strong> both assume reasonably compact, spherical clusters; neither handles crescents or rings natively.</li>
+        <li><strong>Determinism:</strong> hierarchical is deterministic (given a linkage), while K-means depends on initialization (fixed by a seed and many restarts).</li>
+    </ul>
+
+    <h2>How DBSCAN Works</h2>
+    <p>DBSCAN (Density-Based Spatial Clustering of Applications with Noise) defines clusters by density instead of center distance. Two parameters control it:</p>
+    <ul>
+        <li><code>eps</code>: the radius of the neighborhood examined around each point.</li>
+        <li><code>min_samples</code>: how many points must live inside that radius for the point to count as a core point.</li>
+    </ul>
+    <p>The algorithm labels every point as core, border, or noise. Core points have at least <code>min_samples</code> neighbors within <code>eps</code>; border points are within <code>eps</code> of a core point but have too few neighbors; everything else is noise. A cluster is the set of points reachable by hopping between core points, together with their borders.</p>
+
+    <h2>Examples After Applying DBSCAN</h2>
+    <p>Because DBSCAN follows density, it finds shapes that center-based methods cannot:</p>
+    <ul>
+        <li>A crescent moon dataset splits cleanly into two curving clusters, one on each arm.</li>
+        <li>A donut shape becomes a ring cluster, with the hole correctly left empty.</li>
+        <li>Real transaction data yields a few dense spending clusters plus a sprinkling of isolated points that DBSCAN reports as noise — those are often exactly the suspicious transactions.</li>
+    </ul>
+    <p>Noise points are returned with the label -1, which makes DBSCAN a natural tool for anomaly detection (the next chapter uses this trick).</p>
+
+    <h2>Pros and Cons of DBSCAN</h2>
+    <ul>
+        <li><strong>Pros:</strong> no need to specify K; finds arbitrary shapes; robust to outliers; handles clusters of different densities reasonably when tuned.</li>
+        <li><strong>Cons:</strong> <code>eps</code> is hard to choose and is sensitive to scaling — standardize features first; fails when clusters have very different densities, because one <code>eps</code> cannot serve both; needs more data to discover small clusters.</li>
+    </ul>
+
+    <h2>DBSCAN Clustering Implementation</h2>
+    <pre><code>from sklearn.cluster import DBSCAN
+from sklearn.preprocessing import StandardScaler
+
+X_std = StandardScaler().fit_transform(X)
+
+db = DBSCAN(eps=0.5, min_samples=5)
+labels = db.fit_predict(X_std)
+print(set(labels))            # a -1 label marks noise points</code></pre>
+    <p>Try a small range of <code>eps</code> values and check how many points become noise and how many clusters appear; <code>eps</code> around 0.3–0.6 is a sensible starting zone for standardized data.</p>
+
+    <h2>Silhouette Score Intuition</h2>
+    <p>The silhouette score judges a clustering without any labels. For each point <code>i</code> let <code>a(i)</code> be the mean distance to the other points in its own cluster and <code>b(i)</code> the mean distance to the points of the nearest other cluster. The silhouette of point <code>i</code> is:</p>
+    <pre><code>s(i) = (b(i) - a(i)) / max(a(i), b(i))</code></pre>
+    <ul>
+        <li><code>s(i) ~ 1</code>: the point is much closer to its own cluster than to any other — perfect placement.</li>
+        <li><code>s(i) ~ 0</code>: the point sits on the boundary between two clusters.</li>
+        <li><code>s(i) &lt; 0</code>: the point is probably in the wrong cluster.</li>
+    </ul>
+    <p>Averaging <code>s(i)</code> over all points gives a single number you can use to compare different K values (K-means), different linkages, or different <code>eps</code> values (DBSCAN), independent of the algorithm's own internal loss.</p>
+
+    <div class="info">
+        <strong>Which to use:</strong> K-means for fast, interpretable segmentation of large data; hierarchical clustering when you want a full merge tree and the dataset is small; DBSCAN when your clusters are oddly shaped or you specifically want to isolate outliers. Standardize features before all three.
+    </div>
+
+    <div class="exercise">
+        <strong>Practice:</strong> generate or load the "blobs" and "moons" datasets from <code>sklearn.datasets.make_blobs</code> and <code>make_moons</code>. Run K-means, AgglomerativeClustering, and DBSCAN on both. Which algorithm recovers the true shapes of the moons, and which one fails? Compute the silhouette score for each result and explain whether the score agrees with what your eyes tell you.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="25-ensembles.html">Prev: Ensemble Methods: Bagging &amp; Boosting</a>
+        <a href="27-anomaly-detection.html">Next: Anomaly Detection</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

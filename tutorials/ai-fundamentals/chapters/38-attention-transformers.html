@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+    <title>Chapter 38: Attention &amp; Transformers | AI Fundamentals</title>
+    <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+    <a href="../../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 38</span>
+    <h1>Attention &amp; Transformers</h1>
+
+    <p>LSTM and GRU made sequence models practical, but they still read one token at a time and compress the entire source into one final state. The transformer threw that away: it processes all tokens in parallel and lets every token directly look at every other token through a mechanism called attention. Transformers now power translation, search, and the large language models behind modern assistants. This chapter builds your intuition for them from the ground up.</p>
+
+    <h2>In-Depth Intuition of Encoder-Decoder Sequence-to-Sequence Architectures</h2>
+    <p>A sequence-to-sequence model (seq2seq) has two networks. The <strong>encoder</strong> reads the entire source sentence and compresses it into a final hidden state. The <strong>decoder</strong> then generates the target sentence word by word, feeding each produced word back as the input for the next step. This is how classic machine translation worked: read the French sentence fully, then write the English one.</p>
+
+    <h2>Problems with Encoder-Decoder</h2>
+    <p>The bottleneck is the final state. Every ounce of meaning from a long source sentence must fit into one vector, and the decoder has no other way to consult the source. Information from the beginning of a long sentence gets diluted by the time the decoder starts writing. Attention was invented to fix exactly this: instead of one compressed summary, let the decoder look back at every encoder position, every step.</p>
+    <div class="note">
+        <strong>The core idea of attention:</strong> when the decoder needs the next word, it should search the entire source sentence for the words most relevant right now, rather than trusting one fixed summary.
+    </div>
+
+    <h2>In-Depth Architecture Explanation of the Attention Mechanism</h2>
+    <p>Attention computes a weighted average over encoder outputs. The decoder has a current state called the query; each encoder position contributes a key (its "address"); and each carries a value (its content). The model scores how well the query matches each key, turns those scores into probabilities with softmax, and uses them to weigh the values. The result is a context vector rich in the parts of the source that matter for this output step.</p>
+    <pre><code>scores = query . keys            # dot-product similarity
+weights = softmax(scores)        # probabilities summing to 1
+context = sum(weights * values)  # weighted blend of source</code></pre>
+
+    <h2>A Plan of Action for Learning Transformers</h2>
+    <p>Transformers are intimidating only because they stack many ideas. Learn them in this order: (1) self-attention, because it is the engine; (2) multi-head attention, which runs several attention passes at once; (3) positional encoding, which gives order to a model that otherwise sees a bag of words; (4) the feed-forward layer and residual structure; (5) layer normalization; (6) how encoder and decoder assemble these blocks; (7) the mask in the decoder that prevents peeking at future words.</p>
+
+    <h2>What and Why to Use Transformers</h2>
+    <p>Transformers are used because they fix the weaknesses of RNNs. They process the whole sequence in parallel, so training on GPUs is dramatically faster; they give every token a direct connection to every other token, so long-range dependencies are not crushed by distance; and the same architecture scales to enormous sizes, which is why pretrained transformers dominate NLP. Their cost is quadratic in sequence length, because every pair of tokens must be compared.</p>
+
+    <h2>Understanding the Basic Architecture of Transformers</h2>
+    <p>A transformer is built from stacked blocks. The <strong>encoder</strong> block contains a multi-head self-attention sublayer followed by a feed-forward network, each wrapped with residual connections and layer normalization. The <strong>decoder</strong> block contains those same two sublayers plus an extra cross-attention sublayer that lets the decoder consult the encoder output. Both sides convert tokens into vectors through an embedding plus positional encoding.</p>
+
+    <h2>How the Self-Attention Layer Works</h2>
+    <p>In self-attention, every token in the sequence plays all three roles. For each token we compute a query, a key, and a value by multiplying the token's vector by three learned matrices <code>W_q</code>, <code>W_k</code>, <code>W_v</code>. Then each token scores its query against every key, normalizes with softmax, and gathers a weighted sum of all values. A token's output therefore depends on the whole sentence — the model literally reads the full context before answering.</p>
+    <pre><code>Q = X @ W_q;  K = X @ W_k;  V = X @ W_v
+attention = softmax(Q @ K.T / sqrt(d_k)) @ V</code></pre>
+    <p>Dividing by <code>sqrt(d_k)</code> keeps the dot products from growing huge and pushing softmax into very sharp distributions.</p>
+
+    <h2>Multi-Head Attention</h2>
+    <p>One attention pass finds one kind of relationship: "this word depends on that word". A sentence contains many relationships at once — grammar, coreference, meaning. Multi-head attention runs several attention computations in parallel with different learned projections, then concatenates their outputs and projects them back together. Each head can specialize in a different pattern, giving the model much richer context.</p>
+
+    <h2>The Feed-Forward Neural Network with Multi-Head Attention</h2>
+    <p>After attention mixes information across positions, the feed-forward sublayer processes each position independently: the same two dense layers with a ReLU in between, applied to every token vector. The pattern repeats block after block: attention shares information across the sequence, then the feed-forward layer thinks locally about each token.</p>
+
+    <h2>In-Depth Intuition of Positional Encoding</h2>
+    <p>Attention is a weighted average, and a weighted average does not care about order — "dog bites man" and "man bites dog" would look identical to a bag of tokens. Positional encoding injects order by adding a vector that encodes each token's position to its embedding. The classic scheme uses sine and cosine functions of different frequencies, so every position gets a unique pattern and nearby positions get similar patterns. Modern variants learn the position vectors or use relative distances instead.</p>
+
+    <h2>Layer Normalization</h2>
+    <p>Layer normalization rescales the activations of one layer across all its features so they have zero mean and unit variance, then applies learned scale and shift parameters. It stabilizes training and lets networks use larger learning rates. In a transformer it is applied inside each sublayer, after the residual addition.</p>
+    <pre><code>def layer_norm(x):
+    mean = x.mean(axis=-1, keepdims=True)
+    var = x.var(axis=-1, keepdims=True)
+    xhat = (x - mean) / np.sqrt(var + 1e-6)
+    return gamma * xhat + beta</code></pre>
+
+    <h2>Layer Normalization Examples</h2>
+    <p>Suppose a hidden state is <code>[1.0, -1.0, 3.0]</code>. The mean is <code>1.0</code> and the variance is <code>2.67</code>, so the normalized values are roughly <code>[0.0, -1.22, 1.22]</code> before the learned scale and shift are applied. Because normalization happens per layer per sample, batch size does not affect it — which matters for transformers, where sequences have different lengths.</p>
+
+    <h2>The Complete Encoder Transformer Architecture</h2>
+    <ol>
+        <li>Tokens become embeddings; positional encodings are added.</li>
+        <li>Multi-head self-attention mixes information across all positions.</li>
+        <li>A residual connection adds the input back, then layer normalization.</li>
+        <li>A feed-forward network processes each position, again followed by residual plus layer normalization.</li>
+        <li>Steps 2&ndash;4 repeat for <code>N</code> stacked encoder blocks.</li>
+    </ol>
+
+    <h2>Decoder Transformer Plan of Action</h2>
+    <p>The decoder is like the encoder with two differences: self-attention is masked so a position only sees earlier positions (it must generate left to right), and an extra cross-attention sublayer lets the decoder query the encoder's output. Build it in this order: masked self-attention, then encoder&ndash;decoder attention, then feed-forward, each with residuals and normalization.</p>
+
+    <h2>Masked Multi-Head Attention in the Decoder</h2>
+    <p>When generating word 5, the model must not see words 6, 7, and 8. The decoder enforces this by masking: the attention scores for future positions are set to an enormous negative number before softmax, so their weights collapse to zero. The model learns to predict the next token using only what came before — exactly the condition it faces at inference time.</p>
+
+    <h2>Encoder-Decoder Multi-Head Attention</h2>
+    <p>This is where the decoder connects to the encoder. The decoder's hidden states provide the queries; the encoder's outputs provide the keys and values. So each decoder position looks at the entire source sentence and gathers the parts it needs for the next word — the original attention idea, now inside every decoder block.</p>
+
+    <h2>The Final Decoder Linear and Softmax Layer</h2>
+    <p>After the last decoder block, a final linear layer projects each position's vector to the vocabulary size, and softmax turns those scores into a probability distribution over every possible next word. The model samples from that distribution to choose the next token, appends it, and repeats until it generates the end-of-sentence marker.</p>
+    <div class="info">
+        <strong>How they all fit together:</strong> self-attention answers "which other tokens matter?", cross-attention answers "which source tokens matter?", feed-forward answers "what do I do with what I gathered?", and the final softmax answers "which word do I emit?".
+    </div>
+
+    <div class="exercise">
+        <strong>Exercise:</strong> Compute a full self-attention step by hand on two short tokens using random 2&times;2 matrices for <code>W_q</code>, <code>W_k</code>, and <code>W_v</code>, following the formula above, and verify the attention weights sum to 1. Then implement the <code>layer_norm</code> function and check your numbers against the worked example. Finally, load a small pretrained transformer in Keras or Hugging Face, feed it a sentence, and inspect which tokens get the highest self-attention weight for a word of your choice.
+    </div>
+
+    <nav>
+        <a href="../index.html">Back to Index</a>
+        <a href="37-lstm-gru.html">Prev: LSTM &amp; GRU Networks</a>
+        <a href="39-agentic-ai-career.html">Next: Agentic AI, Claude &amp; Your Career</a>
+    </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>
