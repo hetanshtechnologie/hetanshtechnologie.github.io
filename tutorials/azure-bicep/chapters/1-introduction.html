@@ -1,0 +1,130 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 1: Introduction to Bicep</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#0062ad;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>Chapter 1: Introduction to Azure Bicep</h1>
+
+<h2>1.1 What is Bicep?</h2>
+<p>Bicep is a <strong>domain-specific language (DSL)</strong> created by Microsoft for declaratively deploying Azure infrastructure. You describe the infrastructure you want — storage accounts, app services, databases, virtual networks — in a clean, human-readable language, and Bicep translates it into an Azure Resource Manager (ARM) template behind the scenes.</p>
+<p>The key phrase is <strong>declarative</strong>: you state the <em>end state</em> (what must exist), and Azure Resource Manager figures out the <em>steps</em> to get there. Bicep is also <strong>idempotent</strong> — running the same deployment twice produces the same result instead of stacking duplicates on top of each other.</p>
+
+<h3>The Bicep → ARM pipeline</h3>
+<div class="diagram">
+┌──────────┐    build    ┌──────────────────┐   HTTP   ┌────────────────────┐
+│ main.bicep│ ──────────▶ │ main.json (ARM)  │ ───────▶ │ Azure Resource     │
+│  (you)   │  bicep build │ (generated)      │  deploy  │ Manager + APIs     │
+└──────────┘             └──────────────────┘          └────────────────────┘
+     ▲                              │
+     └── decompile ─────────────────┘   (optional, one-time)
+</div>
+
+<h2>1.2 Why Bicep? (Why Not Just ARM JSON?)</h2>
+<p>Before Bicep, deploying infrastructure to Azure meant writing ARM templates — enormous JSON documents with deep nesting. Bicep was released in 2020 as a response to the pain points of ARM JSON. The most often-cited comparison: a 1,800-line ARM template usually compresses to roughly 200 lines of Bicep.</p>
+
+<h3>Benefits of Bicep vs ARM Templates</h3>
+<table>
+<tr><th>Aspect</th><th>ARM Templates (JSON)</th><th>Bicep</th></tr>
+<tr><td>Syntax</td><td>Verbose JSON with heavy nesting</td><td>Concise, readable, Python-flavoured</td></tr>
+<tr><td>Loops &amp; conditions</td><td>Packed into "copy" and complex JSON expressions</td><td>Native <code>for</code>, <code>if</code>, <code>for</code>-<code>if</code> syntax</td></tr>
+<tr><td>String interpolation</td><td><code>[concat('a', parameters('x'))]</code></td><td><code>'${prefix}-${name}'</code></td></tr>
+<tr><td>IntelliSense</td><td>Limited</td><td>Full IDE support in VS Code (completion, validation, quick fixes)</td></tr>
+<tr><td>Type safety</td><td>Runtime-ish validation</td><td>Compile-time type checking and semantic validation</td></tr>
+<tr><td>Reusability</td><td>Nested templates (painful)</td><td>Modules — first-class, with registry support</td></tr>
+<tr><td>Code reuse across params</td><td>Verbose expressions</td><td>Variables + functions</td></tr>
+<tr><td>Tooling</td><td>Manual JSON editing</td><td><code>bicep build</code>, <code>bicep decompile</code>, <code>what-if</code>, linter</td></tr>
+</table>
+
+<h3>Optional: See the Difference</h3>
+<p>Here is a minimal storage account as an ARM template and then as Bicep:</p>
+<pre><code>// ARM Template (abridged — this is already ~40 lines without the wrapping)
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "storageAccountName": { "type": "string" },
+    "location": { "type": "string", "defaultValue": "[resourceGroup().location]" }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Standard_LRS" },
+      "kind": "StorageV2"
+    }
+  ]
+}</code></pre>
+<pre><code>// Bicep (18 lines, same resource)
+@description('Globally unique storage account name; lowercase letters and numbers only.')
+param storageAccountName string
+
+param location string = resourceGroup().location
+
+resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageAccountName
+  location: location
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+}</code></pre>
+<div class="tip"><strong>Key idea:</strong> Bicep always compiles down to a standard ARM template, so nothing has to change on the Azure side. You keep full compatibility with deployments, CI/CD pipelines, and the Azure portal's automation blade.</div>
+
+<h3>Other benefits worth knowing</h3>
+<ul>
+<li><strong>What-if deployments</strong> — preview changes (<code>az deployment group what-if</code>) before applying them, like a <code>terraform plan</code> for Azure.</li>
+<li><strong>Modular by design</strong> — split infra into reusable <em>modules</em> and publish them to a private or public registry.</li>
+<li><strong>Free and open source</strong> — no license cost, works with any CI/CD system that can call Azure CLI.</li>
+<li><strong>Future-proof</strong> — Bicep is the recommended direction from Microsoft for ARM authoring.</li>
+</ul>
+
+<h2>1.3 Bicep vs Other IaC Tools</h2>
+<table>
+<tr><th>Feature</th><th>Bicep</th><th>Terraform</th><th>Pulumi</th></tr>
+<tr><td>Cloud scope</td><td>Azure only</td><td>Multi-cloud</td><td>Multi-cloud</td></tr>
+<tr><td>Language</td><td>Bicep (DSL)</td><td>HCL</td><td>TypeScript/Python/Go</td></tr>
+<tr><td>State storage</td><td>None — ARM tracks state</td><td>State file (remote backend)</td><td>State store</td></tr>
+<tr><td>Preview change</td><td>what-if</td><td>plan</td><td>preview</td></tr>
+<tr><td>Azure-native features speed</td><td>Fastest (first-party)</td><td>Depends on provider release</td><td>Depends on provider release</td></tr>
+<tr><td>Best fit</td><td>Azure-only teams</td><td>Multi-cloud orgs</td><td>Programmers who want real languages</td></tr>
+</table>
+<div class="note"><strong>Rule of thumb:</strong> if your infrastructure is Azure-only, Bicep is typically the simplest and most aligned choice. If you manage AWS + Azure + GCP in one codebase, use Terraform.</div>
+
+<h2>1.4 How You'll Work With Bicep</h2>
+<div class="diagram">
+Typical Bicep workflow:
+
+  1. Write/edit  main.bicep      (VS Code + Bicep extension)
+       │
+  2. Validate   bicep build main.bicep     (compile to JSON, catch errors)
+       │
+  3. Preview    az deployment group what-if --template-file main.bicep
+       │
+  4. Deploy     az deployment group create --template-file main.bicep
+       │
+  5. Manage     az group delete --name myRG      (tear down when done)
+</div>
+<p>Later chapters drill into each of these steps in detail, so you can follow along with a live Azure subscription.</p>
+
+<div class="exercise">
+<strong>Summary &amp; Checklist:</strong>
+<ul>
+<li>Bicep is a declarative DSL that compiles to ARM templates</li>
+<li>It is far more concise, readable, and type-safe than ARM JSON</li>
+<li>Native support for loops, conditions, variables, and modules</li>
+<li>Idempotent deployments managed by Azure Resource Manager</li>
+<li>Bicep is Azure-only; choose Terraform for multi-cloud</li>
+<li>Core workflow: build &rarr; what-if &rarr; deploy &rarr; manage</li>
+</ul>
+</div>
+
+<nav><a href="../index.html">&larr; Back to Index</a><a href="2-installation.html">Next: Installation &amp; Setup &rarr;</a></nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

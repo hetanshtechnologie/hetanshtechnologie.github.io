@@ -1,0 +1,150 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 2: Installation &amp; Setup</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#0062ad;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>Chapter 2: Installation &amp; Setup</h1>
+
+<h2>2.1 Prerequisites</h2>
+<ul>
+<li>An <strong>Azure subscription</strong> (free account works for the examples in this book)</li>
+<li><strong>Azure CLI</strong> (recommended, works on Windows/macOS/Linux) <em>or</em> Azure PowerShell</li>
+<li>A text editor — <strong>VS Code</strong> recommended for the best Bicep experience</li>
+</ul>
+<p>You do <em>not</em> need to run the Bicep compiler directly for most workflows — the Azure CLI bundles Bicep and can install/update it for you.</p>
+
+<h2>2.2 Installing the Bicep CLI</h2>
+
+<h3>Option A — Install via Azure CLI (recommended)</h3>
+<p>If you use Azure CLI, let it manage the Bicep CLI for you:</p>
+<pre><code># Install the latest version of the Bicep CLI
+az bicep install
+
+# Show the installed version
+az bicep version
+
+# Upgrade when a new version ships
+az bicep upgrade</code></pre>
+<p>This places <code>bicep.exe</code> (or <code>bicep</code>) in a cache folder managed by the CLI.</p>
+
+<h3>Option B — Install the standalone Bicep CLI</h3>
+<pre><code># Windows (PowerShell)
+winget install Microsoft.Bicep
+
+# Linux
+curl -Lo bicep https://github.com/Azure/bicep/releases/latest/download/bicep-linux-x64
+chmod +x ./bicep
+sudo mv ./bicep /usr/local/bin/bicep
+
+# macOS (Homebrew)
+brew tap azure/bicep
+brew install bicep
+
+# Any platform with .NET SDK 8+
+dotnet tool install -g Azure.Bicep</code></pre>
+
+<h3>Verify the install</h3>
+<pre><code>bicep --version
+# Bicep CLI version 0.31.92 (…)
+
+bicep --help         # list all commands</code></pre>
+
+<h2>2.3 The Bicep CLI Commands You'll Actually Use</h2>
+<pre><code>bicep build main.bicep            # compile to ARM JSON (main.json)
+bicep build --stdout main.bicep   # print JSON without writing a file
+bicep decompile main.json         # try converting an ARM template back to Bicep
+bicep format main.bicep           # auto-format your file
+bicep lint main.bicep             # run the built-in linter
+bicep publish main.bicep --target br:...   # publish a module to a registry
+bicep restore main.bicep          # fetch registry modules referenced by the file</code></pre>
+<div class="tip"><strong>Tip:</strong> <code>bicep build</code> is your safety net — run it after every edit to catch syntax, type, and linter errors before anything touches Azure.</div>
+
+<h2>2.4 Integration with Azure CLI</h2>
+<p>The most common way to deploy Bicep is through Azure CLI. Sign in and set your default resource group:</p>
+<pre><code>az login                              # opens a browser to sign in
+az account set --subscription "My Sub" # pick a subscription
+az group create --name rg-bicep-demo --location eastus
+
+# Preview then deploy
+az deployment group what-if \
+  --resource-group rg-bicep-demo --template-file main.bicep
+
+az deployment group create \
+  --resource-group rg-bicep-demo --template-file main.bicep</code></pre>
+<p>If a <code>main.parameters.json</code> file sits next to <code>main.bicep</code>, the Azure CLI loads it automatically. You can also pass parameters inline:</p>
+<pre><code>az deployment group create \
+  --resource-group rg-bicep-demo --template-file main.bicep \
+  --parameters storageAccountName=mystor1000 environment=dev</code></pre>
+<p>PowerShell users have an equivalent: <code>New-AzResourceGroupDeployment -TemplateFile main.bicep</code>.</p>
+
+<h2>2.5 VS Code Integration (The Best Free Tooling)</h2>
+<p>Install the official <strong>Bicep</strong> extension by Microsoft from the VS Code marketplace (Extensions panel &rarr; search "Bicep"). What you get for free:</p>
+<ul>
+<li><strong>IntelliSense</strong> — autocomplete for resource types, property names, and API versions</li>
+<li><strong>Inline validation</strong> — errors underlined as you type, without running a build</li>
+<li><strong>Quick fixes</strong> — "Add resource property", "Fix naming conflict", snippet insertion</li>
+<li><strong>Go to definition / references</strong> across modules and parameters</li>
+<li><strong>Decompiling</strong> — convert an ARM JSON file by right-clicking</li>
+<li><strong>Bicep gallery</strong> — snippets for common resources (storage, app service, etc.)</li>
+</ul>
+<div class="diagram">
+VS Code Bicep authoring workspace
+┌────────────────────────────────────────────────────────────┐
+│ main.bicep  (active tab)                                   │
+│                                                            │
+│  param env string                                          │
+│  var name = 'app-${env}'                                   │
+│  resource app 'Microsoft.Web/sites@2022-03-01' = {    ◀── │
+│    name: name      ▒ IntelliSense dropdown                │
+│    ...
+└────────────────────────────────────────────────────────────┘
+    Pane: Problems     [no errors]  |  Bicep 0.31.92 detected
+</div>
+
+<h3>Recommended workspace settings</h3>
+<pre><code>// .vscode/settings.json
+{
+  "bicep.enableTelemetry": false,
+  "[bicep]": { "editor.formatOnSave": true },
+  "editor.defaultFormatter": "ms-azuretools.vscode-bicep"
+}</code></pre>
+
+<h2>2.6 First Project Structure</h2>
+<p>A small, well-organised Bicep project looks like this:</p>
+<pre><code>webapp-infra/
+├── deployment/
+│   ├── main.bicep              ← entry point (what you deploy)
+│   ├── main.parameters.dev.json
+│   └── main.parameters.prod.json
+├── modules/
+│   ├── app-service.bicep
+│   ├── storage.bicep
+│   └── sql.bicep
+└── .vscode/
+    └── settings.json</code></pre>
+<p>This layout keeps the <em>entry point</em> thin (just parameters and module calls) and hides the details inside <em>modules</em>. You'll build exactly this kind of project in Chapters 4 and 7.</p>
+
+<div class="note"><strong>No VS Code / CLI on your machine?</strong> Bicep also works in Azure Cloud Shell (bash or PowerShell) — run <code>az bicep install</code> there and you're ready without installing anything locally.</div>
+
+<div class="exercise">
+<strong>Summary &amp; Checklist:</strong>
+<ul>
+<li>Install Bicep via <code>az bicep install</code> or the standalone CLI</li>
+<li>Learn the core commands: <code>build</code>, <code>format</code>, <code>lint</code>, <code>decompile</code></li>
+<li>Deploy with <code>az deployment group create --template-file main.bicep</code></li>
+<li>Always run <code>what-if</code> before creating a deployment</li>
+<li>Install the official VS Code Bicep extension for authoring</li>
+<li>Structure projects as: thin <code>main.bicep</code> entry point + reusable <code>modules/</code></li>
+</ul>
+</div>
+
+<nav><a href="../index.html">&larr; Back to Index</a><a href="3-core-concepts.html">Next: Core Concepts &rarr;</a></nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

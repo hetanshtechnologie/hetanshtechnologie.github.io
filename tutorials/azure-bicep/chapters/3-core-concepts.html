@@ -1,0 +1,222 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 3: Core Concepts</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#0062ad;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>Chapter 3: Core Concepts</h1>
+
+<h2>3.1 Anatomy of a Bicep File</h2>
+<p>Every Bicep file is a plain text file (usually <code>.bicep</code>) made of <em>declarations</em>. There are only a few kinds, and you can read them in any order:</p>
+<pre><code>targetScope = 'resourceGroup'        // 1. Where does this deploy?
+
+param environment string              // 2. Inputs you supply at deploy time
+param location string = resourceGroup().location
+
+var fullName = 'app-${environment}'   // 3. Values computed from params
+
+resource appService 'Microsoft.Web/sites@2022-03-01' = {  // 4. The infrastructure
+  name: fullName
+  location: location
+  ...
+}
+
+output url string = 'https://${appService.properties.defaultHostName}'  // 5. Values to read back
+</code></pre>
+<div class="diagram">
+Block order (convention, not a requirement):
+  targetScope
+  ─────────► parameters
+  ─────────► variables
+  ─────────► resources
+  ─────────► outputs
+</div>
+
+<h2>3.2 targetScope</h2>
+<p>Declares <em>where</em> the deployment is executed. The default is <code>resourceGroup</code> if you omit it.</p>
+<table>
+<tr><th>Scope</th><th>Where resources land</th><th>Common use</th></tr>
+<tr><td><code>resourceGroup</code></td><td>A single resource group</td><td>Most day-to-day deployments</td></tr>
+<tr><td><code>subscription</code></td><td>The whole subscription</td><td>RBAC roles, policies, resource groups themselves</td></tr>
+<tr><td><code>managementGroup</code></td><td>A management group</td><td>Policy sets, budgets across subscriptions</td></tr>
+<tr><td><code>tenant</code></td><td>The Azure AD tenant</td><td>Tenant-level policies/billing</td></tr>
+</table>
+
+<h2>3.3 Parameters</h2>
+<p>Parameters are the <em>inputs</em> to your template — the things that vary between environments (names, SKUs, regions).</p>
+
+<h3>Parameter types</h3>
+<pre><code>param env string                    // string
+param replicaCount int              // integer
+param enabled bool                  // boolean
+param endpoints array               // array
+param tags object                   // object
+param adminPassword secureString    // string, hidden in logs
+param secretObject secureObject     // object, hidden in logs</code></pre>
+
+<h3>Decorators add rules</h3>
+<pre><code>@description('Environment: dev, test, or prod.')
+@allowed([ 'dev', 'test', 'prod' ])
+param environment string
+
+@minLength(3)
+@maxLength(24)
+@pattern('^[a-z0-9]+$')              // lowercase letters &amp; numbers only
+param storageAccountName string
+
+@minValue(1)
+@maxValue(10)
+@default(3)
+param replicaCount int = 3</code></pre>
+<div class="tip"><strong>Secure types:</strong> <code>secureString</code>/<code>secureObject</code> are masked in deployment history and logs. Use them for any secret — and prefer <code>keyVaultReference</code> for production secrets (data decoded only at deploy time).</div>
+
+<h3>Supplying parameter values</h3>
+<pre><code>// main.parameters.json (sits next to main.bicep)
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": { "value": "prod" },
+    "replicaCount": { "value": 3 }
+  }
+}</code></pre>
+<p>Deploy with: <code>az deployment group create --resource-group RG --template-file main.bicep --parameters main.parameters.json</code></p>
+
+<h2>3.4 Variables</h2>
+<p>Variables are <em>computed within</em> the template — they cannot be overridden at deploy time. Use them to keep expressions out of your resources:</p>
+<pre><code>param environment string
+
+var namePrefix = 'mgmt'
+var rgName = 'rg-${namePrefix}-${environment}'       // interpolation
+var fullName = toLower('${namePrefix}${environment}')
+
+var skuMap = {                                        // object of values
+  dev:  'Standard_LRS'
+  prod: 'Premium_LRS'
+}
+var chosenSku = skuMap[environment]                   // object access
+
+resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: fullName
+  sku: { name: chosenSku }
+  ...
+}</code></pre>
+<p>Variables are evaluated lazily, so a variable used nowhere costs nothing.</p>
+
+<h2>3.5 Resources — the Declaration Syntax</h2>
+<p>This is the heart of Bicep:</p>
+<pre><code>resource &lt;symbolicName&gt; '&lt;namespace&gt;/&lt;type&gt;@&lt;apiVersion&gt;' = {
+  name: &lt;value&gt;
+  &lt;property&gt;: &lt;value&gt;
+  ...
+}</code></pre>
+<ul>
+<li><strong>symbolicName</strong> — the name you use to reference the resource elsewhere in the file (e.g. <code>stg.id</code>, <code>appService.properties.defaultHostName</code>)</li>
+<li><strong>type@apiVersion</strong> — the resource provider type and pinned API version. VS Code auto-completes both from the correct values.</li>
+</ul>
+<pre><code>resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: 'mydatalake12345'
+  location: resourceGroup().location
+  kind: 'StorageV2'
+  sku: { name: 'Standard_LRS' }
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+    supportsHttpsTrafficOnly: true
+  }
+}</code></pre>
+
+<h3>Referencing resources</h3>
+<pre><code>output stgId string = stg.id                       // ARM resource ID
+output stgName string = stg.name                   // the deployed name
+output stgEndpoint string = stg.properties.primaryEndpoints.blob   // nested property
+</code></pre>
+<div class="note"><strong>Access syntax:</strong> top-level properties like <code>id</code>, <code>name</code>, <code>type</code> are accessed directly (<code>stg.id</code>); body properties live under <code>.properties</code> for most resource types.</div>
+
+<h3>Child resources (nested under a parent)</h3>
+<pre><code>resource server 'Microsoft.Sql/servers@2023-08-01-preview' = {
+  name: 'sqlserver-${environment}'
+  location: location
+  properties: { administratorLogin: adminUser }
+}
+
+resource serverDb 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
+  parent: server                       // ties to parent, builds full name automatically
+  name: 'myapp-db'
+  sku: { name: 'Basic' }
+}</code></pre>
+<p>(In the examples above <code>adminUser</code> and <code>location</code> would be parameters — shown inline for brevity.)</p>
+
+<h2>3.6 Modules</h2>
+<p>A module is <em>a Bicep file used as a component</em>. The entry point passes parameters in and reads outputs back — like a function call in a programming language.</p>
+<pre><code>// main.bicep
+param environment string
+param location string
+
+module storageMod 'modules/storage.bicep' = {
+  name: 'storage-module-${environment}'    // deployment name, must be unique-ish
+  params: {
+    environment: environment
+    location: location
+  }
+}
+
+output storagePrimaryEndpoint string = storageMod.outputs.primaryEndpoint</code></pre>
+<pre><code>// modules/storage.bicep
+param environment string
+param location string
+
+var name = toLower('st${environment}${uniqueString(resourceGroup().name)}')
+
+resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: name
+  location: location
+  kind: 'StorageV2'
+  sku: { name: 'Standard_LRS' }
+}
+
+output primaryEndpoint string = stg.properties.primaryEndpoints.blob</code></pre>
+<p>Modules can also be pulled from a <em>registry</em> (published Bicep in ACR or the public <code>mcr.microsoft.com/bicep</code> registry):</p>
+<pre><code>module app 'br/public:app-service-docs:3.0.1' = { ... }</code></pre>
+
+<h2>3.7 Outputs</h2>
+<p>Outputs surface values after a deployment — useful for chaining modules together and for consuming values in scripts and pipelines.</p>
+<pre><code>output webUrl string = 'https://${webSite.properties.defaultHostName}'
+output dbConnectionRaw string = 'Server=tcp:${server.name}.database.windows.net,1433;Database=${db.name};'
+output rgName string = resourceGroup().name</code></pre>
+<p>Read outputs afterwards from the CLI:</p>
+<pre><code>az deployment group show -g myrg -n mydeployment --query properties.outputs</code></pre>
+
+<h2>3.8 Built-in Functions (a useful subset)</h2>
+<pre><code>resourceGroup().location        // get resource group info at deploy time
+reference(resourceId(...))      // read live values from existing resources
+uniqueString(arg1, arg2)        // deterministic short hash → for unique names
+concat('a', 'b')                // concatenation (or use ${} interpolation)
+format('{0}-{1}', a, b)         // printf-style formatting
+toLower() / toUpper()           // string casing for names
+if(condition, trueVal, falseVal)// inline conditional
+array / length() / first()      // array helpers
+empty() / contains()            // string/array checks</code></pre>
+<div class="tip"><strong>uniqueString</strong> is the standard trick for globally unique names: <code>'st${env}${uniqueString(subscription().subscriptionId, resourceGroup().name)}'</code> produces the same name on every run (idempotent) but different across subscriptions.</div>
+
+<div class="exercise">
+<strong>Summary &amp; Checklist:</strong>
+<ul>
+<li>Files are built from five declaration kinds: <code>targetScope</code>, <code>param</code>, <code>var</code>, <code>resource</code>, <code>output</code>, plus <code>module</code></li>
+<li>Parameters are deploy-time inputs; variables are internally computed</li>
+<li>Resource syntax: <code>resource name 'type@apiVersion' = { ... }</code></li>
+<li>Reference resources by their symbolic name: <code>stg.id</code>, <code>stg.properties...</code></li>
+<li>Modules reuse whole Bicep files; outputs let modules hand values to each other</li>
+<li>Use decorators (<code>@allowed</code>, <code>@minLength</code>, <code>@pattern</code>...) for input validation</li>
+</ul>
+</div>
+
+<nav><a href="../index.html">&larr; Back to Index</a><a href="4-hands-on.html">Next: Hands-On Examples &rarr;</a></nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

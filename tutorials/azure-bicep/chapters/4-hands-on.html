@@ -1,0 +1,239 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 4: Hands-On Examples</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#0062ad;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>Chapter 4: Hands-On Examples</h1>
+<p>This chapter is three practical exercises. Complete them in order — each builds on the last. You need the Azure CLI and Bicep from Chapter 2, plus any resource group:</p>
+<pre><code>az group create --name rg-bicep-demo --location eastus</code></pre>
+
+<h2>4.1 Exercise 1 — Deploy a Simple Storage Account</h2>
+
+<h3>Step 1: Write <code>storage.bicep</code></h3>
+<pre><code>targetScope = 'resourceGroup'
+
+param storageAccountName string
+param location string = resourceGroup().location
+
+resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageAccountName
+  location: location
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: false
+  }
+}
+
+output storageId string = stg.id
+output blobEndpoint string = stg.properties.primaryEndpoints.blob</code></pre>
+
+<h3>Step 2: Validate locally</h3>
+<pre><code>bicep build storage.bicep        # writes storage.json; any error stops here
+bicep lint storage.bicep          # check style + correctness rules</code></pre>
+
+<h3>Step 3: Preview</h3>
+<pre><code>az deployment group what-if \
+  --resource-group rg-bicep-demo \
+  --template-file storage.bicep \
+  --parameters storageAccountName=demoStore1234</code></pre>
+<p>Output shows exactly what will be created ("+ Microsoft.Storage/storageAccounts") before anything runs.</p>
+
+<h3>Step 4: Deploy</h3>
+<pre><code>az deployment group create \
+  --resource-group rg-bicep-demo \
+  --template-file storage.bicep \
+  --parameters storageAccountName=demoStore1234 \
+  --name deploy-storage
+
+# Read the outputs
+az deployment group show -g rg-bicep-demo -n deploy-storage \
+  --query properties.outputs</code></pre>
+<div class="note"><strong>Idempotency:</strong> run the same <code>create</code> again — it succeeds and reports no changes. That's declarative deployments in action.</div>
+
+<h2>4.2 Exercise 2 — Parameters and Variables</h2>
+<p>Now make the template reusable across <code>dev</code>, <code>test</code>, and <code>prod</code> with a validation-guarded parameter and computed variables.</p>
+
+<h3>Step 1: <code>storage.env.bicep</code></h3>
+<pre><code>targetScope = 'resourceGroup'
+
+@description('Environment to deploy. Controls SKU and names.')
+@allowed([ 'dev', 'test', 'prod' ])
+param environment string
+
+@minLength(3)
+@maxLength(18)
+@pattern('^[a-z0-9]+$')
+param namePrefix string
+
+param location string = resourceGroup().location
+
+// Compute the storage name: prefix + env + short unique hash
+var storageName = '${namePrefix}${environment}${uniqueString(subscription().subscriptionId, resourceGroup().name)}'
+
+// SKU + tier vary by environment
+var skuMap = {
+  dev:  { name: 'Standard_LRS', tier: 'Standard' }
+  test: { name: 'Standard_GRS', tier: 'Standard' }
+  prod: { name: 'Premium_LRS',  tier: 'Premium' }
+}
+var sku = skuMap[environment]
+
+resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageName
+  location: location
+  kind: 'StorageV2'
+  sku: sku
+  properties: {
+    accessTier: 'Hot'
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+  }
+  tags: {
+    environment: environment
+    managedBy: 'bicep'
+    builtBy: 'bicep-book'
+  }
+}
+
+output storageNameOut string = stg.name
+output skuOut string = '${stg.sku.name}-${stg.sku.tier}'</code></pre>
+
+<h3>Step 2: Per-environment parameter files</h3>
+<pre><code>// storage.parameters.prod.json
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": { "value": "prod" },
+    "namePrefix":  { "value": "corpdata" }
+  }
+}</code></pre>
+
+<h3>Step 3: Validate the parameter rules work</h3>
+<pre><code># This should FAIL fast:
+az deployment group create -g rg-bicep-demo --template-file storage.env.bicep \
+  --parameters environment=dev namePrefix="BAD-NAMES!"
+
+# This should succeed:
+az deployment group create -g rg-bicep-demo --template-file storage.env.bicep \
+  --parameters storage.env.parameters.prod.json --name deploy-storage-env</code></pre>
+<p>Note the difference: interesting SKUs and tags per environment, stable names, and deploy-time validation — all without branching logic in the file.</p>
+
+<h2>4.3 Exercise 3 — Create a Reusable Module</h2>
+<p>Modules let you write the resource <em>once</em> and reuse it from many entry points. We'll refactor Exercise 2 into a module, then call it from a <code>main.bicep</code>.</p>
+
+<h3>Step 1: <code>modules/storage.bicep</code> — the module itself</h3>
+<pre><code>targetScope = 'resourceGroup'
+
+@description('Environment to deploy. Controls SKU and names.')
+@allowed([ 'dev', 'test', 'prod' ])
+param environment string
+
+@minLength(3)
+@maxLength(18)
+@pattern('^[a-z0-9]+$')
+param namePrefix string
+
+param location string = resourceGroup().location
+
+var storageName = '${namePrefix}${environment}${uniqueString(subscription().subscriptionId, resourceGroup().name)}'
+
+var skuMap = {
+  dev:  { name: 'Standard_LRS', tier: 'Standard' }
+  test: { name: 'Standard_GRS', tier: 'Standard' }
+  prod: { name: 'Premium_LRS',  tier: 'Premium' }
+}
+var sku = skuMap[environment]
+
+resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: storageName
+  location: location
+  kind: 'StorageV2'
+  sku: sku
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+  }
+  tags: { environment: environment }
+}
+
+output storageNameOut string = stg.name
+output storageEndpoint string = stg.properties.primaryEndpoints.blob</code></pre>
+
+<h3>Step 2: <code>main.bicep</code> — thin entry point calling the module</h3>
+<pre><code>targetScope = 'resourceGroup'
+
+param environment string
+param namePrefix string
+param location string = resourceGroup().location
+
+module storageDeploy 'modules/storage.bicep' = {
+  name: 'storage-module-${environment}'
+  params: {
+    environment: environment
+    namePrefix: namePrefix
+    location: location
+  }
+}
+
+// A second module could consume the first module's output here.
+output storageEndpoint string = storageDeploy.outputs.storageEndpoint</code></pre>
+
+<h3>Step 3: Deploy the module-based project</h3>
+<pre><code>bicep build main.bicep                       # compiles main + inlined module
+az deployment group what-if -g rg-bicep-demo --template-file main.bicep \
+  --parameters environment=dev namePrefix=corpdata
+az deployment group create -g rg-bicep-demo --template-file main.bicep \
+  --parameters environment=dev namePrefix=corpdata --name main-deploy</code></pre>
+
+<h3>Step 4: Verify it's the same resource</h3>
+<p>Because we kept the same name algorithm, this deployment <em>updates</em> the account from Exercise 2 in place — no duplicate storage account. That is the payoff of deterministic naming + idempotent deployments:</p>
+<pre><code>az storage account list -g rg-bicep-demo --query "[].name"     # still one account</code></pre>
+<div class="diagram">
+Execution flow when main.bicep runs:
+
+┌─────────────────────┐
+│  main.bicep         │
+│  targetScope rg     │
+└──────────┬──────────┘
+           │ params: environment, namePrefix, location
+           ▼
+┌──────────────────────────────┐
+│  module storageDeploy        │
+│  modules/storage.bicep       │
+│  └─ resource stg (Storage)   │──► creates/updates in rg-bicep-demo
+└──────────────────────────────┘
+           │ outputs.storageEndpoint
+           ▼
+  reported back by main.bicep output
+</div>
+
+<div class="tip"><strong>Module naming:</strong> <code>module X 'path' = { name: '...' }</code> — the <code>name</code> is the ARM <em>deployment</em> name inside the parent deployment. Make it environment-scoped to keep deployments distinct (<code>'storage-module-${environment}'</code>) or allow nested deployments to auto-name by omitting... actually you must provide it; prefix it with the environment.</div>
+
+<div class="exercise">
+<strong>Checks:</strong>
+<ul>
+<li>Storage account deploys with minimal JSON-equivalent (Bicep) code</li>
+<li><code>what-if</code> shows changes before applying</li>
+<li>Parameters + decorators enforce valid input at deploy time</li>
+<li>Variables compute names/SKUs per environment</li>
+<li>Module publishes cleanly and is consumed from <code>main.bicep</code></li>
+<li>Redeploys are idempotent — resource count stays flat</li>
+</ul>
+</div>
+
+<nav><a href="../index.html">&larr; Back to Index</a><a href="5-advanced.html">Next: Advanced Features &rarr;</a></nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

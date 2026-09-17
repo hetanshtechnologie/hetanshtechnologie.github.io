@@ -1,0 +1,251 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 7: Real-World Scenario</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#0062ad;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>Chapter 7: Real-World Scenario — Scalable Web App on App Service + SQL Database</h1>
+<p>Everything in this book comes together now. We'll build a production-shaped deployment: a scalable App Service (Linux, Node.js runtime) backed by a SQL Server + SQL Database, with a firewall rule so the app can talk to the database, sensible SKUs per environment, secure parameters for the SQL admin, and useful outputs to hand down the pipeline.</p>
+
+<h2>7.1 Architecture</h2>
+<div class="diagram">
+                    Internet
+                       │ (HTTPS, port 443)
+                       ▼
+        ┌───────────────────────────────┐
+        │  App Service Plan (Linux)     │  sku: P1v2 (scalable, prod)
+        │  ┌─────────────────────────┐  │
+        │  │ App Service (webapp)    │  │  linuxFxVersion: NODE|18-lts
+        │  │ siteConfig.appSettings  │  │  WEBSITE_RUN_FROM_PACKAGE
+        │  └───────────┬─────────────┘  │
+        └──────────────┼────────────────┘
+                       │ SQL connection (port 1433, TLS)
+                       ▼
+        ┌───────────────────────────────┐
+        │ SQL Server (FQDN ...sql...)   │  minimalTlsVersion 1.2
+        │ ┌───────────────────────────┐ │
+        │ │ SQL Database  (S1 tier)   │ │  the app's data store
+        │ └───────────────────────────┘ │
+        └───────────────────────────────┘
+        Firewall: Allow Azure services (start/end 0.0.0.0)
+</div>
+<p>Everything is deployed into one resource group. The <em>entry point</em> is a single <code>main.bicep</code>; for a bigger team you'd split the plan, app, and SQL into modules (Chapter 6).</p>
+
+<h2>7.2 The Full <code>main.bicep</code></h2>
+<h3>1. Parameters</h3>
+<p>All environment-specific values are parameters with validation decorators. SQL admin credentials are secure so they never appear in plain text in deployment history.</p>
+<pre><code>targetScope = 'resourceGroup'
+
+@description('Application short name, used as the base for all resource names.')
+@minLength(3)
+@maxLength(12)
+@pattern('^[a-z][a-z0-9]*$')
+param applicationName string
+
+@description('Deployment environment.')
+@allowed([ 'dev', 'test', 'prod' ])
+param environment string
+
+param location string = resourceGroup().location
+
+@description('SQL server admin login.')
+@minLength(4)
+param sqlAdminLogin string
+
+@description('SQL server admin password. Use the Azure CLI secure prompt or Key Vault in production.')
+@secureString
+@minLength(12)
+param sqlAdminPassword string
+
+@description('App Service plan SKU. Premium in prod, Standard elsewhere.')
+@allowed([ 'B1', 'S1', 'P1v2' ])
+param planSku string = 'S1'
+</code></pre>
+
+<h3>2. Variables</h3>
+<p>One stable formula produces every resource name, satisfying Azure's length/charset rules and the no-recreation rule.</p>
+<pre><code>// Deterministic suffix keeps names unique to this subscription+RG
+var uniqueSuffix = uniqueString(subscription().subscriptionId, resourceGroup().name)
+
+var appPlanName  = 'asp-${applicationName}-${environment}-${uniqueSuffix}'
+var webAppName   = 'app-${applicationName}-${environment}-${uniqueSuffix}'
+var sqlServerName= 'sql-${applicationName}-${environment}-${uniqueSuffix}'
+var sqlDbName    = 'sqldb-${applicationName}-${environment}'
+var sqlFirewallName = 'AllowAllWindowsAzureIps'
+</code></pre>
+
+<h3>3. The Resources</h3>
+<p><strong>App Service Plan</strong> — the scale unit. <code>reserved: true</code> + <code>kind: 'linux'</code> signal a Linux plan; bumping <code>sku.name</code> to <code>P1v2</code> in prod gives you more memory and burst capacity, and you can later enable autoscale on the ASP from the portal or a separate Bicep file.</p>
+<pre><code>resource appServicePlan 'Microsoft.Web/serverfarms@2022-03-01' = {
+  name: appPlanName
+  location: location
+  kind: 'linux'
+  sku: {
+    name: planSku                     // B1 / S1 / P1v2
+    tier: (planSku == 'P1v2') ? 'PremiumV2' : 'Standard'
+    capacity: (planSku == 'B1') ? 1 : 2
+  }
+  properties: {
+    reserved: true                    // required for Linux plans
+  }
+}
+</code></pre>
+<p><strong>App Service site</strong> — the web host. It <em>implicitly</em> depends on the plan via <code>serverFarmId: appServicePlan.id</code>, and gets its SQL connection string injected as a connection-string app setting so the application code just reads <code>DefaultConnection</code>.</p>
+<pre><code>resource webApp 'Microsoft.Web/sites@2022-03-01' = {
+  name: webAppName
+  location: location
+  properties: {
+    serverFarmId: appServicePlan.id       // implicit dependency on the plan
+    httpsOnly: true                       // force HTTPS
+    siteConfig: {
+      linuxFxVersion: 'NODE|18-lts'       // Node.js 18 LTS on Linux
+      minTlsVersion: '1.2'
+      alwaysOn: true                      // keep the app warm
+      appSettings: [
+        { name: 'WEBSITE_RUN_FROM_PACKAGE', value: '1' }
+        { name: 'APPINSIGHTS_INSTRUMENTATIONKEY', value: '' }
+      ]
+      connectionStrings: [
+        {
+          name: 'DefaultConnection'
+          connectionString: 'Server=tcp:${sqlServer.name}.database.windows.net,1433;Initial Catalog=${sqlDbName};User ID=${sqlAdminLogin};Password=${sqlAdminPassword};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+          type: 'SQLAzure'
+        }
+      ]
+    }
+  }
+}
+</code></pre>
+<div class="note"><strong>Production hardening:</strong> the connection string above is fine for a learning scenario. In real deployments prefer SQL authentication with an AAD-managed identity, or place the admin password in Key Vault and pull it via a Key Vault reference — that keeps secrets out of the template output entirely.</div>
+<p><strong>SQL Server + Database + firewall</strong> — the data tier. The database uses <code>parent: sqlServer</code> (implicit dependency). The firewall rule allows the default "Azure services" range so the App Service can reach the logical server.</p>
+<pre><code>resource sqlServer 'Microsoft.Sql/servers@2023-08-01-preview' = {
+  name: sqlServerName
+  location: location
+  properties: {
+    administratorLogin: sqlAdminLogin
+    administratorLoginPassword: sqlAdminPassword
+    minimalTlsVersion: '1.2'             // no TLS 1.0/1.1
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource sqlDatabase 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
+  parent: sqlServer
+  name: sqlDbName
+  location: location
+  sku: {
+    name: (environment == 'prod') ? 'S1' : 'Basic'
+    tier: (environment == 'prod') ? 'Standard' : 'Basic'
+  }
+  properties: {
+    collation: 'SQL_Latin1_General_CP1_CI_AS'
+    maxSizeBytes: (environment == 'prod') ? 268435456000 : 2147483648   // 250GB / 2GB
+  }
+}
+
+resource sqlFirewall 'Microsoft.Sql/servers/firewallRules@2022-05-01-preview' = {
+  parent: sqlServer
+  name: sqlFirewallName
+  properties: {
+    startIpAddress: '0.0.0.0'
+    endIpAddress: '0.0.0.0'              // special value = Azure services only
+  }
+}
+</code></pre>
+<div class="tip"><strong>Dependency check:</strong> <code>webApp</code>'s connection string reads <code>sqlServer.name</code> and <code>sqlDbName</code> directly, so Bicep deploys SQL before the app — no <code>dependsOn</code> needed. That's the implicit-dependency feature from Chapter 5 doing its job.</div>
+
+<h3>4. Outputs</h3>
+<pre><code>output webUrl string = 'https://${webApp.properties.defaultHostName}'
+output appHostName string = webApp.properties.defaultHostName
+output sqlServerFqdn string = '${sqlServer.name}.database.windows.net'
+output sqlDatabaseName string = sqlDbName
+output appServicePlanName string = appServicePlan.name
+</code></pre>
+
+<h2>7.3 Parameter File for Prod</h2>
+<pre><code>// main.parameters.prod.json
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "applicationName": { "value": "inventory" },
+    "environment":     { "value": "prod" },
+    "location":        { "value": "eastus2" },
+    "planSku":         { "value": "P1v2" },
+    "sqlAdminLogin":   { "value": "dbadmin01" },
+    "sqlAdminPassword":{ "value": "P@ss-injected-via-CLI-or-vault" }
+  }
+}
+</code></pre>
+<div class="warning"><strong>Seriously:</strong> in a real repo the password won't sit in a parameter file. Pass it as a CLI secret or inject it in your pipeline via <code>--parameters sqlAdminPassword=$(secret-vault-value)</code> so it never reaches disk.</div>
+
+<h2>7.4 Deploying the Solution</h2>
+<pre><code># 0. Prepare (once)
+az group create --name rg-inventory-prod --location eastus2
+
+# 1. Compile-check locally
+bicep build main.bicep
+bicep lint main.bicep
+
+# 2. Preview every change
+az deployment group what-if -g rg-inventory-prod \
+  --template-file main.bicep \
+  --parameters main.parameters.prod.json
+
+# 3. Deploy (supply the secure param from your environment, not the file)
+az deployment group create -g rg-inventory-prod \
+  --template-file main.bicep \
+  --parameters main.parameters.prod.json \
+  --parameters sqlAdminPassword="$SQL_PASSWORD" \
+  --name deploy-inventory-prod
+
+# 4. Grab outputs
+az deployment group show -g rg-inventory-prod -n deploy-inventory-prod \
+  --query properties.outputs
+</code></pre>
+<p>Expected output (paraphrased):</p>
+<pre><code>{
+  "webUrl":         "https://app-inventory-prod-xxxx.azurewebsites.net",
+  "appHostName":    "app-inventory-prod-xxxx.azurewebsites.net",
+  "sqlServerFqdn":  "sql-inventory-prod-xxxx.database.windows.net",
+  "sqlDatabaseName":"sqldb-inventory-prod",
+  "appServicePlanName":"asp-inventory-prod-xxxx"
+}</code></pre>
+
+<h2>7.5 Verifying and Scaling</h2>
+<ol>
+<li>Open <code>webUrl</code> in a browser — if your Node app is deployed, the default page comes back over TLS.</li>
+<li>Connect to SQL from SSMS / Azure Data Studio using <code>sqlServerFqdn</code> and the admin login to confirm the DB exists.</li>
+<li>Redeploy with a changed <code>planSku</code> (<code>S1</code> &rarr; <code>P1v2</code>); <code>what-if</code> shows a plan update, not a replacement, because the <em>name</em> didn't change.</li>
+</ol>
+<div class="diagram">
+Scaling the plan horizontally:
+  az appservice plan update -g rg-inventory-prod -n asp-inventory-prod-xxxx \
+    --sku P1v2 --number-of-workers 3
+  → the site keeps its name, DNS, and settings — only capacity grows.
+</div>
+
+<h2>7.6 Cleanup</h2>
+<pre><code>az group delete --name rg-inventory-prod --yes --no-wait   # removes all resources</code></pre>
+
+<h2>7.7 What You Learned (Final Recap)</h2>
+<ul>
+<li>One declarative file builds a complete App Service + SQL tier</li>
+<li>Parameters with decorators make the template safe across dev/test/prod</li>
+<li>Deterministic naming (env + app + uniqueSuffix) keeps names stable and idempotent</li>
+<li>Implicit dependencies order the deployment automatically</li>
+<li>Secure strings, HTTPS-only, TLS pinning, and firewall rules bake security in by default</li>
+<li>what-if + a CI/CD gate make every change reviewable before it lands</li>
+</ul>
+<div class="exercise">
+<strong>Next steps:</strong> split this file into modules, publish them to a private ACR registry, then wire the deployment into GitHub Actions (Chapter 6) with what-if as the approval gate. You now have the full toolkit — go build.</div>
+
+<nav><a href="../index.html">&larr; Back to Index</a><span></span></nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

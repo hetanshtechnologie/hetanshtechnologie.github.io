@@ -1,0 +1,151 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 6: Best Practices</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#0062ad;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>Chapter 6: Best Practices</h1>
+
+<h2>6.1 Naming Conventions</h2>
+<p>Consistent naming makes resource groups, deployments, and resource names predictable across environments and teams. Two rules dominate Azure naming: <strong>prefix groups by purpose</strong> and <strong>let Bicep assemble full names from a few parameters</strong>.</p>
+
+<h3>Named resource groups</h3>
+<pre><code># pattern: rg-&lt;name&gt;-&lt;env&gt;
+rg-networking-dev
+rg-app-prod
+rg-data-test</code></pre>
+
+<h3>Resource names via a shared convention</h3>
+<p>Use short type codes + environment + unique suffix. Pull the pieces from parameters/variables so a name never contains a hard-coded env:</p>
+<pre><code>@description('Application/workload short name, e.g. "inventory"')
+@minLength(3) @maxLength(10) @pattern('^[a-z0-9]+$')
+param appName string
+
+@allowed(['dev','test','prod'])
+param environment string
+
+var uniqueSuffix = uniqueString(subscription().subscriptionId, resourceGroup().name)
+
+// standard codes per resource family
+var codes = {
+  storageAccount:     'st'
+  appServicePlan:     'asp'
+  appServiceSite:     'app'
+  sqlServer:          'sql'
+  sqlDatabase:        'sqldb'
+  keyVault:           'kv'
+  vnet:               'vnet'
+}
+
+resource stg 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: '${codes.storageAccount}${appName}${environment}${uniqueSuffix}'   // stinventoryprodabc123
+  ...
+}</code></pre>
+<p>Official guidance: storage account names ≤ 24 chars, lowercase alphanumeric; web app names ≤ 60 chars using <code>&lt;descriptor&gt;&lt;project&gt;&lt;env&gt;&lt;sequence&gt;</code>.</p>
+<div class="tip"><strong>Never recreate:</strong> once a name is live, changing the formula can rename and <em>recreate</em> resources in a later deploy. Bake naming into variables at the start and keep them stable.</div>
+
+<h2>6.2 Modularization</h2>
+<p>Modules are Bicep's reuse mechanism — but reuse done badly creates a mess. Follow these rules:</p>
+<ul>
+<li><strong>Single responsibility</strong> — one module = one logical component (a storage account <em>with</em> its access policy, or an app service <em>with</em> its plan). Not "everything for the whole platform in one file".</li>
+<li><strong>Small surface area</strong> — expose only parameters that genuinely vary. Fewer params = fewer translation bugs.</li>
+<li><strong>Package them</strong> — publish stable modules to a private registry (ACR) or the public registry, then reference by version: <code>br:myregistry.azurecr.io/bicep/modules/storage:1.2.0</code>.</li>
+<li><strong>Test modules standalone</strong> — give each module a minimal <code>main.bicep</code> that calls it, so you can deploy the module in isolation.</li>
+<li><strong>Libraries not frameworks</strong> — prefer many small focused modules over one giant mega-module with 30 switches.</li>
+</ul>
+<pre><code># A tidy registry-style layout
+modules/
+├── storage/
+│   ├── main.bicep          # the module
+│   └── version.json
+├── app-service/
+│   ├── main.bicep
+│   └── version.json
+└── sql/
+    ├── main.bicep
+    └── version.json
+
+deployment/
+├── main.bicep              # thin: parameters + module calls + outputs
+├── main.parameters.dev.json
+└── main.parameters.prod.json</code></pre>
+<div class="warning"><strong>Over-modularization:</strong> a module per resource with one-line files adds indirection, slows the compiler, and hurts readability. Group tightly-coupled resources; split only what is genuinely reusable or independently deployable.</div>
+
+<h2>6.3 Version Control Integration</h2>
+<p>Treat <code>.bicep</code> files like application code — commit them, review them, tag them.</p>
+
+<h3>Repo layout</h3>
+<pre><code>infra/
+├── deployment/        # environment-facing entry points
+│   ├── main.bicep
+│   └── main.parameters.*.json
+├── modules/           # reusable building blocks
+├── tests/             # standalone smoke files per module
+└── .github/workflows/deploy.yml   # or azure-pipelines.yml</code></pre>
+
+<h3>Guardrails in CI/CD</h3>
+<pre><code># Every PR should prove the templates compile and lint clean:
+bicep build --stdout deployment/main.bicep &gt; /dev/null          # compile check
+bicep lint deployment/main.bicep --diagnostics-level error       # fail on lint violations
+
+# Clean up local build artifacts — never commit generated *.json
+echo "deployment/**/*.json" &gt;&gt; .gitignore</code></pre>
+<div class="note"><strong>Versioning tracked infra:</strong> pin Bicep CLI versions in CI containers (e.g. <code>Azure/cli:latest</code> runs az bicep install) and tag module releases so <code>br:</code> references are exact and auditable.</div>
+
+<h3>Pipeline deployment (GitHub Actions style)</h3>
+<pre><code># .github/workflows/deploy.yml (trimmed)
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'infra/**' ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Bicep what-if
+        run: |
+          az deployment group what-if --resource-group rg-app-prod \
+            --template-file infra/deployment/main.bicep \
+            --parameters infra/deployment/main.parameters.prod.json
+      - name: Bicep deploy
+        run: |
+          az deployment group create --resource-group rg-app-prod \
+            --template-file infra/deployment/main.bicep \
+            --parameters infra/deployment/main.parameters.prod.json</code></pre>
+<p>The <code>what-if</code> step gates destructive changes before the <code>create</code> step, and the deployment history in Azure becomes your change log.</p>
+
+<h2>6.4 More Loose Ends</h2>
+<ul>
+<li><strong>Secrets:</strong> never <code>secureString</code> params in a file. Use Key Vault references or managed identity — never commit passwords to the repo.</li>
+<li><strong>Tags everything:</strong> owner, environment, cost-center, created-by for the FinOps folks.</li>
+<li><strong>Use <code>existing</code> keyword</strong> to reference resources you don't own in the same pipeline (e.g. shared vnets): <code>resource existingVnet 'Microsoft.Network/virtualNetworks@2023-06-01' existing = { name: 'shared-vnet' }</code>.</li>
+<li><strong>Keep API versions explicit</strong> — pin them, and let the extension help you upgrade on your schedule, not Azure's.</li>
+<li><strong>Run <code>bicep format</code> on save</strong> and agree on a team baseline via editorconfig.</li>
+</ul>
+
+<div class="exercise">
+<strong>Checks:</strong>
+<ul>
+<li>Names derive from <code>env + appName + type-code + uniqueSuffix</code> variables</li>
+<li>Modules are single-purpose, small, versioned, and registry-hosted for reuse</li>
+<li>Templates compile &amp; lint in CI before any <code>what-if</code>/<code>create</code></li>
+<li>Secrets stay out of repos; identities or Key Vault handle secrets</li>
+<li>Every resource carries ownership tags</li>
+<li>Generated ARM JSON is not committed</li>
+</ul>
+</div>
+
+<nav><a href="../index.html">&larr; Back to Index</a><a href="7-real-world.html">Next: Real-World Scenario &rarr;</a></nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>

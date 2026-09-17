@@ -1,0 +1,188 @@
+<!DOCTYPE html><html lang="en">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ch 5: Advanced Features</title><link rel="stylesheet" href="../styles.css"></head>
+<body><div class="chapter">
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#0062ad;text-decoration:none;">&larr; Back to Tutorials</a>
+<h1>Chapter 5: Advanced Features</h1>
+<p>Real infrastructure is rarely one resource. This chapter covers the three features that turn Bicep from "nicer ARM" into a real programming language for infrastructure: <strong>loops</strong>, <strong>conditions</strong>, and <strong>dependencies</strong> — plus how they combine when you chain modules.</p>
+
+<h2>5.1 Loops</h2>
+<p>Loop over an array with <code>for</code> to create a variable number of resources (or a resource-nested loop for sub-resources).</p>
+
+<h3>Loop over a parameter array</h3>
+<pre><code>param vmNames array = [ 'web-01', 'web-02', 'web-03' ]
+
+resource vmResources 'Microsoft.Compute/virtualMachines@2023-09-01' = [for vmName in vmNames: {
+  name: vmName
+  location: resourceGroup().location
+  properties: {
+    // ... VM properties
+  }
+}]</code></pre>
+
+<h3>Loop with an index (range)</h3>
+<pre><code>param instanceCount int = 3
+resource nsgRules 'Microsoft.Network/networkSecurityGroups/securityRules@2023-06-01' = [for i in range(0, instanceCount): {
+  name: 'simpleRule-${i}'
+  properties: {
+    priority: 100 + i
+    protocol: 'Tcp'
+    access: 'Allow'
+    direction: 'Inbound'
+  }
+}]</code></pre>
+
+<h3>Loop over an object dict and use the key</h3>
+<pre><code>param envs object = {
+  dev:  { sku: 'Standard' }
+  prod: { sku: 'Premium' }
+}
+resource plans 'Microsoft.Web/serverfarms@2022-03-01' = [for (key, value) in envs: {
+  name: 'plan-${key}'
+  sku: { name: value.sku }
+}]</code></pre>
+<div class="tip"><strong>Naming:</strong> loops with <code>range()</code> keep index-based names stable so reordering your array doesn't rename (and destroy/recreate) resources. Prefer arrays of names that never change position.</div>
+
+<h2>5.2 Conditions</h2>
+<p>Make a resource (or a whole module) optional with <code>if</code>.</p>
+
+<h3>Conditional resource</h3>
+<pre><code>param enableDiagnostics bool = true
+
+resource diagSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (enableDiagnostics) {
+  name: 'diag-${storageName}'
+  scope: storageAccount
+  properties: {
+    workspaceId: workspaceId
+    metrics: []
+    logs: []
+  }
+}</code></pre>
+
+<h3>Conditional module</h3>
+<pre><code>module network 'modules/vnet.bicep' = if (createVNet) {
+  name: 'vnet-module'
+  params: { ... }
+}</code></pre>
+
+<h3>Combine loop + condition</h3>
+<pre><code>@description('Subnet names to create')
+param subnetNames array = [ 'subnet-a', 'subnet-b', 'subnet-c' ]
+
+param restricted bool = false   // only open 3389/RDP when needed
+
+resource subnets 'Microsoft.Network/virtualNetworks/subnets@2023-06-01' = [for (name, i) in subnetNames: {
+  name: name
+  properties: {
+    addressPrefix: '10.0.${i}.0/24'
+    networkSecurityGroup: restricted ? nsg.id : null     // ternary in an expression
+  }
+}]
+
+// only add a RDP allow-rule when restricted is true
+resource rdpRule 'Microsoft.Network/networkSecurityGroups/securityRules@2023-06-01' = if (restricted) {
+  name: 'rdp-in'
+  properties: { ... }
+}</code></pre>
+<p>You can also filter inside a loop with an inline condition — Bicep supports <code>for-each-if</code> style iterators where you project only matching items:</p>
+<pre><code>resource needsAudit 'Microsoft.Storage/storageAccounts@2023-01-01' = [for env in environmentList: if (env != 'dev') {
+  name: 'stg-${env}'
+}]</code></pre>
+<div class="note"><strong>Watch out:</strong> conditional <em>outputs</em> need care. If the resource may not exist, guard reads with <code>? ... : null</code> or access through <code>if(exists(...))</code> patterns; the compiler will warn when an output reads a possibly-missing resource.</div>
+
+<h2>5.3 Resource Dependencies</h2>
+<p>Bicep usually figures out ordering <em>implicitly</em> — if resource B references resource A (via <code>A.id</code>, <code>A.properties...</code>), B is deployed after A automatically. Only use <code>dependsOn</code> when there is a runtime ordering requirement that the compiler cannot see (e.g. a script or app expecting a sibling resource to be ready).</p>
+
+<h3>Implicit dependency</h3>
+<pre><code>resource server 'Microsoft.Sql/servers@2023-08-01-preview' = { ... }
+
+// references server.id → Bicep knows: db depends on server
+resource db 'Microsoft.Sql/servers/databases@2023-08-01-preview' = {
+  parent: server
+  name: 'catalog'
+  sku: { name: 'S1' }
+}</code></pre>
+
+<h3>Explicit dependency (rarely needed)</h3>
+<pre><code>resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' = {
+  name: 'web-vm'
+  dependsOn: [ storageAccount ]        // compiler wouldn't see a reason otherwise
+  ...
+}</code></pre>
+<div class="warning"><strong>Best practice:</strong> prefer implicit references. <code>dependsOn</code> hides the relationship from the compiler — if you refactor, you can end up with stale dependencies, slower deploys, and unnecessary churn.</div>
+
+<h2>5.4 Linking Multiple Modules</h2>
+<p>Modules can consume each other's <em>outputs</em>, creating a clean data-flow pipeline in your main file:</p>
+<div class="diagram">
+main.bicep
+  │
+  ├──► module storage      ── outputs (id, endpoint) ──►
+  ├──► module vnet         ── outputs (subnetId) ──────────►
+  └──► module app          consumes storage.endpoint + vnet.subnetId
+</div>
+<pre><code>// main.bicep
+targetScope = 'resourceGroup'
+
+param environment string
+param location string
+
+module storage 'modules/storage.bicep' = {
+  name: 'stg-${environment}'
+  params: { environment: environment, location: location }
+}
+
+module vnet 'modules/vnet.bicep' = {
+  name: 'vnet-${environment}'
+  params: { location: location, environment: environment }
+}
+
+module app 'modules/app-service.bicep' = {
+  name: 'app-${environment}'
+  params: {
+    environment: environment
+    location: location
+    storageAccountName: storage.outputs.name        // ← module → module wiring
+    subnetId: vnet.outputs.subnetId
+  }
+}
+
+output appUrl string = app.outputs.url</code></pre>
+<p>Each module below has a matching <code>output</code> — e.g. <code>modules/vnet.bicep</code> ends with <code>output subnetId string = sub.id</code>. Bicep resolves the chain at compile time: <code>storage</code> and <code>vnet</code> deploy in parallel, and <code>app</code> waits for both.</p>
+
+<h3>Passing whole objects between modules</h3>
+<p>If two modules need identical tags or config, you can pass an <code>object</code> parameter instead of a dozen scalars:</p>
+<pre><code>// modules/base.tags → consumed by many modules
+module webApp 'modules/app-service.bicep' = {
+  name: 'web-${environment}'
+  params: {
+    commonTags: { env: environment, team: 'platform', managedBy: 'bicep' }
+  }
+}</code></pre>
+
+<h3>Cycle-safe design</h3>
+<ul>
+<li>Keep module graphs <strong>acyclic</strong>: if A needs B's output <em>and</em> B needs A's output, Bicep fails to compile. Break the cycle by hoisting the shared value to the caller.</li>
+<li>Two modules that only <em>name</em> each other's resources should receive the <em>name/ID</em>, not create it twice.</li>
+</ul>
+
+<div class="exercise">
+<strong>Checks:</strong>
+<ul>
+<li><code>for</code> loops over arrays, ranges, and object key/value pairs</li>
+<li><code>if</code> conditions on resources and modules, plus loop-and-condition filters</li>
+<li>Implicit dependencies via symbolic references; <code>dependsOn</code> only for runtime ordering</li>
+<li>Module outputs feed downstream module parameters</li>
+<li>Keep the module graph acyclic</li>
+</ul>
+</div>
+
+<nav><a href="../index.html">&larr; Back to Index</a><a href="6-best-practices.html">Next: Best Practices &rarr;</a></nav>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../js/analytics-tracker.js" defer></script>
+</body></html>
