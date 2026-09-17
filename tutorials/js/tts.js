@@ -65,7 +65,19 @@
     bar.appendChild(stopBtn);
     bar.appendChild(progressSpan);
 
-    chapter.insertBefore(bar, chapter.firstChild);
+    var logoAnchor = null;
+    var kids = chapter.children;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i].tagName === 'A' && kids[i].querySelector('img[src*="images/logo.png"]')) {
+        logoAnchor = kids[i];
+        break;
+      }
+    }
+    if (logoAnchor) {
+      logoAnchor.insertAdjacentElement('afterend', bar);
+    } else {
+      chapter.insertBefore(bar, chapter.firstChild);
+    }
 
     playBtn.addEventListener('click', startPlayback);
     pauseBtn.addEventListener('click', togglePause);

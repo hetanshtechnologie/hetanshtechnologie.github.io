@@ -59,7 +59,7 @@ Best regards,
 Hetansh Technologie
 +91 9974031480
 Cloud Native Lead | Solution Architect | DevOps Expert
-\uD83C\uDF10 Hetansh Technologie .github.io
+\uD83C\uDF10 hetanshtechnologie.github.io
 Ahmedabad, Gujarat, India
 Helping businesses design scalable, secure, and intelligent systems.`
 

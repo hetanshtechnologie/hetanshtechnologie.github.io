@@ -4,7 +4,7 @@ const _shop = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const EDGE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1`;
 
-const UPI_ID = 'Hetansh Technologie @okaxis';
+const UPI_ID = 'hetanshtechnologie@okaxis';
 const UPI_PHONE = '+919974031480';
 const RAZORPAY_KEY_ID = 'rzp_live_T69SbFfk53qNmY';
 

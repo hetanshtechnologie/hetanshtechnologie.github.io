@@ -47,7 +47,7 @@ VALUES ('<ADMIN_USER_UUID>', 'Admin', '', 'admin');
 
 ## 5. Deploy the admin web app
 
-**GitHub Pages** (repo: `Hetansh Technologie /Hetansh Technologie .github.io`):
+**GitHub Pages** (repo: `hetanshtechnologie/hetanshtechnologie.github.io`):
 - Push the `Applications/garshop` folder; it's served at
   `https://HetanshTechnologie.github.io/Applications/garshop/admin/index.html`
 - The config in `admin/js/config.js` already points at the project URL + anon key.

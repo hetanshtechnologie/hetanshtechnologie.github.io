@@ -1,7 +1,7 @@
 /* Job applications local folder archive.
    Uses the File System Access API to save downloaded CVs + parsed application
    details as real files into a folder the admin picks once
-   (e.g. C:\HetanshTechnologie\edu\Hetansh Technologie \db). The folder handle is remembered in
+   (e.g. C:\HetanshTechnologie\edu\hetanshtechnologie\db). The folder handle is remembered in
    IndexedDB so it persists across page loads.
    Requires Chrome or Edge (secure context: localhost or https). */
 

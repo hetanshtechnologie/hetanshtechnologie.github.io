@@ -63,7 +63,7 @@ class MainActivity : AppCompatActivity() {
                     override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
                         val url = request.url ?: return false
                         if (url.scheme == "http" || url.scheme == "https") {
-                            if (url.host?.endsWith("Hetansh Technologie .github.io") == true) {
+                            if (url.host?.endsWith("hetanshtechnologie.github.io") == true) {
                                 webView.loadUrl(url.toString())
                             } else {
                                 try { startActivity(Intent(Intent.ACTION_VIEW, url)) } catch (e: Exception) {}

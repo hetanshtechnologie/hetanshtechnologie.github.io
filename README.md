@@ -1,4 +1,4 @@
-# Hetansh Technologie - Corporate Website
+# hetanshtechnologie - Corporate Website
 
 A professional, responsive corporate website for an IT startup specializing in software engineering, cloud-native architecture, AI integration, and enterprise solutions.
 
@@ -25,7 +25,7 @@ A professional, responsive corporate website for an IT startup specializing in s
 ## Project Structure
 
 ```
-Hetansh Technologie /
+hetanshtechnologie/
 ├── index.html          # Home page
 ├── services.html       # Services page
 ├── portfolio.html      # Portfolio/Case studies
@@ -58,12 +58,12 @@ Hetansh Technologie /
    git init
    git add .
    git commit -m "Initial commit"
-   git remote add origin https://github.com/yourusername/Hetansh Technologie .git
+   git remote add origin https://github.com/yourusername/hetanshtechnologie.git
    git push -u origin main
    ```
 3. Go to repository **Settings** → **Pages**
 4. Under **Source**, select **main** branch and **/ (root)** folder
-5. Click **Save** - Your site will be live at `https://yourusername.github.io/Hetansh Technologie /`
+5. Click **Save** - Your site will be live at `https://yourusername.github.io/hetanshtechnologie/`
 
 ### Option 2: Netlify (Free)
 
@@ -89,7 +89,7 @@ netlify deploy --prod --dir .
 3. Create a Static Web App:
    ```bash
    az staticwebapp create \
-     --name Hetansh Technologie  \
+     --name hetanshtechnologie \
      --resource-group myResourceGroup \
      --location "East US2" \
      --source . \

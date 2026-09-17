@@ -20,7 +20,7 @@
     fullName: 'Hetansh Technologie',
     email: 'hetanshtechnologie@gmail.com',
     phone: '',
-    linkedIn: 'https://linkedin.com/in/Hetansh Technologie ',
+    linkedIn: 'https://linkedin.com/in/hetanshtechnologie',
     resumeUrl: '',
     coverLetter: '',
     website: 'https://HetanshTechnologie.github.io'

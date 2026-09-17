@@ -25,9 +25,17 @@ serve(async (req) => {
       const { data, error } = await supabase
         .from('site_analytics')
         .delete()
-        .like('page_path', '/Hetansh Technologie /%')
+        .like('page_path', '/admin/%')
       if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-      return new Response(JSON.stringify({ success: true, message: 'Deleted all /Hetansh Technologie / rows' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ success: true, message: 'Deleted all admin rows' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    let range = '7d'
+    if (req.method === 'POST') {
+      try {
+        const body = await req.json()
+        if (body && typeof body.range === 'string') range = body.range
+      } catch (_) {}
     }
 
     const now = new Date()

@@ -27,7 +27,7 @@ Run `shop/supabase-schema.sql` in Supabase SQL Editor.
 - Requires `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` secrets to be set
 
 ### UPI (GPay / PhonePe / Paytm)
-- UPI ID: `Hetansh Technologie @okaxis`
+- UPI ID: `hetanshtechnologie@okaxis`
 - Phone: `+919974031480`
 - User pays via any UPI app and enters the transaction ID
 
