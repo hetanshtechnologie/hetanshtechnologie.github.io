@@ -4,7 +4,7 @@ import nodemailer from 'https://esm.sh/nodemailer@6.9.3'
 
 const GMAIL_USER = Deno.env.get('GMAIL_USER') || ''
 const GMAIL_APP_PASSWORD = Deno.env.get('GMAIL_APP_PASSWORD') || ''
-const SITE_URL = Deno.env.get('SITE_URL') || 'https://Hetansh Technologie .github.io'
+const SITE_URL = Deno.env.get('SITE_URL') || 'https://HetanshTechnologie.github.io'
 
 serve(async (req) => {
   try {

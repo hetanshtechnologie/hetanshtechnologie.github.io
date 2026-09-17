@@ -23,7 +23,7 @@
     linkedIn: 'https://linkedin.com/in/Hetansh Technologie ',
     resumeUrl: '',
     coverLetter: '',
-    website: 'https://Hetansh Technologie .github.io'
+    website: 'https://HetanshTechnologie.github.io'
   };
 
   function matchField(input) {

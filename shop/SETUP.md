@@ -16,7 +16,7 @@ Run `shop/supabase-schema.sql` in Supabase SQL Editor.
 - `RAZORPAY_KEY_ID` = `rzp_live_T69SbFfk53qNmY`
 - `RAZORPAY_KEY_SECRET` = `jI0XYcUDAzg6fvEGLspETOI4`
 - `RESEND_API_KEY` = your Resend API key (for email delivery)
-- `SITE_URL` = `https://Hetansh Technologie .github.io`
+- `SITE_URL` = `https://HetanshTechnologie.github.io`
 
 ## 3. Payment Methods
 

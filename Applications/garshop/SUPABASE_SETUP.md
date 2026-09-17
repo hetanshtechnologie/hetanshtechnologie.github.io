@@ -49,7 +49,7 @@ VALUES ('<ADMIN_USER_UUID>', 'Admin', '', 'admin');
 
 **GitHub Pages** (repo: `Hetansh Technologie /Hetansh Technologie .github.io`):
 - Push the `Applications/garshop` folder; it's served at
-  `https://Hetansh Technologie .github.io/Applications/garshop/admin/index.html`
+  `https://HetanshTechnologie.github.io/Applications/garshop/admin/index.html`
 - The config in `admin/js/config.js` already points at the project URL + anon key.
 
 > The anon key is a public (publishable) key — safe to include in web apps. Never expose the `service_role` key.

@@ -187,7 +187,7 @@ document.getElementById('show-signup').addEventListener('click', async () => {
   err.textContent = '';
   const { data, error } = await sb.auth.signUp({
     email, password,
-    options: { emailRedirectTo: 'https://Hetansh Technologie .github.io/qna/index.html' }
+    options: { emailRedirectTo: 'https://HetanshTechnologie.github.io/qna/index.html' }
   });
   if (error) { err.textContent = error.message; return; }
   err.textContent = 'Check your email for confirmation link!';

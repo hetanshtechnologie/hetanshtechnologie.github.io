@@ -29,7 +29,7 @@ serve(async (req) => {
       return new Response(JSON.stringify({ status: 'logged', note: 'Gmail not configured' }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    const siteUrl = Deno.env.get('SITE_URL') || 'https://Hetansh Technologie .github.io'
+    const siteUrl = Deno.env.get('SITE_URL') || 'https://HetanshTechnologie.github.io'
 
     const attachments = []
     for (const url of pdf_urls) {

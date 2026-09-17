@@ -61,6 +61,6 @@ gradlew assembleDebug          # output: app/build/outputs/apk/debug/app-debug.a
 
 ## Live URLs (after pushing to GitHub Pages)
 
-- Admin: `https://Hetansh Technologie .github.io/Applications/garshop/admin/index.html`
-- Owner APK: `https://Hetansh Technologie .github.io/Applications/garshop/downloads/GarShop-Owner.apk`
-- User APK: `https://Hetansh Technologie .github.io/Applications/garshop/downloads/GarShop-User.apk`
+- Admin: `https://HetanshTechnologie.github.io/Applications/garshop/admin/index.html`
+- Owner APK: `https://HetanshTechnologie.github.io/Applications/garshop/downloads/GarShop-Owner.apk`
+- User APK: `https://HetanshTechnologie.github.io/Applications/garshop/downloads/GarShop-User.apk`

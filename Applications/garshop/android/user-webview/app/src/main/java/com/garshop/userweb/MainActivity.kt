@@ -21,7 +21,7 @@ class MainActivity : AppCompatActivity() {
     private var cameraUri: Uri? = null
 
     companion object {
-        const val BASE_URL = "https://Hetansh Technologie .github.io/Applications/garshop/user-web/index.html"
+        const val BASE_URL = "https://HetanshTechnologie.github.io/Applications/garshop/user-web/index.html"
         const val BIND_HOST = "bind"
         private const val FILE_CHOOSER_REQUEST = 1001
     }

@@ -15,7 +15,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
 
     companion object {
-        const val BASE_URL = "https://Hetansh Technologie .github.io/Applications/garshop/owner-web/index.html"
+        const val BASE_URL = "https://HetanshTechnologie.github.io/Applications/garshop/owner-web/index.html"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
