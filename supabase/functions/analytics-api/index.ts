@@ -13,9 +13,11 @@ serve(async (req) => {
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) return new Response(JSON.stringify({ error: 'No auth' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
-    const supabaseAnon = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } })
-    const { data: { user } } = await supabaseAnon.auth.getUser()
-    if (!user || user.email !== 'hetanshtechnologie@gmail.com') {
+    const userResp = await fetch(`${Deno.env.get('SUPABASE_URL')}/auth/v1/user`, {
+      headers: { Authorization: authHeader, apikey: Deno.env.get('SUPABASE_ANON_KEY')! },
+    })
+    const userInfo = await userResp.json().catch(() => null)
+    if (userResp.status !== 200 || !userInfo || userInfo.email !== 'hetanshtechnologie@gmail.com') {
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 

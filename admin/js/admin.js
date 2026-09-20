@@ -12,6 +12,17 @@ async function requireAdmin() {
   return user;
 }
 
+async function getAdminToken() {
+  const { data: { user }, error } = await _admin.auth.getUser();
+  if (error || !user) {
+    await _admin.auth.signOut();
+    window.location.href = 'index.html';
+    return null;
+  }
+  const { data } = await _admin.auth.getSession();
+  return data?.session?.access_token || null;
+}
+
 function escapeHtml(t) {
   const d = document.createElement('div');
   d.textContent = t;
