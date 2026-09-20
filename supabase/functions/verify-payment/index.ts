@@ -15,7 +15,7 @@ serve(async (req) => {
     if (!authHeader) return new Response(JSON.stringify({ error: 'No auth' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
     const supabaseAnon = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } })
-    const { data: { user } } = await supabaseAnon.auth.getUser()
+    const { data: { user } } = await supabaseAnon.auth.getUser(authHeader.replace('Bearer ', ''))
     if (!user) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = await req.json()

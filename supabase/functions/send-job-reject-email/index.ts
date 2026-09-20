@@ -16,7 +16,7 @@ serve(async (req) => {
     if (!authHeader) return new Response(JSON.stringify({ error: 'No auth' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
     const supabaseAnon = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } })
-    const { data: { user } } = await supabaseAnon.auth.getUser()
+    const { data: { user } } = await supabaseAnon.auth.getUser(authHeader.replace('Bearer ', ''))
     if (!user || user.email !== 'hetanshtechnologie@gmail.com') {
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }

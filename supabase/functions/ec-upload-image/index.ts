@@ -17,7 +17,7 @@ serve(async (req) => {
     }
 
     const supabaseAnon = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } })
-    const { data: { user } } = await supabaseAnon.auth.getUser()
+    const { data: { user } } = await supabaseAnon.auth.getUser(authHeader.replace('Bearer ', ''))
     if (!user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
