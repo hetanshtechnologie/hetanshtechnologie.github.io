@@ -1,0 +1,182 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>4. Multi-Agent Workflow — LangGraph for Beginners</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 4</span>
+    <h1>Multi-Agent Workflow: Research + Summarizer</h1>
+
+    <p>Single agents are great for one task. But real applications decompose work: a <strong>research agent</strong> gathers raw material; a <strong>summarizer agent</strong> condenses it; a formatter agent publishes it. In LangGraph you compose agents as <strong>nodes in one graph</strong>, and they communicate by reading and updating the shared state.</p>
+
+    <img src="../images/multi-agent-flow.svg" alt="Two-agent pipeline sharing state">
+
+    <div class="note"><strong>Key idea:</strong> agents don't call each other directly. Agent 1 writes results into state; agent 2 reads them on the next edge. This decoupling makes each agent independently testable and swappable.</div>
+
+    <h2>Running example: explain a technical topic</h2>
+    <p>We reuse one chat model, but give each node a different system prompt so each behaves like a specialist "agent". The state carries three fields: <code>topic</code> (input), <code>research_notes</code> (written by agent 1), and <code>final_summary</code> (written by agent 2).</p>
+
+    <pre><code>from typing import TypedDict
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph, START, END
+from dotenv import load_dotenv
+load_dotenv()
+
+model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+class WorkflowState(TypedDict):
+    topic: str
+    research_notes: str
+    final_summary: str
+
+# --- Agent 1: Research ---
+def research_node(state: WorkflowState):
+    system = SystemMessage(
+        "You are a research agent. Collect detailed factual notes about the topic: "
+        "key concepts, how it works, and a concrete example. Do not summarize yet."
+    )
+    user = HumanMessage(f"Topic: {state['topic']}")
+    notes = model.invoke([system, user]).content
+    return {"research_notes": notes}          # <-- communicate via state
+
+# --- Agent 2: Summarizer ---
+def summarize_node(state: WorkflowState):
+    system = SystemMessage(
+        "You are a summarization agent. From the research notes, write a concise, "
+        "beginner-friendly summary of at most 150 words."
+    )
+    user = HumanMessage(f"Research notes:\n{state['research_notes']}")
+    summary = model.invoke([system, user]).content
+    return {"final_summary": summary}
+
+# --- Wire the pipeline ---
+graph = StateGraph(WorkflowState)
+graph.add_node("research", research_node)
+graph.add_node("summarize", summarize_node)
+graph.add_edge(START, "research")
+graph.add_edge("research", "summarize")      # agent 1 hands off to agent 2
+graph.add_edge("summarize", END)
+
+app = graph.compile()
+
+result = app.invoke({"topic": "Retrieval-Augmented Generation (RAG)"})
+print(result["final_summary"])</code></pre>
+
+    <p>Notice the execution order: <code>research</code> fills <code>research_notes</code>, then <code>summarize</code> reads it via <code>state["research_notes"]</code> and writes <code>final_summary</code>. Two LLM calls, one graph, clean handoff.</p>
+
+    <h2>Upgrade 1: give the research agent tools (a loop inside a node)</h2>
+    <p>A node can be as smart as you like. Instead of one plain LLM call, make research a <strong>tool-calling loop</strong> over an internal knowledge base — the same pattern as Chapter 3, but contained inside a single node of the outer graph.</p>
+    <pre><code>from langchain_core.tools import tool
+from langchain_core.messages import ToolMessage
+
+@tool
+def fetch_fact(concept: str) -&gt; str:
+    """Fetch background facts about a concept from our internal knowledge base."""
+    kb = {
+        "rag": "RAG retrieves relevant documents, embeds them, and augments the prompt "
+               "with them before generation to reduce hallucination.",
+        "embedding": "An embedding maps text to a dense vector; similar texts are near "
+                     "each other in vector space.",
+        "vector": "A vector database stores embeddings and returns nearest neighbors.",
+    }
+    return kb.get(concept.lower(), f"No entry found for '{concept}'.")
+
+model_with_tools = ChatOpenAI(model="gpt-4o-mini", temperature=0).bind_tools([fetch_fact])
+
+def research_agent_node(state: WorkflowState):
+    messages = [
+        SystemMessage("Research agent. Use fetch_fact to gather facts you need, "
+                      "then produce detailed notes."),
+        HumanMessage(f"Topic: {state['topic']}"),
+    ]
+    for _ in range(5):                       # guard against infinite loops
+        ai_msg = model_with_tools.invoke(messages)
+        messages.append(ai_msg)
+        if not ai_msg.tool_calls:
+            break
+        for tc in ai_msg.tool_calls:
+            result = fetch_fact.invoke(tc["args"])
+            messages.append(ToolMessage(content=result, tool_call_id=tc["id"]))
+    return {"research_notes": messages[-1].content}
+
+graph = StateGraph(WorkflowState)
+graph.add_node("research", research_agent_node)
+graph.add_node("summarize", summarize_node)
+graph.add_edge(START, "research")
+graph.add_edge("research", "summarize")
+graph.add_edge("summarize", END)
+app = graph.compile()</code></pre>
+    <p>Now agent 1 reasons, calls <code>fetch_fact</code>, observes results, and loops until confident — then hands its notes to agent 2. In production, replace <code>fetch_fact</code> with Tavily/SerpAPI web search, a SQL query, or a vector-store lookup.</p>
+
+    <h2>Upgrade 2: a supervisor for dynamic routing</h2>
+    <p>When the flow depends on the content, add a third node that decides the next step via a conditional edge. This is the classic <strong>supervisor</strong> pattern.</p>
+    <pre><code>def needs_more_research(state: WorkflowState) -&gt; str:
+    # Rich enough? Deterministic check on the notes.
+    if state["research_notes"] and len(state["research_notes"]) &gt; 200:
+        return "summarize"
+    return "research"     # go back and gather more
+
+graph = StateGraph(WorkflowState)
+graph.add_node("research", research_node)
+graph.add_node("summarize", summarize_node)
+graph.add_edge(START, "research")
+graph.add_conditional_edges("research", needs_more_research,
+                            {"research": "research", "summarize": "summarize"})
+graph.add_edge("summarize", END)
+app = graph.compile()</code></pre>
+    <div class="info"><strong>Supervisor variants:</strong> the routing function can be deterministic (token counts, validation rules) or an LLM (a small classifier). Hand-rolled routing is cheaper, faster, and fully auditable — prefer it when a rule works.</div>
+
+    <h2>How the agents "talk" to each other</h2>
+    <table>
+      <tr><th>Mechanism</th><th>Description</th><th>When to use</th></tr>
+      <tr><td><strong>Shared state</strong></td><td>Agent A writes <code>state["research_notes"]</code>; agent B reads it later.</td><td>Pipeline workflows; structured handoff (most common).</td></tr>
+      <tr><td><strong>Messages list</strong></td><td>Agents append <code>AIMessages</code>/<code>ToolMessages</code> to <code>messages</code> with <code>add_messages</code>.</td><td>Conversational agents that must see full history.</td></tr>
+      <tr><td><strong>Supervisor routing</strong></td><td>A router node chooses the next agent based on content.</td><td>Dynamic, multi-skill routing (support vs. billing vs. sales).</td></tr>
+      <tr><td><strong>Parallel fan-out</strong></td><td>Several worker nodes run concurrently for the same input (e.g. one per region).</td><td>Speed-ups: same task split across workers.</td></tr>
+    </table>
+
+    <h2>Why this scales</h2>
+    <ul>
+      <li>Each agent node is a <strong>plain function</strong> — test it in isolation with a fixture state.</li>
+      <li>Swap LLM providers per node: use a cheap model for research, a stronger one for final summary.</li>
+      <li>Add checkpointing (Chapter 5) so the pipeline can stop, resume, and be human-reviewed between agents.</li>
+    </ul>
+
+    <div class="exercise">
+      <strong>✏️ Exercise:</strong> Extend the pipeline to three agents: Research &rarr; Summarize &rarr; <em>Publish</em> (formats the summary into a blog-style paragraph and stores it in <code>final_blog</code>). Add a <code>needs_revision</code> field and a supervisor that re-runs the research agent when the summary is under 80 words.
+    </div>
+
+    <nav>
+      <a href="3-hello-world.html">&larr; Previous: Hello World</a>
+      <span></span>
+      <a href="5-best-practices.html">Next: Best Practices &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

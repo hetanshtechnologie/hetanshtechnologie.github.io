@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>5. Server-Side: Express, Email &amp; Python — GitHub Copilot for Beginners</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 5</span>
+    <h1>Server-Side: Express, Email &amp; Python</h1>
+
+    <p>CashTrack is a browser-only app. In this chapter you give it a backend — an Express server that stores transactions and emails a receipt — and then cross the line into Python, because Copilot has one of the best "translate my JS into Python" moves in the business.</p>
+
+    <h2>1. Generate server code with Express (prompt tips)</h2>
+    <p>Server code is a great Copilot target because the shape is institutional. Watch the prompt techniques that make it clean:</p>
+    <pre><code>Panel (new thread, give the stack up front):
+&gt; Create an Express 4 server (Node 22, CommonJS) in server.js:
+&gt;   - POST /api/transactions   : validate {description, amount, type, category} with zod;
+&gt;                               require type in ['income','expense']; reject amount &lt;= 0;
+&gt;                               store in an in-memory array; return 201 + the created row.
+&gt;   - GET  /api/transactions   : return all rows.
+&gt;   - PUT  /api/transactions/:id : update amount/description only.
+&gt;   - DELETE /api/transactions/:id : remove row, 404 if missing.
+&gt;   - Graceful errors: express.json() with a 500 handler that logs but returns a generic message.
+&gt;   - No database yet, no dotenv clutter: PORT from process.env.PORT || 3000.</code></pre>
+    <p>Prompt tips used here (memorize these): <strong>state the stack+module system</strong>, <strong>enumerate endpoints with methods and status codes</strong>, <strong>give the field schema</strong>, and <strong>declare constraints</strong> (validate rules, no DB, no dotenv). Then verify with curl:</p>
+    <pre><code>curl -X POST localhost:3000/api/transactions -H "Content-Type: application/json" \
+  -d '{"description":"site hosting","amount":1200,"type":"expense","category":"hosting"}'</code></pre>
+    <div class="info"><strong>Fidelity check:</strong> always re-read the generated endpoint for the two things beginners skip — <code>express.json()</code> middleware actually mounted, and the order of 404 vs. 500 handling.</div>
+
+    <h2>2. Setup sending emails with Resend</h2>
+    <p>Email providers like Resend give you one API key and one SDK. Copilot wires the boilerplate fast; you supply the API key and the design decisions. Prompt for the whole flow, then split the apply/verify steps:</p>
+    <pre><code>Panel:
+&gt; Add a POST /api/receipts endpoint that emails a transaction receipt using the Resend SDK
+&gt;   (from "resend"). Config: RESEND_API_KEY (env), from: "CashTrack &lt;receipts@example.com&gt;",
+&gt;   to comes from the request body. Email must include the transaction description, amount,
+&gt;   type and a plain-text body AND an HTML body with a simple table. Return 202 accepted,
+&gt;   and 400 if "to" is missing or invalid. Keep the API key out of source code.
+
+Then follow-up:
+&gt; Handle the case where Resend SDK isn't installed: give me the npm install command for it,
+&gt; and make the endpoint import only if present (defensive) — actually, use the normal import and
+&gt; I'll install before running.</code></pre>
+    <p>Security rules for email + AI:</p>
+    <ul>
+      <li>Read the key from <code>process.env</code> or a secret manager — <strong>never</strong> ask Copilot to hardcode it (it may happily comply).</li>
+      <li>Validate <code>to</code> addresses server-side; email flows are spam/injection targets.</li>
+      <li>Ask Copilot to add an allow-list or rate limit if the endpoint could be spammed.</li>
+    </ul>
+
+    <h2>3. Convert JavaScript to Python step by step</h2>
+    <p>This is one of Copilot's magic moments. Take CashTrack's <code>downloadCsv</code> (Chapter 3) and ask for a Python API that does the same job:</p>
+    <pre><code>Copy the JS function into chat with a selection, then:
+&gt; Port this exact behavior to Python using only the standard library:
+&gt;   - function csv_for(transactions: list[dict]) -&gt; str
+&gt;   - columns date, description, category, type, amount
+&gt;   - escape embedded double-quotes by doubling; wrap fields containing commas or quotes
+&gt;   - expense amounts prefixed with '-'
+&gt;   - prepend a UTF-8 BOM and use '\\n' line endings
+&gt;   - produce the same output string as the JS for identical input.</code></pre>
+    <p>Why this prompts works: it pins <strong>behavior</strong> (the JS is the executable spec), <strong>constraints</strong> (stdlib, function signature), and <strong>equivalence</strong> (same output for same input). The counterpart function — <code>downloadCsv</code> → <code>csv_for</code> — is the kind of dry, fiddly function perfect for AI.</p>
+
+    <h2>4. Generate a Python API endpoint</h2>
+    <pre><code>Panel:
+&gt; Add a FastAPI endpoint POST /trends that takes {transactions: [...]} and returns
+&gt;   {"labels": [...], "values": [...]} for expense totals grouped by category,
+&gt;   sorted descending, computed in pure Python (no pandas). Use pydantic for the input model,
+&gt;   custom validation: empty list &rarr; 422, unknown 'type' &rarr; 400.
+&gt; Also give me the uvicorn command to run it.</code></pre>
+    <ul>
+      <li>Copilot will happily pick a framework; <strong>you</strong> should tell it which (FastAPI vs. Flask). The course favors explicitness.</li>
+      <li>Ask for the run command and the health-check curl in the same thread — fewer windows to search.</li>
+    </ul>
+
+    <h2>5. Python with Copilot in PyCharm</h2>
+    <p>Copilot works identically well in JetBrains IDEs, with small differences:</p>
+    <table>
+      <tr><th>Surface</th><th>VS Code</th><th>JetBrains (PyCharm etc.)</th></tr>
+      <tr><td>Completions</td><td>ghost text, Tab</td><td>grey inline suggestion, Tab (same feel)</td></tr>
+      <tr><td>Chat panel</td><td><code>Ctrl+Alt+I</code> icons in the activity bar</td><td>Tool window "Copilot Chat" (bottom/right icon)</td></tr>
+      <tr><td>Inline chat</td><td><code>Ctrl+I</code></td><td><code>Alt+Insert</code> / right-click <em>GitHub Copilot</em> menu; "Chat with Selection"</td></tr>
+      <tr><td>Slash commands</td><td>same <code>/</code> list</td><td>same (slightly different defaults per IDE)</td></tr>
+    </table>
+    <p>JetBrains picks up your project interpreter and virtualenv, so "using only the standard library" and "pandas available" behave differently there — mention <code>venv</code> only if you actually want the installed packages used. The in-IDE preview also shows richer completions for Python docstrings.</p>
+
+    <h2>6. Full-stack wiring prompt (what you just learned, combined)</h2>
+    <pre><code>@workspace -- "Connect the pieces we built: in Electron-but-simpler terms, make the CashTrack
+  front-end POST new transactions to the Express server, and GET from it on load. Replace the
+  localStorage persistence with the API. Keep the chart and CSV logic exactly as-is. Add a note
+  in the README about running the server first."</code></pre>
+    <p>One request, four files touched. Copilot Edits (Chapter 4) is the right surface for this — watch it change <code>app.js</code>, <code>server.js</code>, and the README while your review gates each diff.</p>
+
+    <div class="exercise">
+      <strong>✏️ Exercise:</strong> (a) Add the <code>GET /api/transactions</code> and <code>POST</code> endpoints to a scratch project, run uvicorn/express, and POST 3 items via curl. (b) Use the Section-3 conversion technique on a 20-line function you wrote — JS → Python — and prove equivalence with 5 sample inputs. (c) Wire an email receipt with Resend and send one to your own address; then review the sent source to confirm there is no leaked key.
+    </div>
+
+    <nav>
+      <a href="4-chat-prompt-power.html">&larr; Previous: Prompt Engineering</a>
+      <span></span>
+      <a href="6-react-agent-mode.html">Next: React, Next.js &amp; Agent Mode &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

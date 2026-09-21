@@ -1,0 +1,125 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>5. Best Practices, Pitfalls &amp; Use Cases — LangGraph for Beginners</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 5</span>
+    <h1>Best Practices, Pitfalls &amp; Real-World Use Cases</h1>
+
+    <h2>Best practices</h2>
+
+    <h3>1. Keep nodes small and single-purpose</h3>
+    <p>A node should do one thing: "extract fields", "validate", "generate draft", "run tool". Small nodes are easy to unit test and rerun. If a node has three <code>if</code> branches switching between LLM and logic paths, split it.</p>
+
+    <h3>2. Design the state schema up front</h3>
+    <p>State is your contract between nodes. Keep it explicit and typed, and only store what other nodes actually need. For fields that grow, use reducers:</p>
+    <pre><code>from typing import Annotated, TypedDict
+from operator import add
+from langgraph.graph.message import add_messages
+
+class State(TypedDict):
+    messages: Annotated[list, add_messages]   # append, never overwrite
+    scores: Annotated[list[float], add]       # accumulate numbers</code></pre>
+
+    <h3>3. Guard every loop</h3>
+    <p>LLM routing is probabilistic — always bound recursion and iteration counts:</p>
+    <pre><code>result = app.invoke(
+    {"messages": [HumanMessage("...")]},
+    config={"recursion_limit": 25},   # hard cap on graph steps
+)</code></pre>
+    <p>For loops you write yourself (like the research node in Chapter 4), add a <code>for _ in range(MAX_STEPS)</code> guard and break once the answer is final.</p>
+
+    <h3>4. Use checkpointing for memory and human-in-the-loop</h3>
+    <p>A checkpointer persists state after every super-step. Give it a <code>thread_id</code> and multi-turn conversations "remember" prior turns; you can also extract state mid-run for human approval before continuing. This is one of LangGraph's killer features.</p>
+    <pre><code>from langgraph.checkpoint.memory import InMemorySaver
+
+app = graph.compile(checkpointer=InMemorySaver())
+
+config = {"configurable": {"thread_id": "user-42"}}
+app.invoke({"messages": [HumanMessage("Hi, I'm Aisha")]}, config=config)
+app.invoke({"messages": [HumanMessage("What's my name?")]}, config=config)  # remembers</code></pre>
+    <div class="note">In-memory state is lost on restart. For persistence across processes use <code>langgraph-checkpoint-postgres</code> (or SQLite). To fetch/set state for approvals: <code>app.get_state(config)</code> and <code>app.update_state(config, values)</code>.</div>
+
+    <h3>5. Stream for good UX</h3>
+    <p>For chat products, don't wait for the whole graph. Stream tokens or node updates:</p>
+    <pre><code>for chunk in app.stream({"messages": [msg]}, config, stream_mode="messages"):
+    print(chunk[0].content, end="")   # token-by-token</code></pre>
+
+    <h3>6. Prefer deterministic routing over LLM routing</h3>
+    <p>Use rules, validators, and regex where possible; reserve the LLM for judgment calls. Deterministic routers are free, fast, and auditable. Example: route to "human" only if an API error occurred or a required field is empty.</p>
+
+    <h3>7. Test with real traces and an eval set</h3>
+    <p>Use <strong>LangSmith</strong> to trace runs, then build a small dataset of inputs with expected outcomes and run evaluation after every change to your prompts or graph structure. Agent changes are easy to overfit — evals keep you honest.</p>
+
+    <h3>8. Choose models per node and control cost</h3>
+    <p>Use a cheap, fast model for routing and extraction; use a stronger model only for the node where quality matters (e.g., final summary). Cache identical tool results.</p>
+
+    <h2>Common pitfalls</h2>
+    <table>
+      <tr><th>Pitfall</th><th>Symptom</th><th>Fix</th></tr>
+      <tr><td>Overwriting instead of appending</td><td>Chat history shrinks to one message per run</td><td>Add <code>add_messages</code> reducer to <code>messages</code></td></tr>
+      <tr><td>Missing <code>END</code> edge</td><td>Graph fails to compile with "orphaned" nodes</td><td>Every node reaches <code>END</code> via an edge or conditional path</td></tr>
+      <tr><td>No recursion guard</td><td>Cost explosion or timeout on a tricky prompt</td><td>Set <code>recursion_limit</code>; add step counters in hand-rolled loops</td></tr>
+      <tr><td>Mutating state in place</td><td>Unexpected values when nodes rerun (retries)</td><td>Nodes must <em>return</em> partial updates; don't mutate the input dict</td></tr>
+      <tr><td>Unhandled tool errors</td><td>Run dies on a 404 or malformed JSON</td><td>Wrap tool bodies in try/except and return an error <code>ToolMessage</code> so the LLM can recover</td></tr>
+      <tr><td>Context window overflow</td><td>Errors after long conversations</td><td>Trim/condense history (<code>trim_messages</code>) or summarize older turns into a running summary</td></tr>
+      <tr><td>Leaking secrets to the model</td><td>API keys appear in prompts or traces</td><td>Never put credentials in state/messages; redact tool inputs</td></tr>
+      <tr><td>Naive parallelism</td><td>Duplicate work or race conditions</td><td>Use explicit fan-out with <code>Send</code> only when workers are independent</td></tr>
+    </table>
+
+    <h2>Real-world use cases</h2>
+    <ul>
+      <li><strong>Support ticket triage</strong> — classify intent, search the wiki, draft a reply; escalate to a human with full context when confidence is low.</li>
+      <li><strong>RAG researcher + reviewer</strong> — a researcher agent gathers sources and a reviewer agent checks citations and flags hallucination risks before an answer ships.</li>
+      <li><strong>Code review / code-fix agents</strong> — run static analysis, propose diffs, apply tests, and loop until the test suite passes (bounded by recursion limit).</li>
+      <li><strong>Finance document workflows</strong> — extract fields from invoices, validate them against rules, and pause for human approval before payment — checkpointing makes each stage resumable.</li>
+      <li><strong>Content production pipelines</strong> — outline generation &rarr; research &rarr; drafting &rarr; fact-check &rarr; formatting as a multi-agent graph.</li>
+      <li><strong>Multi-step automation</strong> — booking, forms, and browser automation where an agent decides actions, a tools agent executes, and a validator confirms completion.</li>
+    </ul>
+    <p>Companies such as GitHub (Copilot pull-request agents), LinkedIn (feed summarization), and numerous enterprises use LangGraph in production for exactly these patterns.</p>
+
+    <h2>Where to go next</h2>
+    <ul>
+      <li>Official docs: <a href="https://langchain-ai.github.io/langgraph/" style="color:#0891b2;">langchain-ai.github.io/langgraph</a></li>
+      <li><code>create_react_agent</code> from <code>langgraph.prebuilt</code> — start production agents from a one-liner, then customize.</li>
+      <li>Explore <code>langgraph-checkpoint-postgres</code> for durable memory, and LangSmith for tracing your first eval run.</li>
+    </ul>
+
+    <div class="exercise">
+      <strong>✏️ Capstone:</strong> Combine everything — build a three-agent graph (Triage Agent &rarr; Research Agent with tools &rarr; Publish Agent) with an in-memory checkpointer and a <code>recursion_limit</code>. Stream the run, then break it intentionally (bad tool) and verify the graph's diagnosed error message and state.
+    </div>
+
+    <nav>
+      <a href="4-multi-agent.html">&larr; Previous: Multi-Agent Workflow</a>
+      <a href="../index.html">Back to Index</a>
+      <span></span>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>
