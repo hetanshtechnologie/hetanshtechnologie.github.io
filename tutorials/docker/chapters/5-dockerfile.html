@@ -1,0 +1,149 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>5. Building Custom Images with Dockerfile — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 5</span>
+    <h1>Building Custom Images with Dockerfile</h1>
+
+    <p>A <strong>Dockerfile</strong> is a recipe that describes your image, one instruction per line, each becoming a layer. You write it, then <code>docker build</code> turns it into an image. This chapter covers the instructions you need, the build context, <code>.dockerignore</code>, caching, and multi-stage builds — the technique that most shrinks real images.</p>
+
+    <h2>5.1 Anatomy of a Dockerfile</h2>
+<pre><code>FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /app/dist ./dist
+COPY package*.json ./
+RUN npm ci --omit=dev
+EXPOSE 3000
+USER node
+CMD ["node", "dist/server.js"]
+</code></pre>
+    <p><em>Diagram (described in text):</em> the left column is the "build stage" — base with deps, install, compile — and the right column is the "runtime stage", a fresh minimal base receiving only the compiled output via <code>COPY --from=build</code>. The runtime stage is what ships.</p>
+
+    <h2>5.2 The core instructions</h2>
+    <table>
+      <tr><th>Instruction</th><th>What it does</th></tr>
+      <tr><td><code>FROM image</code></td><td>Base image (every image starts here; can appear multiple times for multi-stage)</td></tr>
+      <tr><td><code>WORKDIR /app</code></td><td>Set working directory (creates it). Always use it — never rely on inherited dirs</td></tr>
+      <tr><td><code>COPY src dst</code></td><td>Copy files from the build context into the image</td></tr>
+      <tr><td><code>ADD src dst</code></td><td>Like COPY but auto-extracts tar and supports URLs — prefer COPY unless you need those</td></tr>
+      <tr><td><code>RUN cmd</code></td><td>Execute a command <em>at build time</em> (install deps, compile)</td></tr>
+      <tr><td><code>ENV K=v</code></td><td>Set environment variables baked into the image / container</td></tr>
+      <tr><td><code>ARG v</code></td><td>Build-time only variable (visible to RUN, not to the running container)</td></tr>
+      <tr><td><code>EXPOSE 3000</code></td><td>Documentation only — records the port; does NOT publish it</td></tr>
+      <tr><td><code>USER node</code></td><td>Run as non-root (do this in production images)</td></tr>
+      <tr><td><code>CMD ["app"]</code></td><td>Default command, overridable at <code>docker run</code></td></tr>
+      <tr><td><code>ENTRYPOINT ["app"]</code></td><td>Fixed entrypoint; CMD args get appended to it</td></tr>
+    </table>
+
+    <h2>5.3 CMD vs ENTRYPOINT (the classic confusion)</h2>
+<pre><code># ENTRYPOINT is the binary; CMD is its default args.
+# Docker run can replace CMD, but not ENTRYPOINT (without --entrypoint).
+ENTRYPOINT ["nginx"]
+CMD ["-g", "daemon off;"]
+--&gt; docker run mynginx                        # runs: nginx -g "daemon off;"
+--&gt; docker run mynginx -v                    # runs: nginx -v
+</code></pre>
+    <p>For your own apps: put the app in ENTRYPOINT, its default options in CMD. That lets operators tweak flags without knowing your launch script.</p>
+
+    <h2>5.4 Build context and .dockerignore</h2>
+    <p>The <strong>build context</strong> is the folder you send to the daemon (<code>docker build .</code>). Everything in it is visible to <code>COPY</code>. Sending <code>node_modules</code> or <code>.git</code> makes builds slow and images polluted — filter them:</p>
+<pre><code># .dockerignore
+node_modules
+.git
+*.log
+.env
+dist
+</code></pre>
+    <p><em>Diagram (described in text):</em> your project folder on the left; the arrows into the daemon on the right showing only the allowed files passing the .dockerignore filter; the excluded heavy folders stop at the gate.</p>
+
+    <h2>5.5 Layer caching — order is strategy</h2>
+    <p>Each instruction that doesn't change reuses its cached layer. Pure strategy rules:</p>
+    <ol>
+      <li><strong>Copy dependency manifests first</strong> (<code>package*.json</code>, <code>requirements.txt</code>), run the install, <em>then</em> copy source. Code changes never re-trigger dependency installs.</li>
+      <li>Put rarely-changing steps (base, tools, deps) near the top; hot files (source) last.</li>
+      <li>One logical <code>RUN</code> per concern, but avoid dozens of tiny layers that fragment caching.</li>
+    </ol>
+<pre><code>docker build -t myapp:dev .
+docker build --no-cache -t myapp:dev .      # when behavior drifts, rebuild fresh
+docker build --cache-from ghcr.io/me/myapp:cache .   # CI reuse pattern
+</code></pre>
+
+    <h2>5.6 Multi-stage builds (the size killer)</h2>
+    <p>Build toolchains (Go, gcc, node_modules for builds) are huge. Multi-stage lets you build in one stage and copy only the result into a slim runtime stage — your shipped image has no compilers, no dev deps.</p>
+<pre><code># Go example: dev stage has the toolchain; runtime stage is bare
+FROM golang:1.22 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /bin/app .
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=build /bin/app /app
+USER nonroot:nonroot
+ENTRYPOINT ["/app"]
+</code></pre>
+    <p>Result: a ~10 MB image instead of ~900 MB, no shell for attackers to find, and a static binary that runs anywhere — this pattern also shows up in Ch. 9 and 12.</p>
+
+    <h2>5.7 Build the image and verify</h2>
+<pre><code>docker build -t myapp:1.0.0 .
+docker images | grep myapp
+docker run --rm -p 3000:3000 myapp:1.0.0
+docker history myapp:1.0.0     # see the layer list, size per layer
+docker image inspect myapp:1.0.0 --format '{{.Config.User}}'   # expect non-empty user
+</code></pre>
+
+    <h2>Summary</h2>
+    <p>A Dockerfile is an ordered recipe: pick a base, copy manifests before code for caching, compile/install, and copy only runnable output into a slim runtime stage. Use <code>COPY</code> not <code>ADD</code>, <code>USER</code> not root, ENTRYPOINT+CMD for your app, a <code>.dockerignore</code>, and multi-stage builds to keep images small and drama-free.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; I have a Dockerfile that uses FROM, WORKDIR, COPY, RUN, EXPOSE, USER, and CMD/ENTRYPOINT.</li>
+      <li>&#9744; I have a <code>.dockerignore</code> excluding node_modules/.git/.env.</li>
+      <li>&#9744; Dependency manifests are copied before source (caching works).</li>
+      <li>&#9744; I ran a multi-stage build and saw the final image size drop.</li>
+      <li>&#9744; I know when to use CMD vs ENTRYPOINT.</li>
+    </ul>
+
+    <nav>
+      <a href="4-cli-basics.html">&#8592; Prev: Docker CLI Basics</a>
+      <a href="6-volumes.html">Next: Volumes and Persistent Storage &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

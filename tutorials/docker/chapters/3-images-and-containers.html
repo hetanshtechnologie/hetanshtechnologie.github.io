@@ -1,0 +1,114 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3. Images and Containers — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 3</span>
+    <h1>Images and Containers</h1>
+
+    <p>Everything in Docker is built on one idea: <strong>images are immutable templates; containers are their running, read-write instances</strong>. This chapter makes that relationship — and the layer system underneath it — concrete, because every later chapter (Dockerfiles, volumes, networks, Compose) builds on it.</p>
+
+    <h2>3.1 The image is a stack of layers</h2>
+    <p>An image is not one blob of files. It is an ordered stack of <strong>layers</strong>, each layer being the diff between one build step and the previous. When the engine runs a container from an image, it stacks the layers in order, then adds a thin <strong>read-write layer</strong> on top for the running process.</p>
+    <p><em>Diagram (described in text):</em> a vertical stack — bottom layer "base OS (ubuntu)" on top of it "add curl" above that "copy app code" and finally the white top layer labeled "container writable layer". Separate small diagram beside it: two containers sharing the same bottom three layers but each with its own writable top layer.</p>
+
+    <h2>3.2 Why layers matter (three consequences)</h2>
+    <ul>
+      <li><strong>Shared storage:</strong> ten containers from the same image all share the base layers; only the writable layer is per-container. That's why hundreds of containers fit on one host.</li>
+      <li><strong>Speed:</strong> <code>docker pull</code> downloads only layers you don't already have. If another image uses the same <code>ubuntu</code> base, those bytes are reused.</li>
+      <li><strong>Build caching:</strong> when you rebuild, unchanged steps reuse cached layers (Ch. 5). Layer order in a Dockerfile is therefore a design decision, not trivia.</li>
+    </ul>
+
+    <h2>3.3 Names, tags, and digests</h2>
+<pre><code>registry/repository:tag
+# registered name form: ghcr.io/n8n-io/n8n:1.2.3
+# Docker Hub prefix "docker.io/library/" is implied:
+ubuntu:24.04          # == docker.io/library/ubuntu:24.04
+nginx                                        # == nginx:latest (default tag)
+postgres@sha256:abcd1234...                  # immutable digest — the true identity
+</code></pre>
+    <p>A <strong>tag</strong> is a mutable nickname for an image; a <strong>digest</strong> is the cryptographic fingerprint of the image content. Production systems pin by digest (Ch. 9) so "latest moved under me" can never happen silently.</p>
+
+    <h2>3.4 The image catalog: local and registry</h2>
+<pre><code>docker pull nginx:alpine        # fetch from the registry (Docker Hub by default)
+docker images                   # images stored on this host (REPOSITORY, TAG, IMAGE ID, SIZE)
+docker image inspect nginx:alpine
+docker rmi nginx:alpine         # remove image (fails if a container uses it)
+docker rmi nginx:alpine --force # you almost never want --force
+</code></pre>
+    <div class="info"><strong>Image ID vs image name:</strong> the <code>IMAGE ID</code> (e.g. <code>1fa43dd296d2</code>) is derived from the top layer's digest. Two tags pointing at the same content share one ID. Commands accept the ID or a unique prefix of it.</div>
+
+    <h2>3.5 from image to container: the run-time layers</h2>
+    <p>When you run a container, the engine adds the writable layer and starts your process (<code>CMD</code>/<code>ENTRYPOINT</code>, Ch. 5). The container gets:</p>
+    <ul>
+      <li>its own filesystem (base layers + writable layer),</li>
+      <li>its own network namespace (Ch. 7),</li>
+      <li>its own process namespace — <code>PID 1</code> is your app, not a shell,</li>
+      <li>resource limits if you request them (CPU/memory flags).</li>
+    </ul>
+<pre><code>docker run -dit --name box ubuntu:24.04 bash      # interactive, detached
+docker exec box whoami                             # your process, inside the namespace
+docker exec box cat /etc/os-release | head -1      # same Ubuntu, isolated view
+docker stop box &amp;&amp; docker rm box</code></pre>
+    <p><em>Diagram (described in text):</em> a container as a fenced area. Outside the fence: host kernel, host processes, host network. Inside the fence: your app (PID 1), its private filesystem, its private network interface, and its resource quota.</p>
+
+    <h2>3.6 Containers end; images remain</h2>
+    <p>The single most important behavioral rule: <strong>stopping or deleting a container never touches the image</strong>, and deleting a container throws away its writable layer — unless data sits in a volume (Ch. 6).</p>
+    <table>
+      <tr><th>Action</th><th>Image</th><th>Container writable layer</th><th>Volumes</th></tr>
+      <tr><td><code>docker stop</code></td><td>Unchanged</td><td>Kept</td><td>Kept</td></tr>
+      <tr><td><code>docker rm</code></td><td>Unchanged</td><td><strong>Deleted</strong></td><td>Kept (unless <code>-v</code>)</td></tr>
+      <tr><td><code>docker rmi</code></td><td>Deleted (if unused)</td><td>n/a</td><td>Kept</td></tr>
+    </table>
+
+    <h2>3.7 Register your own image names early</h2>
+    <p>From Ch. 5 onward you will build images. Get the naming habit now — the name you build under is what you push to a registry:</p>
+<pre><code>docker build -t my-app:1.0.0 .
+docker tag my-app:1.0.0 ghcr.io/my-org/my-app:1.0.0     # later, push under your registry
+</code></pre>
+
+    <h2>Summary</h2>
+    <p>Images are immutable, layered templates; containers add a throwaway writable layer and a process namespace on top. Layers give you shared storage, fast pulls, and build caching. Tags are mutable nicknames, digests are the identity, and deleting a container never touches its image or volumes.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; I can draw the layer stack (base → deps → code → writable).</li>
+      <li>&#9744; I can run <code>exec</code> into a container and explain which namespace I entered.</li>
+      <li>&#9744; I know the difference between tag and digest, and when to use a digest.</li>
+      <li>&#9744; I can explain why <code>docker rm</code> loses container data but not volume data.</li>
+      <li>&#9744; I named and tagged a first image (<code>docker tag</code>).</li>
+    </ul>
+
+    <nav>
+      <a href="2-installation.html">&#8592; Prev: Installing Docker</a>
+      <a href="4-cli-basics.html">Next: Docker CLI Basics &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

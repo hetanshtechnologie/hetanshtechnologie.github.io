@@ -1,0 +1,159 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>8. Docker Compose — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 8</span>
+    <h1>Docker Compose: Multi-Container Applications</h1>
+
+    <p>Running three containers with eleven flags each is how apps stop being reproducible. <strong>Docker Compose</strong> describes the whole stack — services, networks, volumes, env — in one <code>docker-compose.yml</code>, and one command brings it up and tears it down. It is the standard way to run multi-container apps locally and in small-to-medium CI.</p>
+
+    <h2>8.1 Your first compose file (app + redis)</h2>
+<pre><code>services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      REDIS_URL: redis://cache:6379
+    depends_on:
+      cache:
+        condition: service_healthy
+    restart: unless-stopped
+
+  cache:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redisdata:
+</code></pre>
+    <p><em>Diagram (described in text):</em> a compose file box on the left spawning three lanes: the "web" service (builds from ., port 5000), the "cache" service (redis image with a healthcheck), and a named volume "redisdata" the cache writes into. A dotted arrow labeled "depends_on healthy" runs from web to cache.</p>
+    <div class="info"><strong>Modern compose = no "version" key.</strong> Older tutorials put <code>version: "3.8"</code> at the top — current Compose warns about it; omit it. Also note the service name <code>cache</code> is usable as a hostname on the default compose network, exactly like Ch. 7's custom network.</div>
+
+    <h2>8.2 The daily commands</h2>
+<pre><code>docker compose up -d              # build + create + start everything, detached
+docker compose ps                 # status per service
+docker compose logs -f web        # tail one service's logs
+docker compose exec web sh        # shell into a service
+docker compose down               # stop + remove containers (keeps named volumes)
+docker compose down -v            # ALSO delete volumes — data loss, use with care
+docker compose config             # validate + pretty-print the resolved file
+docker compose up -d --build      # rebuild changed services, keep the rest
+</code></pre>
+    <p>Everything you did in Ch. 4 with <code>docker run</code> has a compose equivalent: <code>restart</code>, <code>environment</code>, <code>volumes</code>, <code>ports</code>, <code>--network</code> (top-level <code>networks:</code>), <code>--rm</code> (there's no Compose default; use <code>profiles</code> or <code>run --rm</code>). The win is that the <em>file</em>, not your memory, carries the flags.</p>
+
+    <h2>8.3 Ordering and health checks</h2>
+    <p><code>depends_on</code> alone just starts a container first — it does not wait for it to be <em>ready</em>. The modern form couples it with a healthcheck, so a database that takes 20 seconds to accept connections doesn't make your app crash at startup:</p>
+<pre><code>services:
+  web:
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: dev-password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+</code></pre>
+
+    <h2>8.4 Environment and secrets handling</h2>
+<pre><code>services:
+  web:
+    env_file:
+      - .env            # plain KEY=value file (never commit!)
+    environment:
+      NODE_ENV: production
+      # prefer env_file for secrets; inline "environment" for non-secret config
+</code></pre>
+    <p>Compose automatically reads <code>.env</code> for variable substitution too: <code>ports: ["${WEB_PORT:-5000}:5000"]</code>. For real secrets in prod, Ch. 9's guidance applies — env files are a dev convenience, not a vault.</p>
+
+    <h2>8.5 Networking in compose</h2>
+<pre><code>services:
+  api:
+    networks: [api-net]
+  db:
+    networks: [api-net]
+  public:
+    image: nginx
+    ports: ["80:80"]
+    networks: [edge]     # db &amp; api cannot see the public web service
+
+networks:
+  api-net:
+  edge:
+</code></pre>
+    <p>By default all services share one network (fine for most stacks). When you separate them, you get the boundary behavior from Ch. 7 — this is how a public proxy is boxed away from the database net.</p>
+
+    <h2>8.6 Scaling and one-off jobs</h2>
+<pre><code>docker compose up -d --scale worker=3     # 3 replicas of "worker"
+docker compose run --rm web npm test      # one-off command in a service's image
+docker compose ps --format '{{.Name}} {{.Status}}'
+</code></pre>
+    <p>Compose scales by running N containers of a service — great for worker pools and load-testing. It is <em>not</em> an orchestrator (no self-healing across hosts); that's Ch. 12's job (Kubernetes/Swarm).</p>
+
+    <h2>8.7 Profiles — services that only come up on demand</h2>
+<pre><code>services:
+  backup:
+    image: postgres:16-alpine
+    profiles: ["tools"]
+    command: ["pg_dumpall"]                    # only started with --profile tools
+# docker compose --profile tools run backup ...</code></pre>
+
+    <h2>Summary</h2>
+    <p>Compose turns a multi-container stack into one declarative file and one command. Model every service with <code>image:</code>/<code>build:</code>, wire readiness with healthchecks + <code>condition: service_healthy</code>, isolate traffic with networks, and persist data with named volumes. For local/dev/CI, this file <em>is</em> your deployment.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; I wrote a compose file with at least two services, a healthcheck, and a named volume.</li>
+      <li>&#9744; I can run, log, exec, validate, and tear down with the five daily commands.</li>
+      <li>&#9744; My app waits for db readiness, not just db startup.</li>
+      <li>&#9744; I know what <code>down -v</code> destroys.</li>
+      <li>&#9744; I separated networks where isolation matters.</li>
+    </ul>
+
+    <nav>
+      <a href="7-networking.html">&#8592; Prev: Networking in Docker</a>
+      <a href="9-best-practices.html">Next: Best Practices &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

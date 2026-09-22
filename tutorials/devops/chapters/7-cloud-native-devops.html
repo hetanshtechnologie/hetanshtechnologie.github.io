@@ -1,0 +1,139 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>7. Cloud-Native DevOps — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 7</span>
+    <h1>Cloud-Native DevOps: AWS, Azure, and GCP</h1>
+
+    <p>Cloud providers do not change DevOps principles; they change vocabulary, CLIs, and the half of the stack they run for you. This chapter teaches the pattern that transfers everywhere — IAM first, managed Kubernetes, cloud-native CI/CD, and active cost control — with concrete AWS/Azure/GCP commands so you can map your skills to all three.</p>
+
+    <h2>7.1 The universally applicable cloud model</h2>
+<pre><code>Git --&gt; CI/CD (cloud-native pipelines) --&gt; repositories --&gt; managed Kubernetes --&gt; observability --&gt; budget alerts
+        |                                      ^
+        └----&gt; IaC (AWS CDK / Bicep / Terraform) --&gt; networks, IAM, databases, storage
+</code></pre>
+    <p><em>Diagram (described in text):</em> one loop. Code flows right into cloud CI/CD, then into artifact repositories, then to a managed Kubernetes cluster. Instructions for the supporting infrastructure flow through IaC into the control plane. Observability and budget alerts feed back to the developer loop on the left.</p>
+
+    <h2>7.2 The identity layer (get this wrong and nothing else matters)</h2>
+    <ul>
+      <li><strong>AWS:</strong> IAM users/roles; power users use IAM Roles Anywhere or OIDC-federated workloads, never static AK/SK on a server.</li>
+      <li><strong>Azure:</strong> managed identities for Azure resources + service principals; RBAC via built-in or custom role assignments.</li>
+      <li><strong>GCP:</strong> service accounts + IAM roles; workload identity federation for K8s/GitHub Actions.</li>
+    </ul>
+<p>Least-privilege policy (AWS; equivalents exist everywhere):</p>
+<pre><code>aws iam create-role --role-name deploy-role --assume-role-policy-document file://trust-oidc.json
+aws iam put-role-policy --role-name deploy-role --policy-name deploy \
+  --policy-document '{"Version":"2012-10-17","Statement":[
+    {"Effect":"Allow","Action":["s3:PutObject"],"Resource":"arn:aws:s3:::artifacts/*"}
+  ]}'</code></pre>
+    <div class="warn"><strong>The #1 cloud leak:</strong> a long-lived admin key committed to a repo or pasted into a build log. Fix it permanently with workload identity federation: GitHub Actions OIDC / Azure workload identity / GCP WIF — GitHub then mints short-lived tokens for your pipeline, and there is nothing to rotate.</div>
+
+    <h2>7.3 Managed Kubernetes on each cloud</h2>
+    <table>
+      <tr><th></th><th>EKS (AWS)</th><th>AKS (Azure)</th><th>GKE (GCP)</th></tr>
+      <tr><td>Provision cluster</td><td><code>eksctl create cluster</code> / Cluster API</td><td><code>az aks create</code></td><td><code>gcloud container clusters create</code></td></tr>
+      <tr><td>kubeconfig</td><td><code>aws eks update-kubeconfig</code></td><td><code>az aks get-credentials</code></td><td><code>gcloud container clusters get-credentials</code></td></tr>
+      <tr><td>Node scaling</td><td>Karpenter / Cluster Autoscaler</td><td><code>az aks nodepool scale</code> + autoscaler</td><td>Horizontal node autoprovisioner</td></tr>
+      <tr><td>Storage class base</td><td><code>gp2/gp3</code> (EBS)</td><td><code>managed-csi</code> (Azure Disk)</td><td><code>pd-balanced</code> (Persistent Disk)</td></tr>
+    </table>
+
+<pre><code># GKE — one command to a managed multi-node cluster
+gcloud container clusters create prod --region us-central1 \
+  --num-nodes 3 --machine-type e2-standard-4 \
+  --enable-autoscaling --min-nodes 3 --max-nodes 30 \
+  --workload-pool prod.svc.id.goog
+
+# AKS — equivalent
+az aks create -g prod-rg -n prod --enable-cluster-autoscaler --min-count 3 --max-count 30 \
+  --enable-managed-identity --zones 1 2 3
+
+# EKS via eksctl
+eksctl create cluster --name prod --region ap-south-1 \
+  --nodegroup-name workers --node-type t3.medium --nodes 3 --managed</code></pre>
+
+    <div class="info"><strong>Cluster-upgrade rhythm (the quiet killer):</strong> each cloud deprecates minor versions (~14 months). Budget 2&nbsp;hours/month: test a minor upgrade in staging, run <code>kubectl get nodes</code> &amp; conformance smoke, then upgrade prod. Teams die by "we'll do it next quarter" until the API server goes EOL on an emergency.</div>
+
+    <h2>7.4 Cloud-native CI/CD and artifact repos</h2>
+    <table>
+      <tr><th>Need</th><th>AWS</th><th>Azure</th><th>GCP</th></tr>
+      <tr><td>Native pipelines</td><td>CodePipeline + CodeBuild</td><td>Azure Pipelines</td><td>Cloud Build</td></tr>
+      <tr><td>Container registry</td><td>ECR</td><td>ACR</td><td>Artifact Registry</td></tr>
+      <tr><td>Deploy trigger (from Git/GitOps)</td><td>CodeDeploy, Argo CD</td><td>Ation pipelines / Argo CD</td><td>Cloud Deploy / Argo CD</td></tr>
+      <tr><td>Serverless deploy</td><td>Lambda / App Runner</td><td>Azure Functions / App Service</td><td>Cloud Run / Functions</td></tr>
+    </table>
+<p>Cloud-native tends to ARGUE FOR GitOps (Chapter 9) over proprietary deploy steps — invisible, versioned, reviewable. The best-staffed platform teams standardize on ECR/GCR/ACR = the registry, and Argo CD = the deploy.</p>
+
+    <h2>7.5 Multi-cloud/portability notes</h2>
+    <ul>
+      <li><strong>Containerize first, abstract later:</strong> portable images run everywhere; don't hide provider APIs behind a heavy abstraction until a cloud is a real constraint.</li>
+      <li><strong>Keep provider-specific things at the edge:</strong> bucket/queue/KMS inside a small "cloud adapter" package; the app core stays provider-agnostic.</li>
+      <li><strong>Terraform/Pulumi with provider blocks per env:</strong> your IaC is portable if the only env-delimited diffs are provider config lines.</li>
+      <li><strong>Cost symmetry:</strong> the big three all bill you for sort-of-the-same things (compute, storage, egress, managed services) — the cheapest stack is usually <em>managed services that match your team's skills</em>, not the cheapest list price.</li>
+    </ul>
+
+    <h2>7.6 Cost control as a DevOps practice (not a finance panic)</h2>
+<pre><code># AWS — tag your world, then query costs
+aws resourcegroupstaggingapi get-resources --tag-filters "Key=Environment,Values=staging"
+aws ce get-cost-and-usage --time-period Start=$(date +%Y-%m-01),End=$(date +%Y-%m-%d) \
+  --granularity MONTHLY --metrics UnblendedCost --group-by Type=TAG,Key=Environment
+
+# Azure
+az cost management query --type ActualCost --timeframe MonthToDate --scope "/subscriptions/$SUB"
+
+# GCP
+gcloud billing projects describe $PROJECT --format='value(budgetAmount)'</code></pre>
+    <p>Then wire <strong>budget alerts</strong> (AWS Budgets, Azure Cost Alerts, GCP budget notifications) at 50/80/100% with a Slack hook — before the invoice, not after. And the dullest but most effective lever: dev/test/staging environments <em>shut down at night and on weekends</em>; one cron + one start/stop script on non-prod clusters routinely cuts 30-50% of a platform bill.</p>
+
+    <h2>7.7 Best practices recap: scale, security, cost</h2>
+    <ul>
+      <li><strong>Scale:</strong> use the managed cluster autoscaler + pod autoscaler pair; enable spot/preemptible for stateless; right-size via metrics, not guesswork.</li>
+      <li><strong>Security:</strong> workload identity everywhere; no long-lived keys; CIS-benchmark the managed node image; enable VPC/NSG/private-cluster networking; use cloud KMS for secret encryption at rest.</li>
+      <li><strong>Cost:</strong> tags on 100% of resources, budget alerts, non-prod auto shutdown, and quarterly rightsizing review driven by usage data.</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <p>Cloud-native DevOps is the same loop — code, CI/CD, registry, managed Kubernetes, observability, budget — mapped onto IAM, CLIs, and managed services. The transferable asset is the pattern, not the commands; the discipline that survives all clouds is identity-first security and active, data-driven cost management.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; All workload identity is short-lived/federated; no static keys in repos or logs.</li>
+      <li>&#9744; Managed cluster is provisioned via IaC and has a version-upgrade calendar.</li>
+      <li>&#9744; Deploys go through a registry + GitOps; provider-native deploy is avoided.</li>
+      <li>&#9744; Everything is cost-tagged; budget alerts at 50/80/100% reach a chat channel.</li>
+      <li>&#9744; Non-prod environments have an automatic off-hours shutdown.</li>
+    </ul>
+
+    <nav>
+      <a href="6-monitoring-logging.html">&#8592; Prev: Monitoring &amp; Logging</a>
+      <a href="8-devsecops.html">Next: DevSecOps &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

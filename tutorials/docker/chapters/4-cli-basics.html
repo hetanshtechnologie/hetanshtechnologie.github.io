@@ -1,0 +1,147 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>4. Docker CLI Basics: run, ps, stop, rm — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 4</span>
+    <h1>Docker CLI Basics: run, ps, stop, rm</h1>
+
+    <p>This chapter is the command reference you will actually use daily. Every section pairs the command with a real invocation and a "what to check next." By the end you can run, debug, and clean up containers without looking anything up.</p>
+
+    <h2>4.1 The lifecycle in one line</h2>
+<pre><code>pull --&gt; create --&gt; start --&gt; (attach) --&gt; stop --&gt; start --&gt; ... --&gt; rm
+   \__docker run is create + start + attach in one shot__/
+</code></pre>
+    <p><em>Diagram (described in text):</em> the container state machine. pull/download feeds <code>create</code>; <code>create</code> builds the writable layer (state: created); <code>start</code> makes it running; running can pause, or stop to exited; exited can start again or be removed by <code>rm</code>. From any state, <code>docker rm -f</code> jumps straight to removed.</p>
+
+    <h2>4.2 docker run — the master command</h2>
+<pre><code># name + detach + port map + remove-on-exit, all at once
+docker run -d --name web -p 8080:80 --rm nginx
+
+# interactive shell for exploration (auto-removes when you exit)
+docker run -it --rm ubuntu:24.04 bash
+
+# environment variables + a named volume + a memory cap
+docker run -d --name api \
+  -e DATABASE_URL=postgres://user:pass@db:5432/app \
+  -v pgdata:/var/lib/postgresql/data \
+  -m 512m \
+  postgres:16-alpine
+
+# a one-shot job that exits when done
+docker run --rm busybox echo "hello from a container"
+</code></pre>
+    <table>
+      <tr><th>Flag</th><th>Meaning</th></tr>
+      <tr><td><code>-d</code></td><td>Detached: run in background</td></tr>
+      <tr><td><code>-it</code></td><td>Interactive + pseudo-TTY: for shells</td></tr>
+      <tr><td><code>-p host:container</code></td><td>Publish a container port to the host</td></tr>
+      <tr><td><code>--name</code></td><td>Give it a stable name (easy logs/stop)</td></tr>
+      <tr><td><code>--rm</code></td><td>Delete container automatically after stop</td></tr>
+      <tr><td><code>-e KEY=value</code></td><td>Environment variable</td></tr>
+      <tr><td><code>-v / --mount</code></td><td>Persistent storage (Ch. 6)</td></tr>
+      <tr><td><code>-m / --cpus</code></td><td>Memory / CPU limits</td></tr>
+      <tr><td><code>--network</code></td><td>Which network (Ch. 7)</td></tr>
+    </table>
+    <div class="warn"><strong>When run fails, the error message is the feature.</strong> "port is already allocated", "bind: address already in use", "no such image", "Dockerfile not found" — each maps to a fix in Ch. 11. Read the first line before guessing.</div>
+
+    <h2>4.3 docker ps — what is running</h2>
+<pre><code>docker ps                  # running containers only
+docker ps -a               # including exited ones
+docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}'   # table you actually want
+# alive containers: name, image, command, ports, names
+</code></pre>
+    <p>If a container isn't in <code>ps -a</code>, it either never existed or was <code>--rm</code>'d.</p>
+
+    <h2>4.4 stop, start, restart</h2>
+<pre><code>docker stop web            # SIGTERM, 10s grace, then SIGKILL
+docker stop -t 30 web      # extend the grace period
+docker start web           # restart a stopped container (same writable layer)
+docker restart web         # stop then start
+docker pause web           # freeze processes (SIGSTOP)
+docker unpause web
+</code></pre>
+
+    <h2>4.5 rm — cleanup</h2>
+<pre><code>docker rm web              # remove a stopped container
+docker rm -f web           # force: SIGKILL then remove (running containers)
+docker rm $(docker ps -aq)             # remove ALL containers
+docker system prune -f                # dead containers + unused images + build cache
+</code></pre>
+    <div class="info"><strong>Prune danger:</strong> <code>docker system prune -a</code> also removes unused <em>images</em> and stopped containers everywhere on the host — fine on your laptop, surprising on a shared CI box.</div>
+
+    <h2>4.6 exec, logs, inspect, stats</h2>
+<pre><code>docker logs web            # stdout/stderr of the container
+docker logs -f --tail 100 web
+docker exec -it web bash   # shell inside the running container
+docker exec web ps aux     # look, don't touch
+docker inspect web         # full JSON: State, NetworkSettings, Mounts, ...
+docker inspect -f '{{.State.Status}} {{.NetworkSettings.IPAddress}}' web
+docker stats --no-stream   # live CPU/mem snapshot across containers
+docker top web             # host-view process list
+</code></pre>
+    <p>Use <code>docker logs</code> before <code>docker exec</code>: 90% of "why is it failing" answers are in the logs. <code>docker inspect</code> is the truth source for every runtime detail (mounts, network, health).</p>
+
+    <h2>4.7 port, cp, diff, events</h2>
+<pre><code>docker port web           # host:container mapping in use
+docker cp web:/etc/nginx/nginx.conf ./my-nginx.conf   # copy OUT
+docker cp ./index.html web:/usr/share/nginx/html/     # copy IN (dev-only)
+docker diff web           # what the writable layer changed
+docker events --filter container=web   # live stream of lifecycle events
+</code></pre>
+
+    <h2>4.8 Putting it together: the 30-second runbook</h2>
+<pre><code>docker run -d --name api --rm -p 3000:3000 myapp:1.0.0   # run
+docker ps                                   # confirm running
+curl -sf http://localhost:3000/healthz     # smoke test
+docker logs -f api                          # watch it live
+docker exec -it api bash                    # poke inside
+docker stop api                             # stop + auto-remove (--rm)
+docker system prune -f                      # keep the box tidy
+</code></pre>
+
+    <h2>Summary</h2>
+    <p><code>run</code> (create+start+attach), <code>ps</code> (observe), <code>stop/start/restart</code> (control), <code>rm</code>/<code>prune</code> (clean), and <code>logs/exec/inspect/stats</code> (debug) cover the container lifecycle. Attach names to everything, use <code>--rm</code> for one-shots, and let error messages drive your diagnosis.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; I ran a detached container with a name, port map, and env var.</li>
+      <li>&#9744; I started, stopped, restarted, and removed that container.</li>
+      <li>&#9744; I streamed logs and exec'd into a container.</li>
+      <li>&#9744; I used <code>docker inspect -f '{{.State.Status}}'</code> on a container.</li>
+      <li>&#9744; I can clean up everything with <code>docker system prune -f</code>.</li>
+    </ul>
+
+    <nav>
+      <a href="3-images-and-containers.html">&#8592; Prev: Images and Containers</a>
+      <a href="5-dockerfile.html">Next: Building Custom Images &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

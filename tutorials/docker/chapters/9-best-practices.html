@@ -1,0 +1,119 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>9. Best Practices: Optimization, Security, Tagging — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 9</span>
+    <h1>Best Practices: Image Optimization, Security, and Tagging</h1>
+
+    <p>Anyone can make a container run; production teams make images that are <strong>small, secure, and traceable</strong>. This chapter is the pressure-test: tiny images, non-root process, scanned and signed content, and a tagging scheme that survives audits and rollbacks.</p>
+
+    <h2>9.1 Image optimization</h2>
+    <ol>
+      <li><strong>Pick a small base:</strong> <code>alpine</code> (~5 MB), <code>debian:*-slim</code>, or distroless instead of full <code>ubuntu</code>. Small bases = faster pulls, smaller attack surface, less disk.</li>
+      <li><strong>Multi-stage builds (Ch. 5):</strong> compilers and dev deps never reach the runtime stage.</li>
+      <li><strong>Combine RUN steps and clean as you go:</strong> apt/npm caches and temp files die in the same layer they were created.</li>
+      <li><strong>Context discipline:</strong> <code>.dockerignore</code> keeps <code>node_modules</code>, <code>.git</code>, <code>.env</code> out of both the context and the image.</li>
+      <li><strong>Layer hygiene:</strong> dependency-claim order (Ch. 5.5) so rebuilds reuse layers; don't create layers that contain secrets (Ch. 9.2).</li>
+    </ol>
+<pre><code># minimal apache example: single logical RUN, cache cleaned inline
+FROM debian:stable-slim
+RUN apt-get update &amp;&amp; \
+    apt-get install -y --no-install-recommends apache2 &amp;&amp; \
+    apt-get autoremove -y &amp;&amp; rm -rf /var/lib/apt/lists/*
+COPY --chown=www-data:www-data html/ /var/www/html/
+USER www-data
+EXPOSE 80
+CMD ["apache2ctl", "-DFOREGROUND"]</code></pre>
+
+    <h2>9.2 Security hardening</h2>
+    <p><strong>Run as non-root.</strong> The daemon's default is root; one <code>USER</code> instruction removes an entire class of host-escape problems:</p>
+<pre><code>RUN groupadd -r app &amp;&amp; useradd -r -g app app   # or use the official "node"/"www-data"/"postgres" users
+USER app</code></pre>
+    <p><strong>Secrets never in layers.</strong> An image layer is permanent and inspectable via <code>docker history</code>. Never <code>ARG</code> a secret or COPY a <code>.env</code>. Options:</p>
+    <ul>
+      <li>BuildKit secret mounts: <code>RUN --mount=type=secret,id=key ...</code> with <code>--secret id=key,src=./key</code> at build time — the value never lands in a layer.</li>
+      <li>Runtime secrets: env files / vault / Docker secrets / k8s secrets (Ch. 8.4, 12).</li>
+    </ul>
+<pre><code># scan your images before they meet production
+docker scout cves nginx:latest          # Docker Desktop's built-in scanner
+trivy image --severity HIGH,CRITICAL myapp:1.0.0
+# block on findings in CI (Ch. 12): trivy returns non-zero when HIGH/CRITICAL found
+</code></pre>
+    <p><strong>Pin base images by digest, and update deliberately:</strong> <code>FROM node:20-alpine@sha256:abc...</code>. Continuous rebuilds of <code>latest</code> silently change supply chain risk; scanning + renovate-style PRs keep you current on your schedule.</p>
+    <div class="warn"><strong>Don't hand the docker socket around:</strong> <code>/var/run/docker.sock</code> = root control of the host (Ch. 2 note). Never mount it into a container and never expose it to CI runners you don't fully trust.</div>
+
+    <h2>9.3 Tagging strategy</h2>
+    <table>
+      <tr><th>Scheme</th><th>Example</th><th>Notes</th></tr>
+      <tr><td><code>latest</code></td><td><code>myapp:latest</code></td><td>Mutable, ambiguous — dev convenience only</td></tr>
+      <tr><td>Semantic version</td><td><code>myapp:1.4.2</code></td><td>Release identity; the tag you deploy</td></tr>
+      <tr><td>Git commit</td><td><code>myapp:1.4.2-8f31ab6</code></td><td>Traceability: which commit shipped</td></tr>
+      <tr><td>Environment</td><td><code>myapp:staging</code></td><td>Mutable pointer to the current env build — point it at a version, don't rebuild into it</td></tr>
+      <tr><td>Digest</td><td><code>myapp@sha256:…</code></td><td>Immutable truth — what the pod actually runs</td></tr>
+    </table>
+    <p><strong>The workable policy:</strong> tag every CI build with <code>&lt;version&gt;-&lt;sha&gt;</code>, additionally tag promotions to stable version tags, deploy by digest, and let <code>latest</code> die a quiet death (or repoint it to the last stable build). For rollback you always know exactly what's on a node.</p>
+
+    <h2>9.4 Runtime limits and health</h2>
+<pre><code>docker run -d --name api --cpus 0.5 -m 512m --memory-swap 512m \
+  --pids-limit 256 \
+  --health-cmd "wget -qO- http://localhost/healthz || exit 1" \
+  myapp:1.4.2-8f31ab6
+</code></pre>
+    <p>Limits stop one container from starving a host (Ch. 10's Compose has the same knobs via <code>deploy.resources</code> on single-host, and k8s in Ch. 12). A healthcheck makes <code>depends_on: condition: service_healthy</code> (Ch. 8) and orchestrators' restarts actually meaningful.</p>
+
+    <h2>9.5 The production go/no-go list</h2>
+    <ul>
+      <li>&#9744; Image under ~100 MB (context-dependent, but the direction matters).</li>
+      <li>&#9744; Runs as non-root (<code>USER</code> set).</li>
+      <li>&#9744; No secrets in layers (<code>docker history</code> clean).</li>
+      <li>&#9744; Base pinned by digest; scanner shows 0 HIGH/CRITICAL.</li>
+      <li>&#9744; Tagged with version+sha; deploy by digest.</li>
+      <li>&#9744; Has a healthcheck and resource limits.</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <p>Production-grade images are small (multi-stage, slim bases, clean layers), hard to compromise (non-root, scanned, no secrets, digest-pinned bases), and unambiguous (version+sha tags, digest deploys). Apply runtime limits and healthchecks on top, and every image from your pipeline hits the checklist before it ships.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; My main image uses a slim base and a multi-stage build.</li>
+      <li>&#9744; No secret ever touches an image layer; I use BuildKit secret mounts.</li>
+      <li>&#9744; I scanned an image and know my HIGH/CRITICAL count.</li>
+      <li>&#9744; I pin bases by digest and tag releases as version+sha.</li>
+      <li>&#9744; My containers run as non-root and have limits + a healthcheck.</li>
+    </ul>
+
+    <nav>
+      <a href="8-compose.html">&#8592; Prev: Docker Compose</a>
+      <a href="10-real-world-example.html">Next: Real-World Example &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>10. Collaboration Tools — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 10</span>
+    <h1>Collaboration Tools: Git Workflows, ChatOps, and Agile</h1>
+
+    <p>DevOps is a <em>collaboration</em> technology. Git gives you versioned change; code review gives you shared ownership; ChatOps moves operations into the conversation people already live in; and agile ceremonies give operations a rhythm. Tools amplify whichever culture you already have — so this chapter shows both the patterns and the commands.</p>
+
+    <h2>10.1 Git workflows: choose one, commit to it</h2>
+    <table>
+      <tr><th>Workflow</th><th>Shape</th><th>Good for</th></tr>
+      <tr><td><strong>Trunk-based</strong></td><td>Everyone merges to <code>main</code> daily, short-lived branches</td><td>DevOps teams, CD, DORA elite trajectory</td></tr>
+      <tr><td><strong>GitHub Flow</strong></td><td><code>main</code> + feature branch PR per change</td><td>CAAS teams shipping often</td></tr>
+      <tr><td><strong>Git Flow</strong></td><td><code>develop</code>/<code>release</code>/<code>hotfix</code> lines</td><td>Regulated/versioned releases, monorepo SDK releases</td></tr>
+      <tr><td><strong>Monorepo</strong></td><td>Many services in one repo + path-scoped CI</td><td>Large orgs wanting atomic cross-service changes</td></tr>
+    </table>
+
+    <p>Whatever you pick, the mechanical invariants are the same:</p>
+<pre><code># keep main deployable at all times
+git switch -c feat/cart-cache origin/main
+# ... small commit(s), then:
+git push -u origin feat/cart-cache
+# open a PR with a template; CI must be green before merge
+gh pr create --title "cache product cards" --body "Closes #312"
+gh pr merge --squash --delete-branch
+# trunk-based churn: everyone pulls main and merges often</code></pre>
+
+    <div class="note"><strong>Why review discipline matters more than branch names:</strong> a PR that is only "looks fine" is a rubber stamp. DevOps-heavy orgs treat review as <em>ownership transfer</em>: it is the point where the other person must be able to operate the change. That is why the best reviews check tests, rollback, and observability — not just style.</div>
+
+    <p><strong>A PR review template for operations-minded teams</strong> (paste this into the repo's <code>PULL_REQUEST_TEMPLATE.md</code>):</p>
+<pre><code>## What does this change?
+## Why?
+## Tests added/changed?
+## Deploy/rollback plan (how do we go back?)
+## Operability
+ - [ ] Metrics / logs nothing new needed (state which)
+ - [ ] Secrets required? Where injected from?
+ - [ ] Backward compatible? DB migration steps run?
+## Screenshots / links from staging</code></pre>
+
+    <h2>10.2 Code review that catches things: a checklist</h2>
+    <ul>
+      <li>Behavior: does it do what the linked ticket says, and does it fail loudly otherwise?</li>
+      <li>Tests: did new logic get coverage, and do existing tests still mean anything?</li>
+      <li>Security: are inputs validated, secrets absent, permissions least-privilege?</li>
+      <li>Operations: is it observable, reversible, and does it degrade gracefully?</li>
+      <li>Deployment: is the deploy plan explicit and is rollback a single action?</li>
+    </ul>
+
+    <h2>10.3 ChatOps: operations inside the conversation</h2>
+    <p>ChatOps turns chat into the control/debugging surface: deploys, rollbacks, statuses, and runbooks all reachable with a message — everything a human orchestrates is recorded in the same channel. Bot frameworks: Hubot (legacy), mattermost/rocket bots, GitHub Actions webhooks-to-slack, Slack Bolt, or lightweight <code>/slash</code> commands.</p>
+
+<pre><code># Botkit/express example: "/deploy api" from Slack
+const { createEventAdapter } = require('@slack/events-api');
+app.command('/deploy', async ({ command, ack, respond }) =&gt; {
+  await ack();
+  const [ , env = 'staging', image ] = command.text.split(/\s+/);
+  runPipeline(env, image).then(
+    msg =&gt; respond(`:ok: deploy ${image} to ${env} started — #ops-{env}`),
+    err =&gt; respond(`:x: deploy failed: ${err.message} (see trace)`));
+});</code></pre>
+    <p>What ChatOps really buys you: <strong>every action is a logged, shared, auditable side-effect of a conversation</strong> — the "who ran that?" question disappears, and the on-call wiki lives beside the command.</p>
+
+    <h2>10.4 Agile ceremonies wired for operations</h2>
+    <table>
+      <tr><th>Ceremony</th><th>Ops lens</th></tr>
+      <tr><td>Daily standup</td><td>Ask "what is blocking the pipeline?" — treat a red build like a fire.</td></tr>
+      <tr><td>Sprint planning</td><td>Include reliability work (alerts debt, cluster upgrades, runbook fixes) as first-class stories — it always loses in the backlog otherwise.</td></tr>
+      <tr><td>Review/demo</td><td>Demo the <em>deployment</em>, not just the feature: what did this take to ship, what will it take to run?</td></tr>
+      <tr><td>Retrospective</td><td>Blameless incident retro feeds improvement items; velocity only counts if stability holds.</td></tr>
+      <tr><td>On-call handoff</td><td>The "seam" between shifts is where tribal knowledge dies — write the 5-line state of the world, not a link to the wiki.</td></tr>
+    </table>
+
+    <div class="info"><strong>Ways of working that scale (not ceremonial fluff):</strong> (1) <em>Small batches</em>: story ships Monday, not Friday. (2) <em>Definition of done includes observability + rollback</em>. (3) <em>Shared on-call rotation</em>: devs rotate for the services they write — "you built it, you run it" is the collaboration tool that makes the culture real. (4) <em>Pause the train for the red build</em> — five minutes wasted now beats an hour of batch fixes later.</div>
+
+    <h2>10.5 Documentation as collaboration artifact</h2>
+    <p>Doc-as-code is the quiet cousin: runbooks, architecture, and "how we do X" should live in git and deploy like code (<code>mkdocs</code>/<code>docusaurus</code>/generic-stack), with a link from every alert and every release note back to the runbook. A runbook template that on-call actually reads:</p>
+<pre><code># Runbook: API high error rate
+## Symptoms
+  "ApiHighErrorRate" page; p95 &gt; 2s; 5xx &gt; 5% for 10m.
+## Impact
+  All API consumers; checkout refuses.
+## First actions (2 min)
+  1. Open Grafana: /d/api-latency ; check for deploy-markers in last 30m.
+  2. If a deploy is recent: `argocd app rollback api' or `kubectl rollout undo deploy/api`.
+  3. Check DB saturation + queue depth dashboards.
+## If still broken (10 min)
+  ...escalation path, who to call, what to say...
+## Post-incident
+  File retro; attach alert id; update this file with what you learned.</code></pre>
+
+    <h2>Summary</h2>
+    <p>Collaboration is the operating layer on top of the pipelines. Choose a Git workflow and hold its invariants, review for operability not just style, move operations into chat for auditability, run agile ceremonies with an ops lens, and treat docs as deployed code that every alert links to.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; Team uses one documented Git workflow; main is always deployable.</li>
+      <li>&#9744; PR template includes rollback and operability sections; reviews check them.</li>
+      <li>&#9744; Deploys/rollbacks can be triggered from chat with a full audit trail.</li>
+      <li>&#9744; On-call rotation includes service owners; runbooks exist per alert and are linked.</li>
+      <li>&#9744; Reliability work is scheduled (not only "when it breaks").</li>
+    </ul>
+
+    <nav>
+      <a href="9-automation-gitops.html">&#8592; Prev: Automation &amp; GitOps</a>
+      <a href="11-case-studies.html">Next: Case Studies &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

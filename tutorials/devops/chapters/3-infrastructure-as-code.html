@@ -1,0 +1,249 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3. Infrastructure as Code — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 3</span>
+    <h1>Infrastructure as Code</h1>
+
+    <p><strong>Infrastructure as Code (IaC)</strong> means managing your infrastructure — networks, instances, load balancers, databases — through machine-readable definition files instead of clicking in a web console. Two philosophies exist, and knowing which one you're using matters more than the brand name:</p>
+
+    <table>
+      <tr><th></th><th>Declarative (Terraform, Pulumi, cloud native)</th><th>Imperative (Ansible, shell)</th></tr>
+      <tr><td>You state</td><td><em>Desired end state</em></td><td><em>Steps to get there</em></td></tr>
+      <tr><td>Idempotent?</td><td>Yes, by construction (converges)</td><td>Only if you write it to be (plugins help)</td></tr>
+      <tr><td>Drift handling</td><td>Detected on every <code>plan</code>/<code>apply</code></td><td>Re-runs steps; drift not always surfaced</td></tr>
+      <tr><td>Best for</td><td>Provisioning cloud resources</td><td>Configuring machines/apps (Day-2)</td></tr>
+      <tr><td>Mental model</td><td>"What should exist?"</td><td>"What should I do?"</td></tr>
+    </table>
+
+    <h2>3.1 Terraform: declarative provisioning with state</h2>
+    <p>Terraform (HashiCorp) describes resources in HCL. The heart of Terraform is the <strong>state</strong>: a record of what actually exists. Treat state as a liability — keep it in a remote backend (S3 + DynamoDB, Terraform Cloud, Azure Blob, GCS) with locking, never in the repo alone.</p>
+
+    <p>A minimum-but-real module layout:</p>
+<pre><code>.
+&#9500;&#9472;&#9472; main.tf         # resources
+&#9500;&#9472;&#9472; variables.tf    # inputs with descriptions + defaults
+&#9500;&#9472;&#9472; outputs.tf      # useful values after apply
+&#9500;&#9472;&#9472; versions.tf     # provider + backend constraints
+&#9500;&#9472;&#9472; backend.tf      # remote state config
+</code></pre>
+
+<pre><code># versions.tf
+terraform {
+  required_version = "&gt;= 1.5"
+  backend "s3" {
+    bucket         = "my-org-tfstate"
+    key            = "prod/vpc/terraform.tfstate"
+    region         = "ap-south-1"
+    dynamodb_table = "terraform-locks"   # prevents concurrent applies
+    encrypt        = true
+  }
+  required_providers {
+    aws = { source = "hashicorp/aws", version = "~&gt; 5.0" }
+  }
+}</code></pre>
+
+<pre><code># main.tf — a network + autoscaling web tier
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_hostnames = true
+  tags = { Name = "prod-vpc", Environment = "prod" }
+}
+
+resource "aws_subnet" "public" {
+  count                   = 3
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index)
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = true
+}
+
+resource "aws_launch_template" "web" {
+  image_id      = "ami-0abcdef1234567890"   # source from a variable per environment
+  instance_type = var.instance_type
+  user_data = base64encode(&lt;&lt;-USERDATA
+    #!/bin/bash
+    systemctl enable --now nginx
+  USERDATA
+  )
+}
+
+resource "aws_autoscaling_group" "web" {
+  vpc_zone_identifier = aws_subnet.public[*].id
+  desired_capacity    = 2
+  min_size            = 1
+  max_size            = 6
+  target_group_arns   = [aws_lb_target_group.web.arn]
+  launch_template {
+    id      = aws_launch_template.web.id
+    version = "$Latest"
+  }
+  tag {
+    key                 = "Name"
+    value               = "web-asg"
+    propagate_at_launch = true
+  }
+}
+
+resource "aws_lb" "web" { name = "prod-web-alb" }
+resource "aws_lb_listener" "web" {
+  load_balancer_arn = aws_lb.web.arn
+  port              = 443
+  protocol          = "HTTPS"
+  default_action { type = "forward", target_group_arn = aws_lb_target_group.web.arn }
+}
+resource "aws_lb_target_group" "web" { port = 80, protocol = "HTTP", vpc_id = aws_vpc.main.id }</code></pre>
+
+    <p>The workflow is the discipline:</p>
+<pre><code>terraform init                       # download providers, init backend
+terraform plan -out=tfplan           # diff desired vs state (review this!)
+terraform apply tfplan               # only after humans (or policy) approve
+terraform fmt / validate / tflint    # linting gate in CI
+terraform state list                 # inspect what exists</code></pre>
+
+    <div class="warn"><strong>Apply discipline:</strong> enforce the rule "never <code>apply</code> alone, always from a reviewed plan." Put <code>terraform plan</code> in your MR pipeline, feed it to a plan review step, and use <code>terraform apply -parallelism=10</code> with locking. A deploy that deletes the production VPC is a state-management incident, not a Terraform incident.</div>
+
+    <h2>3.2 Ansible: configuration management, agentless</h2>
+    <p>Ansible connects over SSH, pushes <em>tasks</em> (modules), and can bootstrap machines, deploy apps, and enforce config. It is agentless and imperative-but-idempotent because modules test state before changing it.</p>
+
+<pre><code># inventory/production.yml
+all:
+  hosts:
+    web1: { ansible_host: 10.0.1.10 }
+    web2: { ansible_host: 10.0.1.11 }
+  vars:
+    ansible_user: ubuntu
+    ansible_ssh_private_key_file: ~/.ssh/id_ed25519</code></pre>
+
+<pre><code># playbooks/web.yml
+- name: Configure web servers
+  hosts: web
+  become: true
+  vars:
+    app_release: "1.2.3"
+  tasks:
+    - name: Install nginx
+      apt: { name: nginx, state: present, update_cache: true }
+    - name: Deploy config from template
+      template:
+        src: templates/nginx.conf.j2
+        dest: /etc/nginx/sites-available/app
+      notify: reload nginx
+    - name: Enable site
+      file:
+        src: /etc/nginx/sites-available/app
+        dest: /etc/nginx/sites-enabled/app
+        state: link
+    - name: Deploy application version
+      get_url:
+        url: "https://releases.example.com/app-{{ app_release }}.tar.gz"
+        dest: /opt/app/app.tar.gz
+  handlers:
+    - name: reload nginx
+      service: { name: nginx, state: reloaded }</code></pre>
+
+<pre><code>ansible-playbook -i inventory/production.yml playbooks/web.yml --check</code></pre>
+    <p><code>--check</code> is a dry run; <code>--diff</code> shows changes. Run both in CI before touch production.</p>
+
+    <div class="info"><strong>Composition pattern:</strong> Terraform provisions the VM and passes its IP to an inventory; Ansible configures the VM. This "Terraform raises the building, Ansible moves in the furniture" split is the most common production architecture in the wild — and it maps cleanly to two teams owning different risks.</div>
+
+    <h2>3.3 Pulumi: IaC with real programming languages</h2>
+    <p>Pulumi is declarative (it still converges to desired state) but written in TypeScript/Python/Go/C#. That buys you loops, conditionals, functions, and your language's type system — at the cost of a little extra runtime. Same workflow: <code>preview</code>, then <code>up</code>.</p>
+
+<pre><code>// pulumi/typescript/s3.ts — actual program, not a template
+import * as aws from "@pulumi/aws";
+import * as pulumi from "@pulumi/pulumi";
+
+const config = new pulumi.Config("app");
+const env = config.require("environment");
+
+const bucket = new aws.s3.Bucket("app-assets", {
+  acl: "private",
+  tags: { Environment: env },
+});
+
+const policy = aws.iam.getPolicyDocument({
+  statements: [{
+    actions:   ["s3:GetObject"],
+    resources: [pulumi.interpolate`${bucket.arn}/*`],
+    principals: [{ type: "*", identifiers: ["*"] }],
+  }],
+});
+
+new aws.s3.BucketPolicy("app-policy", {
+  bucket: bucket.id,
+  policy: policy.apply(JSON.stringify),
+});
+
+export const bucketName = bucket.id;
+export const region = aws.getRegion().then(r => r.name);</code></pre>
+
+<pre><code>pulumi preview                 # diff
+pulumi up --yes                # apply
+pulumi stack select production # switch environments
+pulumi stack output bucketName</code></pre>
+
+    <h2>3.4 Best practices across any IaC tool</h2>
+    <ul>
+      <li><strong>One backend, locked:</strong> remote state + state lock + encrypted. Never <code>apply</code> with a local stale state in a team.</li>
+      <li><strong>Environments as separate states/stacks</strong> (<code>dev</code>, <code>staging</code>, <code>prod</code>) so a bad change is containable.</li>
+      <li><strong>Variables everywhere, no hardcoded values:</strong> drive region, size, and count from inputs; change size in one line.</li>
+      <li><strong>Tag everything for cost:</strong> <code>CostCenter</code>, <code>Environment</code>, <code>Owner</code> tags are the prerequisite for both cost allocation and drift queries.</li>
+      <li><strong>Plan gating in CI:</strong> run <code>plan</code>/<code>preview</code> in pipelines, attach it to the MR, and let policy-as-code (OPA/Sentinel/Checkov, see Chapter 8) block dangerous diffs.</li>
+      <li><strong>Minimize blast radius:</strong> module count intentionally; a giant all-in-one state file makes review impossible and change dangerous.</li>
+      <li><strong>Per-environment secrets:</strong> wire <em>references</em> to a secrets manager, never values, into your IaC.</li>
+    </ul>
+
+    <h2>3.5 Fixing a drift incident (workflow)</h2>
+<pre><code>terraform plan                     # shows what drifted vs state
+terraform state list               # confirm the resource actually exists
+terraform import aws_instance.web i-0abc123   # adopt an out-of-band resource
+terraform apply                    # converge
+# prevention: AWS Config / Azure Policy / GCP Config Controller + periodic drift scans in CI</code></pre>
+
+    <h2>Summary</h2>
+    <p>IaC turns infrastructure into a reviewable, versioned, reproducible artifact. Declarative tools (Terraform, Pulumi) own provisioning with stateful convergence; imperative tools (Ansible) own configuration. Neither replaces the other; both replace the console clickers and the "I must have created it in 2019" incidents.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; All cloud resources are defined in code, versioned in Git.</li>
+      <li>&#9744; State is remote, locked, encrypted — never a local-only file.</li>
+      <li>&#9744; Environments are separate states; <code>plan</code>/<code>preview</code> is gated in CI for review.</li>
+      <li>&#9744; All resources carry cost/ownership tags.</li>
+      <li>&#9744; Secrets are referenced from a vault, not embedded in IaC.</li>
+    </ul>
+
+    <nav>
+      <a href="2-ci-cd-pipelines.html">&#8592; Prev: CI/CD Pipelines</a>
+      <a href="4-containerization-docker.html">Next: Containerization &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

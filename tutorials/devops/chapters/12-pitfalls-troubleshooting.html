@@ -1,0 +1,123 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>12. Pitfalls, Troubleshooting &amp; Interview Q&amp;A — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 12</span>
+    <h1>Pitfalls, Troubleshooting &amp; Interview Q&amp;A</h1>
+
+    <p>The difference between a DevOps engineer and a DevOps <em>admin</em> is whether you debug systems by reading them, not by praying. This chapter gives you the failure modes to recognize instantly, a diagnostic loop that works, and the interview questions you will actually be asked — with answers you can build from.</p>
+
+    <h2>12.1 The top ten pitfalls (and the fix before they bite)</h2>
+    <table>
+      <tr><th>#</th><th>Pitfall</th><th>Why it hurts</th><th>Fix</th></tr>
+      <tr><td>1</td><td>No CI gate on main</td><td>Red main = everyone's merge blocked, every day</td><td>Main protected; green build required to merge</td></tr>
+      <tr><td>2</td><td>Config drift between envs</td><td>"Works in staging" is a lie</td><td>Same IaC + same manifests per env; secrets differ only</td></tr>
+      <tr><td>3</td><td>Deploying by hand from a laptop</td><td>Untraceable, unreproducible, unrollbackable</td><td>GitOps controller only (ch. 9)</td></tr>
+      <tr><td>4</td><td>No resource limits anywhere</td><td>A noisy pod OOMs the node; everything pimps</td><td>requests + limits + quotas by default</td></tr>
+      <tr><td>5</td><td>Alerts that alarm 24/7</td><td>Nobody listens; real pages get missed</td><td>Windows, symptoms not causes, kill bad alerts (ch. 6)</td></tr>
+      <tr><td>6</td><td>Secrets in repos/images/env dumps</td><td>Breach in progress that stays after the fix</td><td>Vault/secrets manager, scan in PR, rotate on leak</td></tr>
+      <tr><td>7</td><td>Long-lived feature branches</td><td>Integration hell; merge = large batch</td><td>Trunk-based + short branches + feature flags</td></tr>
+      <tr><td>8</td><td>Monolithic state file / giant apply</td><td>One bad line edits everything; review impossible</td><td>Split states/stacks; plan gating; small diffs</td></tr>
+      <tr><td>9</td><td>No rollback rehearsed</td><td>First rollback happens in an incident</td><td>Drill rollback in staging on a schedule</td></tr>
+      <tr><td>10</td><td>Upgrade debt in clusters/deps</td><td>EOL control plane, CVE backlog, stuck platform</td><td>Upgrade calendar + Renovate/Dependabot cadence</td></tr>
+    </table>
+
+    <h2>12.2 The diagnostic loop that ends incidents</h2>
+<pre><code>1. Describe the SYSTEM: what was the last change? (deploys, config, traffic, provider incident)
+2. Establish a BASELINE: is this new, or always been broken?
+3. Narrow with FIFTH discipline: logs --&gt; metrics --&gt; traces --&gt; config --&gt; capacity
+4. Form a HYPOTHESIS; verify with the cheapest check first
+5. Apply the FIX or a mitigation (scale/flag-off/rollback); confirm with data
+6. Retro: why was it possible? add alert/runbook/policy so it cannot recur silently
+</code></pre>
+    <p><em>Diagram (described in text):</em> a loop, not a ladder — after the fix you re-enter at step 1 for confirmation, and the retro feeds improvements back into monitoring ("add an alert here") so the next loop is faster.</p>
+
+    <h3>Forensic commands per layer</h3>
+<pre><code># K8s layer
+kubectl get events --sort-by=.metadata.creationTimestamp
+kubectl describe pod &lt;name&gt; | grep -A5 Events
+kubectl logs &lt;pod&gt; --previous
+
+# Container layer
+docker inspect &lt;id&gt; | jq '.[0].State'
+docker stats --no-stream
+
+# Network / service layer
+kubectl get endpoints; dig +short svc.default.svc.cluster.local
+kubectl exec -it &lt;pod&gt; -- curl -v http://&lt;svc&gt;/
+
+# Resource/capacity layer
+kubectl top nodes; kubectl top pods
+df -h / /var/lib; journalctl -u kubelet -n 100 --no-pager
+
+# IAM/cloud layer (did permissions change?)
+aws iam list-role-policies --role-name the-role; az role assignment list</code></pre>
+
+    <div class="warn"><strong>The #1 debugging failure mode:</strong> jumping to "fix" without "what changed?" first. Most incidents map to a change in the last 30 minutes (deploy, config, dependency, cloud quota). Get the deploy-marker, the last ConfigMap edit, and the traffic spike on one screen before touching anything.</div>
+
+    <h2>12.3 Interview Q&amp;A (the questions that actually come up)</h2>
+    <p><strong>Q: What is the difference between Continuous Delivery and Continuous Deployment?</strong><br>
+    CD-delivery: every change is automatically built, tested and release-ready, but a human/process may promote it. CD-deployment: every change that passes goes straight to production automatically. Delivery keeps a rollout gate you can use for peak hours or compliance; deployment removes it — the gate then lives in feature flags and metrics.</p>
+
+    <p><strong>Q: A pod is CrashLoopBackOff. Walk me through your diagnosis.</strong><br>
+    Order: (1) events for the why (ImagePullBackOff? OOMKilled? start failure?), (2) describe the pod + previous logs, (3) check mounts/secrets/config referenced by the pod, (4) check resource limits vs observed usage, (5) `kubectl exec` for a shell only if the app boots enough. The fix follows the layer that answers first — wrong image tag, missing secret, command crashing, or OOM.</p>
+
+    <p><strong>Q: How do you make a deployment reversible without "reverting code"?</strong><br>
+    Every release should have <em>two</em> levers: the artifact (roll back the image tag — <code>rollout undo</code> or GitOps `app rollback`) and the behavior (feature flags — turn the slow path off). Reverting code is the bluntest and slowest of the three; the raw onboarding move is to rehearse both so you know which knobs exist before traffic breaks.</p>
+
+    <p><strong>Q: Terraform sometimes complains state mismatches reality. What do you do?</strong><br>
+    State ls —&gt; state show —&gt; plan to see the diff. If a resource exists out-of-band, `import` it rather than forcing replacement; if it was deleted elsewhere, `state rm` the gone key and plan/create. Never fix by running `apply` blind or deleting state; lock state and review the plan. The durable fix is drift detection in CI.</p>
+
+    <p><strong>Q: Your monitoring shows 5-minute peaks of CPU but SLO latency is still fine. Act?</strong><br>
+    That's a saturation signal — correlate deploy/time-of-day/batch jobs with the peaks, add limits if a burst is pathological, and distinguish "alert-worthy" (latency/errors) from "trend-worthy" (CPU). Scale decisions go to HPA on the request-relative metric, not raw CPU; resize the node pool or add autoscaler only if capacity, not spikes, is the constraint.</p>
+
+    <p><strong>Q: What does "shift left" mean concretely?</strong><br>
+    Move security/quality checks back into the branch: lint, secret scan, SAST, IaC scan, dependency scan on the PR; image sign + SBOM at build; admission policy at deploy. Cost of a finding multiplies by ~10x per stage you let it pass — shift-left is a cost-of-incident argument, not a slogan.</p>
+
+    <div class="info"><strong>Interview meta-tip:</strong> the answers above are templates of <em>structure</em>, not scripts. Interviewers probe how you order steps, so practice the diagnostic loop and the "what changed → verify → fix → confirm → retro" shape. Structure proves judgment; memorized trivia proves nothing.</div>
+
+    <h2>Summary</h2>
+    <p>The pitfalls are all the same root: process ran ahead of automation, or automation ahead of process. Troubleshooting is a disciplined loop anchored on "what changed," then cheapest-first layers. And interviews, like incidents, reward ordered thinking over flat facts.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; I recognize all ten pitfalls and can state the fix for each.</li>
+      <li>&#9744; I can run the diagnostic loop from memory (change→baseline→layers→hypothesis→fix→retro).</li>
+      <li>&#9744; I can answer the six interview questions with ordered reasoning (not only example traces).</li>
+      <li>&#9744; I have rehearsed at least one real rollback in staging.</li>
+    </ul>
+
+    <nav>
+      <a href="11-case-studies.html">&#8592; Prev: Case Studies</a>
+      <a href="13-future-of-devops.html">Next: The Future of DevOps &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

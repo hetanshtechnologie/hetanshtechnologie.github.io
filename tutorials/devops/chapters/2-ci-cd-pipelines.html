@@ -1,0 +1,231 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>2. CI/CD Pipelines — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 2</span>
+    <h1>CI/CD Pipelines: Concepts and Tools</h1>
+
+    <p><strong>Continuous Integration (CI)</strong> is the practice of merging every developer's changes into a shared trunk frequently and verifying the result with an automated build and test suite on every push. <strong>Continuous Delivery (CD)</strong> extends this: every change that survives CI is automatically built into a releasable artifact and staged; <strong>Continuous Deployment</strong> goes one step further and ships it to production automatically. The difference between Delivery and Deployment is the single manual approval (or not) before the final stage.</p>
+
+    <h2>2.1 The pipeline as a value stream</h2>
+<pre><code>commit --&gt; lint --&gt; unit tests --&gt; build artifact --&gt; container image --&gt; scan --&gt;
+staging deployment --&gt; integration/e2e tests --&gt; [approval] --&gt; production deployment --&gt; smoke checks
+</code></pre>
+    <p><em>Diagram (described in text):</em> a linear pipeline. Every stage gates the next. Stages early in the loop are cheap and fast (seconds); later stages are slower and more realistic. You want failures to surface as early and as cheaply as possible, so you deliberately keep the delta between staging and production as small as possible.</p>
+
+    <p>Design rules that separate good pipelines from decoration:</p>
+    <ul>
+      <li><strong>Fail fast:</strong> run the fastest checks first; a lint error should not wait behind the e2e suite.</li>
+      <li><strong>Single source of truth:</strong> the artifact built in CI is the exact artifact deployed to prod. Never rebuild at deploy time.</li>
+      <li><strong>Idempotent stages:</strong> re-running a stage must be safe and produce the same result.</li>
+      <li><strong>Environment parity:</strong> staging injects real config, real queue, close-to-real data. If staging differs from prod, your pipeline gives you false confidence.</li>
+      <li><strong>Traceability:</strong> every deployment is tied to a commit SHA and a build number, so you can say "exactly this code is live".</li>
+    </ul>
+
+    <h2>2.2 GitHub Actions — the fastest path to a modern pipeline</h2>
+    <p>Workflows live in <code>.github/workflows/</code> as YAML. Here is a complete CI + CD pipeline for a Node.js service that deploys to a container platform:</p>
+
+<pre><code># .github/workflows/deploy.yml
+name: build-test-deploy
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  build:
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write          # needed to push to GHCR
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t $IMAGE .
+      - run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - run: docker push "$IMAGE"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production    # can add required reviewers here
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            docker pull "$IMAGE"
+            docker service update --image "$IMAGE" myservice
+      - name: Smoke check
+        run: curl -fsS https://example.com/healthz</code></pre>
+
+    <p>Key mechanics to internalize:</p>
+    <ul>
+      <li><code>on</code> defines triggers (branches, tags, PRs, schedules, manual via <code>workflow_dispatch</code>).</li>
+      <li><code>needs</code> creates a DAG; <code>if</code> conditionals gate stages.</li>
+      <li><code>environments</code> give you environment-scoped secrets and optional approval gates.</li>
+      <li><code>${{ secrets.* }}</code> and <code>${{ github.* }}</code> are contextual substitutions — never hardcode credentials.</li>
+      <li>Matrix builds let one workflow run the same job across versions/platforms.</li>
+    </ul>
+
+    <h2>2.3 Jenkins — the extensible classic</h2>
+    <p>Jenkins shines where compliance, plugins, and on-prem infrastructure are involved. Modern Jenkins is <em>Jenkins as Code</em> with the <strong>Jenkinsfile</strong> in the repo, using declarative pipeline syntax:</p>
+
+<pre><code>// Jenkinsfile
+pipeline {
+    agent any
+    environment {
+        IMAGE = "myregistry/${env.JOB_NAME}:${env.GIT_COMMIT}"
+    }
+    stages {
+        stage('Checkout')   { steps { checkout scm } }
+        stage('Test') {
+            steps {
+                sh 'npm ci'
+                sh 'npm test'
+            }
+        }
+        stage('Build Image') {
+            steps {
+                sh 'docker build -t ${IMAGE} .'
+            }
+        }
+        stage('Push') {
+            when { branch 'main' }          // CD: only on main
+            steps {
+                sh 'docker push ${IMAGE}'
+            }
+        }
+        stage('Deploy') {
+            when { branch 'main' }
+            steps {
+                // declarative steps, or call a shared library function
+                sh 'ansible-playbook -i inventory deploy.yml -e image=${IMAGE}'
+            }
+        }
+    }
+    post {
+        failure { slackSend channel: '#deploys', message: "Build failed: ${env.BUILD_URL}" }
+    }
+}</code></pre>
+
+    <div class="info"><strong>Jenkins hygiene:</strong> run the controller with a persistent volume, keep plugins pinned and upgraded, use the Jenkins shared-library pattern for reusable pipeline code, and never store secrets in the Jenkinsfile — use Jenkins Credentials (bound as <code>credentials('id')</code>). Jenkins controllers that drift into "tribal knowledge" are the #1 maintenance trap.</div>
+
+    <h2>2.4 Azure DevOps — the integrated Microsoft stack</h2>
+    <p>Azure Pipelines uses <code>azure-pipelines.yml</code>, supports Microsoft- or self-hosted agents, and integrates naturally with Azure, GitHub repos, and ARM/Bicep:</p>
+
+<pre><code># azure-pipelines.yml
+trigger:
+  branches: { include: [ main ] }
+pool:
+  vmImage: ubuntu-latest
+variables:
+  imageName: 'myapp'
+  tag: '$(Build.BuildId)'
+steps:
+- task: UseNode@1
+  inputs: { version: 20 }
+- script: |
+    npm ci
+    npm test
+  displayName: 'Install and test'
+- script: |
+    docker build -t $(imageName):$(tag) .
+  displayName: 'Build image'
+- task: Docker@2
+  inputs:
+    command: push
+    containerRegistry: 'acr-service-connection'
+    repository: $(imageName)
+    tags: $(tag)
+  displayName: 'Push to ACR'
+- task: AzureWebAppContainer@1
+  inputs:
+    azureSubscription: 'pay-as-you-go'
+    appName: 'my-webapp'
+    imageName: 'myregistry.azurecr.io/$(imageName):$(tag)'
+  displayName: 'Deploy to App Service'</code></pre>
+    <p>Azure DevOps couples three products: <strong>Azure Pipelines</strong> (CI/CD), <strong>Azure Repos</strong> (Git), and <strong>Azure Boards</strong> (work items) — plus test plans and a marketplace of tasks. The pipeline YAML is portable to any agent OS, and service connections handle credential management to your subscription.</p>
+
+    <h2>2.5 Choosing and hardening a CI/CD tool</h2>
+    <table>
+      <tr><th>Criterion</th><th>GitHub Actions</th><th>Jenkins</th><th>Azure DevOps</th></tr>
+      <tr><td>Hosting</td><td>SaaS (also self-hosted runners)</td><td>Self-hosted typically</td><td>SaaS with on-prem agents</td></tr>
+      <tr><td>Language ecosystem</td><td>Excellent (huge Actions marketplace)</td><td>Any (plugins); Groovy DSL</td><td>Excellent for .NET/Azure</td></tr>
+      <tr><td>On-prem/air-gapped</td><td>Self-hosted runners</td><td>Natural fit</td><td>Azure DevOps Server</td></tr>
+      <tr><td>Cost model</td><td>Free minutes for public, metered private</td><td>Infra cost only</td><td>Seats + agent minutes</td></tr>
+    </table>
+
+    <h2>2.6 Security &amp; cost best practices for pipelines</h2>
+    <ul>
+      <li><strong>Least-privilege credentials:</strong> grant a deploy token only the scopes needed for one environment; rotate them; never put secrets in logs (gate with <code>::add-mask::</code> in Actions or Jenkins credential masking).</li>
+      <li><strong>Pin third-party actions:</strong> reference by full SHA (<code>uses: actions/checkout@<em>sha</em></code>) instead of a floating tag; review what you pull in.</li>
+      <li><strong>Gate PRs from forks:</strong> never run secrets-bearing jobs on untrusted code unless you re-approve.</li>
+      <li><strong>Cache deliberately:</strong> caching speeds builds but bloats; set expiry and only cache immutable stuff (deps, not build outputs).</li>
+      <li><strong>Right-size runners and use concurrency limits</strong> — CI cost is the largest hidden cloud line-item; cap parallel jobs per repo.</li>
+      <li><strong>Make deploys reversible:</strong> every CD stage should have a one-command rollback (previous image or tag).</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <p>CI makes every commit verifiable; CD makes every verified commit releasable. A good pipeline is a fast, idempotent, traceable value stream with early failure and environment parity. GitHub Actions, Jenkins, and Azure DevOps all implement the same model; pick on fit, not hype, and harden secrets and supply chain regardless of platform.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; My latest commit on <code>main</code> triggers a build, test, and artifact creation automatically.</li>
+      <li>&#9744; The artifact built in CI is identical to what deploys (no rebuild at deploy).</li>
+      <li>&#9744; Secrets come from a vault/secret store, never the pipeline file or logs.</li>
+      <li>&#9744; Every deployment is traceable to a commit SHA and has a documented rollback.</li>
+      <li>&#9744; Third-party pipeline actions/plugins are pinned and reviewed.</li>
+    </ul>
+
+    <nav>
+      <a href="1-introduction.html">&#8592; Prev: Introduction</a>
+      <a href="3-infrastructure-as-code.html">Next: Infrastructure as Code &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,199 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>5. Advanced Topics — Kubernetes for Beginners</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 5</span>
+    <h1>Advanced Topics: Updates, Storage, Ingress, and Observability</h1>
+
+    <p>You already know enough Kubernetes to run a real service. This chapter adds the production skills: shipping changes <em>without downtime</em>, surviving pod restarts with persistent storage, routing hostnames to your apps, and knowing what is happening in your cluster.</p>
+
+    <h2>1. Rolling updates and rollbacks</h2>
+    <p>When you change the image (or any pod template field) of a Deployment, Kubernetes does a <strong>rolling update</strong>: it starts new pods while the old ones are still serving, waits for the new ones to become healthy, then removes the old ones. Zero downtime, by default. (Strategy <code>recreate</code> exists, but it kills everything first — for most apps, rolling wins.)</p>
+
+    <p>Demo (re-apply your nginx Deployment from Chapter 4 first, then):</p>
+<pre><code># bump the image and record WHY this change happened
+kubectl set image deployment/nginx-deployment nginx=nginx:1.26
+kubectl rollout status deployment/nginx-deployment     # watch it complete
+kubectl rollout history deployment/nginx-deployment    # every version + change-cause</code></pre>
+    <p>Now imagine the new image is broken. Roll back in one command — no manual undo:</p>
+<pre><code>kubectl rollout undo deployment/nginx-deployment
+kubectl rollout status deployment/nginx-deployment</code></pre>
+
+    <h3>How Kubernetes controls the update</h3>
+    <table>
+      <tr><th>Setting</th><th>Meaning</th><th>Sane default / example</th></tr>
+      <tr><td><code>maxSurge</code></td><td>How many extra pods (beyond desired) may exist during update</td><td><code>25%</code></td></tr>
+      <tr><td><code>maxUnavailable</code></td><td>How many old pods may be down at once</td><td><code>25%</code></td></tr>
+      <tr><td><code>minReadySeconds</code></td><td>How long a pod must be healthy before it counts as ready</td><td><code>5</code>&nbsp;for slow-starting apps</td></tr>
+      <tr><td><code>progressDeadlineSeconds</code></td><td>Give up &amp; mark rollout "failed" if stuck</td><td><code>600</code></td></tr>
+    </table>
+
+    <div class="info"><strong>Why look at this at all:</strong> the default strategy is great, but for a new release that crashes on startup, Kotlin-style "the rollout waits forever" happens when <code>maxUnavailable</code> is small. Add a <strong>readiness probe</strong> (Section 4) so Kubernetes knows a pod is actually serving before counting it as done.</div>
+
+    <h2>2. Persistent Volumes and Persistent Volume Claims</h2>
+    <p>Pods are disposable, so their storage must not be tied to the pod's life. Kubernetes separates two concerns:</p>
+    <ul>
+      <li><strong>PersistentVolume (PV)</strong> — the storage itself (a disk, an NFS share, a cloud volume). Cluster-level resource.</li>
+      <li><strong>PersistentVolumeClaim (PVC)</strong> — a request: "give me 1&nbsp;Gi of fast storage, read-write." Treated like a disk you mount into pods.</li>
+    </ul>
+
+    <p>In most modern clusters you skip creating PVs yourself and use a <strong>StorageClass</strong> that provisions storage on demand (dynamic provisioning). On Minikube this works out of the box:</p>
+<pre><code>kubectl get storageclass            # "standard" = dynamically provisions local volumes</code></pre>
+
+    <p>Create a PVC and use it in a pod:</p>
+<pre><code># pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-pvc
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi</code></pre>
+
+<pre><code># pod-with-storage.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: storage-test
+spec:
+  containers:
+  - name: writer
+    image: busybox
+    command: ["sh", "-c", "echo 'survives restart' &gt; /data/hello.txt; sleep 3600"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: data-pvc</code></pre>
+<pre><code>kubectl apply -f pvc.yaml -f pod-with-storage.yaml
+kubectl exec storage-test -- cat /data/hello.txt    # file exists
+kubectl delete pod storage-test
+kubectl apply -f pod-with-storage.yaml               # new pod, same PVC
+kubectl exec storage-test -- cat /data/hello.txt    # file STILL exists</code></pre>
+
+    <h3>Access modes you will meet</h3>
+    <table>
+      <tr><th>Mode</th><th>Meaning</th><th>Typical use</th></tr>
+      <tr><td><code>ReadWriteOnce</code> (RWO)</td><td>One node can mount, read &amp; write</td><td>Databases, caches </td></tr>
+      <tr><td><code>ReadOnlyMany</code> (ROX)</td><td>Many nodes, read-only</td><td>Shared config, read replicas</td></tr>
+      <tr><td><code>ReadWriteMany</code> (RWX)</td><td>Many nodes, read &amp; write</td><td>Shared file stores (NFS), CI caches</td></tr>
+    </table>
+
+    <h2>3. Ingress controllers (hostname routing)</h2>
+    <p>A LoadBalancer gives every service its own IP — expensive and clunky when you have many services. <strong>Ingress</strong> is a single entrance that routes by <strong>hostname and path</strong>: <code>api.myapp.com</code> &#8594; service A, <code>www.myapp.com</code> &#8594; service B, with TLS handled once.</p>
+
+    <p>Terminology (a common beginner trap): the <strong>Ingress object</strong> is just rules. The <strong>Ingress controller</strong> (NGINX Ingress, Traefik, HAProxy, cloud ones) is the actual proxy that implements them. Most clusters need you to install a controller.</p>
+
+    <p>On Minikube it is one command:</p>
+<pre><code>minikube addons enable ingress
+minikube addons list | findstr ingress     # after: "ingress: enabled"</code></pre>
+
+    <p>Create two small deployments and services (reuse the nginx image, name them <code>app-a</code> and <code>app-b</code>, following the Service pattern from Chapter 4), then route hostnames:</p>
+<pre><code># ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: a.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: app-a-service
+            port: { number: 80 }
+  - host: b.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: app-b-service
+            port: { number: 80 }</code></pre>
+<pre><code>kubectl apply -f ingress.yaml
+# give the fake hostnames a local address (find your minikube IP)
+kubectl get ingress
+minikube ip
+# Windows: add "&lt;minikube-ip&gt;  a.example.com  b.example.com" to C:\Windows\System32\drivers\etc\hosts
+# Linux/macOS: add the same line to /etc/hosts
+curl http://a.example.com     # Nginx welcome (from service A)
+curl http://b.example.com     # Nginx welcome (from service B)</code></pre>
+
+    <div class="note"><strong>Diagnosing a latency/hang on <code>curl</code>:</strong> the Ingress controller may need a moment to load after <code>minikube addons enable ingress</code>. Give it 30&ndash;60&nbsp;seconds (<code>kubectl get pods -n ingress-nginx</code> to confirm it's Running) before testing.</div>
+
+    <h2>4. Monitoring and logging basics</h2>
+    <h3>Logs</h3>
+    <p>Applications should write to <strong>stdout/stderr</strong> — kubelet captures container output and makes it searchable:</p>
+<pre><code>kubectl logs &lt;pod-name&gt;            # current logs
+kubectl logs &lt;pod-name&gt; -f         # follow (like tail -f)
+kubectl logs &lt;pod-name&gt; --previous # logs of the pod's previous crashed container (gold for debugging crashes!)
+kubectl logs -l app=nginx --all-pods=true     # logs from pods matching a label</code></pre>
+
+    <h3>Metrics</h3>
+    <p>Historical CPU/memory needs the <strong>metrics-server</strong>. Minikube ships it:</p>
+<pre><code>minikube addons enable metrics-server
+sleep 30   # wait for it to collect
+kubectl top nodes
+kubectl top pods</code></pre>
+    <p>That is the foundation. Full observability stacks are <strong>Prometheus</strong> (metrics collection + alerts) and <strong>Grafana</strong> (dashboards); log pipelines are usually <em>Fluentd/Fluent Bit</em> —&gt; <em>Elasticsearch or Loki</em>. All are ecosystem projects, run on the same Kubernetes you now know, and are worth exploring after this course.</p>
+
+    <h3>Health checks: liveness and readiness probes</h3>
+    <pre><code>        # the nginx container:
+        readinessProbe:
+          httpGet: { path: /, port: 80 }     # "start sending traffic only when this passes"
+        livenessProbe:
+          httpGet: { path: /, port: 80 }     # "if this fails, restart the container"
+        startupProbe:                        # optional: give slow apps time to boot
+          httpGet: { path: /, port: 80 }
+          failureThreshold: 30
+          periodSeconds: 10</code></pre>
+
+    <div class="warn"><strong>readiness vs liveness:</strong> readiness = "do not route traffic to me yet" (used by Services, safe). liveness = "restart me, I am stuck" (dangerous if misconfigured — a wrong liveness probe can crash-loop a healthy app). When in doubt, start with a readiness probe only.</div>
+
+    <div class="exercise">
+      <strong>&#9999;&#65039; Exercise:</strong> Apply the three probes above to the nginx Deployment and run <code>kubectl get deploy</code> — readiness is the reason a rollout "pauses." Now: (a) write <code>kubectl rollout undo</code> after a bad <code>set image</code>; (b) mount a PVC into nginx and confirm data survives a pod delete. You have now done the full production loop.
+    </div>
+
+    <nav>
+      <a href="4-hands-on-nginx.html">&#8592; Prev: Hands-On Nginx</a>
+      <a href="6-best-practices.html">Next: Best Practices &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

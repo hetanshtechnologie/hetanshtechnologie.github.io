@@ -1,0 +1,148 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>9. Automation Strategies &amp; GitOps — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 9</span>
+    <h1>Automation Strategies &amp; GitOps</h1>
+
+    <p>Automation is the raw material of DevOps; GitOps is the operating system <em>for</em> automation — using Git as the single source of truth and a controller that continuously enforces it. This chapter moves you from "scripts that someone runs" to "systems that reconcile themselves."</p>
+
+    <h2>9.1 The automation ladder</h2>
+<pre><code>1. Manual clicks        (under review — kill these)
+2. Scripts              (bash/PowerShell on a schedule or trigger)
+3. Task runners         (Makefile, Taskfile, npm scripts, rake)
+4. CI/CD pipelines      (GitHub Actions, Jenkins — event-driven)
+5. GitOps controllers   (Argo CD/Flux reconcile the cluster to Git)
+6. Self-driving ops     (auto-remediation, auto-scaling, AI-assisted — ch. 13)
+</code></pre>
+    <p>Rule: each rung makes the previous one <em>reviewable, reproducible, and versioned</em>. The goal is not "no humans" — it is "no humans doing steps the machine can verify."</p>
+
+    <h2>9.2 Scripting discipline (bash + PowerShell)</h2>
+    <p>Patterns that separate "useful scripts" from "Monday's 3 a.m. call": exit codes, set-safe flags, logging, and tested failure paths.</p>
+<pre><code>#!/usr/bin/env bash
+# deploy.sh — run from CI, not from a laptop
+set -euo pipefail                 # exit on error, unset var, pipeline failure
+trap 'echo "FAILED at line $LINENO"' ERR
+log() { echo "[$(date -Iseconds)] $*"; }
+
+IMAGE="$1"; [ -n "$IMAGE" ] || { echo "usage: deploy.sh &lt;image-tag&gt;"; exit 1; }
+
+log "rolling out $IMAGE"
+kubectl -n production set image deploy api api="$IMAGE"
+kubectl -n production rollout status deploy api --timeout=180s
+log "smoke: ${HEALTH_URL}"
+curl -fsS --retry 5 --retry-all-errors "${HEALTH_URL}/healthz"</code></pre>
+
+<pre><code># cleanup.ps1 — Windows/on-prem equivalent discipline
+$ErrorActionPreference = "Stop"
+param([Parameter(Mandatory)] [string]$EnvName)
+Get-AzResourceGroup -Name "rg-$EnvName" -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        Write-Host "Deleting $($_.ResourceGroupName)..."
+        Remove-AzResourceGroup -Name $_.ResourceGroupName -Force
+    }</code></pre>
+    <ul>
+      <li><strong>Bash:</strong> <code>set -euo pipefail</code>; <strong>PowerShell:</strong> <code>$ErrorActionPreference = "Stop"</code>. Non-negotiable defaults.</li>
+      <li>Take the <em>minimal secrets</em>: a script that pulls deploy creds from a vault and never stores them beats one with a key in the file.</li>
+      <li>Scripts are great for <em>packaging</em> (Makefile/Taskfile wrap long commands). They are not great where state or confidentiality matters — that is pipeline/controller territory.</li>
+    </ul>
+
+    <div class="note"><strong>Makefile pattern:</strong> `make check` = fmt + lint + tests; `make package` = build/test artifact; `make deploy-env` calls the pipeline. You get a single entrypoint for humans <em>and</em> the same commands are what CI runs — one less copy-paste divergence.</div>
+
+    <h2>9.3 Pipelines as automation: event-driven everything</h2>
+    <p>Prefer event triggers over schedules where possible: <code>on: push</code>, <code>workflow_dispatch</code>, webhooks, and ChatOps commands are all events. Scheduled jobs are the exception (nightly prod-database snapshot, security scans). A small but complete automation catalog for a platform team:</p>
+    <table>
+      <tr><th>Automation</th><th>Trigger</th><th>Tool you already have</th></tr>
+      <tr><td>CI + artifact build</td><td>Push/PR</td><td>GitHub/Azure/Jenkins pipeline</td></tr>
+      <tr><td>Nightly IaC drift scan</td><td>Schedule (cron)</td><td>Pipeline + terraform plan diff</td></tr>
+      <tr><td>Non-prod off-hours shutdown</td><td>Schedule</td><td>Cloud CLI in a workflow</td></tr>
+      <tr><td>"Please deploy X" (releases)</td><td>Hubot/chat command</td><td>ChatOps bot hitting pipeline webhook</td></tr>
+      <tr><td>On-call escalation</td><td>Alertmanager route</td><td>Alertmanager → PagerDuty/Slack</td></tr>
+      <tr><td>Dependency auto-update</td><td>Release event</td><td>Dependabot/Renovate PR automation</td></tr>
+    </table>
+
+    <h2>9.4 GitOps: the cluster syncs itself to Git</h2>
+    <p>Classic deploy = a human/CI runs <code>kubectl apply</code>. GitOps = a controller in the cluster watches a Git repo (<code>manifests/</code>) and <strong>reconciles</strong>: if the repo changes, the cluster converges to it; if someone sneaks in a <code>kubectl edit</code>, drift is detected and reverted. Your manifests become the only truth.</p>
+
+<pre><code># Argo CD Application — "this app lives in this repo path, auto-sync"
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: { name: api, namespace: argocd }
+spec:
+  project: production
+  source:
+    repoURL: https://github.com/team/manifests
+    path: apps/api/overlays/production
+    targetRevision: main
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: production
+  syncPolicy:
+    automated:
+      prune: true        # delete resources removed from Git
+      selfHeal: true     # revert drift to Git
+    syncOptions:
+    - CreateNamespace=true</code></pre>
+
+<pre><code># Flux (the lighter alternative) — kustomize-based
+# kustomization.yml + source kustomization with `kubectl apply -k`-style ingresses</code></pre>
+
+    <p>Why teams standardize on GitOps (evidence-based, not fashion):</p>
+    <ul>
+      <li><strong>Audit trail:</strong> every cluster change is a commit with an author, a message, and a diff.</li>
+      <li><strong>Rollback = revert a commit</strong> (or <code>argocd app rollback</code> to a synced revision), not "what did I delete?".</li>
+      <li><strong>Review = PR before merge:</strong> the exact same review discipline as code, including policies (Chapter 8).</li>
+      <li><strong>Multi-cluster:</strong> one repo + one controller per cluster = identical environments by construction.</li>
+    </ul>
+
+    <div class="warn"><strong>GitOps trap:</strong> "we put YAML in a repo and still apply by hand." The controller must <em>own</em> sync. If your workflow is "hey run this file" instead of commit-and-wait, you have a repository, not GitOps. Discipline: write access to prod manifests ✕ anyone's laptop = zero.</div>
+
+    <h2>9.5 Making automation measurable</h2>
+    <p>Automation without telemetry is wishful thinking. Track per automation: <em>how often does it run, how often does it fail, how much human time does it save, and what's its MTTR impact?</em> Ship a dashboard (per Chapter 6) for "automation coverage": jobs split by trigger type, failure rate per job, and seconds from commit to green. That dashboard becomes the weekly ops review.</p>
+
+    <h2>Summary</h2>
+    <p>Automation moves up a ladder from scripts to self-reconciling controllers; GitOps is the top rung where Git is the truth and a controller enforces it. Script everywhere, trigger by events, and let the cluster pull its own state — then measure each automaton so you can tell value from busy-work.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; All deploy/cleanup scripts use strict error handling and vault-injected secrets.</li>
+      <li>&#9744; Manual "click in console" steps are catalogued and being replaced in priority order.</li>
+      <li>&#9744; Cluster manifests live in Git; Argo CD/Flux owns sync (selfHeal + prune on).</li>
+      <li>&#9744; No human has write-execute on prod besides the controller path.</li>
+      <li>&#9744; Automation coverage has a measurable dashboard (runs, failures, time saved).</li>
+    </ul>
+
+    <nav>
+      <a href="8-devsecops.html">&#8592; Prev: DevSecOps</a>
+      <a href="10-collaboration-tools.html">Next: Collaboration Tools &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

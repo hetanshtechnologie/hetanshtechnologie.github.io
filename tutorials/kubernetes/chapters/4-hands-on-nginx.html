@@ -1,0 +1,190 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>4. Hands-On: Deploying Nginx — Kubernetes for Beginners</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 4</span>
+    <h1>Hands-On: Deploying Nginx</h1>
+
+    <p>This is the chapter everything so far has been building toward. On your running local cluster you will: deploy a real application, watch it heal itself, scale it up and down, expose it to your browser, and inject configuration and secrets into it. Five skills, ~30 minutes, zero cloud costs.</p>
+
+    <h2>1. Write your first Deployment</h2>
+    <p>Create a file called <code>nginx.yaml</code> with this content (spaces for indentation, never tabs):</p>
+
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25
+        ports:
+        - containerPort: 80</code></pre>
+
+    <p>Deploy it and watch the results:</p>
+<pre><code>kubectl apply -f nginx.yaml
+kubectl get deployments
+kubectl get pods -o wide</code></pre>
+    <p>You should see a Deployment named <code>nginx-deployment</code> with <code>3/3</code> ready, and three pods each with their own IP. Behind the scenes the Deployment created a ReplicaSet, which created the three pods.</p>
+
+    <h2>2. Watch self-healing work</h2>
+    <p>Now deliberately kill a pod — Kubernetes should not care at all:</p>
+<pre><code>kubectl delete pod &lt;one-of-the-pod-names&gt;
+kubectl get pods</code></pre>
+    <p>The ReplicaSet immediately creates a brand-new replacement pod. The desired state (3 replicas) was <em>declared</em>, so Kubernetes simply refuses to accept anything else. This is self-healing in its purest form.</p>
+
+    <div class="info"><strong>Peek at the machinery:</strong> <code>kubectl get replicasets</code> shows the ReplicaSet the Deployment created (name like <code>nginx-deployment-&lt;hash&gt;</code>). <code>kubectl describe deployment nginx-deployment</code> shows events such as <em>"Created pod"</em> and <em>"Scaled up replica set"</em>.</div>
+
+    <h2>3. Scale the Deployment</h2>
+    <p>Horizontal scaling is a single command:</p>
+<pre><code>kubectl scale deployment nginx-deployment --replicas=5
+kubectl get pods
+kubectl get deployment nginx-deployment -o wide</code></pre>
+    <p>You now have five Nginx pods. Scale back down whenever you like with <code>--replicas=3</code>. Kubernetes balances pods across the available space on your node automatically.</p>
+
+    <h3>Examples of every scaling approach</h3>
+    <table>
+      <tr><th>Approach</th><th>Command / object</th><th>Note</th></tr>
+      <tr><td>Imperative (quick)</td><td><code>kubectl scale deployment nginx-deployment --replicas=5</code></td><td>Fine for experiments</td></tr>
+      <tr><td>Declarative (preferred)</td><td>Edit <code>replicas:</code> in your YAML, re-run <code>kubectl apply -f nginx.yaml</code></td><td>Changes are reviewable in Git</td></tr>
+      <tr><td>Automatic</td><td><code>HorizontalPodAutoscaler</code> (HPA)</td><td>Scales on CPU/memory; see Chapter 6</td></tr>
+    </table>
+
+    <h2>4. Expose the app with a Service</h2>
+    <p>Pods have IPs that change and are only reachable inside the cluster. Add a Service to nginx.yaml: append a second YAML document (separated by <code>---</code>) that routes to pods labeled <code>app: nginx</code>:</p>
+
+<pre><code>---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  type: NodePort          # starts as NodePort for local testing
+  selector:
+    app: nginx
+  ports:
+  - port: 80              # port on the Service
+    targetPort: 80        # port on the pod container
+    nodePort: 30080       # fixed external port (30000-32767 allowed)</code></pre>
+<pre><code>kubectl apply -f nginx.yaml
+kubectl get svc nginx-service</code></pre>
+
+    <h3>Reach it from your browser</h3>
+    <p>Minikube makes this trivial — it opens the URL for you:</p>
+<pre><code>minikube service nginx-service</code></pre>
+    <p>You should see the Nginx welcome page. What actually happened: traffic hit <code>&lt;node-ip&gt;:30080</code> &#8594; kube-proxy &#8594; one of the Nginx pods, balanced automatically. Press <code>curl</code> on it a few times or load it in two browsers — all five pods answer the same content.</p>
+
+    <div class="warn"><strong>Scale does not mean data must differ:</strong> hitting the NodePort repeatedly shows Nginx's default page from whichever pod answered. That is load balancing, not session affinity — good enough for stateless web apps. (If you need a <em>name</em> behind one IP inside the cluster, a <code>ClusterIP</code> Service with <code>port</code>/<code>targetPort</code> is all you need.)</div>
+
+    <h2>5. NodePort vs LoadBalancer</h2>
+    <p>On single-node local clusters both behave similarly, but in the real world they differ:</p>
+    <table>
+      <tr><th></th><th>NodePort</th><th>LoadBalancer</th></tr>
+      <tr><td>Exposed as</td><td>A high port on every node (30000&ndash;32767)</td><td>A real cloud load balancer with a public IP</td></tr>
+      <tr><td>Provider needed</td><td>None</td><td>Cloud controller (EKS/GKE/AKS/DigitalOcean&hellip;)</td></tr>
+      <tr><td>Minikube / kind</td><td>Works directly</td><td>Minikube needs <code>minikube tunnel</code>; kind needs MetalLB</td></tr>
+      <tr><td>Use in production</td><td>Rarely — usually by Ingress/Infra</td><td>Yes, for public services; often behind an Ingress</td></tr>
+    </table>
+
+    <p>Try a LoadBalancer on Minikube (leave this terminal open in the background):</p>
+<pre><code>minikube tunnel</code></pre>
+    <p>In a second terminal, change the Service type and re-apply:</p>
+<pre><code>kubectl patch svc nginx-service -p '{"spec":{"type":"LoadBalancer"}}'
+kubectl get svc nginx-service   # wait for EXTERNAL-IP, then open it in a browser</code></pre>
+    <p>On a cloud cluster the exact same YAML makes your cloud provider spin up a real load balancer and assign a public IP.</p>
+
+    <h2>6. ConfigMaps: configuration without rebuilds</h2>
+    <p>Create a ConfigMap three different ways and note how they differ:</p>
+<pre><code>kubectl create configmap app-config --from-literal=log_level=debug
+kubectl create configmap app-config-file --from-env-file=settings.env   # settings.env = KEY=VALUE lines
+kubectl create configmap from-yaml-file --from-file=./app.conf          # file becomes a mounted file</code></pre>
+    <p>Now wire the <code>log_level</code> value into the Nginx pods as an environment variable by adding to the container in <code>nginx.yaml</code>:</p>
+<pre><code>        env:
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: log_level</code></pre>
+<pre><code>kubectl apply -f nginx.yaml
+kubectl exec deploy/nginx-deployment -- sh -c 'echo "LOG_LEVEL=$LOG_LEVEL"'</code></pre>
+    <p>Changing the ConfigMap does <em>not</em> require rebuilding the image — a rolling restart makes the new value available.</p>
+
+    <h2>7. Secrets: passwords the safe-ish way</h2>
+<pre><code>kubectl create secret generic app-secret \
+  --from-literal=db_password='SuperS3cret!'
+kubectl get secret app-secret -o yaml          # value shown as base64</code></pre>
+    <p>Use it two ways inside the pod:</p>
+<pre><code>        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: db_password
+        volumeMounts:
+        - name: secret-vol
+          mountPath: /etc/app-secret
+          readOnly: true
+      volumes:
+      - name: secret-vol
+        secret:
+          secretName: app-secret</code></pre>
+<pre><code>kubectl apply -f nginx.yaml
+kubectl exec deploy/nginx-deployment -- sh -c 'echo $DB_PASSWORD; ls /etc/app-secret; cat /etc/app-secret/db_password'</code></pre>
+
+    <div class="note"><strong>Beginner security note:</strong> that base64 is <em>not encryption</em>. Anyone with cluster access can decode it. For real deployments encrypt Secrets at rest, scope access with RBAC (Chapter 6), and consider an external vault.</div>
+
+    <h2>8. Inspect and clean up</h2>
+<pre><code>kubectl logs deploy/nginx-deployment       # logs from the first pod
+kubectl logs -l app=nginx --tail=20        # logs from all matching pods
+kubectl top pod                            # CPU/memory (needs metrics-server, see ch. 5)
+kubectl delete -f nginx.yaml               # removes Service + Deployment</code></pre>
+
+    <div class="exercise">
+      <strong>&#9999;&#65039; Exercise:</strong> Recreate the Deployment (re-apply nginx.yaml), scale it to 5, open <code>minikube service nginx-service</code>, then in a loop run <code>kubectl get pods</code> while deleting a pod — watch the replacement appear within a second. Finally, change <code>image: nginx:1.25</code> to <code>nginx:1.26</code> and <code>kubectl apply</code>; the Deployment rolls out the new image without downtime (we go deep on this in Chapter 5).
+    </div>
+
+    <nav>
+      <a href="3-setup-guide.html">&#8592; Prev: Setup Guide</a>
+      <a href="5-advanced-topics.html">Next: Advanced Topics &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

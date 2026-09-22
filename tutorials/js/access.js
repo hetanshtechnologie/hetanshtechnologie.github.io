@@ -23,6 +23,7 @@
     'ai-102':'ai-102-tutorial','ai-agentic-track':'ai-agentic-track-tutorial','ai-engineer-core':'ai-engineer-core-tutorial',
     'claude-vibe-course':'claude-vibe-course-tutorial','maf-fundamentals':'maf-fundamentals-tutorial',
     'foundry-fundamentals':'foundry-fundamentals-tutorial','snowflake-tutorial':'snowflake-tutorial','github-copilot':'github-copilot-tutorial',
+    'kubernetes':'kubernetes-tutorial',
     'project-management':'project-management-tutorial','interpersonal-skills':'interpersonal-skills-tutorial',
     'ml':'ml-tutorial','dsa':'dsa-tutorial','dsa-leetcode-roadmap':'dsa-leetcode-roadmap-tutorial',
     'system-design-fundamentals':'system-design-fundamentals-tutorial',

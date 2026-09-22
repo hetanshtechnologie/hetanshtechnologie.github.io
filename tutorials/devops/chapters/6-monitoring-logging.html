@@ -1,0 +1,213 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>6. Monitoring &amp; Logging — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 6</span>
+    <h1>Monitoring &amp; Logging: Prometheus, Grafana, and the ELK Stack</h1>
+
+    <p>Monitoring answers <em>"is it up, and how healthy?"</em> — metrics and alerts. Logging answers <em>"what actually happened?"</em> — granular, searchable records. They are different data types, different pipelines, and different tools; conflating them ("we have logs, so we're covered") is the most common observability failure. Real teams do <strong>both</strong> plus tracing (OpenTelemetry) — this chapter builds the metrics and logs halves.</p>
+
+    <h2>6.1 Golden signals and the four types of metric</h2>
+    <p>Start instrumenting around the <strong>RED</strong>/<strong>USE</strong> methods and the four golden signals:</p>
+    <table>
+      <tr><th>Signal</th><th>Question</th><th>Example metric</th></tr>
+      <tr><td>Latency</td><td>How fast? (success vs error, separately)</td><td><code>http_request_duration_seconds</code></td></tr>
+      <tr><td>Traffic</td><td>How much demand?</td><td><code>http_requests_total</code></td></tr>
+      <tr><td>Errors</td><td>How much failing?</td><td><code>http_requests_total{code="5xx"}</code></td></tr>
+      <tr><td>Saturation</td><td>How full? (the first to signal trouble)</td><td>CPU, memory, queue depth, connections</td></tr>
+    </table>
+    <p>Metric cardinality rule: keep label sets small and bounded. <code>request_id</code> or <code>user_email</code> as a label explodes the metric space and kills Prometheus. Identifiers go in logs, not labels.</p>
+
+    <h2>6.2 Prometheus: pull-based metrics with PromQL</h2>
+    <p>Prometheus <em>scrapes</em> HTTP <code>/metrics</code> endpoints on a schedule, stores time-series, and evaluates PromQL. Exporters convert system signals (node_exporter, kube-state-metrics, cAdvisor) into that format.</p>
+
+<pre><code># prometheus.yml (minimal)
+global:
+  scrape_interval: 15s
+scrape_configs:
+- job_name: node
+  static_configs:
+  - targets: [ "node-exporter:9100" ]
+- job_name: app
+  kubernetes_sd_configs:
+  - role: pod
+  relabel_configs:
+  - source_labels: [ __meta_kubernetes_pod_annotation_prometheus_io_scrape ]
+    action: keep
+    regex: "true"</code></pre>
+
+    <h3>PromQL that pays the rent</h3>
+<pre><code># error rate over 5m, windows 5 min
+sum(rate(http_requests_total{code=~"5.."}[5m]))
+    / sum(rate(http_requests_total[5m]) or on() vector(0))
+
+# p95 latency
+histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))
+
+# saturation (CPU)
+100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])))
+
+# percentage of pods ready
+sum(kube_deployment_status_replicas_ready) / sum(kube_deployment_status_replicas)</code></pre>
+
+    <h2>6.3 Alerting that does not go to voicemail</h2>
+<pre><code># alerting rule — one alert, tuned thresholds, a runbook URL
+groups:
+- name: app.rules
+  rules:
+  - alert: ApiHighErrorRate
+    expr: |
+      sum(rate(http_requests_total{job="api",code=~"5.."}[5m]))
+        / sum(rate(http_requests_total{job="api"}[5m])) &gt; 0.05
+    for: 10m                     # must hold continuously — kill the flapping
+    labels: { severity: page, team: platform }
+    annotations:
+      summary: "API error rate above 5% for 10 minutes"
+      runbook: "https://wiki.example.com/runbooks/api-hi-error-rate"</code></pre>
+    <p>Alert hygiene: alert on <strong>symptoms</strong> (user-visible) not causes; use <code>for:</code> to require persistence; every alert needs an owner + runbook; and route by severity (ticket vs page). Alertmanager then deduplicates, groups, and routes to Slack/PagerDuty/email.</p>
+
+<pre><code># alertmanager.yml (snippet)
+route:
+  group_by: [ "alertname", "cluster" ]
+  group_wait: 30s
+  repeat_interval: 4h
+  routes:
+  - match_re:
+      severity: "page"
+    receiver: pagerduty-critical
+  - receiver: slack-warnings
+receivers:
+- name: slack-warnings
+  slack_configs:
+  - channel: "#alerts-warn"</code></pre>
+
+    <div class="warn"><strong>Alert anti-patterns that create "alert fatigue":</strong> alerting on <code>rate(...) &gt; 0</code> for anything noisy; alerting on every pod restart (restarts are <em>by design</em> sometimes); no <code>for:</code> window (flapping pages at 2 a.m.); and dashboards that page people. Dashboards inform humans; alerts call them.</div>
+
+    <h2>6.4 Grafana: dashboards from the data you already collect</h2>
+    <p>Grafana is the visualization layer over Prometheus (and logs/Traces via their own data sources). The pattern that scales:</p>
+    <ul>
+      <li><strong>Dashboards as code</strong> (JSON in Git), provisioned on startup — never hand-built in a fragile way on the live instance.</li>
+      <li>One dashboard per <em>service tier</em> with the RED panel set; one cross-service "wallboard" for golden signals.</li>
+      <li>Variables (namespace, pod, job) so one panel set serves every team.</li>
+      <li>Annotate dashboards from deploy events (kubectl/CJ hooks) so you can see "what changed at 09:12?" — the single biggest time-saver.</li>
+    </ul>
+
+<pre><code># grafana provisioning example: datasource + folder pre-created
+apiVersion: 1
+datasources:
+- name: Prometheus
+  type: prometheus
+  url: http://prometheus:9090
+  access: proxy
+  isDefault: true</code></pre>
+
+    <h2>6.5 Logging: the ELK stack</h2>
+<pre><code>app (stdout) --&gt; Filebeat (shipping agent) --&gt; Logstash (parse/transform) --&gt; Elasticsearch (store/index) --&gt; Kibana (search/dashboard)
+</code></pre>
+    <p><em>Diagram (described in text):</em> a log pipeline. Filebeat tails logs from files or containers and ships them; Logstash buffers, parses, and enriches; Elasticsearch indexes them for fast query; Kibana gives humans the UI. In K8s, the agent is usually a DaemonSet so every node has one shipper.</p>
+
+<pre><code># Filebeat input (container logs)
+filebeat.inputs:
+- type: container
+  paths:
+  - /var/log/containers/*.log
+processors:
+- add_kubernetes_metadata:
+    host: ${NODE_NAME}
+output.elasticsearch:
+  hosts: [ "elasticsearch:9200" ]
+  username: ${ELASTIC_USER}
+  password: ${ELASTIC_PASSWORD}</code></pre>
+
+<pre><code># Logstash parsing (grok the messy lines into fields)
+filter {
+  if [app] == "api" {
+    grok {
+      match => { "message" => "%{TIMESTAMP_ISO8601:ts} %{LOGLEVEL:level} %{GREEDYDATA:msg}" }
+    }
+    date { match => [ "ts", "ISO8601" ] }
+  }
+}</code></pre>
+
+    <h2>6.6 Structured logging — do it from day one</h2>
+    <p>JSON logs make parsing trivial and aggregations real. Example in Node/Python:</p>
+<pre><code># never this
+console.log("user " + id + " failed login on " + host + ": " + reason);
+
+# always this — structured fields, correlation id
+console.log(JSON.stringify({
+  event: "login_failed",
+  user_id: id,
+  reason: reason,
+  request_id: req.id,       # correlates logs + traces
+  ts: new Date().toISOString()
+}));</code></pre>
+
+    <p>Kibana queries then become trivial: <code>event:login_failed AND user_id:123</code>. Searching free-text is what you do on a legacy monolith; structured fields are what make a log lake usable at scale.</p>
+
+    <h2>6.7 Where the pieces land on Kubernetes</h2>
+    <table>
+      <tr><th>Component</th><th>Deployment shape</th><th>Why</th></tr>
+      <tr><td>Prometheus</td><td>Deployment + long-lived PVC; operators (kube-prometheus-stack)</td><td>One scrape target for everything</td></tr>
+      <tr><td>Exporters</td><td>DaemonSets / StatefulSets with ServiceMonitors</td><td>One agent per node/pod automatically</td></tr>
+      <tr><td>Alertmanager</td><td>Deployment (HA)</td><td>Central dedup/routing</td></tr>
+      <tr><td>Grafana</td><td>Deployment + provisioned dashboards</td><td>Code-defined dashboards</td></tr>
+      <tr><td>Filebeat/Loki</td><td>DaemonSet</td><td>Every node ships its own logs</td></tr>
+      <tr><td>Elasticsearch (or Loki)</td><td>StatefulSet on fast storage</td><td>Index state must survive restarts</td></tr>
+    </table>
+
+    <h2>6.8 Cost &amp; scale best practices</h2>
+    <ul>
+      <li>Cardinality controls save TB/hour — the single highest-leverage monitoring fix.</li>
+      <li>Downsample/retention tiers: hot index 7d, warm 30d, cold 90d+; logs biggest cost chart in most orgs.</li>
+      <li>Prometheus retention budget tied to disk; use remote-write/VictoriaMetrics/Thanos only when single-node retire hits you.</li>
+      <li>Sample: capture 100% of errors, a slice of success (<em>tail-based sampling</em> for traces).</li>
+      <li>Alert reliability budget: measure each alert's precision (how often was it a page-worthy incident?). Kill low-precision alerts.</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <p>Observability = metrics (numbers on a timeline) + logs (searchable records) + traces (request journey). Prometheus/Grafana own the numbers with PromQL and alert routing discipline; the ELK stack (or Loki) owns the logs with structured fields. Instrument around golden signals, alert on symptoms with windows, and treat dashboards as code.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; Services expose RED-style metrics; granularity matches golden signals.</li>
+      <li>&#9744; Alerts have <code>for:</code> windows, severity, owners, and runbook URLs.</li>
+      <li>&#9744; Dashboards are provisioned from Git, with deploy annotations.</li>
+      <li>&#9744; Logs are structured JSON with correlation IDs; parsing uses fields, not text search.</li>
+      <li>&#9744; Retention tiers and cardinality limits are enforced (cost under control).</li>
+    </ul>
+
+    <nav>
+      <a href="5-kubernetes-orchestration.html">&#8592; Prev: Kubernetes</a>
+      <a href="7-cloud-native-devops.html">Next: Cloud-Native DevOps &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

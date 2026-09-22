@@ -1,0 +1,190 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>10. Real-World Example: Deploy a Web App with Docker Compose — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 10</span>
+    <h1>Real-World Example: Deploy a Web App with Docker Compose</h1>
+
+    <p>Now the entire book converges into one believable, working stack: a Flask API, a PostgreSQL database with a named volume, and an Nginx reverse proxy in front — all orchestrated by Compose. Copy the files, run the commands, and you will have deployed a real multi-service production-shaped app in under two minutes.</p>
+
+    <h2>10.1 The stack</h2>
+    <p><em>Diagram (described in text):</em> browser traffic enters on the left at nginx on port 80. Nginx proxies to the Flask app container on its internal "web" network port 5000. The Flask app reads/writes Postgres across the same network, and Postgres stores data in the named volume "pgdata", with database healthchecks drawn between app and db.</p>
+
+    <h2>10.2 The files</h2>
+    <p><strong>app/app.py</strong> — a tiny API with a health endpoint and a counter backed by Postgres:</p>
+<pre><code>import os, time
+from flask import Flask, jsonify
+import psycopg2
+
+app = Flask(__name__)
+DB = os.environ["DATABASE_URL"]
+
+@app.get("/healthz")
+def health():
+    return jsonify(ok=True)
+
+@app.get("/")
+def hit():
+    conn = psycopg2.connect(DB)
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS hits (n int)")
+    cur.execute("UPDATE hits SET n = COALESCE(n,0) + 1 RETURNING n")
+    row = cur.fetchone()
+    if row is None:
+        cur.execute("INSERT INTO hits (n) VALUES (1) RETURNING n")
+        row = cur.fetchone()
+    n = row[0]
+    conn.commit(); conn.close()
+    return jsonify(hits=n)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)</code></pre>
+
+    <p><strong>app/Dockerfile</strong> — remember Ch. 5: copy manifests first, run as non-root, CMD=default args.</p>
+<pre><code>FROM python:3.12-slim
+WORKDIR /opt/app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py .
+RUN useradd -mr appuser
+USER appuser
+EXPOSE 5000
+ENTRYPOINT ["python", "app.py"]</code></pre>
+
+    <p><strong>app/requirements.txt</strong>:</p>
+<pre><code>flask==3.0.3
+psycopg2-binary==2.9.9</code></pre>
+
+    <p><strong>docker-compose.yml</strong> — watches the app dir for changes (bind mount), waits for db health, publishes only nginx:</p>
+<pre><code>services:
+  proxy:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  app:
+    build: ./app
+    environment:
+      DATABASE_URL: postgresql://postgres:devpass@db:5432/app
+    volumes:
+      - ./app:/opt/app          # dev: live-reload of code
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d app"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  pgdata:</code></pre>
+
+    <p><strong>nginx.conf</strong> — the only published entry point:</p>
+<pre><code>server {
+    listen 80;
+    server_name _;
+    location / {
+        proxy_pass http://app:5000;
+        proxy_set_header Host $host;
+    }
+}
+</code></pre>
+
+    <h2>10.3 Deploy it</h2>
+<pre><code># from the directory holding docker-compose.yml
+docker compose up -d --build
+docker compose ps            # 3 services: proxy, app, db — all healthy/running
+curl http://localhost/healthz        # {"ok": true}
+for i in 1 2 3; do curl -s http://localhost/; done     # hits: 1, 2, 3
+docker compose logs -f app
+</code></pre>
+
+    <h2>10.4 Prove the persistence and the proxy</h2>
+<pre><code># counter survives a restart because the data is in the pgdata volume
+docker compose restart app
+curl -s http://localhost/               # hits: 4 — not reset!
+# but the bind mount + volume survive even "down"; only down -v resets them
+docker compose down && docker compose up -d
+curl -s http://localhost/               # hits: 5 — still counted
+</code></pre>
+    <p>If you run <code>docker compose down -v</code>, the volume is deleted and the counter resets to 1 — that's the "I destroyed my data" moment from Ch. 8, demonstrated safely on purpose.</p>
+
+    <h2>10.5 Scale the worker pattern and clean up</h2>
+<pre><code>docker compose up -d --scale app=2          # Compose serves 2 app containers behind nginx
+docker compose ps
+docker compose down                          # stop everything, keep pgdata
+docker compose down -v                       # full reset (demo only)
+</code></pre>
+
+    <h2>10.6 Production notes on this exact stack</h2>
+    <ul>
+      <li><strong>Secrets:</strong> <code>devpass</code> is in the file for demo. Real deploys use env from a vault or Docker secrets (Ch. 9.2).</li>
+      <li><strong>Single host:</strong> Compose can't fail apps over or place replicas across hosts. When that matters, this same stack's images run under Swarm/Kubernetes (Ch. 12).</li>
+      <li><strong>Backup:</strong> <code>docker compose exec db pg_dump -U postgres app &gt; backup.sql</code> — schedule it in your ops routine (Ch. 6 pattern).</li>
+      <li><strong>Resource limits:</strong> add <code>deploy.resources.limits.memory: 256M</code> per service before load-testing.</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <p>You built and ran a three-service stack: Nginx (port 80) → Flask (internal) → Postgres (named volume, healthchecked), with live code-reload via a bind mount and counters that survive restarts thanks to volumes. That's the entire Docker career's daily motion in one small project.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; All five files exist and are committed in version control.</li>
+      <li>&#9744; <code>docker compose up -d --build</code> brings all three services up healthy.</li>
+      <li>&#9744; The counter survives <code>restart</code> and <code>down/up</code> (volume-backed).</li>
+      <li>&#9744; Only nginx is published (port 80); app and db are internal.</li>
+      <li>&#9744; I can explain how one change to each file (image, env, port) propagates.</li>
+    </ul>
+
+    <nav>
+      <a href="9-best-practices.html">&#8592; Prev: Best Practices</a>
+      <a href="11-troubleshooting.html">Next: Troubleshooting Common Issues &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

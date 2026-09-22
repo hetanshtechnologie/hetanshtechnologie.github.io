@@ -1,0 +1,116 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>6. Volumes and Persistent Storage — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 6</span>
+    <h1>Volumes and Persistent Storage</h1>
+
+    <p>Remember the rule from Ch. 3: <code>docker rm</code> deletes the container's writable layer — including your database writes, uploaded files, or logs stored in it. <strong>Volumes</strong> are storage that survives the container. If your container writes anything you don't want to lose, put that path on a named volume.</p>
+
+    <h2>6.1 The three storage options</h2>
+    <table>
+      <tr><th>Option</th><th>Where data lives</th><th>Use for</th></tr>
+      <tr><td><strong>Named volume</strong></td><td>Managed by Docker (<code>/var/lib/docker/volumes/&lt;name&gt;</code>)</td><td>Databases and app state — your default</td></tr>
+      <tr><td><strong>Bind mount</strong></td><td>A path you choose on the host</td><td>Config files, dev code, watching host tools</td></tr>
+      <tr><td><strong>tmpfs mount</strong></td><td>RAM, in-memory only</td><td>Scratch/temporary, secrets you never want on disk</td></tr>
+    </table>
+    <p><em>Diagram (described in text):</em> a container on the left with three arrows to the right: one down into "Docker's volume area" (named volume), one across into a literal host directory like <code>/home/you/app</code> (bind mount), and one up into "RAM" (tmpfs). The container's lifecycle (oval) flows around all three without touching them.</p>
+
+    <h2>6.2 Named volumes — the default choice</h2>
+<pre><code># create + attach a named volume in one run line
+docker run -d --name pg -v pgdata:/var/lib/postgresql/data postgres:16-alpine
+
+docker volume ls                 # you see "pgdata"
+docker volume inspect pgdata     # where it lives + mountpoint
+docker run -it --rm -v pgdata:/data alpine sh -c 'echo persisted &gt; /data/note.txt'
+docker rm -f pg                  # delete container — volume survives
+docker run --rm -v pgdata:/data alpine cat /data/note.txt   # still there
+</code></pre>
+    <p>Named volumes are portable, shareable between containers, and backup-able. Prefer them whenever a service needs its own data — most database images even declare the volume for you.</p>
+
+    <h2>6.3 Bind mounts — host paths, dev speed</h2>
+<pre><code># live-code mount: edit on the host, container sees it instantly
+docker run -d --name dev -v "$(pwd)/src:/app/src" -p 3000:3000 myapp:dev
+
+# read-only bind for configs (container can't edit its own config)
+docker run -d --name conf -v ./nginx.conf:/etc/nginx/nginx.conf:ro nginx
+</code></pre>
+    <div class="warn"><strong>Bind mount gotchas:</strong> (1) On Windows, paths become <code>C:\path</code> and the parser is picky — prefer <code>$(pwd)</code> or relative paths. (2) A bind mount <em>hides</em> everything already in the container at that path — mounting an empty host dir over <code>/app</code> hides your image's <code>/app</code>. (3) Check file permissions: UID/GID mismatch on Linux is the #1 surprise; fix with <code>:ro</code>, <code>--user</code>, or chown in the image.</div>
+
+    <h2>6.4 tmpfs — memory-backed scratch</h2>
+<pre><code>docker run -d --tmpfs /tmp:rw,noexec,nosuid,size=64m myapp
+# fast, ephemeral, gone with the container — ideal for caches/sockets, never for data
+</code></pre>
+
+    <h2>6.5 Sharing data between containers</h2>
+<pre><code># two containers, one named volume, mounted at different paths
+docker run -d --name writer -v shared:/data alpine sh -c 'while true; do echo tick &gt;&gt; /data/log.txt; sleep 5; done'
+docker run -it --rm -v shared:/read alpine cat /read/log.txt
+docker rm -f writer</code></pre>
+    <p>This is how a metrics scraper shares a scratch directory with a worker, or how an app shares uploads with a thumbnailer — without either knowing the other's filesystem details.</p>
+
+    <h2>6.6 Backup and restore</h2>
+<pre><code># backup: mount both the source volume and a host target dir
+docker run --rm -v pgdata:/data:ro -v "$(pwd):/backup" alpine \
+  tar czf /backup/pgdata-$(date +%F).tar.gz -C /data .
+
+# restore into a fresh volume
+docker volume create pgdata_restored
+docker run --rm -v pgdata_restored:/data -v "$(pwd):/backup" alpine \
+  tar xzf /backup/pgdata-$(date +%F).tar.gz -C /data
+</code></pre>
+    <p>For real databases, prefer the vendor tool (<code>pg_dump</code>, <code>mongodump</code>) over raw file copies — but the pattern above is fine for file stores and shows the essential trick: a throwaway helper container with both mounts.</p>
+
+    <h2>6.7 Cleanup discipline</h2>
+<pre><code>docker volume ls -f dangling=true     # volumes nobody references
+docker volume prune                   # delete the orphans (check first!)
+docker rm -v mycontainer              # remove container AND its anonymous volumes
+</code></pre>
+    <div class="info"><strong>Anonymous vs named:</strong> <code>-v /data</code> (no name) creates an anonymous volume — auto-removed with <code>--rm</code>, orphaned otherwise. Always <em>name</em> volumes for anything you care about.</div>
+
+    <h2>Summary</h2>
+    <p>Containers are ephemeral by design, so anything you must keep goes on a volume: named volumes for app/database state (default), bind mounts for host configs and live dev, tmpfs for throwaway speed. Back up with a helper container (or the DB's own tool), prune orphans, and always give real data a named volume.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; I created a named volume and proved data survives <code>docker rm -f</code>.</li>
+      <li>&#9744; I used a bind mount for live code and a <code>:ro</code> mount for config.</li>
+      <li>&#9744; I moved data between two containers via a shared volume.</li>
+      <li>&#9744; I backed up and restored a volume with a helper container.</li>
+      <li>&#9744; I understand that tmpfs is memory-only, not persistence.</li>
+    </ul>
+
+    <nav>
+      <a href="5-dockerfile.html">&#8592; Prev: Building Custom Images</a>
+      <a href="7-networking.html">Next: Networking in Docker &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

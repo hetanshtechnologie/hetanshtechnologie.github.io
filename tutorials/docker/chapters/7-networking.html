@@ -1,0 +1,117 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>7. Networking in Docker — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 7</span>
+    <h1>Networking in Docker</h1>
+
+    <p>Every container has its own network namespace: its own IP, its own loopback, its own port space. Docker networks are the bridges and walls between containers — who can talk to whom, and how traffic reaches the outside world. Three network types will cover almost everything you do: <strong>bridge</strong> (default), <strong>host</strong>, and <strong>overlay</strong> (multi-host).</p>
+
+    <h2>7.1 The three network drivers</h2>
+    <table>
+      <tr><th>Driver</th><th>Scope</th><th>Default?</th><th>Use for</th></tr>
+      <tr><td><code>bridge</code></td><td>Single host</td><td>Yes (per-run)</td><td>Most apps: NAT'd internal net + published ports</td></tr>
+      <tr><td><code>host</code></td><td>Single host</td><td>No</td><td>Performance-sensitive processes that must bind host ports directly</td></tr>
+      <tr><td><code>overlay</code></td><td>Multi-host (swarm)</td><td>No</td><td>Services spanning a swarm cluster</td></tr>
+      <tr><td><code>none</code></td><td>Isolated</td><td>No</td><td>Offline jobs, strict isolation testing</td></tr>
+    </table>
+    <p><em>Diagram (described in text):</em> one host machine showing three networks. "Bridge net A" contains containers web1 and api1 talking to each other by name; "Bridge net B" contains worker1 alone; "host net" shows a container binding directly to the host's port 80; and an "overlay" box spans two hosts with a service reachable on both.</p>
+
+    <h2>7.2 Bridge networking and published ports</h2>
+<pre><code># container gets its own private IP (172.17.x.x by default on the default bridge)
+docker run -d --name web -p 8080:80 nginx
+docker inspect -f '{{.NetworkSettings.IPAddress}}' web    # 172.17.0.2
+curl http://localhost:8080     # host -p 8080 -&gt; container 80</code></pre>
+    <p>The container's private IP is only reachable inside the host. <code>-p 8080:80</code> creates the published port rule: anything hitting the host's 8080 is forwarded to the container's 80. Without <code>-p</code> (or up to Docker Cloud <code>-P</code> pushing all EXPOSEd ports), nothing on your laptop can reach the container.</p>
+    <div class="info"><strong><code>-p</code> vs <code>EXPOSE</code>:</strong> EXPOSE in a Dockerfile is documentation (Ch. 5). Only <code>-p</code>/<code>-P</code> at run time — or their Compose equivalent — publishes traffic. Teams that forget are the ones who "can't connect" (Ch. 11, issue #3).</div>
+
+    <h2>7.3 Container-to-container: use the network, not IPs</h2>
+    <p>The default bridge gives you connectivity but <em>no name resolution between containers</em> (only by legacy <code>--link</code>). Create a custom bridge and Docker gives every container a DNS alias for free:</p>
+<pre><code>docker network create app-net
+docker run -d --name api --network app-net myapp
+docker run -d --name db  --network app-net -e POSTGRES_PASSWORD=secret postgres:16-alpine
+# the app connects to "db" — not an IP — because they share app-net:
+docker exec api getent hosts db          # resolves to db's IP on app-net
+docker network inspect app-net           # see members + IPs
+</code></pre>
+    <p><em>Diagram (described in text):</em> a custom bridge network as a horizontal bus; api and db each have an interface plugged into it and can address each other by name; nginx on the default "bridge" network is drawn off to the side, unable to see them.</p>
+    <div class="warn"><strong>Shared but isolated:</strong> containers on the SAME network reach each other freely; containers on DIFFERENT networks cannot reach each other at all (unless published via the host). Design network membership as a security boundary, not an afterthought.</div>
+
+    <h2>7.4 Host networking — bind directly</h2>
+<pre><code>docker run -d --network host myapp        # no -p; app binds host:3000 directly
+curl http://localhost:3000
+# Pros: near-zero overhead, port is real. Cons: no port mapping, no isolation,
+# and two host-network containers can't both bind 3000.
+</code></pre>
+    <p>Use host networking for local perf-sensitive things (some proxies, benchmarks). In Compose/Kubernetes it's the exception, not the rule.</p>
+
+    <h2>7.5 Overlay networking (multi-host)</h2>
+    <p>Overlay lets service name = network location across many machines. It's the network of Docker Swarm mode and the basis of "the same Compose stack, spread across a cluster":</p>
+<pre><code>docker swarm init
+docker network create -d overlay --attachable my-overlay
+docker service create --name web --network my-overlay -p 80:80 nginx
+docker service ls     # replicated across hosts, all reachable via "web"
+</code></pre>
+    <p>You'll revisit this in Ch. 12 with orchestration; for a single machine today, "bridge + custom network" is your entire inner loop.</p>
+
+    <h2>7.6 Managing networks</h2>
+<pre><code>docker network ls                     # list (bridge, host, none are built-ins)
+docker network create -d bridge mynet --subnet 172.20.0.0/16   # carve your own range
+docker network connect mynet other    # attach a running container to another net
+docker network disconnect mynet other
+docker rm mynet                       # fails if containers are attached
+</code></pre>
+
+    <h2>7.7 DNS and the outside world</h2>
+    <ul>
+      <li><strong>Outbound:</strong> containers NAT through the host by default — internet works out of the box.</li>
+      <li><strong>DNS inside:</strong> /etc/resolv.conf is managed by Docker; on non-default networks use <code>--dns 1.1.1.1</code> if a vpn/company DNS fails inside.</li>
+      <li><strong>Hostname/IP stability:</strong> rely on names + DNS, never hard-coded container IPs (they change on recreate).</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <p>Containers live on isolated networks. Bridge (default, per-run) gives NAT + published ports; a custom bridge adds automatic DNS so services reach each other by name — your default for multi-container apps; host gives direct binds; overlay spans swarm nodes. Publish with <code>-p</code>, resolve by name, and treat network membership as a security boundary.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; I published a port (<code>-p</code>) and reached the container from the host.</li>
+      <li>&#9744; I created a custom network and connected two containers to it.</li>
+      <li>&#9744; I confirmed containers resolve each other by name on the same network.</li>
+      <li>&#9744; I know when host vs bridge is the right call.</li>
+      <li>&#9744; I inspected the network to see its members.</li>
+    </ul>
+
+    <nav>
+      <a href="6-volumes.html">&#8592; Prev: Volumes and Persistent Storage</a>
+      <a href="8-compose.html">Next: Docker Compose &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

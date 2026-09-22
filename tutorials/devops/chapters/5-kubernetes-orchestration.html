@@ -1,0 +1,222 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>5. Kubernetes Orchestration — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 5</span>
+    <h1>Kubernetes Orchestration: Deployments, Services, Scaling</h1>
+
+    <p>Kubernetes is the operating system for containers: a control plane that constantly reconciles the <em>desired state</em> you declare in YAML with the <em>actual state</em> of the cluster. If a pod dies, a replica is made. If traffic spikes, the HPA adds replicas. If a node fails, workloads are rescheduled. This chapter gives you the production-shaped version of the core objects and the mental model to debug them.</p>
+
+    <h2>5.1 The object model in one diagram</h2>
+<pre><code>            +------------------ Ingress (hostname routing) -------------------+
+            |                                                                 |
+   (clusterIP) Service  ----&gt; selects pods by label ----&gt; Pods (many replicas)
+            ^                                                                 |
+            |                                                        managed by
+        kubectl ---&gt; API server ---&gt; Deployment ---&gt; ReplicaSet               |
+                                               (declares N replicas,     +----+
+                                                rolling update strategy)  |PV/PVC|
+                                                                          +----+
+</code></pre>
+    <p><em>Diagram (described in text):</em> kubectl talks to the API server to create a Deployment, which manages a ReplicaSet that owns N Pods. A Service selects those pods by label and gives them one stable address; an Ingress routes hostnames/paths to that Service. Pods mount PersistentVolumeClaims for stateful data. Everything is declared, nothing is hand-scheduled.</p>
+
+    <h2>5.2 A production-shaped Deployment (this is the template you will copy)</h2>
+<pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: production
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }   # zero-downtime
+  selector:  { matchLabels: { app: api } }
+  template:
+    metadata: { labels: { app: api } }
+    spec:
+      serviceAccountName: api-sa
+      containers:
+      - name: api
+        image: ghcr.io/team/api:&lt;commit-sha&gt;
+        ports: [ { containerPort: 8080 } ]
+        resources:
+          requests: { cpu: "250m", memory: "256Mi" }
+          limits:   { cpu: "1",    memory: "512Mi" }
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 20
+          timeoutSeconds: 3
+        envFrom:
+        - configMapRef: { name: api-config }
+        - secretRef:    { name: api-secrets }
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities: { drop: ["ALL"] }</code></pre>
+
+    <p><strong>Read this Deployment like an auditor:</strong> immutable image tag, resource requests <em>and</em> limits, readiness + liveness probes, config and secrets injected declaratively, non-root security context, zero-downtime rollout strategy. Every one of those lines is a production incident avoided.</p>
+
+    <h2>5.3 Services: giving pods a stable front door</h2>
+<pre><code>apiVersion: v1
+kind: Service
+metadata: { name: api, namespace: production }
+spec:
+  selector: { app: api }                 # find pods by label
+  ports:
+  - port: 80            # Service port
+    targetPort: 8080    # container port
+  type: ClusterIP       # default; internal-only
+
+# --- NodePort (for tests): add nodePort: 30080 under ports ---
+# --- LoadBalancer: change type to LoadBalancer — cloud provisions a real LB ---
+</code></pre>
+<pre><code>kubectl get svc -n production
+kubectl describe svc api                 # shows the endpoint slice = real pod IPs
+kubectl get endpoints api</code></pre>
+    <p>Rule: <strong>ClusterIP</strong> for service-to-service calls, <strong>LoadBalancer</strong> for public single-service exposure, <strong>NodePort</strong> for the rare case of a bare-metal static port, and <strong>Ingress</strong> for everything that wants hostnames, paths, and central TLS.</p>
+
+    <h2>5.4 Scaling: manual, HPA, and scheduling concerns</h2>
+<pre><code>kubectl scale deploy api --replicas=5                 # quick/imperative
+kubectl autoscale deployment api --cpu-percent=70 --min=3 --max=20   # HPA (CPU)
+</code></pre>
+<pre><code># hpa.yaml — better: multiple metrics
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: api, namespace: production }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: api }
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+  - type: Resource
+    resource: { name: memory, target: { type: Utilization, averageUtilization: 80 } }
+  behavior:
+    scaleDown: { stabilizationWindowSeconds: 300 }    # avoid flapping</code></pre>
+    <div class="info"><strong>Scaling gotchas:</strong> HPA needs <em>requests</em> set (it scales on usage vs request). CPU-only autoscaling lags under latency-bound loads — add memory/P95 latency or queue depth. And if your nodes are full, HPA produces <em>pending</em> pods: you also need <strong>cluster autoscaling</strong> (CA-as-a-service on every cloud — Karpenter on EKS is currently the strongest).</div>
+
+    <h2>5.5 Rolling updates and rollback (the release mechanics)</h2>
+<pre><code>kubectl set image deploy/api api=ghcr.io/team/api:&lt;new-sha&gt; --record
+kubectl rollout status deploy/api          # wait for health
+kubectl rollout history deploy/api         # every version + cause
+kubectl rollout undo deploy/api            # one-command rollback
+kubectl rollout restart deploy/api         # reload config (no image change)</code></pre>
+    <p>With <code>maxSurge: 1 / maxUnavailable: 0</code>, rollout never drops capacity below the target and one new pod must become healthy before the next starts. <strong>This is why readiness probes exist</strong>: a missing probe makes K8s call a crashing pod "ready" and the rollout stalls silently instead of failing.</p>
+
+    <h2>5.6 Storage: PersistentVolumes and PVCs</h2>
+<pre><code># pvc.yaml — dynamic provisioning via a StorageClass on the cloud
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: data, namespace: production }
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  storageClassName: gp2                       # EBS on EKS; check your cluster
+  resources: { requests: { storage: 10Gi } }</code></pre>
+<pre><code>apiVersion: apps/v1
+kind: StatefulSet        # for databases: stable name + one PVC per replica
+metadata: { name: postgres, namespace: production }
+spec:
+  serviceName: postgres
+  replicas: 3
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata: { labels: { app: postgres } }
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:16
+        volumeMounts: [ { name: data, mountPath: /var/lib/postgresql/data } ]
+  volumeClaimTemplates:
+  - metadata: { name: data }
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: gp2
+      resources: { requests: { storage: 10Gi } }</code></pre>
+    <p>Use <strong>Deployments</strong> for stateless workloads and <strong>StatefulSets</strong> when each replica needs identity + its own persistent volume (databases, queues). Preserve RWO/RWX semantics: a shared RWX volume for a single-writer database is a corruption bug waiting to happen.</p>
+
+    <h2>5.7 Namespaces &amp; policies for sane multi-team operation</h2>
+<pre><code>kubectl create namespace production
+kubectl create namespace staging
+kubectl config set-context --current --namespace=production
+# then enforce with a ResourceQuota and LimitRange so teams can't starve each other
+kubectl apply -f - &lt;&lt;'EOF'
+apiVersion: v1
+kind: ResourceQuota
+metadata: { name: quota, namespace: staging }
+spec:
+  hard:
+    requests.cpu: "8"
+    limits.cpu: "16"
+EOF</code></pre>
+
+    <h2>5.8 Debugging workflow (the part beginners skip)</h2>
+<pre><code>kubectl get events --sort-by=.metadata.creationTimestamp     # narrative of reality
+kubectl describe pod &lt;name&gt;                                    # why is it CrashLoop?
+kubectl logs &lt;pod&gt; --previous                                 # last crash's output
+kubectl exec -it &lt;pod&gt; -c &lt;container&gt; -- sh                    # get inside
+kubectl top pods -n production                                # resource pressure
+kubectl get pvc,pv -n production                              # wait: claim/image Lost?
+</code></pre>
+    <p><em>Order matters:</em> events first (scheduling failures), then describe (image pulls, probes), then logs (code), then exec (symptoms), then resource queries (pressure). This order eliminates 80% of "why is my pod not healthy" cases in minutes.</p>
+
+    <h2>5.9 Best practices: scale, security, cost</h2>
+    <ul>
+      <li><strong>Pin versions, run workloads as code:</strong> all YAML lives in Git; apply via GitOps (Chapter 9), never <code>kubectl apply</code> from a laptop.</li>
+      <li><strong>Set requests/limits on every container</strong>; use VPA in "recommendation" mode to tune them before committing to numbers.</li>
+      <li><strong>Use network policies / RBAC / pod security standards</strong> (defaults in Chapter 8).</li>
+      <li><strong>Cost:</strong> right-size requests (over-requesting = idle paid nodes), use spot/preemptible nodes for stateless and bursty work, add the HPA + cluster autoscaler pair, and let the autoscaler scale down to zero for batch jobs.</li>
+      <li><strong>Logs to stdout/stderr</strong> so the platform collects them; never rely on <code>kubectl logs</code> for the archive — ship to the stack from Chapter 6.</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <p>Kubernetes converts deployment correctness into a property of YAML plus probes. Deployments own rolling updates, Services own discovery, HPA owns throughput, StatefulSets+PVCs own state, and namespaces/policies own multi-team sanity. Master the reconcile-and-debug loop and the rest is vocabulary.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; Every workload has probes, requests/limits, non-root security context.</li>
+      <li>&#9744; Rollouts are zero-downtime and rollbackable (<code>rollout undo</code> proven once).</li>
+      <li>&#9744; HPA + cluster autoscaler cover throughput; scaling is not "click instances".</li>
+      <li>&#9744; Databases use StatefulSets with per-replica PVCs (not shared RWX).</li>
+      <li>&#9744; Manifests are reviewed in Git and applied through GitOps, not ad hoc.</li>
+    </ul>
+
+    <nav>
+      <a href="4-containerization-docker.html">&#8592; Prev: Containerization</a>
+      <a href="6-monitoring-logging.html">Next: Monitoring &amp; Logging &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

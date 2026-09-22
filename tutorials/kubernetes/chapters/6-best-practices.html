@@ -1,0 +1,168 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>6. Best Practices — Kubernetes for Beginners</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 6</span>
+    <h1>Best Practices: Resources, Namespaces, and Security Basics</h1>
+
+    <p>Tutorial clusters forgivingly swallow sloppy YAML. Production clusters do not: they get noisy neighbors, overloaded nodes, and — if left open — attackers. This chapter teaches the discipline that separates a hobby demo from a deployable system, plus the security fundamentals (RBAC and Network Policies) that real platforms require.</p>
+
+    <h2>1. Resource requests and limits</h2>
+    <p>A container should always declare what it needs and what it may not exceed. Two settings, confusingly similar at first glance:</p>
+    <table>
+      <tr><th></th><th><code>requests</code></th><th><code>limits</code></th></tr>
+      <tr><td>Meaning</td><td><em>Reserve</em> this much; the scheduler guarantees it</td><td><em>Cap</em> usage at this; the runtime enforces it</td></tr>
+      <tr><td>Purpose</td><td>Fair scheduling, prevents overcommit of nodes</td><td>Stops one app from starving the node</td></tr>
+      <tr><td>Verdict if never set</td><td>Pods may never be scheduled correctly</td><td>A runaway pod can kill neighbor nodes</td></tr>
+    </table>
+
+    <pre><code>        resources:
+          requests:
+            cpu: "250m"          # 0.25 CPU core
+            memory: "256Mi"
+          limits:
+            cpu: "1"             # at most 1 full core
+            memory: "512Mi"</code></pre>
+
+    <p><strong>CPU</strong> is measured in <em>cores</em> or milli-units: <code>0.5</code> = <code>500m</code>. <strong>Memory</strong> uses <code>Mi</code>/<code>Gi</code> (mebibytes — 1024-based) in requests because that is how the kernel counts it. When memory hits the <em>limit</em>, the pod is <strong>killed</strong> (OOMKilled) — this is the classic "my pod keeps restarting" mystery. When CPU hits its limit, the app is only <em>throttled</em>, not killed.</p>
+
+    <div class="warn"><strong>Rule of thumb for beginners:</strong> always set <code>requests</code> and <code>limits</code> for CPU and memory on every container. Start with requests based on observation (<code>kubectl top pod</code> over a week) and limits at ~2&times; the request. For the HPA to work, requests must be present.</div>
+
+    <h2>2. Namespaces: folders for your cluster</h2>
+    <p>A <strong>Namespace</strong> partitions the cluster into logical groups. Three namespaces always exist: <code>default</code>, <code>kube-system</code> (where the control plane runs), and <code>kube-public</code>. You will use them to separate environments (<code>dev</code>, <code>staging</code>, <code>prod</code>) or teams.</p>
+
+<pre><code>kubectl create namespace dev
+kubectl get pods -n dev                       # operate inside the namespace
+kubectl apply -f nginx.yaml -n dev            # create objects there
+kubectl config set-context --current --namespace=dev   # make -n default for this session
+kubectl get namespaces</code></pre>
+
+    <p>Why bother? Isolation (dev can't accidentally see prod secrets), policy enforcement (quotas), and cleanup (<code>kubectl delete namespace dev</code> deletes everything in it). Pair namespaces with a <strong>ResourceQuota</strong> to cap total CPU/memory a team may use:</p>
+
+<pre><code>apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-quota
+  namespace: dev
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi</code></pre>
+
+    <h2>3. Labels, selectors, and annotations</h2>
+    <ul>
+      <li><strong>Labels</strong> are key-value pairs that <em>identity</em> — Services, ReplicaSets, and monitoring all choose objects via label selectors (<code>app: nginx</code>, <code>tier: frontend</code>, <code>version: v2</code>).</li>
+      <li><strong>Annotations</strong> are key-value metadata that tools read but selectors ignore (deprecated flags, tool info, timestamps).</li>
+    </ul>
+    <p>Conventions: use a consistent label set (e.g. <code>app</code>, <code>tier</code>, <code>environment</code>) and <strong>never</strong> change a Deployment's selector after creation — only the pod template labels are safe to edit. Changing the selector orphan-s both old and new pods.</p>
+
+    <h2>4. Security basics: RBAC</h2>
+    <p>Kubernetes is no different than any system: default it to deny, then grant least privilege. <strong>RBAC</strong> (Role-Based Access Control) is the mechanism, built on four concepts:</p>
+    <table>
+      <tr><th>Object</th><th>Defines</th><th>Example</th></tr>
+      <tr><td><strong>ServiceAccount</strong></td><td>An identity your pod runs as (not a human!)</td><td><code>myapp-sa</code></td></tr>
+      <tr><td><strong>Role / ClusterRole</strong></td><td>A set of allowed actions on resources</td><td>"get, list pods" (namespaced) vs "get nodes" (cluster-wide)</td></tr>
+      <tr><td><strong>RoleBinding / ClusterRoleBinding</strong></td><td>Attaches a Role to a ServiceAccount/user</td><td>"bind <code>myapp-sa</code> to <code>pod-reader</code>"</td></tr>
+    </table>
+
+<pre><code># role.yaml — never let an app do more than its job
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-reader
+  namespace: dev
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-pods
+  namespace: dev
+subjects:
+- kind: ServiceAccount
+  name: myapp-sa
+  namespace: dev
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io</code></pre>
+
+    <div class="note"><strong>The biggest beginner leak:</strong> admins copy the long-lived admin ServiceAccount credentials out of clusters. Never; and pass a pod's identity via <code>serviceAccountName:</code> in the pod spec, with bound tokens where possible. Audit with <code>kubectl auth can-i --list</code>.</div>
+
+    <h2>5. Network Policies: your private firewall inside the cluster</h2>
+    <p>By default, <em>all pods can talk to all pods</em>. <strong>NetworkPolicy</strong> is the micro-firewall: allow only the traffic your app truly needs. It works only if your cluster has a CNI that enforces it (Calico, Cilium, Antrea — Minikube's default generally permits policies with the right add-on, usually via Cilium).</p>
+
+<pre><code># only the web frontend may reach the database
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-only
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: database        # this policy applies to database pods
+  policyTypes: ["Ingress"]
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: frontend    # only pods tagged app:frontend may connect
+    ports:
+    - port: 5432</code></pre>
+
+    <p>Follow the <em>default-deny</em> pattern: apply an empty <code>podSelector: {}</code> policy that blocks everything for a namespace, then add explicit <code>allow</code> policies. Everything not allowed is denied.</p>
+
+    <h2>6. More habits that save you in production</h2>
+    <ul>
+      <li><strong>Pin image versions</strong> (<code>nginx:1.25</code>, not <code>latest</code>) and prefer digest pinning for critical images.</li>
+      <li><strong>Run as non-root</strong> and read-only root filesystem in the pod security context (<code>securityContext: { runAsNonRoot: true, readOnlyRootFilesystem: true }</code>).</li>
+      <li><strong>Health checks on everything</strong> — readiness + liveness probes (Chapter 5) prevent both downtime and crash-loops.</li>
+      <li><strong>Always courtesy-delete</strong> (<code>kubectl delete -f file.yaml</code>) instead of leaving test workload running.</li>
+      <li><strong>Keep YAML in Git</strong> — every cluster object should be a reviewed file, not a shell history. Tools like <code>kubectl diff</code> and GitOps (Argo CD/Flux, Chapter 7) come from this habit.</li>
+      <li><strong>Tie the HPA to the right metric</strong>: autoscale on real business metrics if possible (requests/second), not only CPU.</li>
+    </ul>
+
+    <div class="exercise">
+      <strong>&#9999;&#65039; Exercise:</strong> Create a <code>dev</code> namespace with a ResourceQuota of 2 CPU / 2&nbsp;Gi. Deploy nginx there with resources <code>requests: 250m/128Mi</code>, <code>limits: 500m/256Mi</code>. Then (a) apply the <code>allow-web-only</code> NetworkPolicy against your database-style pod, (b) verify with <code>kubectl top</code> that your limits are being respected. You have now built a small but genuinely production-minded cluster.
+    </div>
+
+    <nav>
+      <a href="5-advanced-topics.html">&#8592; Prev: Advanced Topics</a>
+      <a href="7-conclusion.html">Next: Conclusion &amp; Next Steps &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

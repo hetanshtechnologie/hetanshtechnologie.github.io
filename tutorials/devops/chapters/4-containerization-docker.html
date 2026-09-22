@@ -1,0 +1,168 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>4. Containerization: Docker Fundamentals — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 4</span>
+    <h1>Containerization: Docker Fundamentals</h1>
+
+    <p>A <strong>container</strong> is an isolated process (not a full OS) that bundles your application with its runtime, libraries, and configuration. Because the filesystem is layered and the runtime is shared with the host kernel, containers start in milliseconds and use a fraction of a VM's memory. <strong>Docker</strong> is the tooling that makes containers approachable; this chapter covers images, Dockerfiles, registries, and the security foot-guns every engineer steps on.</p>
+
+    <h2>4.1 Images vs containers vs registries</h2>
+    <table>
+      <tr><th>Concept</th><th>Analogy</th><th>Reality</th></tr>
+      <tr><td><strong>Image</strong></td><td>A class / recipe / snapshot</td><td>Immutable filesystem layers + metadata</td></tr>
+      <tr><td><strong>Container</strong></td><td>An instance / a cake baked</td><td>A running image with an isolated process tree, network, and mounts</td></tr>
+      <tr><td><strong>Registry</strong></td><td>A package store</td><td>Stores and distributes images (Docker Hub, GHCR, ECR, ACR, GCR)</td></tr>
+    </table>
+
+    <h2>4.2 Anatomy of a good Dockerfile</h2>
+<pre><code># ---- builder stage: compile the app ----
+FROM node:20 AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci                      # install deps exactly (lockfile)
+COPY . .
+RUN npm run build               # produces dist/
+
+# ---- runtime stage: small, non-root, only artifacts ----
+FROM node:20-alpine AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /app/package*.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+RUN addgroup -S appgroup &amp;&amp; adduser -S appuser -G appgroup   # (busybox adduser)
+USER appuser
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD wget -qO- http://127.0.0.1:3000/healthz || exit 1
+CMD ["node", "dist/server.js"]</code></pre>
+
+    <p><strong>This Dockerfile encodes five rules:</strong> multi-stage build (builder stays fat, runtime stays tiny), pin base images, copy artifacts not sources, run as a non-root user, and declare a health check. Together they make images small (~50&nbsp;MB vs ~1&nbsp;GB), secure, and observable.</p>
+
+    <h2>4.3 Building, tagging, scanning, and pushing</h2>
+<pre><code>docker build -t myapp:1.2.3 .
+docker build --no-cache -t myapp:1.2.3 .            # forced rebuild (suspicious cache)
+docker scout cves myapp:1.2.3                       # or: trivy image myapp:1.2.3
+docker tag myapp:1.2.3 ghcr.io/team/myapp:1.2.3
+docker login ghcr.io
+docker push ghcr.io/team/myapp:1.2.3
+docker run --rm -p 3000:3000 -e LOG_LEVEL=debug ghcr.io/team/myapp:1.2.3</code></pre>
+
+    <p><em>Diagram (described in text):</em> build pipeline feeding a registry. A Dockerfile is compiled into layers; each layer is a diff. The registry serves these layers to any machine that runs <code>docker pull</code>. Because layers are cached and shared, pushing and pulling transmit only changed layers — that is why distroless and alpine images move so fast.</p>
+
+    <h2>4.4 Running containers properly</h2>
+<pre><code>docker container run -d --name api \
+  -p 8000:8000 --restart unless-stopped \
+  -v api-data:/var/lib/app        \
+  --read-only                     \
+  --cap-drop ALL                  \
+  --memory 512m --cpus 1          \
+  ghcr.io/team/api:1.2.3</code></pre>
+    <ul>
+      <li><code>-d</code> detach, <code>--name</code> name, <code>-p</code> publish ports.</li>
+      <li><code>-v name:/path</code> named volume (survives container restarts).</li>
+      <li><code>--restart unless-stopped</code> basic self-healing on a single host.</li>
+      <li><code>--read-only</code> + <code>--cap-drop ALL</code> <strong>hardening</strong>, not paranoia.</li>
+      <li><code>--memory</code>/<code>--cpus</code> resource limits (the kernel enforces them).</li>
+    </ul>
+<pre><code>docker ps -a
+docker logs --tail=50 -f api
+docker exec -it api sh
+docker inspect api | jq '.[0].State'
+docker stats                     # live CPU/mem of all containers
+docker system prune -f           # reclaim disk (be careful in prod)</code></pre>
+
+    <div class="warn"><strong>Container facts beginners misremember:</strong> containers are <em>not</em> lightweight VMs (no independent kernel, no systemd, no SSH server by default). They are also <em>not</em> a security boundary by themselves — container isolation assumes kernel hardening, so in production treat containers as <em>untrusted-ish</em> and enforce seccomp/AppArmor, resource limits, and no privileged mode. And never <code>docker exec -it --privileged</code> anything you do not intend to give root on the host to.</div>
+
+    <h2>4.5 Multi-service apps with Docker Compose</h2>
+    <p>Compose is the single-machine orchestrator: one YAML = one environment stack, perfect for local dev, staging, and lab environments.</p>
+<pre><code># docker-compose.yml
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}      # from .env, never committed
+    volumes: [ "dbdata:/var/lib/postgresql/data" ]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD}@db:5432/postgres
+    ports: [ "8000:8000" ]
+volumes:
+  dbdata:</code></pre>
+<pre><code>docker compose up -d --build
+docker compose ps
+docker compose logs -f api
+docker compose down              # teardown (add -v only to destroy volumes!)</code></pre>
+
+    <h2>4.6 Registry and image management best practices</h2>
+    <ul>
+      <li><strong>Tag immutable-ly:</strong> <code>myapp:1.2.3</code> and <code>myapp:&lt;sha&gt;</code> are good; <code>myapp:latest</code> as the only tag is a time bomb. Never redeploy from <code>latest</code>.</li>
+      <li><strong>Scan before push (CI):</strong> Trivy, Grype, or Snyk gate on fixable CVEs; block critical/high on the image path to prod.</li>
+      <li><strong>Sign images:</strong> <code>cosign sign</code> (+ SBOM via <code>syft</code>) lets your runtime and supply-chain policy verify provenance. See Chapter 8.</li>
+      <li><strong>Private registry + pull-through caching</strong> to cut egress and avoid rate limits at scale.</li>
+      <li><strong>Retention policies:</strong> keep N months of images, auto-prune untagged; registries are the #1 silent storage consumer.</li>
+      <li><strong>Distroless/scratch for production:</strong> fewer binaries = smaller attack surface = fewer CVEs.</li>
+    </ul>
+
+    <h2>4.7 Cost optimization quick wins</h2>
+    <ul>
+      <li><code>docker system df</code> weekly; prune dangling build cache in CI agents.</li>
+      <li>Use <code>--mount=type=cache</code> (BuildKit) for package caches across builds.</li>
+      <li>Share base layers: one org base image per runtime saves multiplatform layer pull time.</li>
+      <li>Right-size agents: most "slow CI" is bloated images plus cold caches, not weak CPUs.</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <p>Docker turns applications into immutable, versionable artifacts via layered images. The craft is in the Dockerfile (multi-stage, non-root, small, healthy), the discipline is in the pipeline (scan, sign, immutable tags), and the security contract is understanding that a container isolates a process — not a host.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; My Dockerfile uses multi-stage builds and a minimal runtime image.</li>
+      <li>&#9744; My container runs as a non-root user with dropped capabilities.</li>
+      <li>&#9744; Images are scanned in CI and signed with cosign before deployment.</li>
+      <li>&#9744; Tags are immutable (version + SHA-based), never only <code>latest</code>.</li>
+      <li>&#9744; Secrets come from env/config at runtime, never baked into the image.</li>
+    </ul>
+
+    <nav>
+      <a href="3-infrastructure-as-code.html">&#8592; Prev: Infrastructure as Code</a>
+      <a href="5-kubernetes-orchestration.html">Next: Kubernetes Orchestration &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

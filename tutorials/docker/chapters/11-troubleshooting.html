@@ -1,0 +1,146 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>11. Troubleshooting Common Issues — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 11</span>
+    <h1>Troubleshooting Common Issues</h1>
+
+    <p>Containers fail in remarkably predictable ways. This chapter is a symptom → diagnosis → fix playbook for the failures you are most likely to meet, plus the diagnosis loop that handles everything else. <strong>Rule #1: read the actual error before changing anything.</strong> <strong>Rule #2:</strong> <code>docker logs</code> beats guessing, always.</p>
+
+    <h2>11.1 The diagnosis loop</h2>
+<pre><code>1. docker ps -a            # is it running? exited? restarting?
+2. inspect state: docker inspect --format '{{json .State}}' &lt;name&gt;
+3. docker logs --tail 50   # the app's own voice (the 90% answer)
+4. docker events           # live lifecycle events while you reproduce
+5. narrow by layer: daemon vs image vs app vs network vs storage
+6. apply cheapest fix, verify with data, then retro: why was it possible?
+</code></pre>
+
+    <h2>11.2 Symptom: "port is already allocated" / "address already in use"</h2>
+    <p>Something already owns the host port you asked to publish.</p>
+<pre><code>docker ps -a                 # another container mapped that port?
+netstat -ano | grep 8080     # host process on 8080 (Windows: netstat -ano | findstr 8080)
+# fix: pick a different host port, or free the port
+docker run -d -p 8081:80 nginx
+</code></pre>
+
+    <h2>11.3 Symptom: image issues — "manifest unknown", pull denied, pull hangs</h2>
+    <ul>
+      <li><strong>"manifest unknown" / "not found":</strong> the tag doesn't exist — check the spelling; <code>latest</code> may be omitted where a version is expected.</li>
+      <li><strong>"pull access denied":</strong> either the image doesn't exist, or it's private — add credentials with <code>docker login</code> / <code>docker login ghcr.io -u ... -p $TOKEN</code>.</li>
+      <li><strong>hang / slow:</strong> a registry or proxy issue; try <code>docker pull --platform linux/amd64</code> to rule out platform confusion, or retry after network check.</li>
+    </ul>
+<pre><code>docker pull nginx:alpine          # sanity: a registry round-trip
+docker search "official nginx"    # confirm names exist
+</code></pre>
+
+    <h2>11.4 Symptom: container starts then exits immediately ("status Exited (1)")</h2>
+    <p>A container exits when its PID 1 process finishes or crashes. The cause is almost always in the logs, or one of:</p>
+    <ul>
+      <li><strong>No long-running process:</strong> a base image like <code>ubuntu</code> has no service to keep running — the container exits instantly. Fix: run a foreground process (<code>CMD ["nginx", "-g", "daemon off;"]</code> or your app).</li>
+      <li><strong>App crashed:</strong> missing env, bad config, dependency burned a compile step. <code>docker run -it --rm myapp</code> (foreground) shows the trace directly.</li>
+      <li><strong>OOMKilled:</strong> <code>docker inspect --format '{{.State.OOMKilled}}' &lt;name&gt;</code> → true means raise the memory limit or fix the leak.</li>
+    </ul>
+<pre><code>docker logs --tail 50 &lt;name&gt;      # first move
+docker run -it --rm myapp         # foreground + tty: you SEE the crash
+docker inspect --format '{{.State.ExitCode}} {{.State.Error}}' &lt;name&gt;
+</code></pre>
+
+    <h2>11.5 Symptom: can't connect to a service ("connection refused", timeout)</h2>
+    <p>Check which side of the story is true: host→container, container→container, or container→internet.</p>
+<pre><code># host -> container: did you publish? is the app listening on 0.0.0.0?
+docker ps                    # look at the PORTS column — 0.0.0.0:8080-&gt;80/tcp? 
+curl http://localhost:8080
+docker exec &lt;name&gt; curl -s http://localhost:80   # is the app alive INSIDE?
+
+# container -> container: same network? DNS-resolvable name?
+docker network inspect &lt;net&gt;         # members and IPs
+docker exec api getent hosts db      # resolves?
+
+# container -> internet: NAT through host — what fails?
+docker run --rm busybox wget -qO- https://www.google.com
+</code></pre>
+    <div class="warn"><strong>"Connection refused" almost never means "firewall blocked".</strong> It means "nothing is listening at that address:port." Firewalls and networks typically cause timeouts instead. Listen for that word, it directs you: refused → the app/port/publish layer; timeout → the network layer.</div>
+
+    <h2>11.6 Symptom: "permission denied" on the Docker socket</h2>
+    <pre><code># error: Get "http://unix/.../docker.sock": dial unix ... permission denied
+sudo usermod -aG docker $USER   # then LOG OUT and back in
+sudo systemctl restart docker   # also restarts the daemon cleanly
+</code></pre>
+
+    <h2>11.7 Symptom: "no space left on device" (Windows WSL2 edition)</h2>
+    <p>Docker's data lives in the WSL2 VHD which grows but rarely shrinks. Since you can't just delete AppData files:</p>
+<pre><code># inside WSL2: reclaim disk after pruning
+docker system prune -a --volumes        # reclaim what you can (!! deletes un-backuped data)
+wsl --shutdown                          # PowerShell, releases the VHD for compaction
+# then compact via `optimize-vhd -Path docker-desktop-data.vhdx -Mode Full` (admin)
+# longer-term: docker desktop settings can `Disk image size` cap; use .dockerignore
+</code></pre>
+
+    <h2>11.8 Symptom: exec format error / wrong platform arch</h2>
+    <p>"exec format error" = the binary's CPU architecture doesn't match the runtime (e.g., built on Apple Silicon, run on amd64).</p>
+<pre><code>docker build --platform linux/amd64 -t myapp .
+docker run --platform linux/arm64 myapp
+# or push multi-arch: docker buildx build --platform linux/amd64,linux/arm64 -t me/app --push .
+</code></pre>
+
+    <h2>11.9 Symptom: volume/file permission mismatch (UID wars)</h2>
+    <p>Biggest surprise on Linux: the container's user (e.g. UID 999 for postgres, 33 for www-data) can't write to a directory owned by your host user.</p>
+<pre><code>docker run -d --user "$(id -u):$(id -g)" -v "$(pwd)/data:/data" myapp
+# or in Compose: user: "1000:1000", or chown the dir in the image
+docker compose exec db ls -la /var/lib/postgresql/data   # observe ownership
+</code></pre>
+
+    <h2>11.10 Symptom: Compose says "no such service" / "service depends on undefined service"</h2>
+    <ul>
+      <li>Missing <code>services:</code> indentation — the #1 YAML mistake (use <code>docker compose config</code> to validate).</li>
+      <li>A <code>depends_on</code> naming a service that isn't defined in this file (works in <code>docker compose ... --profile</code> footguns).</li>
+      <li>Different Compose versions: plugin vs 1.x standalone (<code>docker compose</code> vs <code>docker-compose</code>); the plugin is current.</li>
+    </ul>
+
+    <h2>Summary</h2>
+    <p>Most failures live in nine buckets: port conflicts, image pulls, instant-exit, connectivity, socket permissions, disk, architecture, permissions, and compose/YAML. Each has one defining diagnostic (logs, PORTS column, OOMKilled flag, getent, config). Follow the loop, read the error, and let the layer that speaks first point you to the fix.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; I ran <code>docker logs</code> before changing anything at least once today.</li>
+      <li>&#9744; I can debug a "can't connect" between four layers (host, app-internal, cross-container, internet).</li>
+      <li>&#9744; I can explain why "connection refused" ≠ firewall.</li>
+      <li>&#9744; I know the OOMKilled check and the exec format + platform fix.</li>
+      <li>&#9744; I validated a compose file with <code>docker compose config</code>.</li>
+    </ul>
+
+    <nav>
+      <a href="10-real-world-example.html">&#8592; Prev: Real-World Example</a>
+      <a href="12-advanced.html">Next: Advanced Topics &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

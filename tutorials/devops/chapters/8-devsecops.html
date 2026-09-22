@@ -1,0 +1,136 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>8. Security in DevOps: DevSecOps — The DevOps Engineer's Handbook</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 8</span>
+    <h1>Security in DevOps: DevSecOps</h1>
+
+    <p><strong>DevSecOps</strong> is security as a first-class pipeline stage, not a separate team that audits at the end. You move security <em>left</em> — into commit, build, and deploy — so that problems are found where they are cheapest to fix, and you automate enforcement so humans review exceptions rather than everything. The three pillars are: <em>shift-left scanning</em>, <em>secrets management</em>, and <em>supply-chain trust</em>, wrapped in <em>policy as code</em>.</p>
+
+    <h2>8.1 Where security checks live in a pipeline</h2>
+<pre><code>commit --&gt; [secret scan, IaC scan, SAST] --&gt; build --&gt; [dependency scan, container scan] --&gt;
+packaging --&gt; [sign, generate SBOM] --&gt; deploy --&gt; [DAST/pen test, runtime policy] --&gt; observe --&gt; [threat feed]
+</code></pre>
+    <p><em>Diagram (described in text):</em> security stages interleaved with CI/CD stages. Static checks (secrets, IaC, SAST) run in the commit/build phase; dependency and container scans gate the artifact; signing + SBOM happen at packaging; runtime checks (DAST, admission policy) guard the deploy, and threat signals flow back into the pipeline.</p>
+
+    <h2>8.2 Shift-left scanning (the check names you must know)</h2>
+    <table>
+      <tr><th>Kind</th><th>What it finds</th><th>Tool examples</th></tr>
+      <tr><td>Secret scanning</td><td>API keys, tokens, passwords in code</td><td>gitleaks, trufflehog, cloud secret scanners</td></tr>
+      <tr><td>SAST</td><td>Code-level vulns (injection, XSS)</td><td>Semgrep, SonarQube, CodeQL</td></tr>
+      <tr><td>IaC scan</td><td>Misconfigs in Terraform/CloudFormation/Bicep</td><td>Checkov, tfsec/Trivy config, Prowler</td></tr>
+      <tr><td>Dependency scan</td><td>Known CVEs in libraries</td><td>Dependabot, Renovate, Trivy, Grype</td></tr>
+      <tr><td>Container scan</td><td>CVEs + secrets in images</td><td>Trivy, Grype, Syft (SBOM), cosign (sign)</td></tr>
+      <tr><td>DAST</td><td>Runtime/web-app issues</td><td>OWASP ZAP, Burp</td></tr>
+    </table>
+
+<pre><code># GitHub Actions: gate the merge on security
+- name: Secret scan
+  run: gitleaks detect --source . --redact --report-format=json
+- name: IaC scan
+  run: checkov -d terraform/ --framework terraform --compact --download-external-modules False
+- name: Dependency scan (fails on high+)
+  run: trivy fs --scanners vuln --severity HIGH,CRITICAL --fail-on-vuln --exit-code 1 .</code></pre>
+
+    <div class="info"><strong>Priority note for your team:</strong> IaC misconfigs and leaked secrets are the two findings that recur most in production breaches — and both are solvable in PR. SAST/DAST matter, but cover the top of the funnel first.</div>
+
+    <h2>8.3 Secrets management (the practice everyone gets wrong once)</h2>
+    <p>The pipeline needs secrets at three points: <em>CI</em> (deploy credentials), <em>runtime</em> (DB passwords, API keys), and <em>IaC</em> (provisioning values). Use the right tool at each:</p>
+    <ul>
+      <li><strong>CI:</strong> the platform's secret store (GitHub <code>secrets.*</code>, Jenkins Credentials, Azure variable groups) populated from a human-approved vault — never committed, never echoed.</li>
+      <li><strong>Runtime:</strong> a vault with dynamic secrets: <strong>HashiCorp Vault</strong>, or cloud-native (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager), <strong>or</strong> K8s Secrets with encryption-at-rest via KMS — in that order of preference from "most done" to "minimum."</li>
+      <li><strong>Config-as-files:</strong> <strong>SOPS</strong> (encrypt only the values in Git with age/KMS) so application config with secrets can still be versioned.</li>
+    </ul>
+
+<pre><code># Vault: dynamic, expiring DB credentials (databases/creds)
+vault read database/creds/app@5m
+# &gt; connection string valid 5 minutes — no static passwords to rotate</code></pre>
+<pre><code># SOPS: encrypt values inside a normal YAML, decrypt at deploy
+sops -e -k ark:&lt;key&gt; secrets/app.yaml &gt; secrets/app.enc.yaml
+sops --decrypt secrets/app.enc.yaml | kubectl apply -f -</code></pre>
+
+    <div class="warn"><strong>Static-secret reality check:</strong> if you cannot do Vault yet, at minimum: (1) never bake secrets into images or IaC, (2) enable KMS encryption at rest on whatever store you use, (3) rotate/expire by policy, (4) revoke immediately on a leak — and treat <code>base64</code> in K8s as "encoded," not "encrypted."</div>
+
+    <h2>8.4 Supply chain: SBOMs, signing, provenance</h2>
+<pre><code># syft: make an SBOM (software bill of materials) at build time
+syft image ghcr.io/team/api:1.2.3 -o spdx-json &gt; sbom.json
+# cosign: sign the image + attest like "git-sha: &lt;x&gt;"
+cosign sign --key cosign.key ghcr.io/team/api:1.2.3
+cosign verify --key cosign.pub ghcr.io/team/api:1.2.3</code></pre>
+    <p><strong>SBOM</strong> answers "what is actually inside my image that I must track when the next big CVE drops?" <strong>Signing</strong> ensures the image your runtime pulls is the image your pipeline built. <strong>Provenance</strong> (SLSA attestation) ties artifact to build logs, so a compromised image is traceable. This is the current frontier of DevSecOps and where every serious platform team is investing.</p>
+
+    <h2>8.5 Policy as code: enforcement, not hoping</h2>
+    <p>Admission controllers can block bad manifests at deploy time. The standard is none of the tool choices as much as the <em>placement</em>: policies evaluated by the cluster, not by memory.</p>
+<pre><code># Open Policy Agent (Gatekeeper) constraint: block privileged containers
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sPSPPrivilegedContainer
+metadata: { name: no-privileged-containers }
+spec:
+  match:
+    kinds: [{ apiGroups: [""], kinds: ["Pod"] }]
+  enforcementAction: deny</code></pre>
+    <p>Equivalent checks on the IaC side: Checkov/OPA on <code>terraform plan</code> can automatically block "storage bucket public-read" before it ever reaches a cloud. The dream outcome: humans review <em>exceptions</em>; machines enforce the rules.</p>
+
+    <h2>8.6 Runtime hardening on Kubernetes</h2>
+    <ul>
+      <li><strong>Pod Security Standards</strong> (baseline/restricted) or Gatekeeper in your namespaces — no running as root, no privileged.</li>
+      <li><strong>NetworkPolicies</strong> default-deny east-west; allow only declared pairs (see Chapter 5).</li>
+      <li><strong>Runtime security</strong> (Falco, cloud-native agents) detects odd behavior at runtime: shells in web containers, file tampering.</li>
+      <li><strong>ImagePullPolicy + admission scan:</strong> ratify/sigstore policy "pull only signed images."</li>
+    </ul>
+
+    <h2>8.7 DevSecOps workflow in one commit (your template)</h2>
+<pre><code>git push main            # 1. push the MR
+# 2. repo triggers: gitleaks, checkov, semgrep, dependabot
+# 3. on merge: build, trivy scan (fail on HIGH/CRITICAL), syft sbom, cosign sign
+# 4. deploy to staging behind a slack "review my env" gate
+# 5. cluster admission policy rejects privileged/unsigned images
+# 6. ZAP/DAST runs weekly against staging; findings become tickets
+# 7. every release ships with sbom attached to the release notes</code></pre>
+
+    <h2>Summary</h2>
+    <p>DevSecOps makes security continuous and automatic: scan early in the funnel, manage secrets through a vault with short-lived credentials, sign and SBOM every artifact, and enforce policy as code at the admission/apply boundary. Security becomes a property of engineering practice instead of a gate at the end.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; PRs run gitleaks + checkov + a dependency scan that can block the merge.</li>
+      <li>&#9744; No secret exists in Git, images, or IaC; runtime secrets come from a vault/KMS-backed store.</li>
+      <li>&#9744; Images are signed (cosign) and ship with an SBOM.</li>
+      <li>&#9744; Admission policy blocks privileged/unsigned workloads; NetworkPolices enforce default-deny.</li>
+      <li>&#9744; Access permissions are least-privilege and reviewed; no long-lived admin credentials in use.</li>
+    </ul>
+
+    <nav>
+      <a href="7-cloud-native-devops.html">&#8592; Prev: Cloud-Native DevOps</a>
+      <a href="9-automation-gitops.html">Next: Automation &amp; GitOps &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>

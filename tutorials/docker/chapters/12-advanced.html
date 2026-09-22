@@ -1,0 +1,141 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+    
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-1RVMWL4SDK');
+</script>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>12. Advanced Topics: Registries, CI/CD, Orchestration — Complete Docker Tutorial</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+    <a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#2563eb;text-decoration:none;">&larr; Back to Tutorials</a>
+    <span class="tag">Chapter 12</span>
+    <h1>Advanced Topics: Registries, CI/CD Integration, and Orchestration Basics</h1>
+
+    <p>You can now build, run, and persist containers — the last three skills take what you built and make it <em>team-scalable</em>: pushing images to registries, building them automatically in CI, and letting an orchestrator run them across many machines.</p>
+
+    <h2>12.1 Registries: where images live and move</h2>
+    <p>A registry stores and serves images. Docker Hub is the public default; your own images should live in a private registry — GitHub Container Registry (GHCR), GitLab, ECR, ACR, GCR, or a self-hosted registry.</p>
+<pre><code># login once (token as password)
+docker login ghcr.io -u YOUR_GITHUB_USER -p $GITHUB_TOKEN
+
+# tag so the name points at your registry, then push
+docker tag myapp:1.0.0 ghcr.io/your-org/myapp:1.0.0
+docker push ghcr.io/your-org/myapp:1.0.0
+
+# digests again: what your orchestrator will actually pin
+docker inspect ghcr.io/your-org/myapp:1.0.0 --format '{{index .RepoDigests 0}}'
+</code></pre>
+    <p><em>Diagram (described in text):</em> a horizontal flow — CI (left) builds and pushes → a central registry in the middle → on the right, three machines all `pull` the same image tag and run containers. The arrow from each machine back to the registry is labeled "pull with @digest".</p>
+    <div class="info"><strong>Registry hygiene:</strong> set retention (delete stale tags), enable vulnerability scanning on private repos, use pull-through caching for shared bases, and treat registry credentials as secrets with minimal scope (read-only for deploy, write-only for CI).</div>
+
+    <h2>12.2 CI/CD: build, scan, push, cache</h2>
+    <p>CI should produce the exact image production will run — in this GitHub Actions workflow, notice the secure login, digest pinning, layer caching via <code>cache-to</code>, and the scan gate:</p>
+<pre><code>name: build-and-push
+on:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build &amp; push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ format('ghcr.io/me/app:{0}-{1}', github.ref_name, github.sha) }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan the pushed image
+        run: |
+          docker run --rm aquasec/trivy image \
+            --severity HIGH,CRITICAL --exit-code 1 \
+            ghcr.io/me/app:${{ github.sha }}
+</code></pre>
+    <p>Key production habits: tag with <code>branch-sha</code> (immutable trace back to a commit), use the <code>type=gha</code> cache so rebuilds reuse your layers (Ch. 5.5), and fail the pipeline on critical scan findings before anything deploys (Ch. 9.2).</p>
+
+    <h2>12.3 Orchestration: from one host to many</h2>
+    <p>Compose tells one host "run these N containers." Orchestrators tell a fleet "keep this many replicas healthy across these nodes, replace failed ones, route traffic, and upgrade without downtime."</p>
+    <table>
+      <tr><th></th><th>Docker Compose</th><th>Docker Swarm</th><th>Kubernetes</th></tr>
+      <tr><td>Scope</td><td>Single host, local/dev</td><td>Multi-node, simple</td><td>Multi-node, cloud-scale</td></tr>
+      <tr><td>Declare</td><td>compose file</td><td>compose file (swarm-aware)</td><td>YAML manifests (Deployment, Service, Ingress...)</td></tr>
+      <tr><td>Self-healing</td><td>restart policies only</td><td>Yes</td><td>Yes (richest)</td></tr>
+      <tr><td>Learning curve</td><td>None (this book)</td><td>Low</td><td>Steep (Ch. 13 worth it for k8s pros)</td></tr>
+    </table>
+    <p><strong>Swarm — Compose-like, multi-host</strong> (your climb step):</p>
+<pre><code>docker swarm init            # you are a manager node
+docker network create -d overlay web
+docker service create --name web --network web --publish 80:80 nginx:alpine
+docker service scale web=3   # three replicas across the cluster
+docker service ls &amp;&amp; docker service ps web
+docker service update --image nginx:1.27 web    # rolling update
+</code></pre>
+    <p><strong>Kubernetes — the industry standard:</strong> the same Flask image from Ch. 10 becomes a Deployment (desired state: 3 replicas of the image), a Service (stable DNS), and k8s reconciles reality to that state — the exact "Git is truth, controller enforces" model you met in Ch. 9 of the DevOps book. Orchestrators care about your image quality (Probes/limits/non-root) more than Compose ever did.</p>
+
+    <h2>12.4 What makes an image "orchestrator-ready"</h2>
+    <ul>
+      <li><strong>Stateless pods:</strong> data in volumes/object stores, not container disk (Ch. 6).</li>
+      <li><strong>Graceful shutdown:</strong> catch SIGTERM, stop accepting work, drain in-flight (orchestrators send SIGTERM first, SIGKILL after grace).</li>
+      <li><strong>Readiness + liveness probes</strong> in terms an orchestrator understands (Ch. 8 healthcheck pattern).</li>
+      <li><strong>Resource requests/limits</strong> so the scheduler can pack correctly (Ch. 9 limits).</li>
+      <li><strong>Non-root + pinned digests</strong> — CHAP 9 hardening is exactly what multi-tenant clusters demand.</li>
+    </ul>
+
+    <h2>12.5 Where you are now (skills map)</h2>
+    <pre><code>Dockerfiles + builds .......... complete (Ch. 5, 9)
+local stacks + compose ........ complete (Ch. 8, 10)
+persistence + networking ...... complete (Ch. 6, 7)
+registries + CI ................ this chapter
+orchestration (k8s/swarm) ...... this chapter --&gt; next tutorial</code></pre>
+
+    <h2>Summary</h2>
+    <p>Registries make images portable (tag for your registry, push, pin by digest); CI builds and scans them on every commit with layer caching and secure logins; orchestrators replace "run containers" with "keep this desired state alive across a fleet." Your Compose stack is now untethered from a single host — and your images are ready to serve at any scale.</p>
+
+    <h2>Checklist</h2>
+    <ul>
+      <li>&#9744; I pushed an image to a private registry and pulled it back by digest.</li>
+      <li>&#9744; My CI tags images with branch-sha and caches layers.</li>
+      <li>&#9744; Scan findings block the pipeline.</li>
+      <li>&#9744; I can outline the compose → swarm → kubernetes progression and when each is right.</li>
+      <li>&#9744; I can list four changes that make a container "orchestrator-ready."</li>
+    </ul>
+
+    <nav>
+      <a href="11-troubleshooting.html">&#8592; Prev: Troubleshooting Common Issues</a>
+      <a href="../index.html">Back to Table of Contents &rarr;</a>
+    </nav>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script><script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../js/progress.js"></script>
+</body>
+</html>
