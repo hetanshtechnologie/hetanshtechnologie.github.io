@@ -10,6 +10,7 @@ let plans = [];
 let familyProgress = [];
 let isChild = false;
 let planMode = 'links';
+let orderBy = 'oldest';
 
 async function init() {
   app = await guardPage();
@@ -27,6 +28,7 @@ async function init() {
     toast(err.message, true);
   }
   el('filter-cat').addEventListener('change', (e) => { filterCat = e.target.value; renderLinks(); });
+  el('order-links').addEventListener('change', (e) => { orderBy = e.target.value; renderLinks(); });
   planMode = isChild ? 'videos' : 'links';
   await loadLinks();
   if (!isChild) {
@@ -240,7 +242,8 @@ function renderSummary() {
 
 function renderLinks() {
   const container = el('link-list');
-  const list = filterCat ? links.filter(l => String(l.category_id) === filterCat) : links;
+  const base = filterCat ? links.filter(l => String(l.category_id) === filterCat) : links;
+  const list = getOrdered(base);
   if (!list.length) {
     container.innerHTML = isChild
       ? '<p class="empty">No videos yet. Ask your parent to add some.</p>'
@@ -274,6 +277,20 @@ function renderLinks() {
       return;
     }
 
+    row.querySelectorAll('.link-move').forEach(mv => {
+      mv.addEventListener('click', async () => {
+        if (orderBy !== 'custom') {
+          orderBy = 'custom';
+          el('order-links').value = 'custom';
+        }
+        try {
+          await moveLink(id, +mv.dataset.dir);
+        } catch (err) {
+          toast(err.message, true);
+        }
+      });
+    });
+
     row.querySelector('.link-watch').addEventListener('change', async (e) => {
       const prev = e.target.checked;
       try {
@@ -302,14 +319,36 @@ function renderLinks() {
         toast(err.message, true);
       }
     });
+    row.querySelector('.link-edit').addEventListener('click', () => {
+      row.querySelector('.link-edit-area').classList.toggle('hidden');
+    });
+    row.querySelector('.le-cancel').addEventListener('click', () => {
+      row.querySelector('.link-edit-area').classList.add('hidden');
+    });
+    row.querySelector('.le-save').addEventListener('click', async () => {
+      const url = row.querySelector('.le-url').value.trim();
+      if (!url) { toast('Link URL is required.', true); return; }
+      try {
+        await db.updateLink(id, {
+          title: row.querySelector('.le-title').value.trim() || null,
+          url,
+          category_id: row.querySelector('.le-cat').value || null,
+        });
+        await loadLinks();
+        toast('Link updated.');
+      } catch (err) {
+        toast(err.message, true);
+      }
+    });
   });
 }
 
-function renderLinkRow(l) {
+function renderLinkRow(l, i) {
   const label = linkLabel(l);
   const canPlay = !!youtubeVideoId(l.url);
   const done = isChild ? progressMap[l.id] : l.watched;
   const row = '<div class="link-row' + (done ? ' done' : '') + '" data-id="' + l.id + '">'
+    + '<span class="link-seq">' + (i + 1) + '</span>'
     + '<label class="watch-check"><input type="checkbox" class="link-watch"' + (done ? ' checked' : '') + '></label>'
     + (canPlay ? '<span class="play-badge" title="Play inline">&#9654;</span>' : '')
     + '<div class="link-main">'
@@ -317,9 +356,64 @@ function renderLinkRow(l) {
     + '<div class="link-url-meta">' + esc(shortUrl(l.url)) + (l.category ? ' &middot; ' + esc(l.category) : '') + '</div>'
     + '</div>';
   if (isChild) return row + '</div>';
-  return row + linkCatSelect(l)
+  return row + '<div class="link-order-btns">'
+      + '<button class="btn btn-outline btn-small link-move" data-dir="-1" title="Move up">&#9650;</button>'
+      + '<button class="btn btn-outline btn-small link-move" data-dir="1" title="Move down">&#9660;</button>'
+      + '</div>'
+    + linkCatSelect(l)
+    + '<button class="btn btn-outline btn-small link-edit">Edit</button>'
     + '<button class="btn btn-outline btn-small link-del">Delete</button>'
+    + '<div class="link-edit-area hidden">'
+    + '<input class="input le-title" value="' + esc(l.title || '') + '" placeholder="Title of link" autocomplete="off">'
+    + '<input class="input le-url" value="' + esc(l.url) + '" placeholder="YouTube link" autocomplete="off">'
+    + '<select class="input le-cat">'
+    + '<option value="">None</option>'
+    + buildFlat(categories).map(c =>
+        '<option value="' + c.id + '"' + (String(c.id) === String(l.category_id) ? ' selected' : '') + '>'
+        + '\u00A0'.repeat(c.depth) + esc(c.name)
+        + '</option>'
+      ).join('')
+    + '</select>'
+    + '<button class="btn btn-primary btn-small le-save">Save</button>'
+    + '<button class="btn btn-outline btn-small le-cancel">Cancel</button>'
+    + '</div>'
     + '</div>';
+}
+
+function sortLabel(l) {
+  const t = (l.title || '').trim();
+  if (t) return t.toLowerCase();
+  return shortUrl(l.url).toLowerCase();
+}
+
+function linkIsDone(l) {
+  return isChild ? !!progressMap[l.id] : !!l.watched;
+}
+
+function getOrdered(arr) {
+  const a = arr.slice();
+  const newest = (x, y) => +new Date(y.created_at) - +new Date(x.created_at);
+  if (orderBy === 'oldest') return a.sort((x, y) => +new Date(x.created_at) - +new Date(y.created_at));
+  if (orderBy === 'custom') return a.sort((x, y) => (x.sort_order || 0) - (y.sort_order || 0));
+  if (orderBy === 'az') return a.sort((x, y) => sortLabel(x).localeCompare(sortLabel(y)));
+  if (orderBy === 'za') return a.sort((x, y) => sortLabel(y).localeCompare(sortLabel(x)));
+  if (orderBy === 'unwatched') return a.sort((x, y) => (linkIsDone(x) ? 1 : 0) - (linkIsDone(y) ? 1 : 0) || newest(x, y));
+  return a.sort(newest);
+}
+
+async function moveLink(id, dir) {
+  const base = filterCat ? links.filter(l => String(l.category_id) === filterCat) : links;
+  const list = getOrdered(base);
+  const i = list.findIndex(l => String(l.id) === String(id));
+  const j = i + dir;
+  if (i === -1 || j < 0 || j >= list.length) return;
+  const a = list[i];
+  const b = list[j];
+  await Promise.all([
+    db.updateLink(a.id, { sort_order: b.sort_order }),
+    db.updateLink(b.id, { sort_order: a.sort_order }),
+  ]);
+  await loadLinks();
 }
 
 function linkCatSelect(l) {
@@ -341,8 +435,9 @@ async function onSubmitLink(e) {
   const btn = el('add-link-submit');
   btn.disabled = true;
   try {
-    await db.addLink({ url, category_id });
+    await db.addLink({ url, title: el('link-title').value.trim() || null, category_id });
     el('link-url').value = '';
+    el('link-title').value = '';
     await loadLinks();
     if (!isChild) renderCategoryTree();
     toast('Link added.');

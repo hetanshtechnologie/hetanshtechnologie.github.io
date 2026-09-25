@@ -27,14 +27,14 @@ const db = {
   // ---------- Links ----------
   async listLinks() {
     const { data } = await sb.from('links')
-      .select('id, tenant_id, user_id, category_id, url, title, watched, created_at, categories(name)')
+      .select('id, tenant_id, user_id, category_id, url, title, watched, sort_order, created_at, categories(name)')
       .order('created_at', { ascending: false });
     return (data || []).map(l => ({ ...l, category: l.categories?.name || '' }));
   },
 
   async listTenantLinks() {
     const { data } = await sb.from('links')
-      .select('id, tenant_id, user_id, category_id, url, title, watched, created_at, users(email), categories(name)')
+      .select('id, tenant_id, user_id, category_id, url, title, watched, sort_order, created_at, users(email), categories(name)')
       .order('created_at', { ascending: false });
     return (data || []).map(l => ({
       ...l,
@@ -199,6 +199,32 @@ const db = {
 
   async deleteUser(id) {
     const { error } = await sb.from('users').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+  },
+
+  // ---------- Admin across all tenants (role=admin) ----------
+  async adminListChildren() {
+    const { data, error } = await sb.rpc('admin_list_children');
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  async adminSetUser(id, patch) {
+    const plan = patch.plan;
+    const { error } = await sb.rpc('admin_set_user', {
+      p_user_id: id,
+      p_role: patch.role || null,
+      p_parent_id: patch.parent_id || null,
+      p_plan: plan || null,
+      p_plan_expires_at: plan && plan !== 'free'
+        ? (patch.plan_expires_at || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString())
+        : null,
+    });
+    if (error) throw new Error(error.message);
+  },
+
+  async adminDeleteUser(id) {
+    const { error } = await sb.rpc('admin_delete_user', { p_user_id: id });
     if (error) throw new Error(error.message);
   },
 };
