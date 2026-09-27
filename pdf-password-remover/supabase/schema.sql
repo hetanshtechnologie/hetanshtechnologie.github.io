@@ -390,8 +390,16 @@ begin
 end;
 $$;
 
--- Paginated log feed for the admin dashboard.
-create or replace function public.pr_admin_list_logs(
+  -- Paginated log feed for the admin dashboard.
+  --
+  -- This feed grew four columns (has_password, has_input, has_output,
+  -- retain_until). CREATE OR REPLACE refuses to change the OUT row type of an
+  -- existing function, so the old signature has to go first. Nothing depends on
+  -- it - it is only ever called as an RPC - and the grants for it are re-issued
+  -- further down.
+  drop function if exists public.pr_admin_list_logs(integer, integer, uuid, text);
+  create or replace function public.pr_admin_list_logs(
+
   p_limit  int default 100,
   p_offset int default 0,
   p_user   uuid default null,
@@ -533,11 +541,9 @@ grant execute on function public.pr_is_active() to authenticated;
 -- these down completely.
 revoke all on function public.pr_handle_new_user() from public, anon, authenticated, service_role;
 revoke all on function public.pr_enforce_log_fields() from public, anon, authenticated, service_role;
-revoke all on function public.pr_cleanup_expired_pdfs() from public, anon, authenticated, service_role;
--- The previous zero-argument signature is replaced by (int,int). Postgres keeps
--- the old entry as a separate overload, so it is revoked here as well - otherwise
--- it stays callable by anon and someone could sweep the bucket at will.
-revoke all on function public.pr_cleanup_expired_pdfs(int, int) from public, anon;
+-- pr_cleanup_expired_pdfs() is defined, and its privileges set, further down
+-- where its signature is known. Referencing it here would fail on a database
+-- that has not run this script yet.
 
 -- pr_protect_user_fields() is a trigger, not invokable directly, but it runs as
 -- the calling role and has to evaluate pr_role_for_email() to decide whether a
@@ -559,7 +565,6 @@ revoke all on function public.pr_admin_set_retain(uuid, int) from public, anon, 
 
 grant execute on function public.pr_admin_get_log(uuid) to authenticated;
 grant execute on function public.pr_admin_set_retain(uuid, int) to authenticated;
-grant execute on function public.pr_cleanup_expired_pdfs(int, int) to service_role;
 
 grant execute on function public.pr_admin_list_users() to authenticated;
 grant execute on function public.pr_admin_set_user_status(uuid, boolean) to authenticated;
@@ -578,59 +583,71 @@ grant execute on function public.pr_admin_list_logs(int, int, uuid, text) to aut
 
   -- ---------- retention sweep ----------
   -- Uploaded originals and unlocked copies are both kept, so an admin can go
-  -- back to any run. A row is swept only once its retention window has passed:
+  -- back to any run. A row is expired once its window has passed:
   --   retain_until            when an admin explicitly pinned or released it
-  --   created_at + 7 days     the default, chosen by DEFAULT_RETAIN_HOURS
-  -- p_extra_hours shifts the default, which is how a test can force an expiry
-  -- without waiting a week.
+  --   created_at + 7 days     the default
+  -- p_extra_hours moves the cutoff later (a positive value expires more rows),
+  -- which is how a test can force an expiry without waiting a week. The window
+  -- is clamped to at least an hour so a caller cannot expire everything.
+  --
+  -- This function only *reports* what is expired. It cannot delete the files:
+  -- this storage version has no storage.delete_object(), and the
+  -- protect_objects_delete trigger raises "Direct deletion from storage tables
+  -- is not allowed" for any delete from storage.objects. An earlier revision
+  -- tried to delete here and wrapped it in "exception when others then null",
+  -- which turned that hard error into a sweep that reported zero removals
+  -- forever. Removal therefore happens in the pr-cleanup Edge Function, which
+  -- goes through the Storage API where deletion is actually permitted.
+  -- This function used to return integer and counted the files it thought it had
+  -- deleted. It now returns the expired rows instead, and PostgreSQL will not
+  -- change a function's return type in place (42P13), so the signature is
+  -- dropped first. The drop is also what keeps a bare
+  -- select pr_cleanup_expired_pdfs() from resolving to a stale legacy overload.
+  drop function if exists public.pr_cleanup_expired_pdfs(integer, integer);
+
   create or replace function public.pr_cleanup_expired_pdfs(
     p_default_hours int  default 168,
     p_extra_hours   int  default 0
   )
-  returns integer
-  language plpgsql security definer set search_path = '' as $$
-  declare
-    r record;
-    removed integer := 0;
-  begin
-    for r in
-      select o.name
-      from storage.objects o
-      where o.bucket_id = 'pr_pdfs'
-        and (
-          select min(
-            coalesce(
-              l.retain_until,
-              l.created_at + make_interval(hours => greatest(1, coalesce(p_default_hours, 168)))
-            )
-          )
-          from public.pr_pdf_logs l
-          where l.input_path = o.name or l.output_path = o.name
-        ) <= now() + make_interval(hours => coalesce(p_extra_hours, 0))
-    loop
-      begin
-        perform storage.delete_object('pr_pdfs', r.name);
-        removed := removed + 1;
-      exception when others then
-        -- One unreadable object must not abort the whole sweep.
-        null;
-      end;
-    end loop;
-    return removed;
-  end;
+  returns table (log_id uuid, object_path text)
+  language sql stable security definer set search_path = '' as $$
+    select l.id, p.path
+    from public.pr_pdf_logs l
+    cross join lateral (
+      select l.input_path as path
+      union all
+      select l.output_path
+    ) p
+    where p.path is not null
+      and coalesce(
+            l.retain_until,
+            l.created_at + make_interval(hours => greatest(1, coalesce(p_default_hours, 168)))
+          ) <= now() + make_interval(hours => coalesce(p_extra_hours, 0));
   $$;
 
-  -- pg_cron is optional on Supabase. When the extension is present the sweep is
-  -- scheduled; otherwise it raises a notice and pr_cleanup_expired_pdfs() has to
-  -- be called from some other scheduler, or objects are never reclaimed.
+  -- These have to follow the CREATE: revoking or granting on a signature that
+  -- does not exist yet raises "function does not exist" and aborts the script.
+  drop function if exists public.pr_cleanup_expired_pdfs();
+  create or replace function public.pr_cleanup_expired_pdfs()
+  returns table (log_id uuid, object_path text)
+  language sql stable security definer set search_path = '' as $$
+    select * from public.pr_cleanup_expired_pdfs(168, 0);
+  $$;
+  revoke all on function public.pr_cleanup_expired_pdfs(int, int) from public, anon, authenticated;
+  revoke all on function public.pr_cleanup_expired_pdfs() from public, anon, authenticated;
+  grant execute on function public.pr_cleanup_expired_pdfs(int, int) to service_role;
+  grant execute on function public.pr_cleanup_expired_pdfs() to service_role;
+
+  -- No job is scheduled here. Even with pg_cron installed, a SQL job cannot
+  -- delete from storage.objects (see the note above), so a cron entry would
+  -- just find expired rows and drop them on the floor. The sweep is driven by
+  -- the pr-cleanup Edge Function, which removes objects through the Storage
+  -- API; point any scheduler (Supabase cron, GitHub Actions, uptime pinger)
+  -- at that function's URL with the service-role key.
   do $$ begin
     if exists (select 1 from pg_extension where extname = 'pg_cron') then
-      -- Drop first so re-running this script does not pile up duplicate jobs.
       perform cron.unschedule(jobid) from cron.job where jobname = 'pr-cleanup-expired-pdfs';
-      perform cron.schedule('pr-cleanup-expired-pdfs', '*/15 * * * *', 'select public.pr_cleanup_expired_pdfs()');
-    else
-      raise notice 'pg_cron not installed: run public.pr_cleanup_expired_pdfs() on a schedule or objects are never deleted';
     end if;
   exception when others then
-    raise notice 'pg_cron scheduling skipped: %', sqlerrm;
+    raise notice 'pg_cron job cleanup skipped: %', sqlerrm;
   end $$;

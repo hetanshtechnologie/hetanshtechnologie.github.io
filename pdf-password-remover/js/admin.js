@@ -1,7 +1,7 @@
 // Admin dashboard: analytics, user management, processing log.
 const PAGE_SIZE = 25;
 
-const state = { offset: 0, status: '', selfId: null };
+const state = { offset: 0, status: '', selfId: null, lastRows: [] };
 
 const el = {
   statCards: document.getElementById('stat-cards'),
@@ -17,6 +17,7 @@ const el = {
   nextBtn: document.getElementById('next-btn'),
   pageLabel: document.getElementById('page-label'),
   msg: document.getElementById('admin-msg'),
+  msgWarn: document.getElementById('admin-msg-warn'),
 };
 
 // ---------- stats ----------
@@ -147,9 +148,42 @@ function renderLeaderboard(rows) {
 }
 
 // ---------- logs ----------
+// Passwords are never in the list payload on purpose: the RPC returns only
+// has_password. The plaintext is fetched one row at a time by an explicit
+// click, so a page load does not ship every user's password to the browser.
+const revealedPasswords = new Map();
+
+function storedCell(l) {
+  const parts = [];
+
+  if (l.has_password) {
+    const shown = revealedPasswords.get(l.id);
+    parts.push(
+      shown
+        ? `<span class="mono pw-revealed">${escapeHtml(shown)}</span>
+           <button class="btn ghost sm" data-act="hide-pw" data-id="${l.id}">Hide</button>`
+        : `<button class="btn ghost sm" data-act="show-pw" data-id="${l.id}">Show password</button>`,
+    );
+  } else {
+    parts.push('<span class="muted small">none saved</span>');
+  }
+
+  if (l.has_input) {
+    parts.push(`<button class="btn ghost sm" data-act="download" data-which="input" data-id="${l.id}">Original</button>`);
+  }
+  if (l.has_output) {
+    parts.push(`<button class="btn ghost sm" data-act="download" data-which="output" data-id="${l.id}">Unlocked</button>`);
+  }
+  if (!l.has_input && !l.has_output) {
+    parts.push('<span class="muted small">file removed</span>');
+  }
+
+  return `<div class="stored-cell">${parts.join('')}</div>`;
+}
+
 function renderLogs(rows) {
   if (!rows?.length) {
-    el.logsBody.innerHTML = '<tr><td colspan="6" class="small muted">Nothing on this page.</td></tr>';
+    el.logsBody.innerHTML = '<tr><td colspan="7" class="small muted">Nothing on this page.</td></tr>';
     return;
   }
 
@@ -161,6 +195,7 @@ function renderLogs(rows) {
       const detail = l.status === 'failure'
         ? escapeHtml(l.error_message || '-')
         : escapeHtml(l.was_encrypted === false ? 'File was not encrypted' : 'Password removed');
+      const until = l.retain_until ? `title="kept until ${escapeHtml(l.retain_until)}"` : '';
       return `<tr>
         <td title="${escapeHtml(formatDate(l.created_at))}">${escapeHtml(timeAgo(l.created_at))}</td>
         <td class="wrap-any">${escapeHtml(l.email)}</td>
@@ -168,6 +203,7 @@ function renderLogs(rows) {
         <td>${badge}</td>
         <td class="num">${escapeHtml(formatBytes(l.file_size_bytes))}</td>
         <td class="wrap-any small muted">${detail}</td>
+        <td ${until} class="wrap-any">${storedCell(l)}</td>
       </tr>`;
     })
     .join('');
@@ -177,8 +213,58 @@ function renderLogs(rows) {
   el.nextBtn.disabled = rows.length < PAGE_SIZE;
 }
 
+// One delegated listener for the whole table. Passwords and download links are
+// per-row controls, so binding a handler per render would leak listeners.
+el.logsBody.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-act]');
+  if (!btn) return;
+  const { act, id, which } = btn.dataset;
+  btn.disabled = true;
+
+  try {
+    if (act === 'show-pw') {
+      const { password, hasPassword } = await callFunction(CONFIG.ADMIN_FUNCTION, {
+        action: 'log_detail',
+        logId: id,
+      });
+      if (!hasPassword) {
+        showMessage(el.msgWarn, 'warn', 'No password was saved for that run.');
+      } else if (password === '') {
+        showMessage(el.msgWarn, 'info', 'The user submitted an empty password for that PDF.');
+      } else {
+        revealedPasswords.set(id, password);
+        showMessage(
+          el.msgWarn,
+          'warn',
+          'Password revealed. Do not share this screen, and click Hide when you are done.',
+        );
+        renderLogs(state.lastRows);
+      }
+    } else if (act === 'hide-pw') {
+      revealedPasswords.delete(id);
+      renderLogs(state.lastRows);
+    } else if (act === 'download') {
+      const res = await callFunction(CONFIG.ADMIN_FUNCTION, {
+        action: 'download',
+        logId: id,
+        which,
+      });
+      // Short-lived signed link, so open it in a new tab rather than using
+      // <a download>, which is ignored for a cross-origin URL.
+      window.open(res.downloadUrl, '_blank', 'noopener');
+    }
+  } catch (err) {
+    showMessage(el.msg, 'err', err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 async function loadLogs() {
-  el.logsBody.innerHTML = '<tr><td colspan="6"><div class="skeleton"></div></td></tr>';
+  // Any password revealed on the previous page is dropped here, so plaintext
+  // never survives a pagination or filter change.
+  revealedPasswords.clear();
+  el.logsBody.innerHTML = '<tr><td colspan="7"><div class="skeleton"></div></td></tr>';
   try {
     const { logs } = await callFunction(CONFIG.ADMIN_FUNCTION, {
       action: 'logs',
@@ -186,9 +272,10 @@ async function loadLogs() {
       offset: state.offset,
       status: state.status || null,
     });
+    state.lastRows = logs;
     renderLogs(logs);
   } catch (err) {
-    el.logsBody.innerHTML = `<tr><td colspan="6" class="small muted">${escapeHtml(err.message)}</td></tr>`;
+    el.logsBody.innerHTML = `<tr><td colspan="7" class="small muted">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
