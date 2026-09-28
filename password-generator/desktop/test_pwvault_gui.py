@@ -129,7 +129,57 @@ app._on_select()
 app.update()
 check("selection tracked", app.selected_id == target)
 check("selected row resolves", app._selected()["password"] == "gh-plaintext")
+
+# ---- Add must stay blank even with a row selected ----------------------
+# Regression: open_editor() used to seed from the selection, so Add pre-filled
+# the highlighted row and then overwrote it instead of adding a new entry.
+
+
+def top_dialog():
+    dialogs = [w for w in app.winfo_children() if w.winfo_class() == "Toplevel"]
+    return dialogs[-1] if dialogs else None
+
+
+def entry_values(win):
+    """Every ttk.Entry value inside the dialog, in creation order."""
+    found = []
+
+    def walk(widget):
+        for child in widget.winfo_children():
+            if child.winfo_class() == "TEntry":
+                found.append(child.get())
+            walk(child)
+
+    walk(win)
+    return found
+
+
+before_count = len(app.vault.items())
+app.open_editor()
+app.update()
+add_win = top_dialog()
+check("Add dialog opened", add_win is not None)
+check("Add dialog is titled 'Add entry'", add_win.title() == "Add entry", add_win.title())
+check("Add dialog fields are empty", entry_values(add_win) == ["", ""],
+      str(entry_values(add_win)))
+add_win.destroy()
+app.update()
+check("Add created nothing on its own", len(app.vault.items()) == before_count)
+check("selected row survived Add",
+      any(i["password"] == "gh-plaintext" for i in app.vault.items()))
+
+# ---- Edit must pre-fill the selected row -------------------------------
+app.edit_selected()
+app.update()
+edit_win = top_dialog()
+check("Edit dialog is titled 'Edit entry'", edit_win.title() == "Edit entry", edit_win.title())
+check("Edit dialog pre-fills name and password",
+      entry_values(edit_win) == ["GitHub", "gh-plaintext"], str(entry_values(edit_win)))
+edit_win.destroy()
+app.update()
+
 app.copy_selected()
+
 app.update()
 check("clipboard holds the password", app.clipboard_get() == "gh-plaintext", app.clipboard_get())
 check("still masked after copy", app.tree.item(target)["values"][1] == pv.MASK)

@@ -618,7 +618,7 @@ class App(tk.Tk):
         ttk.Button(right, text="Lock", style="Ghost.TButton",
                    command=self.lock_vault).pack(side="left")
         ttk.Button(right, text="Add", style="Accent.TButton",
-                   command=lambda: self.open_editor()).pack(side="left", padx=6)
+                   command=self.open_editor).pack(side="left", padx=6)
 
         tools = ttk.Frame(self.vault_view)
         tools.pack(fill="x", pady=12)
@@ -653,8 +653,8 @@ class App(tk.Tk):
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<Delete>", lambda _e: self.delete_selected())
-        self.tree.bind("<Return>", lambda _e: self.open_editor())
-        self.tree.bind("<Double-1>", lambda _e: self.open_editor())
+        self.tree.bind("<Return>", lambda _e: self.edit_selected())
+        self.tree.bind("<Double-1>", lambda _e: self.edit_selected())
 
         actions = ttk.Frame(self.vault_view)
         actions.pack(fill="x", pady=(10, 0))
@@ -663,7 +663,7 @@ class App(tk.Tk):
         ttk.Button(actions, text="Copy username", style="Ghost.TButton",
                    command=self.copy_username).pack(side="left", padx=8)
         ttk.Button(actions, text="Edit", style="Ghost.TButton",
-                   command=self.open_editor).pack(side="left")
+                   command=self.edit_selected).pack(side="left")
         ttk.Button(actions, text="Delete", style="Danger.TButton",
                    command=self.delete_selected).pack(side="left", padx=8)
 
@@ -752,7 +752,19 @@ class App(tk.Tk):
         self._set_status(f"Copied. Clipboard clears in {CLIPBOARD_CLEAR_SECONDS}s.")
 
     def open_editor(self) -> None:
+        """Always a blank 'add' dialog.
+
+        This used to seed itself from the selected row, so clicking Add with a
+        row highlighted opened that entry pre-filled and then overwrote it
+        instead of creating a new one.
+        """
+        Editor(self, None)
+
+    def edit_selected(self) -> None:
         row = self._selected()
+        if not row:
+            self._set_status("Select an entry first.")
+            return
         Editor(self, row)
 
     def delete_selected(self) -> None:
