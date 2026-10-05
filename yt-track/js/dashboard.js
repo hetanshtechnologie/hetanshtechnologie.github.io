@@ -347,10 +347,15 @@ function renderLinkRow(l, i) {
   const label = linkLabel(l);
   const canPlay = !!youtubeVideoId(l.url);
   const done = isChild ? progressMap[l.id] : l.watched;
+  const thumb = youtubeThumbnailUrl ? youtubeThumbnailUrl(l.url, 'mqdefault') : null;
+  const hqThumb = youtubeThumbnailUrl ? youtubeThumbnailUrl(l.url, 'hqdefault') : thumb;
   const row = '<div class="link-row' + (done ? ' done' : '') + '" data-id="' + l.id + '">'
     + '<span class="link-seq">' + (i + 1) + '</span>'
     + '<label class="watch-check"><input type="checkbox" class="link-watch"' + (done ? ' checked' : '') + '></label>'
     + (canPlay ? '<span class="play-badge" title="Play inline">&#9654;</span>' : '')
+    + '<div class="link-thumb">'
+    + (thumb ? '<img src="' + esc(thumb) + '" data-hq="' + esc(hqThumb || thumb) + '" alt="' + esc(label) + '" loading="lazy" onerror="this.style.display=\'none\'">' : '<div class="thumb-empty"></div>')
+    + '</div>'
     + '<div class="link-main">'
     + '<a class="link-title" href="' + esc(l.url) + '" target="_blank" rel="noopener nofollow">' + esc(label) + '</a>'
     + '<div class="link-url-meta">' + esc(shortUrl(l.url)) + (l.category ? ' &middot; ' + esc(l.category) : '') + '</div>'

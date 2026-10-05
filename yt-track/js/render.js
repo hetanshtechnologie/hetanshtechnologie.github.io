@@ -6,10 +6,38 @@ function renderProgressBar(percent) {
 
 // ---------- Inline YouTube player ----------
 function youtubeVideoId(url) {
-  const m = url.match(/[?&]v=([A-Za-z0-9_-]{6,})/)
-        || url.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/)
-        || url.match(/\/shorts\/([A-Za-z0-9_-]{6,})/);
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    if (host === 'youtu.be') {
+      const id = u.pathname.slice(1).split('/')[0].split('?')[0];
+      return id && id.match(/^[A-Za-z0-9_-]{6,}$/) ? id : null;
+    }
+    if (host.includes('youtube.com')) {
+      const v = u.searchParams.get('v');
+      if (v && v.match(/^[A-Za-z0-9_-]{6,}$/)) return v;
+      const listMatch = u.searchParams.get('list');
+      // not video id
+      const shorts = u.pathname.match(/\/shorts\/([A-Za-z0-9_-]{6,})/);
+      if (shorts) return shorts[1];
+      const embed = u.pathname.match(/\/embed\/([A-Za-z0-9_-]{6,})/);
+      if (embed) return embed[1];
+      return null;
+    }
+  } catch (e) {}
+  const m = String(url).match(/[?&]v=([A-Za-z0-9_-]{6,})/)
+        || String(url).match(/youtu\.be\/([A-Za-z0-9_-]{6,})/)
+        || String(url).match(/\/shorts\/([A-Za-z0-9_-]{6,})/)
+        || String(url).match(/\/embed\/([A-Za-z0-9_-]{6,})/);
   return m ? m[1] : null;
+}
+
+function youtubeThumbnailUrl(url, quality) {
+  const id = youtubeVideoId(url);
+  if (!id) return null;
+  const q = quality || 'mqdefault';
+  return 'https://img.youtube.com/vi/' + encodeURIComponent(id) + '/' + q + '.jpg';
 }
 
 function openVideoPlayer(url) {
