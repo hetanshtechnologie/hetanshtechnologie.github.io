@@ -76,29 +76,51 @@ const db = {
 
   // ---------- Per-child progress ----------
   async listMyProgress() {
-    const { data } = await sb.from('link_progress')
-      .select('link_id, child_id, watched, updated_at')
-      .eq('child_id', (await this.requireProfile()).id);
+    const profile = await this.requireProfile();
+    let { data, error } = await sb.from('link_progress')
+      .select('link_id, child_id, watched, position, updated_at')
+      .eq('child_id', profile.id);
+    if (error && /position/i.test(error.message)) {
+      ({ data } = await sb.from('link_progress')
+        .select('link_id, child_id, watched, updated_at')
+        .eq('child_id', profile.id));
+    }
     return data || [];
   },
 
-  async setProgress(linkId, watched) {
+  async setProgress(linkId, watched, position) {
     const profile = await this.requireProfile();
-    const { data, error } = await sb.from('link_progress')
-      .upsert(
-        { link_id: linkId, child_id: profile.id, watched: !!watched, updated_at: new Date().toISOString() },
-        { onConflict: 'link_id,child_id' }
-      )
+    const patch = {
+      link_id: linkId,
+      child_id: profile.id,
+      watched: !!watched,
+      updated_at: new Date().toISOString(),
+    };
+    if (position !== undefined && position !== null) patch.position = Math.max(0, Math.floor(position));
+    let { data, error } = await sb.from('link_progress')
+      .upsert(patch, { onConflict: 'link_id,child_id' })
       .select('*')
       .single();
+    if (error && /position/i.test(error.message) && 'position' in patch) {
+      delete patch.position;
+      ({ data, error } = await sb.from('link_progress')
+        .upsert(patch, { onConflict: 'link_id,child_id' })
+        .select('*')
+        .single());
+    }
     if (error) throw new Error(error.message);
     return data;
   },
 
   async familyProgress() {
-    const { data } = await sb.from('link_progress')
-      .select('link_id, child_id, watched, child:users(email)')
+    let { data, error } = await sb.from('link_progress')
+      .select('link_id, child_id, watched, position, child:users(email)')
       .order('updated_at', { ascending: false });
+    if (error && /position/i.test(error.message)) {
+      ({ data } = await sb.from('link_progress')
+        .select('link_id, child_id, watched, child:users(email)')
+        .order('updated_at', { ascending: false }));
+    }
     return (data || []).map(p => ({ ...p, child_email: p.child?.email || '' }));
   },
 

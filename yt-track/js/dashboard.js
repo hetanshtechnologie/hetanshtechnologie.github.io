@@ -11,6 +11,7 @@ let familyProgress = [];
 let isChild = false;
 let planMode = 'links';
 let orderBy = 'oldest';
+let lastSaveAt = {};
 
 async function init() {
   app = await guardPage();
@@ -21,6 +22,8 @@ async function init() {
 
   if (isChild) await setupChildView();
   else await setupParentView();
+
+  await loadOwnProgress();
 
   try {
     await loadCategories();
@@ -52,10 +55,19 @@ async function setupChildView() {
   const pName = parent && parent.email ? parent.email : 'your parent';
   el('child-banner-title').textContent = 'Videos from ' + pName;
   el('child-parent-email').textContent = 'Only ' + pName + ' can add videos here. You can mark your own progress.';
+}
+
+// Load the signed-in user's saved watch times (works for children, parents and admins).
+async function loadOwnProgress() {
+  progressMap = {};
   try {
     const prog = await db.listMyProgress();
-    progressMap = {};
-    (prog || []).forEach(x => { progressMap[x.link_id] = !!x.watched; });
+    (prog || []).forEach(x => {
+      progressMap[x.link_id] = {
+        watched: !!x.watched,
+        position: x.position !== null && x.position !== undefined ? Number(x.position) : 0,
+      };
+    });
   } catch (err) { /* ignore */ }
 }
 
@@ -227,12 +239,13 @@ async function loadLinks() {
   }
   renderSummary();
   renderLinks();
+  renderResumePanel();
 }
 
 function renderSummary() {
   const total = links.length;
   let watched = 0;
-  if (isChild) watched = links.filter(l => progressMap[l.id]).length;
+  if (isChild) watched = links.filter(l => progressMap[l.id] && progressMap[l.id].watched).length;
   else watched = links.filter(l => l.watched).length;
   const label = isChild ? 'video' : 'link';
   el('overall-progress').innerHTML =
@@ -257,7 +270,41 @@ function renderLinks() {
     const link = links.find(x => String(x.id) === id);
     const titleEl = row.querySelector('.link-title');
     if (titleEl) titleEl.addEventListener('click', (e) => {
-      if (link && openVideoPlayer(link.url)) e.preventDefault();
+      if (link) {
+        let start = 0;
+        if (progressMap[link.id] && progressMap[link.id].position > 0) {
+          start = progressMap[link.id].position;
+        }
+        if (typeof openVideoPlayer === 'function') {
+          window._currentLinkId = link.id;
+          if (openVideoPlayer(link.url, { start, onProgress: (pos, final) => savePlaybackPos(link.id, pos, final) })) {
+            e.preventDefault();
+          }
+        } else if (openVideoPlayer(link.url)) e.preventDefault();
+      }
+    });
+
+    const timeInp = row.querySelector('.link-time-input');
+    if (timeInp) timeInp.addEventListener('blur', () => {
+      const v = parseClock(timeInp.value);
+      if (!isNaN(v)) timeInp.value = formatClock(v);
+    });
+    const ts = row.querySelector('.link-time-save');
+    if (ts) ts.addEventListener('click', async () => {
+      const inp = row.querySelector('.link-time-input');
+      let val = inp ? parseClock(inp.value) : NaN;
+      if (isNaN(val)) { toast('Use hh:mm:ss (e.g. 01:05:30).', true); return; }
+      try {
+        const pm = progressMap[id] || { watched: false, position: 0 };
+        pm.position = val;
+        progressMap[id] = pm;
+        await db.setProgress(id, pm.watched, val);
+        lastSaveAt[id] = Date.now();
+        if (inp) inp.value = formatClock(val);
+        toast('Watch time saved.');
+      } catch (err) {
+        toast(err.message, true);
+      }
     });
 
     if (isChild) {
@@ -265,8 +312,10 @@ function renderLinks() {
       if (cb) cb.addEventListener('change', async (e) => {
         const prev = e.target.checked;
         try {
-          await db.setProgress(id, prev);
-          progressMap[id] = prev;
+          const pm = progressMap[id] || { watched: false, position: 0 };
+          await db.setProgress(id, prev, pm.position);
+          pm.watched = prev;
+          progressMap[id] = pm;
           renderSummary();
           renderLinks();
         } catch (err) {
@@ -343,10 +392,33 @@ function renderLinks() {
   });
 }
 
+// Persist the playback position, throttled while playing and forced on pause/close.
+function savePlaybackPos(linkId, pos, force) {
+  if (!linkId) return;
+  const prevPos = progressMap[linkId] ? (progressMap[linkId].position || 0) : 0;
+  const nextPos = Math.max(0, Math.floor(pos || 0));
+  // Ignore an accidental 0 from closing right after opening a resumed video.
+  if (force && nextPos === 0 && prevPos > 0) return;
+  const pm = progressMap[linkId] || { watched: false, position: 0 };
+  pm.position = nextPos;
+  progressMap[linkId] = pm;
+  const now = Date.now();
+  if (!force && now - (lastSaveAt[linkId] || 0) < 3000) return;
+  lastSaveAt[linkId] = now;
+  db.setProgress(linkId, pm.watched, pm.position).catch(() => {});
+}
+
+function renderResumePanel() {
+  const panel = document.getElementById('resume-panel');
+  if (!panel) return;
+  panel.classList.remove('hidden');
+}
+
 function renderLinkRow(l, i) {
   const label = linkLabel(l);
   const canPlay = !!youtubeVideoId(l.url);
-  const done = isChild ? progressMap[l.id] : l.watched;
+  const done = isChild ? (progressMap[l.id] && progressMap[l.id].watched) : l.watched;
+  const pos = progressMap[l.id] ? (progressMap[l.id].position || 0) : 0;
   const thumb = youtubeThumbnailUrl ? youtubeThumbnailUrl(l.url, 'mqdefault') : null;
   const hqThumb = youtubeThumbnailUrl ? youtubeThumbnailUrl(l.url, 'hqdefault') : thumb;
   const row = '<div class="link-row' + (done ? ' done' : '') + '" data-id="' + l.id + '">'
@@ -360,8 +432,14 @@ function renderLinkRow(l, i) {
     + '<a class="link-title" href="' + esc(l.url) + '" target="_blank" rel="noopener nofollow">' + esc(label) + '</a>'
     + '<div class="link-url-meta">' + esc(shortUrl(l.url)) + (l.category ? ' &middot; ' + esc(l.category) : '') + '</div>'
     + '</div>';
-  if (isChild) return row + '</div>';
-  return row + '<div class="link-order-btns">'
+  const timeCol = '<div class="link-time-col">'
+    + '<div class="muted" style="font-size:11px;">Watched at</div>'
+    + '<div style="display:flex;gap:4px;align-items:center;">'
+    + '<input class="input link-time-input" type="text" placeholder="hh:mm:ss" value="' + formatClock(pos) + '" style="width:92px;padding:4px 6px;font-size:12px;">'
+    + '<button class="btn btn-small btn-outline link-time-save">Save</button>'
+    + '</div></div>';
+  if (isChild) return row + timeCol + '</div>';
+  return row + timeCol + '<div class="link-order-btns">'
       + '<button class="btn btn-outline btn-small link-move" data-dir="-1" title="Move up">&#9650;</button>'
       + '<button class="btn btn-outline btn-small link-move" data-dir="1" title="Move down">&#9660;</button>'
       + '</div>'
@@ -617,6 +695,33 @@ function renderPlanPanel() {
 }
 
 // ---------- Helpers ----------
+
+// Clock helpers for "watched at" input, always shown as hh:mm:ss.
+function formatClock(total) {
+  const t = Math.max(0, Math.floor(Number(total) || 0));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = t % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+// Accepts hh:mm:ss, mm:ss, or plain seconds. Returns NaN when invalid.
+function parseClock(value) {
+  if (value == null) return NaN;
+  const str = String(value).trim();
+  if (!str) return NaN;
+  if (str.indexOf(':') === -1) {
+    const n = Number(str);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : NaN;
+  }
+  const parts = str.split(':');
+  if (parts.length > 3) return NaN;
+  const nums = parts.map(p => (p.trim() === '' ? NaN : Number(p)));
+  if (nums.some(n => !Number.isFinite(n) || n < 0)) return NaN;
+  let secs = 0;
+  for (const n of nums) secs = secs * 60 + n;
+  return Math.floor(secs);
+}
 
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
