@@ -1,0 +1,114 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>22. Inference Engineering and Self-Hosting</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>22. Inference Engineering and Self-Hosting</h1>
+
+<h2>What inference engineering means</h2>
+<p>Most developers consume models through an API and never think about serving. Inference engineering is the discipline of running models efficiently: choosing hardware, batching requests, managing memory, quantising weights, and designing systems that serve production traffic within latency and cost targets. It is the layer beneath the agent conversation.</p>
+<p>Interest in self-hosting grows for three reasons: data sovereignty, predictable cost at scale, and control over model versions. It also brings operational complexity that should not be underestimated. The right question is not "can we host it?" but "does hosting give us something we cannot get otherwise?"</p>
+
+<h2>The serving stack</h2>
+<ol>
+<li><strong>Model weights</strong> — stored in a registry or object store, versioned and checksummed.</li>
+<li><strong>Serving engine</strong> — loads weights, manages KV cache, schedules requests.</li>
+<li><strong>Batching layer</strong> — groups compatible requests to improve throughput.</li>
+<li><strong>API layer</strong> — exposes a stable interface to applications.</li>
+<li><strong>Autoscaling</strong> — adds or removes replicas based on load.</li>
+<li><strong>Observability</strong> — tracks latency, throughput, GPU utilisation, and errors.</li>
+</ol>
+<p>Popular engines optimise different trade-offs. Some prioritise throughput for offline batches; others prioritise low time-to-first-token for interactive use. Evaluate with your own traffic pattern, not a generic benchmark.</p>
+
+<h2>Key performance concepts</h2>
+<table>
+<tr><th>Concept</th><th>Meaning</th><th>Practical effect</th></tr>
+<tr><td>Time to first token</td><td>Delay before output begins</td><td>Drives perceived responsiveness</td></tr>
+<tr><td>Inter-token latency</td><td>Speed of subsequent tokens</td><td>Drives reading comfort</td></tr>
+<tr><td>Throughput</td><td>Tokens per second across all requests</td><td>Drives cost efficiency</td></tr>
+<tr><td>KV cache</td><td>Stored attention state for a request</td><td>Consumes GPU memory; limits concurrency</td></tr>
+<tr><td>Batching</td><td>Processing multiple requests together</td><td>Improves throughput, may raise latency</td></tr>
+<tr><td>Quantisation</td><td>Lower-precision weights</td><td>Reduces memory, may affect quality</td></tr>
+</table>
+
+<h2>Batching strategies</h2>
+<p>Continuous batching allows new requests to join a running batch as slots free up. Static batching waits for a group, which can add latency. For interactive agents, a small batch window and careful scheduling usually work best. For offline evaluation or bulk processing, larger batches are efficient.</p>
+<p>Prefix caching is another powerful optimisation. If many requests share a long system prompt or document prefix, the engine can reuse computed attention state. This is especially relevant for agents, where the same instructions appear in every call. Design prompts with stable prefixes to benefit from caching.</p>
+
+<h2>Quantisation and model size</h2>
+<p>Quantisation stores weights with fewer bits, reducing memory bandwidth and allowing larger models on smaller hardware. Common levels include 8-bit and 4-bit. Quality loss varies by model and task, so evaluate rather than assume. A quantised model that fails on structured output is a false economy.</p>
+<p>Distilled models are another tool: smaller models trained to imitate larger ones. They can be excellent for routing, classification, and simple extraction. Keep a set of small models for cheap first-pass work.</p>
+
+<h2>Hardware and topology</h2>
+<p>GPU memory is the primary constraint for hosting. A model must fit in memory along with KV cache and runtime overhead. Multiple GPUs require parallel strategies such as tensor or pipeline parallelism, which add complexity. Start with a model that fits comfortably on one GPU, then scale out only when measurements justify it.</p>
+<p>For teams without GPU operations experience, managed inference endpoints often provide most of the benefit with less risk. Self-hosting makes sense when you have steady high volume, strict data requirements, or a need for custom serving behaviour.</p>
+
+<h2>Sovereign and private infrastructure</h2>
+<p>Some organisations require that prompts and outputs never leave their environment. This is where self-hosting becomes strategic rather than purely technical. It also demands the full operational stack: model updates, security patching, capacity planning, and incident response. Budget for people, not just hardware.</p>
+<div class="tip"><strong>Version everything.</strong> A self-hosted model needs the same version discipline as code. Record model hash, quantisation scheme, engine version, and serving configuration in every trace.</div>
+
+<h2>Cost model</h2>
+<p>Self-hosting cost is mostly fixed: GPUs, power, and operations. API cost is mostly variable. The break-even point depends on utilisation. If your GPUs sit idle half the time, the API may be cheaper. If you serve constant traffic, hosting can win. Model both scenarios with realistic utilisation before deciding.</p>
+
+<div class="exercise"><strong>Exercise 22.1 — Break-even.</strong> Estimate monthly API cost for 10 million input and 2 million output tokens at prices of your choice. Compare with one GPU costing ₹80,000 per month at 60% utilisation. What assumptions matter most?</div>
+<div class="exercise"><strong>Exercise 22.2 — Prefix design.</strong> Restructure a prompt so the long shared portion is a stable prefix. Explain how prefix caching benefits and what could invalidate the cache.</div>
+
+<h2>Case study: sizing a self-hosted summarisation endpoint</h2>
+<p>A logistics company summarises eight million internal documents a month and is considering replacing an API with self-hosting. Each document produces roughly 2,000 input tokens and 500 output tokens, of which 1,200 input tokens are a shared system prompt. At API prices of ₹15 per million input tokens and ₹60 per million output tokens, the monthly bill is 16,000 million × ₹15 = ₹2,40,000 for input plus 4,000 million × ₹60 = ₹2,40,000 for output, or ₹4,80,000 in total. The team models four GPU nodes at ₹85,000 each plus ₹60,000 of operations effort, about ₹4,00,000 a month — but only if the fleet stays above roughly 70% utilisation. Below that, the API wins.</p>
+<p>Cost is not the only driver. Regulation forbids sending certain documents outside the company network, so self-hosting is partly strategic. The team defines targets before choosing hardware: p95 time-to-first-token under one second, at least 40 output tokens per second per active request, and no structured-output failures on a 300-case quality set.</p>
+<pre><code>serving:
+  model: "llama-3.1-13b-instruct"   # weights hash sha256:9f2a...
+  quantisation: int8               # int4 failed the structured-output gate
+  engine: vllm-0.6.x
+  gpu: 1x A100 40GB per replica
+  replicas: 4                      # throughput + one spare for failures
+  batching: continuous, window 50ms
+  prefix_cache: on (shared 1,200-token system prompt)
+  max_concurrent: 8 per replica
+  targets: p95 TTFT &lt; 1.0s, &gt;= 40 tok/s per request
+</code></pre>
+<p>The 13-billion-parameter model in 8-bit needs about 14 GB for weights, leaving room on a 40 GB card for KV cache and eight concurrent requests. Quantisation is chosen empirically: 8-bit passes the structured-output gate, while 4-bit drops extraction accuracy from 0.94 to 0.87 on the quality set — a false economy. Continuous batching with a 50 ms window keeps time-to-first-token low while still grouping requests, and prefix caching avoids recomputing the shared 1,200-token prompt on every call. Measured p95 TTFT lands at 0.8 seconds and aggregate throughput at about 900 tokens per second across the fleet.</p>
+<p>Two operational details determine whether this stays healthy. First, every trace records the model hash, quantisation scheme, engine version, and serving configuration, so a quality change can be correlated with a serving change. Second, autoscaling is driven by queue depth and KV-cache pressure, not only by CPU usage — a GPU can be "busy" in ways CPU metrics miss. The team keeps the API as a burst fallback for traffic spikes, which is why the routers from Chapter 23 matter here too.</p>
+<p>Rolling out a new model hash is handled like a deployment, not a file swap. The team keeps the previous weights loaded on one replica, shifts 10% of traffic to the new replica, and compares quality scores and latency for an hour before going to 100%. Because the serving configuration is recorded in every trace, any shift in output can be tied to the new hash or quantisation scheme. They also watch GPU-specific health signals — memory utilisation, KV-cache occupancy, queue depth, and preemption count — since a saturated cache silently increases time-to-first-token long before an error appears. Capacity planning uses these signals, not request counts alone. A failed comparison automatically shifts traffic back to the previous replica, so a bad hash never reaches the whole fleet.</p>
+<div class="exercise"><strong>Exercise 22.3 — Break-even analysis.</strong> Model monthly API cost and self-hosting cost for a workload of your choice. State your token volumes, prices, hardware cost, and utilisation assumption, then identify the utilisation at which the two are equal. List two non-cost reasons that might override the cheaper option.</div>
+
+<h2>Pitfalls and trade-offs</h2>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Choosing hardware from parameter count alone</td><td>Weights, KV cache, and runtime overhead must all fit in memory; a model that does not fit cannot serve.</td><td>Calculate total memory for your concurrency target and leave headroom.</td></tr>
+<tr><td>Assuming quantisation is free</td><td>Lower precision can break structured output or reasoning on specific tasks.</td><td>Evaluate each quantisation level on your own quality set before adopting it.</td></tr>
+<tr><td>Using generic benchmarks</td><td>Public benchmarks rarely match your prompt lengths, batch sizes, and latency needs.</td><td>Benchmark with your real traffic pattern and target metrics.</td></tr>
+<tr><td>Static batching for interactive traffic</td><td>Waiting to fill a batch adds latency that users feel immediately.</td><td>Use continuous batching with a small window for interactive workloads.</td></tr>
+<tr><td>Scaling out before scaling up</td><td>Multi-GPU parallelism adds complexity that a single larger GPU may avoid.</td><td>Fit the model on one GPU first; add nodes only when measurements justify it.</td></tr>
+<tr><td>Forgetting the people cost</td><td>Patching, capacity planning, and incident response are ongoing work.</td><td>Budget operations effort explicitly, not just hardware.</td></tr>
+</table>
+<p>The core trade-off is fixed versus variable cost. Self-hosting turns a per-token bill into a capacity commitment: excellent economics at steady high utilisation, wasteful at low or spiky load. A hybrid — self-host the baseline, burst to an API — often captures the best of both, at the price of a more complex router.</p>
+
+<h2>Check your understanding</h2>
+<p>These questions are for self-checking. Answer them in your own words, and revisit the relevant section if any answer feels thin.</p>
+<ol>
+<li>Why does inference engineering matter to an agent team even if it never trains a model?</li>
+<li>Explain how batching and prefix caching improve efficiency, and name the workload shape each one suits best.</li>
+<li>A 4-bit quantisation halves memory but lowers extraction accuracy. How would you decide whether to accept it?</li>
+<li>Why can a GPU fleet be unhealthy while its CPU metrics look fine, and what signals should drive autoscaling?</li>
+<li>Under what conditions does self-hosting beat an API on cost, and what non-cost reasons might still decide the question?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Inference engineering optimises model serving, not model training.</li>
+<li>Latency, throughput, and memory are the core constraints.</li>
+<li>Batching and prefix caching improve efficiency but require careful design.</li>
+<li>Quantisation trades quality for memory and speed; evaluate it.</li>
+<li>Self-hosting is a strategic and operational commitment, not just a technical one.</li>
+</ul>
+
+<nav><a href="21-observability-cost.html">&larr; Previous</a><span></span><a href="23-model-routing.html">Next: Model Routing for Cost, Latency, and Quality &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

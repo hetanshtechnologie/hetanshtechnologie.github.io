@@ -1,0 +1,121 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>14. MCP at Scale: Serverless and Stateless Patterns</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>14. MCP at Scale: Serverless and Stateless Patterns</h1>
+
+<h2>What changes at scale</h2>
+<p>A single MCP server running on a laptop is straightforward. A fleet serving many users across many applications introduces new questions: how do you handle bursts, avoid stateful coupling, keep latency predictable, and control cost when most servers are idle? These are familiar infrastructure questions, but the protocol's session model gives them a particular shape.</p>
+<p>One theme runs through this chapter: move state out of the server process. If a request can be handled without depending on memory from a previous request, you can scale horizontally, survive restarts, and run on serverless platforms. Where state is unavoidable, store it externally and reference it by ID.</p>
+
+<h2>Stateless design</h2>
+<p>A stateless MCP server treats every tool call as self-contained. Authentication context, task identifiers, and any needed state arrive with the request or are fetched from an external store. This has several benefits: instances are interchangeable, cold starts are less disruptive, and retries are safe.</p>
+<p>Of course, agents are stateful. The state lives in the client, the graph checkpointer, or a durable workflow store — not in the MCP server. The server's job is to perform capability calls reliably. Keeping that boundary clean is the essence of scaling MCP.</p>
+<table>
+<tr><th>Stateful server</th><th>Stateless server</th></tr>
+<tr><td>In-memory session affinity</td><td>Any instance can serve any request</td></tr>
+<tr><td>Restart loses in-flight work</td><td>Restart is invisible</td></tr>
+<tr><td>Hard to autoscale</td><td>Natural fit for serverless</td></tr>
+<tr><td>Simpler for long-lived local tools</td><td>Needs external stores for durable state</td></tr>
+</table>
+
+<h2>Serverless fit</h2>
+<p>Serverless platforms shine when traffic is bursty and tasks are short. MCP tool calls often are: a lookup, a query, a small transformation. You pay for execution time rather than idle capacity, and scaling is handled for you. The costs are cold-start latency and execution time limits.</p>
+<p>Mitigations include keeping packages small, initialising clients outside the handler where possible, using provisioned concurrency for latency-sensitive paths, and designing tools to finish within the platform's timeout. Long-running tools should be converted into asynchronous jobs: accept the request, return a job ID, and let the agent poll or receive a callback.</p>
+
+<h2>Asynchronous patterns</h2>
+<p>Not every capability can return immediately. A report generation, a batch import, or an approval workflow may take minutes. Model an async tool as two or three calls: <code>start_job</code>, <code>get_status</code>, and optionally <code>get_result</code>. Return a compact status object that tells the agent whether to wait, retry, or ask the user.</p>
+<pre><code>{ "job_id": "job_8192", "status": "running",
+  "poll_after_seconds": 5, "result_hint": "report_url" }
+</code></pre>
+<p>The <code>poll_after_seconds</code> field is a small but useful courtesy: it prevents tight polling loops that waste tokens and money. Your harness can enforce a maximum polling count and a deadline.</p>
+
+<h2>Availability and failure handling</h2>
+<p>MCP servers will fail. Networks partition, databases time out, and dependencies return errors. Design for it. Use timeouts on every call, exponential backoff for transient failures, and circuit breakers when a dependency is clearly unhealthy. Distinguish retryable errors from permanent ones in the response so the agent does not retry a malformed request forever.</p>
+<p>From the agent's perspective, a tool failure is just another observation. The harness can route to a fallback tool, ask a clarifying question, or report a partial answer. These are control-flow decisions from Chapter 7; the protocol simply supplies a clean error signal.</p>
+
+<h2>Cost and tenancy</h2>
+<p>In a multi-tenant environment, one user's expensive tool call must not degrade everyone else's service. Apply rate limits and per-tenant budgets at the gateway or server. Record which tenant and which agent triggered each call. If you cache results, include tenant identity in the cache key to prevent cross-tenant leakage.</p>
+<div class="tip"><strong>Cache carefully.</strong> Caching a read-only tool result can save a great deal of latency and cost. Caching anything that depends on permissions requires the permission set in the key and an invalidation strategy.</div>
+
+<h2>Observability</h2>
+<p>Emit structured logs and metrics for connection count, tool call volume, latency percentiles, error rates by type, and payload sizes. Trace IDs should flow from the agent through the MCP client into the server. Without that correlation, a slow response is a mystery: was it the model, the client, the network, or the tool?</p>
+<p>Also log discovery events. Changes in a server's advertised tools can alter model behaviour even if no code in the agent changed. A new tool with a vague description may suddenly attract calls that used to go elsewhere.</p>
+
+<h2>Migration path</h2>
+<p>Moving a prototype to production is an incremental process. A practical sequence is: make handlers idempotent, move session state to an external store, add authentication and per-call authorisation, introduce timeouts and structured errors, add metrics, then consider serverless deployment. Doing serverless first usually exposes every hidden state dependency at once.</p>
+
+<div class="exercise"><strong>Exercise 14.1 — Async conversion.</strong> Choose a tool that currently takes 30 seconds. Redesign it as start/status/result calls. Define the status object and the agent's decision rules for each status.</div>
+<div class="exercise"><strong>Exercise 14.2 — Cache key design.</strong> Design a cache key for a document lookup tool in a multi-tenant system. List the fields you would include and explain why each is necessary.</div>
+
+<h2>Case study: scaling a report-generation server</h2>
+<p>A team exposes a "generate sales report" tool through MCP. The first version runs on a single long-lived process: it holds a database connection, keeps a map of active jobs in memory, and streams a large CSV back in the tool result. It works for ten users. At two hundred concurrent users it fails in three ways — restarts lose in-flight jobs, latency spikes during bursts, and one tenant's huge report starves everyone else. We will refactor it into a stateless, asynchronous service.</p>
+
+<h3>Making the handler stateless</h3>
+<p>The first change is to remove in-memory job state. The handler now accepts a request, writes a job record to an external store with a generated ID, enqueues work, and returns immediately. Any instance can handle any call, so we can run on a serverless platform and scale to zero between bursts. Cold starts are mitigated by initialising the database client outside the handler and keeping the package small; provisioned concurrency is reserved for the status endpoint, which clients poll. The report itself is generated by a worker that writes the CSV to object storage.</p>
+<pre><code>def start_report(args, ctx):
+    job_id = "job_" + uuid4().hex[:8]
+    store.put(job_id, tenant=ctx.tenant_id,
+              requester=ctx.user_id, status="queued",
+              params=compact(args))
+    queue.enqueue(job_id)
+    return {"job_id": job_id, "status": "queued",
+            "poll_after_seconds": 5}
+</code></pre>
+<p>The <code>poll_after_seconds</code> field is a small courtesy with a large effect. Without it, an agent polls as fast as it can, spending tokens and hammering the status endpoint. The harness now also enforces a maximum of twelve polls and a two-minute deadline.</p>
+
+<h3>Async status and result</h3>
+<p>We expose three tools: <code>start_report</code>, <code>get_status</code>, and <code>get_result</code>. Each status response tells the agent what to do next — wait, retry later, ask the user, or fetch a result. Errors distinguish retryable from permanent failures: a busy worker is retryable, a malformed date range is not. The result tool returns a signed URL valid for ten minutes, scoped to the requesting tenant, rather than embedding CSV content in the conversation.</p>
+<pre><code>{ "job_id": "job_8192", "status": "running",
+  "poll_after_seconds": 5, "result_hint": "report_url",
+  "trace_id": "tr_7c1f" }
+</code></pre>
+<p>Including the trace ID in every status response lets support follow one request across agent, client, queue, worker, and storage with a single search.</p>
+<p>Failure handling is the other half of availability. Each dependency call carries a timeout, and transient failures use exponential backoff with jitter so a hundred clients do not retry in lockstep. When the object store is clearly unhealthy, a circuit breaker stops sending requests for a short window and the status response tells the agent the delay is temporary rather than permanent. Permanent errors — an invalid date range, a report type the tenant cannot access — are never retried. The agent's decision rules are written against these classes, so it knows whether to wait, ask the user, or give up.</p>
+
+<h3>Tenancy, caching, and observability</h3>
+<p>Per-tenant rate limits cap each customer at four concurrent reports and twenty starts per hour, enforced at the gateway before the handler runs. Caching applies only to the schema of a report, not its data; where we do cache read results, the key includes tenant ID and permission set. Metrics track connection count, tool volume, latency percentiles, error rates by type, and payload sizes. We also alert on discovery changes: when the server advertises a new tool, model behaviour can shift without any agent code changing. The migration happened in stages — idempotent handlers first, then external state, then auth, then timeouts and structured errors, and only then serverless. Doing serverless first would have exposed every hidden state dependency at once.</p>
+
+<div class="exercise"><strong>Exercise 14.3 — Failure taxonomy.</strong> For the report server, list five failure modes and classify each as retryable or permanent at the tool boundary. State the response the agent should receive in each case and what it should do next.</div>
+
+<h2>Pitfalls and trade-offs</h2>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Keeping session state in the server process</td><td>Instances are not interchangeable, restarts lose work, and autoscaling becomes unsafe.</td><td>Store state externally and reference it by ID; keep the server's role to reliable capability calls.</td></tr>
+<tr><td>Long calls inside a serverless timeout</td><td>The platform kills the function, the agent sees a generic failure, and work is repeated.</td><td>Convert long operations to start/status/result jobs with a documented deadline.</td></tr>
+<tr><td>Tight polling without guidance</td><td>An agent burns tokens and floods the status endpoint.</td><td>Return <code>poll_after_seconds</code> and enforce a maximum poll count in the harness.</td></tr>
+<tr><td>One error shape for every failure</td><td>Retryable and permanent failures look identical, so agents retry forever or give up too soon.</td><td>Classify errors explicitly and document the agent's action for each class.</td></tr>
+<tr><td>Cache keys that ignore tenancy or permissions</td><td>One customer's data can be served to another.</td><td>Include tenant ID and permission set in the key, with an invalidation plan.</td></tr>
+<tr><td>Trace IDs that stop at the client</td><td>A slow response becomes a mystery across agent, client, queue, and tool.</td><td>Propagate one trace ID through every boundary and return it in status responses.</td></tr>
+<tr><td>Serverless before the basics</td><td>Hidden state dependencies all fail at once, making diagnosis slow.</td><td>Follow the migration sequence: idempotency, external state, auth, errors, metrics, then serverless.</td></tr>
+</table>
+
+<h2>Check your understanding</h2>
+<p>These questions test whether you can reason about a fleet of tool servers, not just one instance. Answer each before continuing.</p>
+<ol>
+<li>Why does moving state out of the server process make retries safe and restarts invisible? Name one thing that must then live in the client or workflow store.</li>
+<li>Describe the start/status/result pattern for a tool that takes five minutes, including the fields in the status object and the agent's decision for each.</li>
+<li>How would you decide between serverless and a long-lived service for a given tool? Name two properties that point toward each.</li>
+<li>A tenant reports that another tenant saw their cached result. Which part of the cache design failed, and what would you change?</li>
+<li>Why is propagating a trace ID across boundaries necessary rather than merely convenient? What production question does it let you answer?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Scaling MCP means removing state from server processes.</li>
+<li>Serverless fits short, bursty tool calls but requires cold-start planning.</li>
+<li>Long operations should become asynchronous jobs with status calls.</li>
+<li>Distinguish retryable from permanent errors and apply backoff.</li>
+<li>Trace IDs must flow across agent, client, and server boundaries.</li>
+</ul>
+
+<nav><a href="13-mcp-fundamentals.html">&larr; Previous</a><span></span><a href="15-production-integration.html">Next: Production Integration Patterns &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

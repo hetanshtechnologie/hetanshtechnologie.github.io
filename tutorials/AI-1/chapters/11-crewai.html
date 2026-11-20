@@ -1,0 +1,129 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>11. CrewAI</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>11. CrewAI</h1>
+
+<h2>Teams as an abstraction</h2>
+<p>CrewAI models automation as a team. You define agents with roles, goals, and backstories; you define tasks with descriptions and expected outputs; then you assemble them into a crew that works through the tasks. The metaphor is more than cosmetic. It encourages you to think about division of labour, handoffs, and accountability — the same things you would consider when designing a human team.</p>
+<p>This approach is appealing for knowledge-work workflows: market research, content production, analysis, and planning. These tasks naturally split into specialist roles, and the output of one role becomes the input of another. The framework provides structure for those relationships instead of leaving them implicit in a long prompt.</p>
+
+<h2>The building blocks</h2>
+<table>
+<tr><th>Block</th><th>Meaning</th></tr>
+<tr><td>Agent</td><td>A role with a goal, a backstory, tools, and a model</td></tr>
+<tr><td>Task</td><td>A unit of work with an instruction and an expected output</td></tr>
+<tr><td>Crew</td><td>A collection of agents and tasks with a process</td></tr>
+<tr><td>Process</td><td>Sequential or hierarchical coordination</td></tr>
+<tr><td>Tool</td><td>A capability an agent may use while performing a task</td></tr>
+<tr><td>Flow</td><td>Event-driven orchestration around crews for more complex control</td></tr>
+</table>
+<p>The "backstory" field often surprises engineers. It is simply a way of giving the model a consistent persona and vocabulary, which can improve style and decision consistency. It is not a substitute for clear instructions. A researcher with a vivid backstory but no source constraints will still invent facts.</p>
+
+<h2>Designing roles that work</h2>
+<p>Good roles are narrow and non-overlapping. "Researcher", "Analyst", and "Reviewer" are distinct. "Assistant", "Helper", and "Generalist" are not. Each role should have a clear deliverable: the researcher produces a list of sourced findings; the analyst produces a comparison table; the reviewer produces a checklist of gaps. When deliverables are concrete, handoffs carry useful information.</p>
+<p>Avoid the common mistake of giving every agent every tool. If the reviewer can rewrite the report, it may do so instead of reviewing it. Give tools according to responsibility, exactly as you would in a real team. This also reduces the tool-selection problem described in Chapter 6.</p>
+
+<h2>Tasks and expected output</h2>
+<p>A task description should state the goal, the inputs, the constraints, and the output format. "Analyse the market" is too vague. "Using the ten sourced findings from the researcher, produce a three-column table comparing competitors on price, onboarding, and support, and flag any claim without a source" is testable.</p>
+<p>Because tasks produce artefacts that other tasks consume, define the shape of those artefacts. If one agent's prose becomes another agent's input, ambiguity compounds. Structured output, as discussed in Chapter 4, keeps the chain clean.</p>
+
+<h2>Processes and delegation</h2>
+<p>In a sequential process, tasks run one after another. This is predictable and easy to debug. In a hierarchical process, a manager agent delegates and reviews. Hierarchical structures are more flexible but harder to evaluate because the path varies between runs. Start sequential; move to hierarchical only when the work genuinely requires dynamic delegation.</p>
+<div class="tip"><strong>Cost warning.</strong> Team-shaped systems multiply model calls. A four-agent crew with two revision rounds can easily cost an order of magnitude more than a single well-prompted call. Measure before you commit.</div>
+
+<h2>Flows for real control</h2>
+<p>Flows add event-driven orchestration around crews, allowing you to listen for events, branch, and manage state across steps. If you find yourself trying to make a crew do something it was not designed for — complex approvals, long pauses, retries with backoff — a flow is the right place. The same principle applies across frameworks: keep the agent metaphor for collaboration, use explicit orchestration for control.</p>
+
+<h2>When CrewAI fits</h2>
+<ul>
+<li>Your work naturally divides into specialist roles.</li>
+<li>You want a quick way to express collaboration without building a state machine.</li>
+<li>The output is a document, analysis, or plan rather than a transactional decision.</li>
+<li>You can tolerate variable paths and are willing to trace them.</li>
+</ul>
+<p>For high-volume, low-latency, deterministic work, a simple pipeline is better. For a weekly research digest where quality matters more than milliseconds, a crew is a productive model.</p>
+
+<div class="exercise"><strong>Exercise 11.1 — Role split.</strong> Design a three-role crew for producing a technical blog post. For each role, list the goal, the tools it may use, and the exact artefact it produces.</div>
+<div class="exercise"><strong>Exercise 11.2 — Cost estimate.</strong> Assume each agent averages 1,200 input tokens and 400 output tokens per task, with four tasks and one revision round. Estimate total tokens and compare with a single-agent approach.</div>
+
+<h2>Case study: a weekly competitive-intelligence digest</h2>
+<p>A product-marketing team publishes a Monday digest about competitors. It currently takes two people most of Friday: one gathers sources, the other writes and checks the summary. We will model this as a crew with four roles and a flow that handles the approval step. The output is a document, quality matters more than latency, and the team wants every claim traceable to a source — a good fit for the team abstraction.</p>
+
+<h3>Roles and deliverables</h3>
+<p>We define four agents with non-overlapping responsibilities. The researcher finds recent, sourced facts. The analyst turns them into a comparison table. The writer produces a short narrative. The reviewer checks that every claim in the narrative appears in the table with a source. Each role gets only the tools it needs: the researcher has web and knowledge-base search, the analyst has a calculation tool, the writer and reviewer have no external tools. Crucially, the reviewer cannot rewrite the digest — it can only produce a list of gaps.</p>
+<pre><code>researcher = Agent(
+    role='Researcher',
+    goal='Find 10 sourced facts about each competitor from the last 7 days',
+    backstory='You are meticulous about dates and never cite an undated claim.',
+    tools=[web_search, kb_search],
+    allow_delegation=False
+)
+
+reviewer = Agent(
+    role='Reviewer',
+    goal='List every claim in the draft that lacks a source in the findings',
+    backstory='You flag gaps; you do not edit the document.',
+    tools=[],
+    allow_delegation=False
+)
+</code></pre>
+<p>Setting <code>allow_delegation=False</code> on the reviewer is the important line. In an earlier version, delegation was on for all roles and the reviewer quietly handed the draft back to the writer with edits, producing an unpredictable loop and roughly three times the expected calls. Disabling delegation kept the reviewer's output as an artefact the flow could handle explicitly.</p>
+
+<h3>Tasks as contracts</h3>
+<p>Each task states its inputs, constraints, and exact output shape. The analyst task, for example, names its input as "the researcher's ten findings per competitor" and requires a three-column table of price, onboarding time, and support, with a source ID in every row. Structured output keeps the chain clean; if the researcher's prose were passed directly to the writer, ambiguity would compound at each step.</p>
+<pre><code>analysis = Task(
+    description=('Using the researcher findings, build a table comparing '
+                 'competitors on price, onboarding, and support. '
+                 'Include a source_id column. Flag any row without a source.'),
+    expected_output='A markdown table with 4 columns and one row per competitor',
+    agent=analyst
+)
+</code></pre>
+
+<h3>Process, flow, and cost</h3>
+<p>We run the crew sequentially — researcher, analyst, writer, reviewer — because the path is predictable and we want reproducible traces. Only after the draft passes review does a flow take over: it waits for a human editor's approval event, then publishes. If the reviewer returns gaps, the flow re-runs the writer once with the gap list attached; after one revision it escalates to the human regardless. The cost is explicit. Four agents, roughly 1,200 input and 400 output tokens per task, plus one revision round, comes to about 8,000 input and 2,400 output tokens per digest. At the configured model rates that is a few cents — trivial for a weekly job, but worth stating because the same crew run every hour would cost roughly 168 times as much.</p>
+
+<div class="exercise"><strong>Exercise 11.3 — Artefact contract.</strong> Define the exact artefact the researcher hands to the analyst in the digest example. Specify its fields, including a source ID and a confidence value, and write one rule the analyst must follow when a source is missing.</div>
+
+<h2>Pitfalls and trade-offs</h2>
+<p>These are the mistakes that most often turn a productive crew into an unpredictable, expensive one. Each has a concrete fix.</p>
+<ul>
+<li><strong>Vague role names.</strong> "Assistant" and "Helper" overlap, so tasks drift between them. Use domain-specific roles — Researcher, Analyst, Reviewer — with one deliverable each that you can inspect after a run.</li>
+<li><strong>Giving every agent every tool.</strong> A reviewer that can rewrite the report will rewrite it instead of reviewing. Assign tools by responsibility, which also shrinks the tool-selection problem described in Chapter 6.</li>
+<li><strong>Backstory as a substitute for instructions.</strong> A vivid persona improves tone but will not stop invented facts. Pair it with explicit source constraints and a required source-ID field in the output.</li>
+<li><strong>Hierarchical process by default.</strong> A manager adds calls and makes the path vary between runs, which complicates evaluation. Start sequential and introduce delegation only when dynamic task selection is genuinely required.</li>
+<li><strong>Unbounded revision loops.</strong> A writer–reviewer pair can revise indefinitely. Cap revisions in the flow, and define exactly what is returned when the cap is reached.</li>
+<li><strong>Ignoring cost until scale.</strong> Team-shaped systems multiply model calls; a cheap weekly job can become an expensive per-request feature. Estimate tokens per role before committing to the pattern.</li>
+<li><strong>Using a crew for transactional work.</strong> Low-latency, deterministic decisions do not benefit from role-play. Use a simple pipeline and reserve crews for document- and analysis-shaped work.</li>
+</ul>
+
+<h2>Check your understanding</h2>
+<p>These questions help you check whether you can apply the team metaphor deliberately rather than just naming agents. Answer each briefly.</p>
+<ol>
+<li>Why does a narrow, non-overlapping role produce better handoffs than a generalist agent, even if the generalist is given more tools?</li>
+<li>In the digest case, why is the reviewer forbidden from editing the draft, and how is that restriction enforced in the flow?</li>
+<li>What is the difference between a crew and a flow, and when should control move from one to the other?</li>
+<li>How would you estimate the cost of a four-agent crew with one revision round before you build it, and what would make you reject the design?</li>
+<li>Name a task that suits a crew and a task that suits a simple pipeline. Explain the property that separates them.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>CrewAI frames automation as a team of specialised roles.</li>
+<li>Narrow roles, concrete deliverables, and scoped tools prevent drift.</li>
+<li>Sequential processes are predictable; hierarchical ones are flexible but variable.</li>
+<li>Flows provide explicit control when a crew alone is not enough.</li>
+<li>Team-shaped systems cost more; justify them with quality gains.</li>
+</ul>
+
+<nav><a href="10-microsoft-agent-framework.html">&larr; Previous</a><span></span><a href="12-autogen.html">Next: AutoGen &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

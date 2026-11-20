@@ -1,0 +1,141 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>25. Offline and On-Device AI for Mobile</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>25. Offline and On-Device AI for Mobile</h1>
+
+<h2>AI without a network</h2>
+<p>Most AI experiences assume a connection. That assumption breaks on a flight, in a rural area, in a basement, or in a field service scenario where the whole point is that there is no reliable network. Running models on a phone or edge device changes the design constraints completely: memory is tight, battery is precious, thermal limits are real, and latency expectations are immediate. The reward is an experience that works anywhere and keeps sensitive data on the device.</p>
+<p>On-device AI is not simply "local AI, but smaller". It requires rethinking the feature itself. You do not run a frontier assistant on a phone; you run a focused capability — transcription, translation, classification, short generation, semantic search over a small local corpus — designed around the device's limits.</p>
+
+<h2>Hardware realities</h2>
+<p>Modern phones include neural processing units and increasingly capable GPUs, but they share constraints:</p>
+<ul>
+<li><strong>Memory</strong> — model weights compete with the app and OS for RAM.</li>
+<li><strong>Power</strong> — inference drains battery and causes heat.</li>
+<li><strong>Storage</strong> — models are large files that must be downloaded and updated.</li>
+<li><strong>Thermals</strong> — sustained load triggers throttling, so short bursts are better than long runs.</li>
+</ul>
+<p>These constraints push you toward small, quantised models and short tasks. A few billion parameters is typically the upper range for a phone, and even that needs careful memory management.</p>
+
+<h2>Choosing on-device tasks</h2>
+<p>Good on-device features share traits: they need low latency, work with small inputs, tolerate a narrower model, and benefit from privacy or offline availability. Examples include voice transcription, real-time translation of short phrases, smart replies, document scanning and OCR, image classification, and search over notes stored on the device.</p>
+<p>Poor fits include long-form reasoning, large-context analysis, and anything that needs fresh external knowledge. For those, the device can collect and preprocess input, then defer to the cloud when a connection is available.</p>
+<div class="tip"><strong>Design for intermittent connectivity.</strong> Treat the network as optional. Queue cloud requests when offline, sync when online, and always give the user a useful local response where possible.</div>
+
+<h2>Model adaptation for devices</h2>
+<p>Several techniques make models fit on devices:</p>
+<ul>
+<li><strong>Quantisation</strong> — reduce weight precision to 8-bit or 4-bit, trading some quality for size and speed.</li>
+<li><strong>Distillation</strong> — train a small model to imitate a larger one on the target task.</li>
+<li><strong>Pruning</strong> — remove less important connections.</li>
+<li><strong>Specialisation</strong> — fine-tune for one narrow task instead of general chat.</li>
+</ul>
+<p>A specialised small model often beats a general larger one on a single task. If your device feature is "classify a photo of a document type", train or choose for that exact job rather than asking a general model to figure it out.</p>
+
+<h2>Offline-first architecture</h2>
+<p>An offline-first AI app has a local inference path, a local data store, and a sync layer. When the network is absent, the app uses local models and local data. When it returns, it syncs results, uploads queued requests, and downloads model or index updates. Conflict resolution matters: a user may have edited content while offline.</p>
+<pre><code>if (network.available &amp;&amp; task.needsCloud) {
+  queue.enqueue(task);
+  showLocalPlaceholder();
+} else {
+  result = await localModel.run(task);
+  showResult(result, source: 'on-device');
+}
+</code></pre>
+<p>Always tell the user where a result came from. "On-device" and "cloud" answers may differ in quality, and transparency builds trust.</p>
+
+<h2>On-device retrieval</h2>
+<p>Semantic search over a user's notes is a compelling offline feature. Embed documents on the device, store vectors locally, and retrieve with a small embedding model. Keep the index small and incremental; re-embedding everything each launch is slow and power-hungry. Update the index when content changes, and compact it periodically.</p>
+<p>Privacy is the headline benefit: personal notes never leave the phone. That also means you must handle index encryption and secure deletion. A local index of private notes is sensitive data.</p>
+
+<h2>Latency and UX</h2>
+<p>On-device inference can feel instant for short tasks, but a slow model still blocks the UI. Run inference off the main thread, show progress for anything over a fraction of a second, and stream tokens where possible. Cache results for repeated queries. Design the feature so a one-second response is acceptable — that is often achievable locally even when a two-second cloud call is not.</p>
+<p>Battery awareness is part of UX. Avoid continuous inference in the background. Batch work, use low-power modes, and let the user disable on-device AI to save power.</p>
+
+<h2>Testing on devices</h2>
+<p>Benchmarks on a development machine do not predict phone performance. Test on real devices, including older ones. Measure cold start (first inference after launch), sustained throughput, memory peaks, and battery impact. Test in airplane mode. Test with a nearly full storage and a nearly empty battery. These are the conditions your users will actually face.</p>
+
+<div class="exercise"><strong>Exercise 25.1 — Feature fit.</strong> Choose five app features and classify each as a good or poor fit for on-device AI. Justify with one constraint from this chapter.</div>
+<div class="exercise"><strong>Exercise 25.2 — Offline flow.</strong> Sketch the state machine for a translation feature that works offline with a local model and syncs to the cloud when connected. Define what happens when a queued request fails after reconnection.</div>
+
+<h2>Case study: an offline field-inspection app</h2>
+<p>Imagine a field-service application used by inspectors who visit substations and industrial sites where connectivity is unreliable. The core task: photograph a piece of equipment, read its meter or serial plate, classify the document type, and store a structured record. The record must be created on the spot even with no signal, then synced to a back office when the inspector returns to coverage. This scenario exercises almost every constraint discussed above.</p>
+
+<h3>Setting the hardware budget</h3>
+<p>The target device is a mid-range Android phone with 4 GB of RAM, of which the app can realistically claim about 1.2 GB during a foreground inference session. Storage available for models is 1.5 GB. The team sets a hard budget before choosing any model:</p>
+<ul>
+<li>Inference working set: at most 1.0 GB, leaving headroom for the OS and UI.</li>
+<li>Download size: under 900 MB so the model can be fetched over a metered connection.</li>
+<li>Cold start: under 2 seconds on the target device; sustained inference under 800 ms per image.</li>
+<li>Battery: no more than 3% per ten inspections in a laboratory drain test.</li>
+</ul>
+<p>Those numbers decide the architecture. A 7-billion-parameter model in 4-bit quantisation would occupy roughly 3.5 GB of weights alone — impossible. A 1.5-billion-parameter model quantised to 4-bit needs about 0.8–0.9 GB, which fits. The team accepts a narrower model because the task is constrained: classify among twelve plate types and read short strings, not hold a conversation.</p>
+
+<h3>Choosing and adapting the model</h3>
+<p>Rather than use a general chat model, the team fine-tunes a small vision-language model on labelled crops of meter plates. Distillation from a larger teacher supplies soft labels for ambiguous glare cases. The output is a fixed JSON schema — document type, serial number, reading — so generation is short and bounded:</p>
+<pre><code>{
+  "doc_type": "analog_meter",
+  "serial": "HT-4471",
+  "reading_kwh": 48213,
+  "confidence": 0.91
+}
+</code></pre>
+<p>Because the schema is fixed, the team caps generation at 64 tokens and uses a constrained decoder that only emits valid JSON. This keeps output cost predictable and makes the result directly storable. When confidence falls below 0.7, the app routes the record to a "needs review" queue instead of presenting a wrong reading as fact — the no-answer path from Chapter 5, applied on-device.</p>
+
+<h3>Walking through one inspection</h3>
+<ol>
+<li>The inspector opens the camera; the app loads the model into memory once and keeps it warm for the session.</li>
+<li>A plate is captured. A lightweight detector crops it, and the classifier runs on the crop off the main thread.</li>
+<li>The model emits the JSON above in about 600 ms. The UI shows the reading and a confidence badge, labelled "on-device".</li>
+<li>The record is written to a local encrypted store with a pending-sync flag. A small embedding of the plate is added incrementally to an on-device index for later search.</li>
+<li>With no signal, a cloud enrichment request that corrects readings against a regional registry is queued rather than dropped.</li>
+<li>At the end of the shift, connectivity returns. The sync layer uploads pending records, processes queued corrections, and shows a short reconciliation report of any conflicts.</li>
+</ol>
+<p>Notice that the valuable part — creating a structured, reviewable record — never needed the network. The cloud step only improves it. That inversion is the essence of offline-first design: local is the primary path, cloud is an enhancement.</p>
+
+<div class="exercise"><strong>Exercise 25.3 — Size the model.</strong> Repeat the budget calculation for a device with 3 GB of RAM and 800 MB of model storage. Which of the four constraints becomes binding first, and what design change do you make in response?</div>
+
+<h2>Design decisions under mobile constraints</h2>
+<p>On-device projects rarely fail because the model is too weak. They fail because a choice that was harmless on a development machine becomes expensive on real hardware. The decisions below are the ones worth making explicitly, early.</p>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Benchmarking only on a laptop</td><td>Desktop CPUs, memory, and cooling tell you nothing about a phone's thermal envelope or NPU behaviour.</td><td>Test on the oldest device you support, with a cold cache and airplane mode on.</td></tr>
+<tr><td>Running inference on the main thread</td><td>A 600 ms model call blocks rendering and makes the app feel broken.</td><td>Dispatch to a worker or background executor and stream or show progress.</td></tr>
+<tr><td>Re-embedding the whole corpus at launch</td><td>It burns battery and time on every open, and users notice the delay.</td><td>Update the index incrementally on content change and compact periodically.</td></tr>
+<tr><td>Long continuous inference in the background</td><td>Sustained load triggers thermal throttling; throughput collapses after a minute.</td><td>Prefer short bursts, batch work, and respect low-power modes.</td></tr>
+<tr><td>Treating the local index as harmless data</td><td>A searchable index of private notes is sensitive even though it never leaves the device.</td><td>Encrypt at rest, support secure deletion, and document retention.</td></tr>
+<tr><td>Hiding which source produced an answer</td><td>Users cannot judge a fuzzy local result against a sharper cloud one if they cannot tell them apart.</td><td>Label results "on-device" or "cloud" and show confidence where useful.</td></tr>
+<tr><td>No model update or eviction strategy</td><td>Models are large files; a naive update can double storage use or strand old downloads.</td><td>Version models, download atomically, and delete superseded files.</td></tr>
+</table>
+<p>Each of these is a design decision, not a bug fix. Making them before you write inference code is far cheaper than retrofitting them after a poor field trial.</p>
+
+<h2>Review questions: on-device trade-offs</h2>
+<p>Use these questions to check whether you can reason about the constraints rather than recite the techniques. Answer each in your own words, with a concrete example where possible.</p>
+<ol>
+<li>A feature needs fresh external knowledge but must work offline. What can the device still do usefully, and where is the honest boundary between local and cloud behaviour?</li>
+<li>You have a 1.2 GB memory budget and a choice between a larger general model and a smaller specialised one. How would you decide, and what evidence would change your mind?</li>
+<li>Quantisation cuts model size but slightly lowers accuracy. Describe a test that tells you whether the trade is acceptable for your specific task.</li>
+<li>A user reports that the app is fast at first but slows after ten minutes of continuous use. What is the likely cause, and what would you measure to confirm it?</li>
+<li>Your on-device search index contains private notes. List three obligations that come with storing that index locally, and explain how each affects the design.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>On-device AI trades broad capability for privacy, offline operation, and immediacy.</li>
+<li>Memory, power, storage, and thermals are the binding constraints.</li>
+<li>Quantisation, distillation, and specialisation make models fit.</li>
+<li>Offline-first architecture needs local inference, local data, and careful sync.</li>
+<li>Test on real devices under realistic adverse conditions.</li>
+</ul>
+
+<nav><a href="24-local-ai.html">&larr; Previous</a><span></span><a href="26-coding-assistants.html">Next: AI Skills, Rules, and Workflows &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

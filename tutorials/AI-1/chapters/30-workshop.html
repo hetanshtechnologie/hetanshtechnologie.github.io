@@ -1,0 +1,148 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>30. Workshop: LangGraph and TypeScript</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>30. Workshop: LangGraph and TypeScript</h1>
+
+<h2>The closing lab</h2>
+<p>The final session of the event was a ninety-minute, hands-on workshop on creating AI agents with LangGraph and TypeScript. Where the talks explained ideas, the workshop asked attendees to build. It was structured in three modules that move from the fundamentals of a graph to an agent that remembers a conversation. This chapter reconstructs the learning path in original language and expands each module with the reasoning you need to reuse it.</p>
+<p>The progression is deliberate. First you learn how state and nodes form a graph. Then you give the graph a tool-calling loop, the classic ReAct pattern. Finally you add memory so the agent can hold a multi-turn conversation. Each step builds on the previous one, which is exactly how you should approach learning a new orchestration library.</p>
+
+<h2>Module 1 — LangGraph basics</h2>
+<p>The first module introduced the core mental model from Chapter 8: an agent as a typed state machine. Attendees defined a state object, wrote nodes that transform it, and connected them with edges. The immediate goal was a working graph that takes an input, calls a model, and returns a result.</p>
+<p>Key ideas to take away:</p>
+<ul>
+<li><strong>State is explicit.</strong> Define its shape before writing nodes.</li>
+<li><strong>Nodes return updates.</strong> Each node contributes a partial change to state.</li>
+<li><strong>Edges decide control flow.</strong> Conditional edges read state to choose the next node.</li>
+<li><strong>START and END bound the graph.</strong> Every path begins and finishes cleanly.</li>
+</ul>
+<pre><code>const State = z.object({
+  messages: z.array(Message),
+  step: z.number().default(0)
+});
+
+const graph = new StateGraph(State)
+  .addNode('callModel', async (state) =&gt; ({
+      messages: [...state.messages, await model.invoke(state.messages)],
+      step: state.step + 1
+  }))
+  .addEdge(START, 'callModel')
+  .addEdge('callModel', END)
+  .compile();
+</code></pre>
+<div class="tip"><strong>Workshop habit.</strong> Print the graph's structure and trace one execution. Seeing the path makes abstract state transitions concrete.</div>
+
+<h2>Module 2 — Tool calling and a ReAct agent</h2>
+<p>The second module added tools. A node could now receive tool calls from the model, execute the requested functions, and append the results to state. A conditional edge checked the last message: if it contained tool calls, route to the tool node; otherwise finish. This is the ReAct loop from Chapter 7 made executable.</p>
+<p>The module highlighted several practical lessons:</p>
+<ul>
+<li>Tool descriptions drive selection, so write them precisely.</li>
+<li>Validate arguments before execution; never trust the model's schema adherence blindly.</li>
+<li>Guard the loop with a maximum step count to prevent endless tool calls.</li>
+<li>Return compact, structured tool results so context stays readable.</li>
+</ul>
+<pre><code>function route(state) {
+  if (state.step &gt;= MAX_STEPS) return END;
+  return lastMessageHasToolCalls(state.messages) ? 'tools' : END;
+}
+
+graph.addConditionalEdges('callModel', route, { tools: 'executeTools', [END]: END });
+graph.addEdge('executeTools', 'callModel');
+</code></pre>
+<p>Notice that the loop is ordinary code. The model proposes; the graph decides. That separation is what makes the system testable and safe, and it is the central lesson of the workshop.</p>
+
+<h2>Module 3 — Stateful conversational memory</h2>
+<p>The final module made the agent remember. A checkpointer persisted state under a thread identifier, so a second invocation could continue an earlier conversation. Attendees learned that memory is not a special feature of the model — it is a property of the runtime storing state between calls.</p>
+<p>Important details covered in this module:</p>
+<ul>
+<li>Use a durable checkpointer in production, not an in-memory one.</li>
+<li>Choose a thread ID convention: one thread per conversation or per work item.</li>
+<li>Trim or summarise long histories so context does not grow forever.</li>
+<li>Record thread ID in traces so a conversation can be replayed during debugging.</li>
+</ul>
+<pre><code>const app = graph.compile({ checkpointer: new SqliteSaver() });
+const config = { configurable: { thread_id: 'user-42-session-1' } };
+await app.invoke({ messages: [new HumanMessage('Hi')] }, config);
+</code></pre>
+<div class="tip"><strong>Memory hygiene.</strong> Persisting everything is easy and often wrong. Decide what should be remembered, for how long, and who can delete it — the same privacy discipline discussed in Chapter 10.</div>
+
+<h2>Learning outcomes</h2>
+<p>By the end of the workshop, participants had built a small but complete agent: a graph with explicit state, a guarded tool-calling loop, and memory across turns. More importantly, they had practised the way of thinking this book teaches — put control flow in code, keep state explicit, bound autonomy, and make runs observable.</p>
+<p>If you work through these modules on your own, extend them with one of the evaluation habits from Part IV. Add a small test set, check that the tool loop terminates, and verify that memory does not leak between threads. A workshop demo becomes a portfolio project the moment you can show how you verified it.</p>
+
+<h2>From the lab to your own project</h2>
+<p>The natural next step is to replace the demo tool with one that matters to you, add a second node for retrieval, or introduce a human approval checkpoint before a mutating action. Each addition exercises a chapter in this book. Chapter 31 offers structured capstone briefs that take the workshop pattern into production-shaped territory.</p>
+
+<div class="exercise"><strong>Exercise 31.1 — Extend the graph.</strong> Add a retrieval node before the model node. Define the state fields it needs and the edge that connects it.</div>
+<div class="exercise"><strong>Exercise 31.2 — Guard the memory.</strong> Add a rule that trims the conversation to the last ten messages and summarises older turns. Describe how you would test that no data leaks between threads.</div>
+
+<h2>Worked example: adding retrieval and a checkpoint to the lab</h2>
+<p>The three workshop modules produce a small agent, but a demo becomes a portfolio project when you add a realistic concern. This walkthrough extends the lab in two ways that mirror production systems: a retrieval node before the model call, and a human approval checkpoint before a mutating tool. Both use the same state-and-edge mechanics from Module 1, which is the point — new capabilities are new nodes, not a rewrite.</p>
+
+<h3>Extending the state</h3>
+<p>First the state grows two fields: retrieved context and a pending-action flag for approval. Keeping these explicit means every node sees them and traces can show how they changed.</p>
+<pre><code>const State = z.object({
+  messages: z.array(Message),
+  context: z.array(Document).default([]),
+  pendingAction: z.string().nullable().default(null),
+  step: z.number().default(0)
+});
+</code></pre>
+
+<h3>Adding the retrieval node</h3>
+<p>A <code>retrieve</code> node reads the latest user message, queries a small vector index, and writes the top four chunks into <code>context</code>. The model node then includes those chunks in its prompt. The edge chain becomes START to retrieve, retrieve to callModel, and the existing conditional edge handles tool calls. Because retrieval is a separate node, you can test it independently: given a query, does it return the right chunks? That testability is exactly what the graph structure buys you.</p>
+
+<h3>Adding an approval checkpoint</h3>
+<p>The mutating tool, say <code>issueRefund</code>, is made two-phase. The model first calls a <code>proposeRefund</code> tool that writes a description to <code>pendingAction</code> and returns to the user. A conditional edge routes to END when <code>pendingAction</code> is set, so the graph pauses. On the next turn, if the user's message is an explicit approval, the graph calls the real <code>issueRefund</code> tool; otherwise it clears the flag. The model never mutates state without a human confirmation in the loop.</p>
+<div class="note"><strong>Why the checkpoint belongs in the graph.</strong> It is tempting to ask the model to "be careful" with the refund tool, but a prompt is not a control. Routing through an explicit state flag and a conditional edge makes the pause a property of the runtime, so it cannot be skipped by a persuasive turn of phrase.</div>
+
+<h3>Guarding and observing the extended graph</h3>
+<p>With more nodes, two safeguards matter. Keep the MAX_STEPS guard from Module 2 so a tool loop cannot run forever, and record the thread ID and step count in every trace. Then write three checks: retrieval returns non-empty context for a known query, the approval gate blocks mutation until confirmation, and memory does not leak between two thread IDs. These checks turn the lab into something you can demonstrate with evidence.</p>
+<p>Run those three checks in continuous integration, not just once on your machine. A graph is easy to break with an innocent-looking edit to a conditional edge, and the approval gate is precisely the kind of control that can fail silently — the demo still works, but the pause quietly disappears. A test that asserts the graph stays paused until an explicit token arrives is worth far more than a careful code review.</p>
+
+<div class="exercise"><strong>Exercise 30.3 — Test the gate.</strong> Write three test cases for the approval checkpoint: approved, rejected, and ambiguous confirmation. State the expected state after each and how you would detect a false approval.</div>
+
+<h2>Common pitfalls in graph and memory design</h2>
+<p>The workshop's mechanics are simple, which makes it easy to develop habits that do not survive contact with real usage. These are the ones to watch.</p>
+<table>
+<tr><th>Pitfall</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Letting state grow without bound</td><td>Every message and tool result is replayed, so latency and cost rise each turn.</td><td>Trim or summarise old turns and keep only the context the next node needs.</td></tr>
+<tr><td>Omitting a step or token guard</td><td>A confused model can call tools forever, running up cost and hanging the user.</td><td>Enforce MAX_STEPS and a token budget in the conditional edge.</td></tr>
+<tr><td>Using an in-memory checkpointer beyond the demo</td><td>State vanishes on restart, so "memory" fails the moment the process recycles.</td><td>Use a durable store and test a restart mid-conversation.</td></tr>
+<tr><td>Poor thread-ID conventions</td><td>Colliding IDs leak one conversation into another; random IDs lose history.</td><td>Derive a stable ID from user and session, and include it in traces.</td></tr>
+<tr><td>Trusting tool arguments blindly</td><td>A malformed or injected argument can make a tool do something harmful.</td><td>Validate against a schema and scope credentials to the minimum needed.</td></tr>
+<tr><td>Persisting everything with no retention policy</td><td>Stored histories become a privacy and storage liability over time.</td><td>Decide what to keep, for how long, and who can delete it.</td></tr>
+<tr><td>Not tracing intermediate nodes</td><td>When an answer is wrong, you cannot tell which node introduced the error.</td><td>Record node names, step counts, and state deltas in every trace.</td></tr>
+</table>
+<p>The theme from the workshop holds: put control flow in code, keep state explicit, and make each run observable. Every pitfall above is a case of violating one of those three ideas.</p>
+
+<h2>Review questions: workshop concepts</h2>
+<p>These questions check that you understood the mechanics of the lab rather than just followed the code. Answer them by describing behaviour, not by naming APIs.</p>
+<ol>
+<li>Why is an agent modelled as a typed state machine useful for testing, compared with an unstructured loop around a model call?</li>
+<li>In the ReAct loop, what stops the agent from calling tools indefinitely, and where does that rule live?</li>
+<li>Explain why memory is a property of the runtime rather than the model, using the checkpointer as your example.</li>
+<li>If two users' conversations were mixed up, which part of the memory design would you inspect first and why?</li>
+<li>You add a retrieval node and a refund tool to the lab. Describe how you would verify that a refund cannot happen without an explicit human approval.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>The workshop built a LangGraph and TypeScript agent in three modules.</li>
+<li>Module 1 covered state, nodes, and edges; Module 2 added a tool-calling ReAct loop; Module 3 added checkpointer-based memory.</li>
+<li>The loop is code-controlled: the model proposes tool calls, the graph decides what happens next.</li>
+<li>Guard loops with step limits and manage memory deliberately.</li>
+<li>Extending the lab with evaluation turns a demo into a portfolio project.</li>
+</ul>
+
+<nav><a href="29-event-guide.html">&larr; Previous</a><span></span><a href="31-capstone.html">Next: Capstone Projects and Next Steps &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

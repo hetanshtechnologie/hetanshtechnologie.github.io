@@ -1,0 +1,141 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>27. Token Economics and Context Engineering</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>27. Token Economics and Context Engineering</h1>
+
+<h2>Tokens are the budget</h2>
+<p>In an AI system, tokens are the unit of cost, latency, and attention. Every token you send costs money, every token generated takes time, and every irrelevant token competes for the model's focus. Token economics is the practice of treating context as a scarce resource and spending it where it changes the outcome.</p>
+<p>Developers often focus on the price per million tokens and miss the bigger lever: how many tokens your architecture consumes per task. A well-designed system can be an order of magnitude cheaper than a careless one using the same model. That difference comes from context engineering, not from haggling over prices.</p>
+
+<h2>Where tokens go</h2>
+<table>
+<tr><th>Source</th><th>Typical waste</th><th>Remedy</th></tr>
+<tr><td>System prompt</td><td>Over-long, repeated on every call</td><td>Trim to essential rules; use stable prefix for caching</td></tr>
+<tr><td>Conversation history</td><td>Grows without bound</td><td>Summarise, trim, or store externally</td></tr>
+<tr><td>Retrieved documents</td><td>Too many chunks, low relevance</td><td>Rerank, cap count, compress</td></tr>
+<tr><td>Tool definitions</td><td>Dozens exposed when few are needed</td><td>Dynamic tool selection</td></tr>
+<tr><td>Tool results</td><td>Raw dumps of large data</td><td>Summarise and reference</td></tr>
+<tr><td>Model output</td><td>Verbose reasoning and explanations</td><td>Concise formats, max tokens, stop sequences</td></tr>
+</table>
+<p>Notice that output tokens are often the largest controllable cost. They cost more per token than input and scale with how chatty your prompts allow the model to be.</p>
+
+<h2>Context engineering principles</h2>
+<ol>
+<li><strong>Relevance over volume.</strong> Three precise chunks beat twenty marginal ones.</li>
+<li><strong>Structure over prose.</strong> Labelled sections and delimiters help the model parse evidence.</li>
+<li><strong>Stability where possible.</strong> A stable prompt prefix enables caching and predictable behaviour.</li>
+<li><strong>Freshness where needed.</strong> Load dynamic data at request time; do not bake it into static instructions.</li>
+<li><strong>Minimality with intent.</strong> Remove tokens that do not influence the decision.</li>
+</ol>
+<p>These principles echo Chapter 2's context layer and Chapter 4's prompting patterns. Token economics is the quantitative view of the same ideas.</p>
+
+<h2>Compression techniques</h2>
+<p>Several practical techniques reduce token use without losing meaning:</p>
+<ul>
+<li><strong>Summarisation</strong> — compress long histories or documents into key facts, keeping references to the originals.</li>
+<li><strong>Extractive selection</strong> — keep only the sentences relevant to the query.</li>
+<li><strong>Reference instead of paste</strong> — store large artefacts externally and pass an ID the model can use in a follow-up tool call.</li>
+<li><strong>Structured formats</strong> — tables and compact JSON carry more information per token than prose.</li>
+<li><strong>Dynamic examples</strong> — retrieve a few relevant few-shot examples rather than embedding a large fixed set.</li>
+</ul>
+<div class="tip"><strong>Measure quality after compression.</strong> Every compression technique risks removing the detail that mattered. Run your eval suite before and after. Saving tokens is not a saving if the answer becomes wrong.</div>
+
+<h2>Caching and prefixes</h2>
+<p>Many providers offer prompt caching: if a long prefix is unchanged, its computed state is reused at lower cost and latency. Design prompts with a stable prefix — system instructions, policy, and tool definitions first — and put variable content at the end. A cache that invalidates on every request because a timestamp sits in the system message is useless. Chapter 22 covers the serving side of prefix caching.</p>
+
+<h2>Budgets at every level</h2>
+<p>Set token budgets in three places:</p>
+<ol>
+<li><strong>Per request</strong> — a hard cap that stops runaway loops.</li>
+<li><strong>Per feature</strong> — so one expensive feature cannot dominate the bill.</li>
+<li><strong>Per user or tenant</strong> — to prevent abuse and enable tiered pricing.</li>
+</ol>
+<p>Record actual spend against each budget with your traces from Chapter 21. Alert at 80% usage. A budget that is discovered only after the invoice arrives is not a control.</p>
+
+<h2>The productivity multiplier</h2>
+<p>Token economics is not only about cloud bills. It applies to your daily use of AI coding assistants too. A lean rules file, a focused skill, and a scoped request produce better work faster than a huge context dump. The developer who writes precise prompts and reuses well-designed skills will outpace the one who pastes entire repositories into every conversation.</p>
+<p>The compounding effect matters: a skill that saves five minutes and two thousand tokens on every use, used twenty times a week, is a meaningful advantage. Treat your prompt and skill library as an asset you invest in.</p>
+
+<h2>A cost-reduction workflow</h2>
+<p>When a feature is too expensive, work in this order: measure where tokens go; remove obvious waste in prompts and tool results; add caching for stable prefixes; introduce routing from Chapter 23; compress retrieved context; and only then consider a cheaper model. Changing the model first is tempting but often the smallest lever, and it can quietly reduce quality.</p>
+
+<div class="exercise"><strong>Exercise 27.1 — Token audit.</strong> Take one AI feature and categorise its token use by the six sources in the table. Identify the single largest source of waste and propose a fix.</div>
+<div class="exercise"><strong>Exercise 27.2 — Prefix refactor.</strong> Rewrite a prompt so all stable content forms a prefix and variable content is appended. Explain what would invalidate the cache.</div>
+
+<h2>Worked example: diagnosing an expensive support assistant</h2>
+<p>A support team runs an assistant that answers questions from a product manual. At 20,000 tickets a month the bill is unexpectedly high, and latency is creeping up. The team instruments one representative request and attributes tokens to the six sources from the table above. The result looks like this:</p>
+<table>
+<tr><th>Source</th><th>Tokens per request</th><th>Observation</th></tr>
+<tr><td>System prompt</td><td>1,200</td><td>Includes a live timestamp, so nothing caches.</td></tr>
+<tr><td>Conversation history</td><td>3,400</td><td>Entire 12-turn history replayed every time.</td></tr>
+<tr><td>Retrieved documents</td><td>2,800</td><td>Eight chunks, several only loosely relevant.</td></tr>
+<tr><td>Tool definitions</td><td>900</td><td>Twelve tools exposed; most requests need two.</td></tr>
+<tr><td>Tool results</td><td>1,500</td><td>Raw API responses pasted in full.</td></tr>
+<tr><td>Model output</td><td>1,100</td><td>Verbose explanations with no length cap.</td></tr>
+</table>
+<p>Total: 10,900 tokens per request. At the team's blended rate this is roughly 11 cents a ticket, or about $2,200 a month — and most of it is waste. The team works through the fixes in the recommended order.</p>
+
+<h3>Fix 1 — Stabilise the prefix</h3>
+<p>The timestamp is moved out of the system message into the final user turn. The system prompt, policy, and tool definitions now form a byte-identical prefix, so prompt caching applies. A refactored prompt separates stable and variable content:</p>
+<pre><code>[stable prefix: system rules + policy + tool schemas]
+---
+[variable tail: retrieved chunks | last 3 turns | current query]
+</code></pre>
+<p>Cached prefix tokens are billed at a fraction of the normal input rate, and first-token latency drops noticeably.</p>
+
+<h3>Fix 2 — Trim history and retrieval</h3>
+<p>The full 12-turn history is replaced by a rolling summary plus the last three turns, cutting about 2,600 tokens. Retrieved chunks are capped at four after reranking, removing roughly 1,400 tokens of marginal context. Quality on the eval set is unchanged, which the team verifies before proceeding.</p>
+
+<h3>Fix 3 — Summarise tool results</h3>
+<p>Tool results are reduced to the fields the answer needs, with an ID for the full record, saving about 1,100 tokens. Output is constrained to a compact format with a 300-token cap, saving another 700.</p>
+
+<h3>The result</h3>
+<p>Per-request tokens fall from 10,900 to roughly 4,400 — a 60% reduction — with no measurable quality loss and lower latency. Notice the order: no model change was needed. The team only changed how context was assembled, which is the point of context engineering.</p>
+<div class="note"><strong>Watch the trend, not a single snapshot.</strong> Token use drifts as conversation features and document sets grow. Re-run this attribution monthly and after every prompt or retrieval change. A per-request budget that looked healthy at launch can quietly double as histories accumulate, so the instrumentation you added for this exercise should stay in production rather than being removed once the optimisation is done. The same traces that reveal waste also tell you when a previous fix has stopped working.</div>
+
+<div class="exercise"><strong>Exercise 27.3 — Attribute a request.</strong> Take one AI feature you know and assign its tokens to the six sources. Rank them by waste, then predict which single change saves the most. Explain how you would verify quality did not drop.</div>
+
+<h2>Design decisions in context budgeting</h2>
+<p>Reducing token use is full of trade-offs: every technique that saves tokens can, in the wrong place, remove the detail that makes an answer correct. Treat the following as decisions to reason about, not rules to apply blindly.</p>
+<table>
+<tr><th>Decision</th><th>Trade-off</th><th>Guidance</th></tr>
+<tr><td>Compress conversation history</td><td>Saves tokens but can drop a detail the user still expects you to remember.</td><td>Keep a rolling summary plus recent turns; store older facts externally.</td></tr>
+<tr><td>Cap retrieved chunks</td><td>Fewer chunks are cheaper and often more relevant, but recall can suffer.</td><td>Rerank first, then cap; verify recall@k on your eval set.</td></tr>
+<tr><td>Use prompt caching</td><td>Cheap repeated prefixes, but any change in the prefix breaks the cache.</td><td>Put timestamps and user data at the end, never in the system prefix.</td></tr>
+<tr><td>Constrain output length</td><td>Caps cost and latency, but overly tight caps truncate useful answers.</td><td>Use structured formats and set the cap from observed answer lengths.</td></tr>
+<tr><td>Expose tools dynamically</td><td>Fewer tool definitions save tokens, but a needed tool may be missing.</td><td>Select tool sets by request type, with a fallback set for ambiguity.</td></tr>
+<tr><td>Switch to a cheaper model</td><td>Largest headline saving, but often the smallest real lever and a quiet quality risk.</td><td>Do it last, after routing and compression, and compare with pairwise eval.</td></tr>
+<tr><td>Summarise tool results</td><td>Cuts large dumps, but a summary may discard the field the answer needs.</td><td>Keep required fields plus an ID for the full record on demand.</td></tr>
+</table>
+<p>The common thread is measurement. Each choice has a quality cost that is invisible until you run the eval suite, which is why the discipline from Part IV matters as much here as the arithmetic.</p>
+
+<h2>Review questions: token economics</h2>
+<p>Use these to check that you understand where savings come from and what they cost. Try to answer with numbers or a concrete feature in mind.</p>
+<ol>
+<li>Why can architecture changes save more money than negotiating a lower price per million tokens?</li>
+<li>A prompt caches perfectly on Monday but not on Tuesday. What are the likely causes, and how would you find the one that changed?</li>
+<li>Output tokens cost more than input tokens. What prompt and format changes reduce them without making the answer less useful?</li>
+<li>You cut a feature's token use by half but an eval shows more wrong answers. How do you decide whether the saving is real?</li>
+<li>Describe how you would divide a per-feature token budget among system prompt, history, retrieval, tools, and output, and where you would alert first.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Tokens are the unit of cost, latency, and attention.</li>
+<li>Context engineering — not price negotiation — is the main cost lever.</li>
+<li>Output tokens are often the largest controllable expense.</li>
+<li>Stable prefixes enable caching; variable content belongs at the end.</li>
+<li>Set and monitor budgets at request, feature, and user levels.</li>
+</ul>
+
+<nav><a href="26-coding-assistants.html">&larr; Previous</a><span></span><a href="28-career.html">Next: Careers, Networking, and the AI Talent Market &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

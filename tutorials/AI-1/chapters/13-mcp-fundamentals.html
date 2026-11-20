@@ -1,0 +1,128 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>13. Model Context Protocol Fundamentals</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>13. Model Context Protocol Fundamentals</h1>
+
+<h2>The integration problem</h2>
+<p>Every agent framework needs tools. Without a standard, each framework invents its own tool format, and every tool vendor must write an adapter for each framework. This is the classic N-by-M integration problem: N applications times M data sources. MCP is a protocol designed to reduce that to N plus M by defining a common way for applications to discover and use capabilities.</p>
+<p>Think of it as a client–server contract. An MCP client lives inside the AI application. An MCP server exposes tools, resources, and prompts. The client discovers what the server offers, asks the model to use them, and relays calls back to the server. The framework becomes a consumer of capabilities rather than the owner of every adapter.</p>
+
+<h2>The three primitives</h2>
+<table>
+<tr><th>Primitive</th><th>Who controls it</th><th>Typical use</th></tr>
+<tr><td>Tools</td><td>Model decides to call</td><td>Search, create, update, execute</td></tr>
+<tr><td>Resources</td><td>Application decides to read</td><td>Documents, records, configuration</td></tr>
+<tr><td>Prompts</td><td>User or application selects</td><td>Reusable instruction templates</td></tr>
+</table>
+<p>This distinction matters. Tools are actions, so they need authorisation and side-effect controls. Resources are data, so they need access control and freshness. Prompts are reusable context, so they need versioning and evaluation. Treating all three as "tools" loses the safety semantics.</p>
+
+<h2>Transport and lifecycle</h2>
+<p>MCP supports different transports. A local process might communicate over standard input/output, which is convenient for desktop tools. A remote service typically uses HTTP-based transport with sessions. The protocol handles capability negotiation, so a client learns what a server supports at connection time rather than assuming a fixed feature set.</p>
+<p>The lifecycle is worth understanding: client connects, initialises, discovers capabilities, exchanges messages, and eventually shuts down. Errors are structured, and servers can indicate whether a call is retryable. Implementing this properly is what separates a reliable integration from a demo that works until the connection blips.</p>
+
+<h2>Tool discovery and descriptions</h2>
+<p>When a client connects, the server lists its tools with names, descriptions, and parameter schemas. The client passes those to the model. This means the quality of your MCP tool descriptions directly determines model behaviour. The advice from Chapter 6 applies in full: precise verbs, explicit scope, parameter constraints, and statements about cost or limits.</p>
+<div class="tip"><strong>Dynamic discovery.</strong> If a server exposes hundreds of tools, do not dump all of them into every request. Retrieve a relevant subset or group them behind higher-level tools. Discovery is a cataloguing feature, not licence for context bloat.</div>
+
+<h2>Resources and URI conventions</h2>
+<p>Resources are identified by URIs and may be read by the client. A well-designed resource namespace makes access obvious: which tenant, which collection, which version. Include metadata such as MIME type and last-modified time. Because resources are data, caching is possible, but cache invalidation must respect permissions and freshness requirements.</p>
+
+<h2>Prompts as shared assets</h2>
+<p>MCP prompts let a server offer reusable instruction templates. A company might expose a "quarterly review" prompt that includes the correct structure and policy language. This moves prompt management closer to the system that owns the data. As with any prompt, version it and evaluate changes before rollout.</p>
+
+<h2>Security basics</h2>
+<ul>
+<li>Authenticate the client and authorise each tool call; do not rely on the model to behave.</li>
+<li>Treat tool output as untrusted data when it is placed back into context.</li>
+<li>Scope credentials to the minimum needed by the server.</li>
+<li>Log tool name, caller, arguments, decision, and result status.</li>
+<li>Validate schemas on both sides; protocol conformance does not guarantee input sanity.</li>
+</ul>
+<p>A compromised or confused model can attempt tool misuse. The server must be the last line of defence. Chapter 20 develops the full guardrail architecture.</p>
+
+<h2>Building your first server mentally</h2>
+<p>Suppose you want to expose an order lookup. You define a tool with a schema that accepts an order ID. In the handler, you derive the tenant and user from the authenticated context, not from model input. You query the database, return a compact object, and emit a log entry. You add a resource URI for the order document so the client can fetch full details when needed. Finally, you write tests that send malformed arguments and unauthorised callers. That is a complete, small MCP server.</p>
+
+<div class="exercise"><strong>Exercise 13.1 — Primitive classification.</strong> Take five capabilities from an application you know and classify each as tool, resource, or prompt. Justify one borderline case.</div>
+<div class="exercise"><strong>Exercise 13.2 — Schema review.</strong> Write an MCP tool schema for creating a support ticket. Mark every field that must come from trusted session state rather than the model.</div>
+
+<h2>A worked example: an order-lookup server</h2>
+<p>Suppose a support product wants an AI assistant that can look up orders. The engineering team decides to expose the capability through a small MCP server so any compatible client can use it. The requirements are concrete: an agent may read an order, but only for the signed-in customer; it must never be able to issue a refund; and the full order document should be fetched only when needed, not on every lookup. We will walk through defining the primitives, the transport, and the security checks.</p>
+
+<h3>Choosing the primitives</h3>
+<p>We classify three capabilities. The lookup itself is a tool — the model decides when to call it. The full order document is a resource, identified by a URI and read by the application when it needs detail. A "compose a status reply" template is a prompt, selected by the agent or user. Keeping these separate preserves their different safety semantics: the tool needs authorisation, the resource needs access control and freshness, the prompt needs versioning.</p>
+<pre><code>tool = Tool(
+    name="find_order",
+    description=("Find one order belonging to the signed-in customer. "
+                 "Accepts an order_id. Returns status, total, and item count. "
+                 "Read-only; cannot modify or refund an order."),
+    input_schema={"type": "object", "properties": {
+        "order_id": {"type": "string", "pattern": "^ORD-[0-9]{6}$"}
+    }, "required": ["order_id"]}
+)
+
+resource_uri = "orders://{tenant_id}/{order_id}?view=full"
+</code></pre>
+<p>The description does real work. It names the scope ("signed-in customer"), the return shape, and the negative constraint ("read-only"). The schema constrains the order ID to a pattern, so a malformed identifier is rejected before it reaches the database.</p>
+<p>The prompt deserves the same discipline as code. "Compose a status reply" is useful because it keeps the support team's tone and required disclaimers in one place, close to the data the server owns. We version it, and any edit goes through the same review as a model-prompt change: run it against a small eval set, compare outputs, then roll out. Skipping that step would let a well-meaning wording tweak quietly remove a required disclaimer from every reply. The resource URI, meanwhile, is designed so the client can fetch detail lazily: a lookup returns a compact object with a <code>detail_uri</code>, and only the UI that needs the full document reads it, with its own access check.</p>
+
+<h3>Handler, lifecycle, and security</h3>
+<p>In the handler, tenant and customer identity come from the authenticated session — never from a model-supplied field. The function queries the database, returns a compact object, and emits a log entry with the tool name, caller, decision, and result status. The connection follows the protocol lifecycle: the client initialises, negotiates capabilities, discovers the tool list, exchanges calls, and shuts down cleanly. Because discovery supplies the tool list, we can change descriptions without changing client code — but we also log discovery events, since a new vague tool can change model behaviour on its own.</p>
+<pre><code>def find_order(args, ctx):
+    tenant = ctx.tenant_id          # trusted session, not model input
+    customer = ctx.customer_id
+    order = db.get(tenant, args["order_id"])
+    if order.customer_id != customer:
+        return error("not_found", retryable=False)  # do not reveal existence
+    audit.log(tool="find_order", caller=customer,
+              decision="allow", status="ok")
+    return {"status": order.status, "total": order.total,
+            "items": len(order.items),
+            "detail_uri": f"orders://{tenant}/{order.id}?view=full"}
+</code></pre>
+<p>Returning <code>not_found</code> rather than <code>forbidden</code> for another customer's order avoids leaking that the order exists. The error object marks the failure as non-retryable, so the agent does not retry a request that will never succeed. For a desktop client we might use a local-process transport; for a remote service we use an HTTP-based transport with sessions, and the authorisation rules stay identical.</p>
+
+<div class="exercise"><strong>Exercise 13.3 — Resource design.</strong> Design the <code>orders://</code> resource namespace for the example. Specify the URI fields, MIME type, metadata such as last-modified time, and a caching rule that respects both permissions and freshness.</div>
+
+<h2>Common pitfalls</h2>
+<p>The protocol makes it easy to expose capabilities; making them safe and understandable takes deliberate choices. These are the recurring mistakes.</p>
+<ul>
+<li><strong>Treating every primitive as a tool.</strong> Resources lose their access-control and caching semantics, and prompts lose versioning. Classify each capability by who controls it — model, application, or user — before writing code.</li>
+<li><strong>Vague tool descriptions.</strong> "Search orders" attracts calls from agents that should not use it. Name the scope, the return shape, any cost or limits, and explicit negative constraints.</li>
+<li><strong>Trusting model-supplied identity.</strong> An order ID or user field from generated text is not authorisation. Derive tenant and customer from the authenticated session in every handler.</li>
+<li><strong>Dumping the whole catalog into every request.</strong> Hundreds of tools bloat context and confuse selection. Expose a curated subset or group capabilities behind higher-level tools.</li>
+<li><strong>Ignoring error structure.</strong> If every failure looks retryable, an agent will hammer a permanently broken call. Mark errors as retryable or permanent and log the decision.</li>
+<li><strong>Caching without permission in the key.</strong> A cached result for one tenant can leak to another. Include tenant and permission set in the key, and define an invalidation strategy.</li>
+<li><strong>Skipping schema validation on one side.</strong> Protocol conformance does not guarantee sane inputs. Validate arguments in the handler as well as in the advertised schema.</li>
+</ul>
+
+<h2>Check your understanding</h2>
+<p>These questions are for self-checking your grasp of the client–server contract. Write short answers before moving on.</p>
+<ol>
+<li>A capability can be modelled as a tool or a resource. What question decides which, and what safety property is lost if you choose wrongly?</li>
+<li>In the order-lookup example, why does the handler derive the customer from the session rather than from a tool argument?</li>
+<li>How does the protocol lifecycle support reliability, and what breaks if a client assumes a fixed feature set instead of negotiating capabilities?</li>
+<li>You add a second tool whose purpose overlaps an existing one. What would you change in the descriptions, and what would you watch after deployment?</li>
+<li>Why should a server log discovery events as well as tool calls? Give an example of a change that alters model behaviour with no agent code change.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>MCP standardises how AI applications discover and use capabilities.</li>
+<li>Tools are actions, resources are data, prompts are reusable context.</li>
+<li>Descriptions are part of the interface and drive model selection.</li>
+<li>Authentication, authorisation, and logging belong in the server.</li>
+<li>Expose a curated set of tools, not an enormous catalog.</li>
+</ul>
+
+<nav><a href="12-autogen.html">&larr; Previous</a><span></span><a href="14-mcp-at-scale.html">Next: MCP at Scale &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

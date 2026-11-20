@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>23. Model Routing for Cost, Latency, and Quality</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>23. Model Routing for Cost, Latency, and Quality</h1>
+
+<h2>One model does not fit every request</h2>
+<p>It is tempting to send every request to the strongest model available. That is also the most expensive way to build an AI feature, and often the slowest. Real workloads contain a wide spectrum of difficulty: a greeting, a classification, a lookup, a summary, a subtle reasoning problem. Paying top-tier prices for a greeting is waste; sending a hard reasoning problem to a tiny model is a quality failure. Model routing is the practice of matching each request to the least expensive model that can handle it well.</p>
+<p>A router is a small piece of engineering with an outsized effect. It sits between the application and the model providers, inspects the request, and chooses a destination. Done well, it cuts cost and latency while preserving — or even improving — quality. Done badly, it becomes a hidden source of misrouted requests that are hard to detect.</p>
+
+<h2>The three-way trade-off</h2>
+<p>Routing optimises across three dimensions that pull against one another:</p>
+<ul>
+<li><strong>Cost</strong> — price per million tokens, plus tool and infrastructure costs.</li>
+<li><strong>Latency</strong> — time to first token and total response time.</li>
+<li><strong>Quality</strong> — correctness, groundedness, and instruction following for this specific task.</li>
+</ul>
+<p>Improving one usually worsens another. A larger model may be more accurate but slower and pricier. A cached answer is fast and free but may be stale. The router's job is to find an acceptable point on that triangle for each request, based on explicit policy rather than guesswork.</p>
+<table>
+<tr><th>Strategy</th><th>Cost</th><th>Latency</th><th>Quality risk</th></tr>
+<tr><td>Always strongest model</td><td>High</td><td>High</td><td>Low</td></tr>
+<tr><td>Always cheapest model</td><td>Low</td><td>Low</td><td>High</td></tr>
+<tr><td>Rule-based routing</td><td>Medium</td><td>Low</td><td>Medium (misrouting)</td></tr>
+<tr><td>Model-based routing</td><td>Medium</td><td>Medium</td><td>Low–medium</td></tr>
+<tr><td>Cascade / escalate</td><td>Medium</td><td>Variable</td><td>Low</td></tr>
+</table>
+
+<h2>Approach 1: deterministic rules</h2>
+<p>The simplest router uses rules: if the input is shorter than twenty tokens and contains no question mark, use the small model; if it mentions a specific feature, use the specialist model; if the user is on a free plan, cap the model tier. Rules are cheap, fast, and fully explainable. They are also brittle — language does not respect tidy thresholds.</p>
+<p>Rules work best when the signal is genuinely structural. Language detection, request length, presence of attachments, and plan tier are reliable. Semantic difficulty is not. Use rules as the first stage of a router, not the whole router.</p>
+
+<h2>Approach 2: a classifier or embedding router</h2>
+<p>A more robust approach trains or prompts a small classifier to predict which model or specialist should handle a request. The classifier can be a fine-tuned small model, an embedding match against labelled intents, or a cheap LLM call that outputs a category. This adds a small cost and latency, but it captures semantic signals that rules miss.</p>
+<p>Build the classifier from real traffic. Label a few hundred requests by intent and required difficulty, then measure routing accuracy separately from answer quality. A router with 90% accuracy still misroutes one request in ten — and those are the requests that generate complaint tickets. Track them explicitly.</p>
+<div class="tip"><strong>Router eval.</strong> Evaluate the router on its own decision, not only on the final answer. If the wrong model was chosen, even a perfect answer from that model may be a routing failure.</div>
+
+<h2>Approach 3: cascades and escalation</h2>
+<p>A cascade starts with a cheap model and escalates only when needed. The cheap model attempts the task; a confidence signal or verifier decides whether the answer is acceptable. If not, the request goes to a stronger model. This "cheap-first" pattern is powerful because many requests genuinely are easy, and you only pay for difficulty where it appears.</p>
+<p>The critical component is the acceptance test. It can be a schema check, a verifier model, a retrieval-groundedness score, or a self-consistency vote. A weak acceptance test defeats the cascade: either you escalate too often (no savings) or too rarely (quality loss). Calibrate it against human judgement, just as you would calibrate a judge in Chapter 17.</p>
+<pre><code>result = cheap_model.answer(request)
+if verifier.accept(result, confidence=0.8):
+    return result
+return strong_model.answer(request, context=result)
+</code></pre>
+
+<h2>Specialists and task-aware routing</h2>
+<p>Routing is not only about model size. Different models have different strengths: one is strong at code, another at long-context summarisation, another at structured extraction. A task-aware router sends each request to the specialist that performs best on that task, using eval results as evidence. Keep a scorecard per task and model, and route based on measured performance rather than reputation.</p>
+<p>Specialists can also be differently prompted versions of the same model. A "concise extractor" prompt and a "careful reasoner" prompt may behave like different models for routing purposes. Version them like any other artefact.</p>
+
+<h2>Latency-aware routing</h2>
+<p>Some requests are user-facing and need a fast first token; others are background jobs where throughput matters more. A latency-aware router considers current system load, model availability, and deadline. If the preferred model is slow or degraded, it can fall back to a faster one. If a request has a strict deadline, it may skip an escalation step.</p>
+<p>Implement a health signal for each destination: latency percentiles, error rate, and queue depth. Routing into an unhealthy model is worse than routing to a slightly weaker but available one. Circuit breakers prevent a failing provider from absorbing every request.</p>
+
+<h2>Cost controls at the router</h2>
+<ul>
+<li>Per-request token and cost ceilings before a call is made.</li>
+<li>Per-user and per-feature budgets accumulated across calls.</li>
+<li>Rate limits to prevent abuse of expensive destinations.</li>
+<li>Caching of identical or near-identical requests where safe.</li>
+<li>A hard rule that escalation must be justified by a recorded signal.</li>
+</ul>
+<div class="tip"><strong>Remember output tokens.</strong> Stronger models often produce longer answers. A routing decision based only on input price understates the real cost difference. Include expected output length in your estimates.</div>
+
+<h2>Observability for routing</h2>
+<p>Log every routing decision: request ID, chosen model, reason, confidence, and whether escalation occurred. Segment quality metrics by chosen model. Without this, a router is a black box that quietly changes system behaviour. When a regression appears, the first question should be "did the routing mix change?"</p>
+<p>Also watch for feedback loops. If a cheap model's failures generate more traffic (retries, user rephrasing), the router may see a distorted picture of difficulty. Sample from stable traffic when recalibrating.</p>
+
+<h2>Building your first router</h2>
+<p>A sensible progression is: start with one good model and measure; add a cheap model for a clearly easy intent and measure the savings; add a verifier and a cascade; then introduce semantic classification if rules are not enough. At each step, keep the previous configuration as a baseline and compare with pairwise eval. Routing is an optimisation, and like all optimisations it should be driven by measurement.</p>
+
+<div class="exercise"><strong>Exercise 23.1 — Cascade design.</strong> Design a cascade for a customer-support answer. Define the cheap model, the acceptance test, the escalation trigger, and the data you would log for every decision.</div>
+<div class="exercise"><strong>Exercise 23.2 — Cost comparison.</strong> Assume 70% of requests are handled by a cheap model and 30% escalate. Compute the blended cost per request given prices of your choice, and compare with using only the strong model. What escalation rate erases the saving?</div>
+
+<h2>Case study: a cascade router for a support inbox</h2>
+<p>A support product handles about 20,000 requests a day. Manual inspection of a sample shows a familiar mix: roughly 45% are greetings, status lookups, or single-fact questions; 35% are standard FAQs answerable from retrieved documents; and 20% are genuinely hard — multi-step troubleshooting or ambiguous complaints. Sending all of them to the strong model costs about ₹2.00 per request on average, or ₹40,000 a day. The team builds a cascade in three stages and measures each one.</p>
+<p>Stage zero is deterministic: detect the language, check the plan tier, note whether an attachment is present, and apply a rule that any <code>warranty</code> intent goes straight to the strong model. Stage one sends the rest to a small, fast model. A verifier accepts its answer only if it passes a schema check and reaches a groundedness score of at least 0.75 with confidence 0.8. Stage two escalates rejected requests to the strong model, passing the cheap model's answer as context so the expensive call does not start from scratch.</p>
+<pre><code>route(request):
+  if plan == "free" or language == "unsupported": return small
+  if intent == "warranty" or has_attachment: return strong
+  draft = small.answer(request)
+  if verifier.accept(draft, groundedness &gt;= 0.75, confidence 0.8):
+      return draft
+  return strong.answer(request, context=draft)
+# measured: 70% accepted, 30% escalated
+# strong ₹2.00/req, small ₹0.20, verifier ₹0.02
+# blended = 0.70×0.22 + 0.30×2.22 = ₹0.82/req (59% saving)
+</code></pre>
+<p>The measured acceptance rate is 70%, giving a blended cost of ₹0.82 per request — a 59% saving — and p95 latency for the easy 70% falls from about six seconds to 2.8 seconds. But the router itself is evaluated separately from the answers. On a labelled set of 500 requests, its decision accuracy is 92%; the 8% it misroutes account for a disproportionate share of new complaint tickets. Segmenting quality by chosen model reveals why: the small model is weak on warranty questions, which is exactly why the team added the escalation rule for that intent. After the rule, warranty complaints return to baseline.</p>
+<p>Every decision is logged with request ID, chosen model, reason, verifier confidence, and whether escalation occurred. When a regression appears two weeks later, the first question — "did the routing mix change?" — is answerable in a query: the verifier's threshold had been lowered in a config tweak, raising acceptance to 78% and quietly sending harder requests to the small model. Restoring the calibrated threshold fixes it. The team also learns to sample from stable traffic when recalibrating, because retries and user rephrasing after a cheap-model failure had begun to make the incoming mix look harder than it really was.</p>
+<p>The team also adds a specialist dimension. They maintain a per-task scorecard — greetings, lookups, summaries, code-like questions, and troubleshooting — and discover that one mid-sized model outperforms both the small default and the strong default on summarisation while costing half as much. The router gains a fourth destination, chosen by the classifier's intent label, and the scorecard is updated nightly from eval results rather than human reputation. A latency-aware rule complements it: when the strong model's p95 exceeds four seconds, non-urgent escalations wait or fall back to the specialist, and a circuit breaker removes a degraded destination until a health probe recovers. Routing decisions now carry a destination-health flag, so an incident can be attributed to the model rather than the router.</p>
+<div class="exercise"><strong>Exercise 23.3 — Escalation economics.</strong> Choose prices for a cheap and a strong model, then compute the blended cost per request at escalation rates of 10%, 30%, and 60%. Find the escalation rate at which the cascade costs the same as always using the strong model, and explain what would push a real system past that point.</div>
+
+<h2>Pitfalls and trade-offs</h2>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Routing on length or keywords alone</td><td>Language does not respect tidy thresholds; short hard questions get the cheap model.</td><td>Use rules for structural signals and a classifier for semantic difficulty.</td></tr>
+<tr><td>Evaluating only final answers</td><td>A correct answer from the wrong model is still a routing failure that wastes budget.</td><td>Evaluate the router's decision accuracy separately and log every choice.</td></tr>
+<tr><td>An uncalibrated acceptance test</td><td>Weak verifiers either escalate everything (no savings) or accept garbage (quality loss).</td><td>Calibrate the threshold against human judgement and monitor the acceptance rate.</td></tr>
+<tr><td>Ignoring output tokens in price comparisons</td><td>Stronger models often answer at greater length, understating the true difference.</td><td>Include expected output length in every routing cost estimate.</td></tr>
+<tr><td>Routing into unhealthy destinations</td><td>A degraded model absorbs traffic and generates failures that look like routing mistakes.</td><td>Track latency, error rate, and queue depth per model; add circuit breakers.</td></tr>
+<tr><td>Recalibrating on distorted traffic</td><td>Retries from cheap-model failures inflate the apparent difficulty of incoming requests.</td><td>Sample from stable traffic when retraining or retuning the router.</td></tr>
+</table>
+<p>The central trade-off is savings versus hidden failure. A cascade is only as good as its acceptance test, and a misrouted request can cost more in support tickets than the routing saves in tokens. That is why the team keeps the strong model as a baseline and compares with pairwise eval at every step: routing is an optimisation, and an unmeasured optimisation is a guess.</p>
+
+<h2>Check your understanding</h2>
+<p>These questions are for self-checking. Try to answer each without referring back to the chapter.</p>
+<ol>
+<li>Why is "always use the strongest model" both expensive and sometimes slower, and what is the router trying to replace it with?</li>
+<li>Distinguish rule-based routing from classifier-based routing with a signal each handles well and one each handles badly.</li>
+<li>What makes a cascade's acceptance test the most important component, and how would you calibrate it?</li>
+<li>Explain why a correct final answer can still count as a routing failure, and what you would log to detect this.</li>
+<li>How can retries create a feedback loop that distorts a router's view of request difficulty, and how would you avoid it?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Routing matches each request to the least expensive model that can handle it well.</li>
+<li>Cost, latency, and quality trade off against one another.</li>
+<li>Rules are cheap but brittle; classifiers capture semantic difficulty.</li>
+<li>Cascades escalate on a calibrated acceptance signal.</li>
+<li>Log every decision and segment quality metrics by chosen model.</li>
+</ul>
+
+<nav><a href="22-inference-engineering.html">&larr; Previous</a><span></span><a href="24-local-ai.html">Next: The Local AI Ecosystem &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

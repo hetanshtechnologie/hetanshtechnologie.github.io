@@ -1,0 +1,108 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>18. Silent Failure and Drift Detection</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>18. Silent Failure and Drift Detection</h1>
+
+<h2>The most dangerous failure is the quiet one</h2>
+<p>A crashed agent gets attention. A degraded agent does not. It still returns answers, still calls tools, still reports success — but the answers are subtly less grounded, the tool choices slightly worse, the explanations a little more generic. Users notice before dashboards do. This is silent failure, and it is the central operational challenge of agentic systems.</p>
+<p>Silent failure arises because agent output is a distribution. A model update, a prompt tweak, a retrieved-document change, or a new tool description can shift that distribution without crossing any hard assertion. The system remains "working" while quality drifts.</p>
+
+<h2>Sources of drift</h2>
+<ul>
+<li><strong>Model updates</strong> — a provider changes weights or serving behaviour behind the same model name.</li>
+<li><strong>Prompt changes</strong> — an innocent wording edit changes emphasis.</li>
+<li><strong>Data changes</strong> — the knowledge base is updated, re-indexed, or partially corrupted.</li>
+<li><strong>Tool changes</strong> — an upstream API alters fields or latency.</li>
+<li><strong>Traffic changes</strong> — users ask questions the system was never evaluated on.</li>
+<li><strong>Feedback loops</strong> — the agent's outputs become future inputs, amplifying small biases.</li>
+</ul>
+<p>Each source has a different detector. The trick is to monitor enough signals that you can tell them apart.</p>
+
+<h2>Canary suites</h2>
+<p>A canary suite is a small, stable set of cases run continuously against production. Unlike the nightly eval set, canaries use a fixed input set and fixed expected properties. They run on a schedule — every few minutes or on every deployment — and their scores are tracked as a time series.</p>
+<p>Pin canary inputs carefully. If you regenerate them, you lose comparability. Keep a long-lived core set and a rotating exploratory set. Alert when a canary score moves outside its historical range, not merely below an absolute threshold.</p>
+
+<h2>Score distributions, not just averages</h2>
+<p>An average groundedness score of 0.88 can hide a bimodal distribution: most answers are excellent, a small cluster is terrible. Track percentiles and shape. A sudden increase in low-score outliers is often the first sign of drift. Plot the distribution over time and segment by input type, user tier, and tool path.</p>
+<p>Pairwise comparisons are also useful. Run the current build against a frozen reference build on the same inputs. If the new build wins less often than expected, investigate even if its absolute score looks fine.</p>
+
+<h2>Judge rationale logging</h2>
+<p>When an LLM judge scores an output, store its rationale. Aggregated rationales reveal patterns that numbers miss: "answer ignored the date filter", "citation pointed to an unrelated section", "agent apologised instead of answering". Cluster these rationales weekly and you will often discover a new failure mode before users report it.</p>
+<div class="tip"><strong>Signal vs noise.</strong> Judge rationales are untrusted generated text. Use them to form hypotheses, then confirm with deterministic checks or human review.</div>
+
+<h2>Span-level tracing</h2>
+<p>End-to-end traces let you localise drift. If final answer quality drops but retrieval relevance is stable, look at generation. If retrieval relevance drops, look at the index or embedding model. If tool error rates rise, look upstream. Store per-span metrics: latency, token count, score, retry count, and error class.</p>
+<p>Defend against the "silent loop" as well. Track the distribution of step counts and tool calls per request. A gradual increase often means the agent is compensating for a degraded tool or a changed prompt by trying more times.</p>
+
+<h2>Production traces as eval fuel</h2>
+<p>Sample real traces, anonymise them, and feed them into the eval set. This keeps evaluation aligned with actual usage. Prioritise traces where the user corrected the answer, rephrased the question, or abandoned the session. Those are implicit quality signals, and they are often more informative than a rating prompt nobody fills in.</p>
+<p>Build a small human review loop: a reviewer looks at twenty sampled traces a week and labels failure categories. Over a month, this produces a high-value eval set and a shared vocabulary for quality discussions.</p>
+
+<h2>Alerting without fatigue</h2>
+<p>Alert on changes that are both statistically meaningful and operationally relevant. A one-point drop on a twenty-case canary is noise; a ten-point drop in groundedness for billing questions is not. Use rolling windows and minimum sample sizes. Route alerts to a human who can act, and include a link to the failing traces.</p>
+<p>Every alert should have a runbook: what to check first, which version to roll back, and who to notify. An alert without a runbook creates anxiety, not reliability.</p>
+
+<div class="exercise"><strong>Exercise 18.1 — Canary design.</strong> Design a twelve-case canary for a RAG assistant. Specify how many cases cover normal questions, no-answer questions, injections, and tool errors.</div>
+<div class="exercise"><strong>Exercise 18.2 — Drift triage.</strong> Answers became less grounded overnight while retrieval scores stayed flat. List five possible causes and the signal you would inspect for each.</div>
+
+<h2>Case study: the Tuesday grounding drift</h2>
+<p>A research assistant at a mid-sized firm answers questions over an internal knowledge base. Its team runs a 40-case canary every five minutes against production. For three weeks the mean groundedness score sits at 0.90 with a tight band of ±0.02. On Tuesday morning the mean slides to 0.81 — not off a cliff, but steadily across thirty-six hours. No hard assertion fires, no tool errors rise, and the service stays fully "up". Users, however, start saying the answers feel "wordier and less sure of themselves".</p>
+<p>The first useful signal comes from distribution, not the average. The tenth-percentile score has fallen from 0.78 to 0.45, meaning a small cluster of answers has become much worse while the majority remain fine. Segmenting by input type shows the drop is concentrated in questions that require a precise date, such as "what was the policy on remote work in 2023?".</p>
+<pre><code>canary: research-assistant
+  cases: 40            # 20 normal, 8 no-answer, 6 injection, 6 tool-error
+  schedule: every 5m
+  baseline_window: 21d
+alert: groundedness.p10
+  condition: value &lt; baseline.p10 - 0.10
+  min_samples: 12
+  window: 30m
+  route: "#quality-oncall"
+  runbook: "drift-triage/runbook#grounding"
+</code></pre>
+<p>Span-level tracing localises the fault. Retrieval relevance is flat at 0.86 and the index build hash has not changed, so the knowledge base is not the problem. The generation spans, however, show a 30% rise in output tokens and a different response pattern: the model now appends cautious caveats that cite no source. A pairwise run against a frozen reference build confirms the shift — the current build wins only 42% of head-to-head comparisons on the same inputs, well below the 50% that would indicate no change.</p>
+<p>Judge rationales supply the hypothesis. Clustering the week's rationales surfaces one phrase repeatedly: "answer adds unsupported caveats". That matches the token increase and points to the model, not the data. Checking the provider's release notes reveals that the alias <code>model-x</code> had been repointed to a new snapshot on Monday evening; the team had been using the alias in production. They pin the exact snapshot ID, redeploy, and the canary returns to 0.90 within one canary cycle. The permanent fixes are threefold: pin model versions everywhere, alert on pairwise regression against a frozen reference (not only absolute thresholds), and keep production traces flowing back into the eval set so new failure modes enter the suite.</p>
+<p>The team also writes a detector matrix so the next incident does not require the same detective work. A model change is caught by a pinned-alias diff and the pairwise canary; a prompt edit by the prompt hash recorded on every trace; a data change by the index build hash and a weekly count of chunks per source; a tool change by the tool schema version plus field-level validation errors; a traffic shift by monitoring the distribution of input topics; and a feedback loop by watching the distribution of step counts per request. Each detector has an owner and a runbook link. When the canary drifts again six weeks later, the matrix points to a schema change in the search tool within minutes rather than days.</p>
+<div class="exercise"><strong>Exercise 18.3 — Drift post-mortem.</strong> Write a short post-mortem for the Tuesday drift: the timeline, the signal that first exposed it, why each candidate cause was accepted or rejected, and the three permanent fixes. Add one monitoring signal that would have caught it sooner.</div>
+
+<h2>Pitfalls and trade-offs in drift detection</h2>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Watching only the mean score</td><td>Averages hide bimodal failure, where a small cluster collapses while the headline stays healthy.</td><td>Track percentiles and the share of low-score outliers, and plot the distribution over time.</td></tr>
+<tr><td>Using a floating model alias in production</td><td>A provider repoint can change behaviour overnight with no deployment on your side.</td><td>Pin immutable model snapshot IDs and record them in every trace.</td></tr>
+<tr><td>Regenerating canary inputs</td><td>Fresh inputs destroy comparability, so the time series no longer measures drift.</td><td>Keep a long-lived core set plus a separate rotating exploratory set.</td></tr>
+<tr><td>Alerting on any small movement</td><td>One-point swings on a small sample create noise and train responders to ignore alerts.</td><td>Require a rolling window, a minimum sample size, and a statistically meaningful change.</td></tr>
+<tr><td>Trusting judge rationales as fact</td><td>Rationales are generated text and can confidently name the wrong cause.</td><td>Treat them as hypotheses and confirm with deterministic checks or human review.</td></tr>
+<tr><td>Alerting without a runbook</td><td>A page that does not say what to check or what to roll back produces anxiety, not reliability.</td><td>Attach a runbook and a failing-trace link to every alert, and rehearse it.</td></tr>
+</table>
+<p>A recurring trade-off is sensitivity versus fatigue. Alert too aggressively and the team mutes the channel; alert too conservatively and drift festers until users complain. A practical response is tiering: silent dashboard annotations for small movements, a ticket for sustained medium shifts, and a page only for a large change on a high-traffic segment with a confirmed runbook.</p>
+
+<h2>Check your understanding</h2>
+<p>These questions are for self-checking. Answer them in your own words before checking the chapter; the goal is to test whether you can reason about drift, not recall a list.</p>
+<ol>
+<li>Why can a system fail silently while every hard assertion and health check still passes? Give a mechanism, not just a definition.</li>
+<li>A groundedness mean is unchanged but the tenth percentile drops sharply. What does that tell you, and how would you segment the data to find the affected group?</li>
+<li>Explain how span-level tracing distinguishes a retrieval problem from a generation problem when final answer quality declines.</li>
+<li>Why are pairwise comparisons against a frozen reference build useful even when absolute scores look acceptable?</li>
+<li>What makes an alert actionable, and what should a responder find when they follow its runbook?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Silent failure is distributional drift that passes hard assertions.</li>
+<li>Canaries provide a stable time series for quality signals.</li>
+<li>Monitor distributions and outliers, not only averages.</li>
+<li>Span-level tracing localises the drifting component.</li>
+<li>Feed production traces back into evaluation with human review.</li>
+</ul>
+
+<nav><a href="17-eval-harness.html">&larr; Previous</a><span></span><a href="19-self-improving-agents.html">Next: Self-Improving Agents &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

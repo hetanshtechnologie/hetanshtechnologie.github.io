@@ -1,0 +1,145 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>9. OpenAI Agents SDK</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>9. OpenAI Agents SDK</h1>
+
+<h2>A different centre of gravity</h2>
+<p>Where a graph library starts from control flow, the OpenAI Agents SDK starts from the idea of an <strong>agent</strong>: a model, a set of instructions, tools, and optional handoffs. You describe agents as objects, give them capabilities, and let the SDK run the loop. The abstractions are small, which makes them approachable, and they are designed to work with the provider's tracing and guardrail facilities.</p>
+<p>This does not mean the SDK is only for simple demos. Its strength is that common patterns — a triage agent handing off to a specialist, guardrails on input and output, traced execution — are first-class concepts rather than things you build from scratch. When your architecture matches those concepts, you can move quickly.</p>
+
+<h2>The core objects</h2>
+<table>
+<tr><th>Object</th><th>Purpose</th></tr>
+<tr><td>Agent</td><td>Name, instructions, model, tools, handoffs, guardrails</td></tr>
+<tr><td>Runner</td><td>Executes an agent synchronously or as a stream</td></tr>
+<tr><td>Handoff</td><td>A transfer of control to another agent, with optional argument transformation</td></tr>
+<tr><td>Guardrail</td><td>A check on input or output that can allow, block, or transform</td></tr>
+<tr><td>Tool</td><td>A function or hosted capability exposed to the agent</td></tr>
+<tr><td>Session / memory</td><td>Conversation history across runs</td></tr>
+<tr><td>Tracing</td><td>Spans for runs, agent steps, tool calls, and handoffs</td></tr>
+</table>
+
+<h2>Defining an agent</h2>
+<p>A minimal definition reads almost like a job description: you state who the agent is, what it should do, and what it may use. Instructions are natural language, so the same clarity rules from Chapter 4 apply. Tools are typed functions with docstrings that become the tool description.</p>
+<pre><code>const billing = new Agent({
+  name: 'Billing specialist',
+  instructions: 'Answer billing questions using the policy tool. Never issue refunds.',
+  tools: [searchPolicy, findInvoice],
+  model: 'gpt-4.1-mini'
+});
+</code></pre>
+<p>Notice the explicit negative constraint. Agents are eager to be helpful, so "never" statements matter when a neighbouring agent owns that capability. Without the constraint, the billing agent might try to refund anyway.</p>
+
+<h2>Handoffs</h2>
+<p>A handoff transfers control from one agent to another. In a customer-service system, a triage agent decides whether the request is about billing, technical support, or something else, then hands off to the appropriate specialist. The SDK typically represents a handoff as a callable tool, which means the model sees it alongside other tools and can choose it.</p>
+<p>Handoffs are powerful but easy to overuse. Two agents with overlapping instructions can pass a request back and forth. Prevent this by giving each agent a narrow scope, by including the reason for transfer in the handoff arguments, and by capping handoff count. Trace handoffs explicitly; they are a common source of latency and confusion.</p>
+<p>Some handoffs should carry structured context: the summary so far, the customer's tier, the reason for escalation. Design that payload deliberately. A bare "transfer to specialist" loses information and forces the specialist to re-ask questions.</p>
+
+<h2>Guardrails</h2>
+<p>Guardrails are checks that run around agent behaviour. Input guardrails examine the user's request before it reaches the model; output guardrails examine the response before it is returned. A guardrail can block, transform, or route. Examples include PII detection, policy classification, banned-topic filters, and schema validation.</p>
+<div class="tip"><strong>Guardrails are not a security boundary.</strong> They are a useful control layer, but a determined prompt-injection attempt can sometimes shape output that passes a classifier. Enforce permissions in tools and runtime, as discussed in Chapter 20.</div>
+<p>Good guardrails are specific and measured. "Detect potentially harmful content" is too vague to evaluate. "Reject requests that ask for another user's order details, using the policy classifier with confidence above 0.8" is testable. Track false positives: an overzealous guardrail that blocks legitimate users is a product failure.</p>
+
+<h2>Tracing as a built-in</h2>
+<p>The SDK's tracing captures the run as a tree: agent invocation, model call, tool execution, handoff, guardrail result. This is valuable because agent failures are often cross-step. An answer may be wrong because a handoff carried the wrong context, not because the final model call was poor. Without a full trace, you will blame the wrong component.</p>
+<p>Adopt a naming convention for traces and spans before you have many agents. Include environment, agent version, prompt version, and thread ID in metadata. Then a spike in handoff failures can be correlated with a prompt change in minutes.</p>
+
+<h2>Tools and hosted capabilities</h2>
+<p>Tools can be your own functions or provider-hosted capabilities such as web search or code interpretation. Hosted tools reduce infrastructure work but change the data boundary: content may leave your environment. For regulated workloads, prefer tools you control or configure retention explicitly.</p>
+<p>Keep tool descriptions precise, as in Chapter 6. The SDK will surface them to the model, and ambiguity will cause misselection. If you expose a hosted tool and a custom tool with similar purposes, write descriptions that make the distinction obvious.</p>
+
+<h2>When the SDK fits</h2>
+<ul>
+<li>You want a fast path from an idea to a working agent.</li>
+<li>Your control flow is mostly the standard loop plus handoffs.</li>
+<li>You value integrated tracing and guardrails.</li>
+<li>You are already invested in the provider's model and tooling ecosystem.</li>
+</ul>
+<p>If you need unusual control flow — nested loops, complex approval state machines, or deterministic branching based on arbitrary state — a graph approach may serve you better. Nothing prevents using both: an SDK agent can be one node inside a larger graph.</p>
+
+<div class="exercise"><strong>Exercise 9.1 — Handoff design.</strong> Design three agents for a travel assistant. Specify each agent's scope, the handoff payload, and a rule that prevents loops between them.</div>
+<div class="exercise"><strong>Exercise 9.2 — Guardrail spec.</strong> Write two input guardrails and two output guardrails for a financial assistant. For each, state the action on failure and one false-positive example you would test.</div>
+
+<h2>A worked example: a support triage desk</h2>
+<p>Consider a support assistant for a mid-sized SaaS product. Requests arrive through a web form and a chat widget. About 60 percent are billing questions, 25 percent are technical how-to questions, and the rest are account or security concerns. Today a single prompt handles everything and produces inconsistent results: it sometimes promises refunds it cannot issue, and it never knows when to involve a human. We will rebuild it as a small SDK application with one triage agent, two specialists, an escalation path, and guardrails around the whole run.</p>
+
+<h3>Defining the agents</h3>
+<p>We start with three agents and a handoff target for humans. The triage agent has no tools; its only job is classification and routing. Each specialist gets a narrow instruction set and only the tools it needs. Notice that the billing agent is explicitly forbidden from issuing refunds, because that action belongs to a human escalation queue.</p>
+<pre><code>const triage = new Agent({
+  name: 'Triage',
+  instructions: 'Classify the request as billing, technical, or security. ' +
+    'Hand off once, with a one-line reason. Never answer policy questions ' +
+    'yourself.',
+  tools: [],
+  handoffs: [billing, technical, security, escalate]
+});
+
+const billing = new Agent({
+  name: 'Billing',
+  instructions: 'Answer billing questions using searchPolicy and findInvoice. ' +
+    'Never issue refunds or promise credits; escalate those requests.',
+  tools: [searchPolicy, findInvoice],
+  model: 'gpt-4.1-mini'
+});
+</code></pre>
+<p>The triage agent has no tools, which is deliberate. With nothing else to call, the model's only available action is a handoff, so routing becomes reliable. In an early prototype we gave triage the same tools as the specialists; it answered directly about 30 percent of the time and skipped the handoff payload entirely.</p>
+
+<h3>Guardrails and the run</h3>
+<p>Next we add guardrails. An input guardrail checks for requests that name another customer's account; an output guardrail checks that the response contains no commitment to a refund or credit. Both record a decision in the trace even when they allow the request through, so we can measure false positives later. We then run the agent with a session so follow-up questions keep context.</p>
+<pre><code>const result = await run(triage, userMessage, {
+  session: conversationSession,
+  inputGuardrails: [detectCrossAccountAccess],
+  outputGuardrails: [detectRefundPromise],
+  maxTurns: 8,
+  tracing: { workflowName: 'support-v2', metadata: { env: 'prod' } }
+});
+</code></pre>
+<p>The <code>maxTurns</code> cap is a cost and safety control. In testing, a pair of agents once looped for eleven turns because the billing specialist kept handing back to triage after an ambiguous answer. With the cap in place, the run terminates and returns a "connecting you to a person" message instead of burning tokens.</p>
+
+<h3>Reading the trace</h3>
+<p>A single failed run illustrates why tracing matters. A user asked why an invoice was higher than expected. The final answer quoted the wrong policy tier. The trace showed the sequence: triage handed off to billing with the reason "invoice question" but no customer tier; the billing agent called <code>findInvoice</code> correctly, then called <code>searchPolicy</code> with a generic query; the policy tool returned two tiers, and the model picked the first. The fix was not a new model. We changed the handoff payload to include <code>customerTier</code> from trusted session state and made <code>searchPolicy</code> require that field. A trace turned a vague "the answer is wrong" into a two-line change.</p>
+
+<div class="exercise"><strong>Exercise 9.3 — Extend the desk.</strong> Add a security agent to the triage example. Specify its tools, the handoff payload it needs, and one output guardrail that should run only on its responses. Explain how you would keep it from being invoked for ordinary billing questions.</div>
+
+<h2>Pitfalls and trade-offs</h2>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Giving triage the same tools as specialists</td><td>The router answers directly, skips the handoff payload, and defeats the specialisation you designed.</td><td>Give routing agents no domain tools; their only action should be a handoff.</td></tr>
+<tr><td>Handoffs without structured context</td><td>The receiving agent re-asks questions or guesses missing facts, adding latency and errors.</td><td>Define a typed payload with the reason, summary, and any trusted fields such as tier or locale.</td></tr>
+<tr><td>Overlapping agent instructions</td><td>Two agents with similar scopes pass a request back and forth until the turn cap is hit.</td><td>Write explicit "never" constraints that name the neighbouring agent's responsibility.</td></tr>
+<tr><td>Vague guardrails</td><td>"Detect bad content" cannot be measured, so you cannot tell whether it is helping or blocking real users.</td><td>State the exact pattern, the threshold, the failure action, and a false-positive test case.</td></tr>
+<tr><td>Treating guardrails as authorisation</td><td>A classifier can be bypassed; a determined injection can shape output that passes.</td><td>Enforce permissions in tools and the runtime, and keep guardrails as a secondary layer.</td></tr>
+<tr><td>Hosted tools without a data review</td><td>Content may leave your environment, which can violate retention rules.</td><td>Prefer tools you control for regulated data, or configure retention explicitly before launch.</td></tr>
+<tr><td>Tracing everything with no naming scheme</td><td>Spans become unsearchable, so cross-step failures stay invisible.</td><td>Adopt a convention with environment, agent version, prompt version, and thread ID from day one.</td></tr>
+</table>
+
+<h2>Check your understanding</h2>
+<p>These questions are for self-checking. Answer them in your own words before moving on; if you cannot answer one, revisit the relevant section above.</p>
+<ol>
+<li>A triage agent occasionally answers billing questions itself instead of handing off. What is the most likely design cause, and how would you verify it with a trace?</li>
+<li>Why should a handoff carry structured context rather than just a destination, and which fields in your own system would come from trusted session state?</li>
+<li>Describe a guardrail that is specific enough to evaluate. What is its failure action, and what false-positive case would you test?</li>
+<li>You expose both a hosted web-search tool and a custom knowledge-base search. How would you write their descriptions so the model reliably chooses the right one?</li>
+<li>A user reports a wrong answer, and the final model call looks reasonable. Name three earlier steps in the trace you would inspect before changing the prompt.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>The SDK centres on agents, runners, handoffs, guardrails, and tracing.</li>
+<li>Handoffs are tools; narrow scopes and payload design prevent loops.</li>
+<li>Guardrails are measurable controls, not a substitute for tool-level security.</li>
+<li>Built-in tracing is essential for diagnosing cross-step failures.</li>
+<li>The SDK is ideal for standard loops; graphs win for unusual control flow.</li>
+</ul>
+
+<nav><a href="8-langgraph.html">&larr; Previous</a><span></span><a href="10-microsoft-agent-framework.html">Next: Microsoft Agent Framework &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

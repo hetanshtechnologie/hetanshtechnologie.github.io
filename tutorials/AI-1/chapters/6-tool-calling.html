@@ -1,0 +1,140 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>6. Tool Calling and Function Execution</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>6. Tool Calling and Function Execution</h1>
+
+<h2>From language to action</h2>
+<p>A tool call is a structured request from the model to the harness: "please run this named function with these arguments". The model does not execute anything. It proposes. The harness validates, authorises, executes, and returns the result as a new message. This separation is the single most important safety property in agent design.</p>
+<p>Tool calling turns a chatbot into an agent. It also introduces a new failure surface: the model may request the wrong tool, supply malformed arguments, call a tool at the wrong time, or loop forever. A good tool layer makes those failures cheap to detect and recover from.</p>
+
+<h2>Designing a tool contract</h2>
+<p>A tool definition should be small, specific, and honest. It contains a name, a description, parameter schema, and a description of the output. The description is what the model reads to decide whether to call it. Vague descriptions cause misrouting.</p>
+<pre><code>{
+  "name": "find_orders",
+  "description": "Search the current user's orders by order id or date range.
+                  Read-only. Returns at most 20 results.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "order_id": { "type": "string", "pattern": "^ORD-[0-9]{6}$" },
+      "from_date": { "type": "string", "format": "date" },
+      "to_date": { "type": "string", "format": "date" }
+    },
+    "additionalProperties": false
+  }
+}
+</code></pre>
+<p>Notice the hints: "current user's", "read-only", "at most 20". These are not decorative. They tell the model about scope and cost, and they tell the implementer what to enforce. If the tool can only see the current user's records, the implementation must derive that identity from the session, never from a model-supplied user_id.</p>
+
+<h2>The execution loop</h2>
+<p>A single agent step follows a predictable sequence:</p>
+<ol>
+<li>Assemble messages: system instructions, history, current input, tool definitions.</li>
+<li>Call the model with a bounded maximum token count.</li>
+<li>If the response is plain text, return it.</li>
+<li>If the response contains tool calls, validate each call against the schema.</li>
+<li>Check policy: is this tool allowed for this user, in this state, with these arguments?</li>
+<li>Execute with a timeout and scoped credentials.</li>
+<li>Append results as tool messages and call the model again.</li>
+<li>Stop when a stop condition is met: final answer, step limit, or budget limit.</li>
+</ol>
+<p>Step 8 is not optional. An agent without a step limit can spin for minutes and spend a surprising amount of money. Set a maximum number of tool rounds and a token budget, and treat hitting them as an observable event, not a silent truncation.</p>
+
+<h2>Validation and argument repair</h2>
+<p>Validate arguments with a real schema library. Reject unknown fields. Coerce obvious string-to-number cases only when it is safe, and log every repair. If an argument is missing, you have two choices: ask the model to revise the call, or ask the user. For low-risk, reversible tools, a single repair round is efficient. For high-risk actions, ask the user.</p>
+<div class="tip"><strong>Never let the model supply identity or permissions.</strong> User ID, tenant ID, role, and account balance must come from trusted server state. A tool that accepts <code>user_id</code> from the model is an access-control bug waiting to happen.</div>
+
+<h2>Representing results back to the model</h2>
+<p>Tool results should be concise, structured, and labelled with status. A raw 50 KB JSON dump will consume context and confuse the model. Return the fields the next step needs, a success flag, and an error code when something fails. If the result is large, return a summary plus a reference the model can use in a follow-up call.</p>
+<pre><code>{ "ok": true, "count": 3, "orders": [
+    { "id": "ORD-100245", "status": "shipped", "total": 2499 }
+  ], "truncated": false }
+</code></pre>
+<p>For failures, distinguish retryable errors from permanent ones. "Timeout, try again" and "order not found, do not retry" should produce different model behaviour. Put that guidance in the tool result, but also enforce it in the harness — a model may ignore it.</p>
+
+<h2>Side effects and idempotency</h2>
+<p>Read-only tools are easy. Write tools need care. Give each mutating operation an idempotency key derived from the conversation and step, so a retry does not create duplicate refunds or emails. Require explicit confirmation for irreversible actions. A practical pattern is a two-phase tool: <code>preview_refund</code> followed by <code>execute_refund</code>, where the second call accepts a token produced by the first.</p>
+<p>Some actions should never be fully autonomous. Above a value threshold, or when the target is external to the organisation, insert a human approval checkpoint. The agent prepares the action; a person approves it. This is not a limitation of the technology — it is a design choice that makes deployment possible.</p>
+
+<h2>Tool selection and description hygiene</h2>
+<p>Giving an agent fifty tools does not make it powerful; it makes selection unreliable. Keep the active toolset small for each task. If you have many tools, retrieve the relevant subset dynamically based on the user's request. Group related operations behind a single well-described tool with an action enum, and document each action clearly.</p>
+<ul>
+<li>Use verbs in tool names: <code>search_orders</code>, not <code>orders_tool</code>.</li>
+<li>State limits and scope in the description.</li>
+<li>Avoid overlapping tools with nearly identical descriptions.</li>
+<li>Version tool schemas and keep old versions during migration.</li>
+<li>Log the tool name, arguments, latency, and result status for every call.</li>
+</ul>
+
+<h2>Errors, loops, and recovery</h2>
+<p>Common loop patterns include calling the same tool with the same arguments repeatedly, alternation between two tools without progress, and endless clarification questions. Detect these with a trace fingerprint: hash the last few tool calls and break if the pattern repeats. On break, either summarise what was learned and ask the user, or return a clear failure. Silent looping is worse than an honest failure.</p>
+
+<div class="exercise"><strong>Exercise 6.1 — Tool contract review.</strong> Write a contract for a tool that books a meeting room. List which arguments the model may supply and which values must come from server state. Add a two-phase confirmation step.</div>
+<div class="exercise"><strong>Exercise 6.2 — Loop detector.</strong> Sketch a function that inspects the last five tool calls and returns true if the same name-and-argument pair appears three times. Describe what your agent should do when it returns true.</div>
+
+<h2>A worked example: a refund tool that cannot hurt you</h2>
+<p>Refunds are a good stress test because they spend money and touch customer records. Suppose a support agent may issue refunds up to ₹2,000 autonomously and must seek approval above that. Here is a design that makes the dangerous paths difficult to reach by accident.</p>
+<p><strong>Step 1: split the operation.</strong> Instead of one <code>issue_refund</code> tool, expose <code>preview_refund</code> and <code>execute_refund</code>. The preview checks order eligibility, calculates the amount, and returns a short-lived token that encodes the exact amount and order id. Execute accepts only that token plus an idempotency key — not a free-form amount. A model that hallucinates a larger amount has no argument slot in which to put it.</p>
+<p><strong>Step 2: derive identity from the session.</strong> Neither tool accepts a customer id. The harness reads it from the authenticated session and cross-checks that the order belongs to that customer. If the model asks to refund someone else's order, the tool returns a permanent error with code <code>NOT_YOUR_ORDER</code>, and no approval path can override it.</p>
+<p><strong>Step 3: bound the loop.</strong> The agent is allowed six tool rounds and 8,000 output tokens. A trace fingerprint hashes the last three calls; if the same name-and-argument pair appears twice, the harness injects a tool result saying "no new information — stop repeating and summarise". Hitting the round limit is a logged event with a metric, not a silent cut-off.</p>
+<p><strong>Step 4: make retries safe.</strong> The idempotency key is <code>hash(thread_id, step_number)</code>. If the same key arrives twice, the refund service returns the original result instead of creating a second refund. This matters because networks drop responses and harnesses retry — the exact situation in which duplicate charges happen.</p>
+<p><strong>Step 5: return compact results.</strong> The preview returns four fields and a token, never the full order history. Errors carry a <code>retryable</code> flag: a timeout is retryable, an ineligible order is not.</p>
+<pre><code>tools:
+  preview_refund(order_id) -&gt; {eligible, amount, token, expires_in: 300}
+  execute_refund(token, idempotency_key) -&gt; {ok, refund_id}
+constraints:
+  customer_id: from session ONLY
+  amount: from preview token ONLY
+  autonomous_limit: 2000 INR   above -&gt; approval node
+limits: 6 tool rounds | 8000 output tokens | 5s per tool
+loop_guard: repeated(name+args) &gt;= 2 -&gt; inject "stop repeating"
+idempotency: hash(thread_id, step)
+</code></pre>
+<p>Every rule in this design is enforceable in code. The tool description tells the model about the limits, but the limits do not depend on the model remembering them. That is the pattern to carry into every tool you design.</p>
+<div class="exercise"><strong>Exercise 6.3 — Break the contract.</strong> List five tool calls an adversary could try against this refund design — for example, a token from another customer, an expired token, or a reused idempotency key. For each, state which check rejects it and what error the model should see.</div>
+
+<h2>Tool design pitfalls</h2>
+<p>Tools are where language becomes action, so mistakes here have consequences outside the prompt. These are the recurring ones.</p>
+<table>
+<tr><th>Mistake</th><th>Consequence</th><th>Fix</th></tr>
+<tr><td>Accepting identity from the model</td><td>Any prompt injection becomes an access-control bypass.</td><td>Derive user, tenant, and role from trusted session state.</td></tr>
+<tr><td>One giant tool with fifteen actions</td><td>Selection degrades and descriptions become vague.</td><td>Split by purpose, or use a small action enum with clear docs.</td></tr>
+<tr><td>Returning raw API payloads</td><td>Context fills with noise and the model fixates on irrelevant fields.</td><td>Return a summarised, typed result with a status flag.</td></tr>
+<tr><td>No idempotency on writes</td><td>A retry creates duplicate emails, charges, or records.</td><td>Key every mutation and make repeated keys return the original result.</td></tr>
+<tr><td>Describing a tool as "safe" without enforcing it</td><td>The model trusts the label while the implementation may not be safe.</td><td>Make scope and limits true in code, then state them in the description.</td></tr>
+<tr><td>Treating loop detection as optional</td><td>A confused agent can spin and spend for minutes.</td><td>Fingerprint recent calls, break repeats, and emit a metric.</td></tr>
+</table>
+<p>Validation is where a tool contract becomes real. A schema library rejects unknown fields and malformed types, but the interesting checks are semantic: is the date in the future, is the amount within the approved limit, does the order id belong to this customer? Each rejected call should produce an error message the model can act on, not a stack trace. Log both the raw proposed arguments and the validated ones, because the difference between them is often the clearest evidence of a confused plan or a manipulation attempt in the surrounding context.</p>
+<p>A final trade-off: repair versus refusal. When arguments are slightly malformed, an automatic repair round is convenient for reversible tools but dangerous for write tools. Decide per tool, record every repair, and never repair identity or amount fields.</p>
+<div class="tip"><strong>Description hygiene.</strong> Tool descriptions are read by the model as an interface contract. State scope, limits, and read-only status in the description — and then make each claim literally true in the implementation.</div>
+
+<h2>Review questions for tool design</h2>
+<p>These questions check whether you understand the execution loop rather than just its vocabulary. Answer them in your own words.</p>
+<ol>
+<li>Why is deriving a customer id from the session safer than accepting it as a tool argument, even if the model has been behaving well so far?</li>
+<li>Explain what an idempotency key protects against and why hashing the thread and step is a reasonable choice.</li>
+<li>A tool returns "error: timeout" and another returns "error: order not found". How should the harness and the model treat these differently?</li>
+<li>When would you choose a two-phase tool over a single mutating operation? What new state must you track?</li>
+<li>Describe a loop your fingerprint detector would miss, and propose an additional guard that would catch it.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>The model proposes tool calls; the harness validates, authorises, and executes them.</li>
+<li>Tool descriptions are part of the interface and must state scope and limits.</li>
+<li>Identity and permissions never come from model-generated arguments.</li>
+<li>Set step and token budgets, and detect repeated call patterns.</li>
+<li>Mutating tools need idempotency, confirmation, and often human approval.</li>
+</ul>
+
+<nav><a href="5-rag.html">&larr; Previous</a><span></span><a href="7-agent-architectures.html">Next: Agent Architectures and Control Flow &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

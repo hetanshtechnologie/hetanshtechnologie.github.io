@@ -1,0 +1,131 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>24. The Local AI Ecosystem</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>24. The Local AI Ecosystem</h1>
+
+<h2>Why run AI locally</h2>
+<p>Cloud models are convenient, but they are not the only option. A complete local AI stack — models, runtimes, embeddings, retrieval, guardrails, and observability running on your own machine — gives you privacy, offline operation, predictable unit cost, and full control over versions. It is also an excellent way to learn: when you run every layer yourself, the abstraction fog lifts.</p>
+<p>Local AI is not a universal replacement for the cloud. Small local models trail large hosted models on hard reasoning. The sweet spot is tasks that are well-bounded: drafting, summarisation, classification, extraction, translation, and retrieval over private documents. For those, a local stack is often good enough and sometimes better, because your data never leaves the machine.</p>
+
+<h2>The layers of a local stack</h2>
+<table>
+<tr><th>Layer</th><th>Examples</th><th>Role</th></tr>
+<tr><td>Model runtimes</td><td>Ollama, LM Studio</td><td>Load and serve models locally with a simple API</td></tr>
+<tr><td>Open-weight models</td><td>Qwen, Gemma, GPT-OSS family</td><td>General chat, coding, and reasoning in various sizes</td></tr>
+<tr><td>Embedding models</td><td>Local sentence-transformers</td><td>Convert text to vectors for retrieval</td></tr>
+<tr><td>Vector store</td><td>Local embedded databases</td><td>Persist and search embeddings</td></tr>
+<tr><td>Guardrails</td><td>NeMo Guardrails, Presidio</td><td>Input/output policy and PII detection</td></tr>
+<tr><td>Observability</td><td>Langfuse (self-hosted)</td><td>Tracing, evaluation, and feedback</td></tr>
+</table>
+<p>Each layer has a cloud equivalent, and the concepts are identical. The difference is where it runs and who controls the data. If you understand the stack from earlier chapters, you already understand local AI — only the deployment topology has changed.</p>
+
+<h2>Model runtimes</h2>
+<p>Tools such as Ollama and LM Studio abstract away the complexity of loading model weights and exposing an API. You pull a model by name, choose a size, and get an endpoint that looks much like a cloud chat API. This makes experimentation fast: swap models by changing a string, and compare behaviour on your own prompts.</p>
+<p>Size matters. A 7-billion-parameter model can run on a modern laptop; larger models need more memory, often unified memory on Apple silicon or a discrete GPU. Start small, measure quality on your task, and only move up when the small model fails. Quantised versions reduce memory needs at some quality cost, as discussed in Chapter 22.</p>
+<div class="tip"><strong>Model names change.</strong> Open-weight model families evolve quickly. Treat a specific model tag as a versioned artefact, record it in your traces, and re-evaluate when you change it. Do not assume a newer release is better for your task.</div>
+
+<h2>Choosing models for local work</h2>
+<p>Different open-weight families have different characters. Some are optimised for coding, some for multilingual tasks, some for long context. A practical selection process is:</p>
+<ol>
+<li>Define three representative tasks and a small eval set.</li>
+<li>Run two or three candidate models of similar size.</li>
+<li>Compare quality, latency, and memory use.</li>
+<li>Pick the smallest model that clears your quality bar.</li>
+</ol>
+<p>This is the same evidence-based approach you would use for cloud models. The only new constraint is hardware. A model that needs more memory than your machine has is not a candidate, however good its benchmarks.</p>
+
+<h2>Local embeddings and retrieval</h2>
+<p>Embeddings are ideal for local deployment. They are small, fast, and run comfortably on CPU. A local embedding model plus a local vector store gives you a retrieval system with no external calls at all. Chunking, hybrid search, and reranking from Chapter 5 apply unchanged.</p>
+<p>Because embeddings are local, you can index sensitive documents without sending them anywhere. Add access filtering at query time exactly as you would in the cloud. The privacy benefit disappears the moment a document is leaked into a shared index.</p>
+
+<h2>Guardrails and privacy tools</h2>
+<p>A local stack still needs safety controls. Guardrail frameworks such as NeMo Guardrails let you define allowed topics, response patterns, and dialogue policies in configuration. PII tools such as Presidio detect and redact sensitive information before it enters a prompt or after it leaves the model.</p>
+<ul>
+<li>Redact identifiers before sending text to a model, even a local one — logs and traces still persist.</li>
+<li>Define topic boundaries in configuration, not only in the system prompt.</li>
+<li>Validate structured output with a schema, as always.</li>
+<li>Test guardrails with adversarial inputs; a local model can be manipulated too.</li>
+</ul>
+<p>Local does not automatically mean safe. It means the data boundary is under your control — which also means you are responsible for it.</p>
+
+<h2>Observability without the cloud</h2>
+<p>Self-hosted observability tools such as Langfuse give you tracing, prompt management, and evaluation dashboards on your own infrastructure. The concepts from Chapters 17 and 21 still apply: record spans, token counts, prompt versions, and feedback. A local trace store is especially valuable when data cannot leave the environment.</p>
+<p>Evaluate with the same discipline. A local model's behaviour changes when you change its quantisation, runtime version, or sampling parameters. Record all three.</p>
+
+<h2>A complete local RAG assistant</h2>
+<p>Put the pieces together: documents are chunked and embedded locally; a query retrieves relevant chunks from a local vector store; a guardrail checks the input; the prompt and evidence go to a local chat model through Ollama or LM Studio; a second guardrail scans the output for PII; the whole run is traced locally. Nothing leaves the machine.</p>
+<p>This is a genuinely useful system for personal knowledge management, private code assistance, and offline documentation search. Its limits are the limits of the local model: complex multi-step reasoning may still need a cloud escalation, which you can add as an explicit routing decision from Chapter 23.</p>
+
+<h2>When to choose local</h2>
+<ul>
+<li>Data sensitivity or regulation forbids external calls.</li>
+<li>You need offline operation — travel, field work, air-gapped environments.</li>
+<li>Volume is high enough that fixed hardware beats variable API cost.</li>
+<li>You want full control of model versions and behaviour.</li>
+</ul>
+<p>Choose cloud when you need frontier reasoning, elastic scale, or minimal operations. Many production systems use both, with a router deciding per request.</p>
+
+<div class="exercise"><strong>Exercise 24.1 — Stack assembly.</strong> Design a local stack for a confidential document assistant. Name one tool per layer, and identify where data could accidentally leave the machine.</div>
+<div class="exercise"><strong>Exercise 24.2 — Model bake-off.</strong> Pick two local models of different sizes. Run the same five prompts and compare quality, response time, and memory use. Write down the smallest model that met your bar.</div>
+
+<h2>Case study: a confidential document assistant, entirely local</h2>
+<p>A small consultancy wants an assistant that answers questions over confidential client documents, with a hard rule that nothing leaves the office network. They build the full stack on a single workstation with 36 GB of unified memory. The model runtime is Ollama serving an 8-billion-parameter open-weight chat model in 4-bit quantisation, which occupies about 5 GB and leaves ample room for context. Embeddings come from a small local sentence-transformer producing 384-dimensional vectors, and a local embedded vector store persists the index. Presidio handles PII detection on the way in and out, a NeMo Guardrails configuration enforces topic boundaries, and a self-hosted Langfuse instance records traces, token counts, and versions.</p>
+<pre><code>stack:
+  runtime: Ollama
+  model: qwen2.5:7b-instruct-q4_K_M   # pinned tag; record in every trace
+  embeddings: local sentence-transformer (384-dim)
+  vector_store: local embedded DB, cosine distance
+  chunking: 800 tokens, 100 overlap
+  guardrails:
+    input:  Presidio redact + NeMo topic allowlist
+    output: Presidio redact + JSON schema validation
+  observability: self-hosted Langfuse
+  retrieval_top_k: 5
+</code></pre>
+<p>Before committing, the team runs a bake-off. They pick three representative tasks — clause lookup, meeting-summary generation, and document classification — and a small eval set of thirty prompts. They compare a 7-billion, an 8-billion, and a 14-billion-parameter model at similar quantisation. The 14B model is the most accurate but needs more memory than is comfortable and takes over nine seconds per answer; the 7B is fast but misses clauses in longer documents. The 8B model clears their quality bar at about three seconds per answer and becomes the default, with the 14B kept as an optional mode for the rare hard question.</p>
+<p>The inference flow is deliberately explicit. Documents are chunked and embedded locally, then stored with access-control tags. A query retrieves the top five chunks with those tags enforced at query time, a guardrail checks the input, the redacted prompt and evidence go to the local chat model, a second guardrail scans the output for any identifier that slipped through, and the whole run — spans, token counts, pinned model tag, runtime version, and sampling parameters — is traced locally. Nothing touches an external service at any step.</p>
+<p>Two lessons emerge. First, "local" does not mean "safe" by itself: the team initially skipped output redaction because they assumed a local model could not leak data externally, until a trace showed a client name echoed in an answer that was later copied into a shared ticket. Second, changing the quantisation or runtime version changed behaviour enough to move eval scores, which is why all three are recorded in every trace. The system's limits are the local model's limits — multi-step reasoning still trails a frontier cloud model — so they add an explicit routing decision for the rare request that may be escalated, with human approval for any external call.</p>
+<p>Version discipline becomes a practical habit. When the runtime pushes an update, the team does not assume behaviour is unchanged: they rerun the same thirty-prompt eval set and diff the scores before adopting it. They keep a small changelog pairing each model tag, runtime version, and quantisation level with its eval result, so a regression can be traced to a specific upgrade in minutes. Offline operation is tested for real, not assumed — a weekly drill disables the network and runs the full assistant flow, including retrieval, guardrails, and tracing. The drill has caught a font-loading dependency in the dashboard and a guardrail rule that quietly called a cloud service, both of which would have broken an air-gapped deployment.</p>
+<div class="exercise"><strong>Exercise 24.3 — Data-boundary audit.</strong> For the local stack above, list every point where data could accidentally leave the machine — including logs, telemetry, crash reports, and model downloads. For each, name the control that keeps the boundary intact.</div>
+
+<h2>Pitfalls and trade-offs</h2>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Assuming local means private</td><td>Traces, logs, and shared tickets can carry data out even when the model runs offline.</td><td>Audit every egress path and redact before persistence.</td></tr>
+<tr><td>Chasing the largest model that fits</td><td>Bigger models are slower and may not improve quality on bounded tasks.</td><td>Run a bake-off and pick the smallest model that clears your quality bar.</td></tr>
+<tr><td>Treating a model tag as permanent</td><td>Open-weight releases and quantisations change behaviour under similar names.</td><td>Pin the exact tag and hash, and re-evaluate whenever it changes.</td></tr>
+<tr><td>Skipping access filtering in a shared index</td><td>A single shared vector store can leak one client's documents into another's answers.</td><td>Enforce access tags at query time, exactly as in the cloud.</td></tr>
+<tr><td>Forgetting guardrails locally</td><td>A local model can be manipulated just like a hosted one.</td><td>Keep topic boundaries in configuration and test with adversarial inputs.</td></tr>
+</table>
+<p>The main trade-off is capability versus control. A local stack gives privacy, offline operation, and predictable unit cost, but it asks you to own hardware, evaluation, and operations. The pragmatic stance is not "local or cloud" but "local by default, cloud by explicit exception", with a router and human approval governing the exceptions.</p>
+
+<h2>Check your understanding</h2>
+<p>These questions are for self-checking. Answer each from your own understanding before checking the text.</p>
+<ol>
+<li>Why do the concepts of a local stack match those of a cloud stack even though the deployment topology differs?</li>
+<li>Describe a sensible model-selection process for a local assistant and explain why the largest model is not automatically the best choice.</li>
+<li>How would you build fully private RAG, and where could privacy still break?</li>
+<li>Why are guardrails and PII detection still necessary when the model never leaves your machine?</li>
+<li>Give three reasons to choose local and three to choose cloud, and explain how a router can let you have both.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>A local stack includes runtimes, models, embeddings, retrieval, guardrails, and observability.</li>
+<li>Ollama and LM Studio make model experimentation approachable.</li>
+<li>Local embeddings and vector stores enable fully private RAG.</li>
+<li>Guardrails and PII detection remain necessary when running locally.</li>
+<li>Local and cloud are complementary; route between them deliberately.</li>
+</ul>
+
+<nav><a href="23-model-routing.html">&larr; Previous</a><span></span><a href="25-on-device.html">Next: Offline and On-Device AI for Mobile &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

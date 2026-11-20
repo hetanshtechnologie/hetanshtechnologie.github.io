@@ -1,0 +1,145 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8. LangGraph Deep Dive</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>8. LangGraph Deep Dive</h1>
+
+<h2>Why a graph</h2>
+<p>LangGraph models an agent as a state machine. You define a state shape, a set of nodes that transform that state, and edges that decide which node runs next. The model's output is one input to those decisions, but it is not the only one. This makes control flow explicit: you can look at a graph and see every possible path, including loops and human checkpoints.</p>
+<p>The graph abstraction is valuable when reliability matters. If a tool fails, you can route to a recovery node. If a confidence score is low, you can route to a clarification node. If an approval is required, you can pause and resume. None of that requires inventing a new prompt; it requires an edge.</p>
+
+<h2>Core concepts</h2>
+<table>
+<tr><th>Concept</th><th>Role</th></tr>
+<tr><td>State</td><td>A typed object passed between nodes. Every node reads and returns updates.</td></tr>
+<tr><td>Node</td><td>A function that does work: call a model, run a tool, transform data.</td></tr>
+<tr><td>Edge</td><td>A transition. Conditional edges inspect state and choose the next node.</td></tr>
+<tr><td>START / END</td><td>Virtual entry and exit points of the graph.</td></tr>
+<tr><td>Checkpointer</td><td>Persists state after each step, enabling memory and resume.</td></tr>
+<tr><td>Thread</td><td>An identifier for one conversation or one long-running task.</td></tr>
+</table>
+
+<h2>Building a first graph</h2>
+<p>A minimal graph has one node that calls a model and writes the response into state. In TypeScript-like pseudocode:</p>
+<pre><code>const State = z.object({
+  messages: z.array(Message),
+  next: z.enum(['agent','end']).default('agent')
+});
+
+const graph = new StateGraph(State)
+  .addNode('agent', async (state) =&gt; {
+      const reply = await model.invoke(state.messages);
+      return { messages: [...state.messages, reply] };
+  })
+  .addEdge(START, 'agent')
+  .addConditionalEdges('agent', (s) =&gt; s.next === 'end' ? END : 'agent')
+  .compile({ checkpointer });
+</code></pre>
+<p>The important part is not the syntax. It is that <code>next</code> is part of state and can be computed from a schema, a policy check, or a model decision. The graph does not care which. That is why graphs are a good home for hybrid autonomy.</p>
+
+<h2>Nodes should be small and testable</h2>
+<p>Resist the temptation to build one giant node that does retrieval, reasoning, and tool execution. Split nodes by responsibility: retrieve, decide, execute, observe, summarise. Small nodes are easier to unit test, easier to trace, and easier to reroute. They also make evaluation precise: you can measure retrieval quality without running the whole agent.</p>
+<p>Each node should be pure enough to reason about: given this state, it produces that update and a set of side effects. Side effects such as sending an email still happen, but they are isolated in a node whose contract you can audit.</p>
+
+<h2>Conditional edges and loops</h2>
+<p>Conditional edges are where policy lives. A typical agent graph has a loop between <code>call_model</code> and <code>execute_tools</code>. The condition examines the last message: if it contains tool calls, go to execution; otherwise finish. Add guards for step count and budget. Without them, a confused model can loop indefinitely.</p>
+<pre><code>function shouldContinue(state) {
+  if (state.steps &gt;= MAX_STEPS) return 'finish';
+  if (state.spend &gt;= BUDGET) return 'finish';
+  if (lastMessageHasToolCalls(state.messages)) return 'tools';
+  if (needsApproval(state)) return 'approve';
+  return 'finish';
+}
+</code></pre>
+<p>This function is ordinary code. You can unit test it, log its decisions, and change it without touching the model. That is the central benefit of graph-based orchestration.</p>
+
+<h2>Checkpointers and threads</h2>
+<p>A checkpointer stores state snapshots keyed by a thread ID. This gives you conversational memory across sessions, but also much more: the ability to inspect a past step, replay a trace in evaluation, or resume after a process restart. Choose a checkpointer that matches your durability needs — in-memory for experiments, a database for production.</p>
+<p>Thread ID discipline matters. Reusing a thread across unrelated tasks mixes contexts; creating a new thread for every message destroys continuity. A common convention is one thread per user session for chat, and one thread per work item for background tasks.</p>
+
+<h2>Human checkpoints in a graph</h2>
+<p>To pause for approval, route to a node that records a pending action and then ends the current invocation. When the approval arrives, a new invocation resumes from the saved state with the approval written in. This pattern requires an external store for the pending action and an ID that links approval to thread. It is more work than a synchronous form, but it survives restarts and gives you a clean audit trail.</p>
+
+<h2>Streaming and observability</h2>
+<p>Long graphs should stream progress: node entered, node completed, tool called, state delta. Users tolerate waiting much better when they can see what is happening. Streaming also helps debugging: a stuck node is obvious. Emit structured events with thread ID, node name, step number, and latency. Feed those events into your tracing system.</p>
+<div class="tip"><strong>Testing tip.</strong> Replace the model node with a deterministic stub in unit tests. Feed it scripted responses to force every branch of your graph, including error and approval paths. This is how you test control flow without burning tokens.</div>
+
+<h2>When to choose LangGraph</h2>
+<ul>
+<li>You need explicit, inspectable control flow with loops and branches.</li>
+<li>You need durable state, pause/resume, or trace replay.</li>
+<li>You want to mix deterministic policy code with model decisions.</li>
+<li>You are comfortable defining state and edges rather than relying on conventions.</li>
+</ul>
+<p>If your task is a single model call with no memory, a graph is unnecessary ceremony. Start simple and introduce a graph when you need the control it provides.</p>
+
+<div class="exercise"><strong>Exercise 8.1 — Branch design.</strong> Sketch a graph for a document-review agent with nodes: retrieve, draft, critique, revise, approve, send. Define the conditional edges and the state fields each edge reads.</div>
+<div class="exercise"><strong>Exercise 8.2 — Fault injection.</strong> Add a node that simulates a tool failure. Route failures to a recovery node that either retries once or asks the user. Write down the three tests you would need to prove the recovery path works.</div>
+
+<h2>A worked example: a document-review graph with a durable pause</h2>
+<p>To see why graphs earn their keep, build a review workflow that must survive restarts. A legal team submits contract drafts for review. The system retrieves similar clauses, drafts a redline, critiques it against a rubric, revises once if needed, and pauses for a human approver before sending. Approvals may arrive hours later, after the process that started the job has exited.</p>
+<p><strong>Step 1: define the state.</strong> The state object holds the draft text, retrieved clauses, critique scores, a revision count, an approval field, and a step counter. Each field is typed. Because everything the graph needs lives in state, a snapshot is a complete description of the job — there is no hidden local variable to lose.</p>
+<p><strong>Step 2: split the nodes.</strong> There are six: <code>retrieve</code>, <code>draft</code>, <code>critique</code>, <code>revise</code>, <code>approve</code>, and <code>send</code>. The model is called only in draft, critique, and revise. Retrieval and sending are ordinary code. Small nodes mean you can test retrieval quality without calling a model at all.</p>
+<p><strong>Step 3: write the conditional edges.</strong> After critique, a function reads the critique scores. If every rubric item scores at least 4 out of 5, go to approve. Otherwise, if the revision count is below 2, go to revise; if it is 2 or more, go to approve with a warning flag rather than looping forever. The approve node records a pending action and ends the invocation. When the reviewer responds, a new invocation resumes from the saved thread with the approval written in.</p>
+<p><strong>Step 4: pick the checkpointer.</strong> Experiments use an in-memory checkpointer. Production uses a database-backed one so snapshots survive a restart. The thread id is the contract id, which gives one thread per work item — reusing it for unrelated drafts would mix contexts.</p>
+<p><strong>Step 5: guard and observe.</strong> A step limit of 20 and a token budget of 40,000 are checked in every conditional edge. Each node emits a structured event with thread id, node name, step number, and latency. In a two-week trial, 62% of drafts pass critique first time, 31% after one revision, and 7% go to approval with a warning — numbers that would be invisible without explicit state.</p>
+<pre><code>State = { draft, clauses[], critique{clarity,citations,tone},
+          revisions:int, approval:pending|approved|rejected,
+          steps:int, spend:int }
+edges:
+  START -&gt; retrieve -&gt; draft -&gt; critique
+  critique -- min(scores)&gt;=4 --&gt; approve
+  critique -- revisions&lt;2 --&gt; revise -&gt; critique
+  critique -- else --&gt; approve(warn=true)
+  approve -- pending --&gt; END        # wait for external event
+  resume -- approved --&gt; send --&gt; END
+  resume -- rejected --&gt; revise
+checkpointer: DB-backed   thread_id: contract_id
+guards: steps &lt; 20 | spend &lt; 40000 tokens
+</code></pre>
+<p>The pause is the important part. It is not a form displayed by the UI; it is a node that ends an invocation and relies on a saved snapshot. That is why an approval arriving the next morning can resume exactly where the graph stopped.</p>
+<div class="exercise"><strong>Exercise 8.3 — Inject a failure.</strong> Add a <code>retrieve_failed</code> branch after the retrieve node. Route it to a recovery node that retries once with a broader query, then to a human if it still fails. Write the three unit tests, using a deterministic stub model, that prove the retry and human paths work without spending tokens.</div>
+
+<h2>Graph design pitfalls</h2>
+<p>Graphs make control flow explicit, but they do not automatically make it correct. These mistakes show up in real implementations.</p>
+<table>
+<tr><th>Mistake</th><th>Why it hurts</th><th>Better practice</th></tr>
+<tr><td>One giant node doing retrieve, reason, and act</td><td>Hard to test, trace, or reroute; a failure is difficult to localise.</td><td>Split by responsibility and keep side effects isolated.</td></tr>
+<tr><td>Putting control decisions only in the model</td><td>Branches become untestable and unpredictable.</td><td>Compute routing in ordinary functions that read state.</td></tr>
+<tr><td>Loops without step or budget guards</td><td>A confused model can run for minutes and spend heavily.</td><td>Check limits in every conditional edge and emit a metric on exit.</td></tr>
+<tr><td>In-memory checkpointer in production</td><td>State vanishes on restart; paused approvals are lost.</td><td>Use a durable store and test a resume after process death.</td></tr>
+<tr><td>Reusing a thread for unrelated tasks</td><td>Contexts bleed into each other and replay becomes meaningless.</td><td>Adopt a clear convention: one thread per session or work item.</td></tr>
+<tr><td>Testing only the happy path</td><td>Error and approval branches rot silently.</td><td>Use a deterministic stub model to force every branch in unit tests.</td></tr>
+</table>
+<p>A final trade-off: a graph adds ceremony. If your task is one model call with no memory and no tools, a state machine is unnecessary. Introduce a graph when you need explicit branches, durable state, pause and resume, or precise evaluation of intermediate steps — not because it looks sophisticated.</p>
+<div class="tip"><strong>Test the edges, not just the nodes.</strong> Conditional-edge functions are ordinary code. Feed them crafted states in unit tests to hit every branch, including budget exhaustion and approval rejection, before you ever call a model.</div>
+
+<h2>Check your graph reasoning</h2>
+<p>These questions are for self-checking your understanding of state, edges, and durability. Answer them without looking at the earlier sections.</p>
+<ol>
+<li>Why does explicit state make pause and resume possible when a message list alone does not?</li>
+<li>In the document-review graph, what happens if the revision guard is removed? Describe the failure mode and the metric that would reveal it.</li>
+<li>Explain why a database-backed checkpointer matters for a human approval that arrives the next day.</li>
+<li>What goes wrong when the same thread id is used for two unrelated documents, and what convention prevents it?</li>
+<li>When is a graph unnecessary ceremony for a task, and what would make you introduce one later?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>LangGraph represents an agent as a typed state machine.</li>
+<li>Nodes do work; conditional edges encode policy and control flow.</li>
+<li>Checkpointers and threads provide memory, replay, and resume.</li>
+<li>Small nodes make testing and evaluation precise.</li>
+<li>Always guard loops with step and budget limits.</li>
+</ul>
+
+<nav><a href="7-agent-architectures.html">&larr; Previous</a><span></span><a href="9-openai-agents-sdk.html">Next: OpenAI Agents SDK &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

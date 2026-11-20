@@ -1,0 +1,128 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16. Evaluation Fundamentals: Why Demos Lie</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>16. Evaluation Fundamentals: Why Demos Lie</h1>
+
+<h2>The demo trap</h2>
+<p>A demo succeeds when one carefully chosen input produces one impressive output. A production system must succeed across a distribution of inputs, over time, after changes, and under adversarial conditions. Evaluation is the discipline of measuring that distribution rather than admiring a single example.</p>
+<p>This is why an agent can pass its evals and still fail in production. The eval set may not represent real traffic. It may contain easier cases. It may reward surface features — confident tone, correct format — while missing deeper failures such as wrong tool choice or unsupported claims. A passing eval is evidence under a specific distribution, not proof of correctness.</p>
+
+<h2>Evaluation is a distribution problem</h2>
+<p>Classic software testing assumes deterministic functions and known-correct answers. Given input X, the output should equal Y. Agent systems violate both assumptions: the same input can produce different outputs, and often no single Y exists. Instead of asking "did it return the expected string?", we ask "what fraction of runs satisfy these properties, and how confident are we about that fraction?"</p>
+<p>That shift has practical consequences. You need repeated trials for non-deterministic cases. You need confidence intervals, not just percentages. You need to stratify results by input category so a strong average does not hide a weak segment. And you need to evaluate trajectories, not only final answers.</p>
+
+<h2>What to evaluate</h2>
+<table>
+<tr><th>Dimension</th><th>Example question</th></tr>
+<tr><td>Answer quality</td><td>Is the final response correct and complete?</td></tr>
+<tr><td>Groundedness</td><td>Are claims supported by retrieved evidence?</td></tr>
+<tr><td>Tool behaviour</td><td>Were the right tools called with valid arguments?</td></tr>
+<tr><td>Control flow</td><td>Did the agent take a reasonable path without loops?</td></tr>
+<tr><td>Safety</td><td>Were permissions and policies respected?</td></tr>
+<tr><td>Efficiency</td><td>Tokens, latency, and tool calls within budget?</td></tr>
+<tr><td>Robustness</td><td>Does it degrade gracefully on odd or adversarial inputs?</td></tr>
+</table>
+<p>Most teams start with answer quality and stop there. That is a mistake. A wrong tool call can produce a correct-looking answer for the wrong user. A safe-looking answer can hide an unauthorised side effect. Evaluate the whole trajectory.</p>
+
+<h2>Building an eval set without golden data</h2>
+<p>You do not need a hand-labelled dataset of thousands of examples. Useful sets can be bootstrapped from several sources:</p>
+<ul>
+<li><strong>Production traces</strong> — sample real requests, anonymise them, and review a small set.</li>
+<li><strong>Model disagreement</strong> — run two models or two prompts and inspect cases where they differ; these are often informative boundaries.</li>
+<li><strong>Generated variations</strong> — paraphrase known cases, add typos, change formatting, and translate.</li>
+<li><strong>Failure reports</strong> — every user-reported bug becomes a permanent regression case.</li>
+<li><strong>Adversarial probes</strong> — prompt injection, conflicting instructions, missing evidence, and ambiguous requests.</li>
+</ul>
+<p>Fifty well-chosen cases beat five hundred random ones. Cover the main intents, the known failure modes, edge cases, and explicit no-answer scenarios.</p>
+
+<h2>Assertions before judges</h2>
+<p>Start with checks that can be computed exactly. Did the output parse as JSON? Is the cited source in the allowed set? Was the tool name on the allowlist? Did the agent stay under ten steps? Are all required fields present? These assertions are cheap, deterministic, and catch a large share of regressions.</p>
+<p>Only after exhausting deterministic checks should you introduce an LLM as judge. A judge is an instrument with its own error profile; it must be calibrated, as we will see in Chapter 17.</p>
+
+<h2>Pass criteria and thresholds</h2>
+<p>Define what "good" means before you run the suite. For a support assistant: groundedness at least 0.9, no unauthorised tool calls, abstention on all no-answer cases, median latency under four seconds, p95 token spend under a budget. Thresholds should be tied to product requirements, not rounded numbers that look nice.</p>
+<div class="tip"><strong>Small-sample caution.</strong> If you have twenty cases, a single failure moves the score by five percentage points. Report counts alongside percentages and avoid declaring victory over a one-point change.</div>
+
+<h2>A failure taxonomy</h2>
+<p>When an eval fails, categorise the failure. Useful categories include retrieval miss, wrong tool, malformed arguments, hallucinated claim, instruction drift, loop, timeout, policy violation, and format error. A taxonomy turns a list of failures into a map of system weaknesses. It also prevents the common pattern of fixing every failure by rewriting the system prompt.</p>
+
+<h2>Evals as communication</h2>
+<p>An eval suite encodes what the team values. If the suite rewards short answers, the system will become short. If it rewards citation coverage, the system will cite more. Make those values explicit and revisit them with product and legal stakeholders. Evaluation is not a purely technical activity.</p>
+
+<div class="exercise"><strong>Exercise 16.1 — Assertions first.</strong> For an email-summarising agent, list ten deterministic assertions that can be checked without an LLM judge.</div>
+<div class="exercise"><strong>Exercise 16.2 — Distribution design.</strong> Design a 40-case eval set: how many cases for common intents, edge cases, adversarial inputs, and no-answer scenarios? Explain your allocation.</div>
+
+<h2>A worked example: evaluating a support assistant</h2>
+<p>A team is about to ship a support assistant that answers questions from a knowledge base and never invents policy. Before launch, they need an eval suite that would actually catch a bad change. We will build one around a distribution of forty cases, deterministic assertions, a failure taxonomy, and thresholds tied to product requirements — not to round numbers.</p>
+
+<h3>Constructing the set</h3>
+<p>The forty cases are allocated deliberately: twelve cover the three most common intents (four each), eight cover edge cases such as typos and unusual formatting, eight are adversarial probes including prompt injection and conflicting instructions, six are no-answer cases where the knowledge base has no relevant document, and six come from past user-reported failures. Every reported bug becomes a permanent regression case, so the set grows over time. Cases are labelled by category, which lets us stratify results instead of hiding a weak segment behind a strong average.</p>
+<pre><code>{
+  "id": "na_04", "category": "no_answer",
+  "input": "What is our refund window for gift cards in Brazil?",
+  "evidence_available": false,
+  "assertions": ["abstain=true", "no_policy_claim=true"],
+  "expected_tool_calls": ["search_kb"]
+}
+</code></pre>
+
+<h3>Assertions before judges</h3>
+<p>For each case we define checks that can be computed exactly. Did the output parse as expected? Is every cited source in the allowed set? Was the tool name on the allowlist? Did the agent abstain on no-answer cases? Did it stay under ten steps and four tool calls? These assertions are cheap, deterministic, and catch a surprising share of regressions. Only after exhausting them would we add an LLM judge for answer quality, and that judge would itself need calibration — the subject of the next chapter. Because the agent is non-deterministic, each case runs three times; we report the fraction of passing trials with a confidence interval rather than a single percentage.</p>
+<pre><code>thresholds = {
+    "groundedness": 0.90,       # at least 90% of trials
+    "abstention_no_answer": 1.00,
+    "unauthorised_tool_calls": 0,
+    "median_latency_ms": 4000,
+    "p95_tokens": 1200
+}
+</code></pre>
+<p>With forty cases run three times, a single failing trial shifts a rate by less than one percentage point. We report counts alongside percentages and refuse to celebrate a one-point improvement that could be noise.</p>
+<p>Stratification is where distribution thinking pays off. Suppose the overall pass rate is 0.92, which looks healthy, but the no-answer segment passes at 0.60. A single headline number would have hidden a serious tendency to invent policy when evidence is missing. We report each category separately and set a threshold for the weakest segment, not just the mean. We also keep the set frozen during a comparison: if you add new cases at the same time you change a prompt, you cannot tell which change moved the score. New failure cases are appended with a date, and older results are recomputed on the full set before a release decision.</p>
+
+<h3>Failure taxonomy and thresholds</h3>
+<p>When the suite fails, each failure is tagged: retrieval miss, wrong tool, malformed arguments, hallucinated claim, instruction drift, loop, timeout, policy violation, or format error. In the first run, twelve failures break down as five retrieval misses, three hallucinated claims on no-answer cases, two wrong-tool calls, and two format errors. That map directs fixes to the right layer: improve retrieval for the first group, tighten the abstention instruction for the second, rewrite tool descriptions for the third, and add schema enforcement for the fourth. The tempting alternative — rewriting the system prompt for all twelve — would fix almost nothing. Thresholds come from product requirements: legal requires zero unauthorised actions, support requires a four-second median response, and finance caps token spend. A passing eval is evidence under this distribution, not proof of correctness on all traffic.</p>
+
+<div class="exercise"><strong>Exercise 16.3 — Taxonomy application.</strong> Take five failures from an eval run of your own design. Assign each to a taxonomy category, name the layer you would fix, and explain why changing the system prompt would or would not help.</div>
+
+<h2>Common pitfalls</h2>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Evaluating only the final answer</td><td>A correct-looking answer can hide a wrong tool call or an unauthorised side effect.</td><td>Evaluate the whole trajectory: tool choice, arguments, control flow, and safety.</td></tr>
+<tr><td>A set made of easy, hand-picked cases</td><td>A high score under a friendly distribution says nothing about real traffic.</td><td>Sample from production traces, disagreements, generated variations, and failures.</td></tr>
+<tr><td>Averages with no stratification</td><td>A strong mean can conceal a weak category, such as no-answer cases.</td><td>Report results per category and inspect the worst segment.</td></tr>
+<tr><td>Single runs on non-deterministic cases</td><td>One trial cannot estimate a pass rate for a stochastic system.</td><td>Run repeated trials and report counts with confidence intervals.</td></tr>
+<tr><td>Jumping to an LLM judge</td><td>A judge has its own error profile and can reward confident-sounding wrong answers.</td><td>Exhaust deterministic assertions first, then calibrate the judge.</td></tr>
+<tr><td>Thresholds chosen for round numbers</td><td>Arbitrary cutoffs either block shipping or let real regressions through.</td><td>Derive thresholds from product, legal, and cost requirements.</td></tr>
+<tr><td>Fixing every failure with a prompt rewrite</td><td>Retrieval, tool, and schema failures live in different layers.</td><td>Use a failure taxonomy and route each category to its owner.</td></tr>
+</table>
+
+<h2>Check your understanding</h2>
+<p>These questions are for self-checking your grasp of evaluation as a measurement discipline. Answer each in your own words.</p>
+<ol>
+<li>Why does a demo prove less than a passing eval, and why does even a passing eval fail to guarantee production success?</li>
+<li>Name four sources for an eval set when you have no labelled golden data, and say what each contributes.</li>
+<li>How would you allocate forty cases across intents, edge cases, adversarial probes, and no-answer scenarios, and why?</li>
+<li>Why should you run repeated trials and report counts, and what does a confidence interval add to a single percentage?</li>
+<li>A failure is tagged "retrieval miss" rather than "hallucinated claim". Which layer do you fix, and why would a system-prompt rewrite be the wrong response?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Demos show one point; evaluation measures a distribution.</li>
+<li>Evaluate answer quality, trajectory, safety, and efficiency.</li>
+<li>Build small, diverse sets from traces, disagreements, and failures.</li>
+<li>Use deterministic assertions before LLM judges.</li>
+<li>A failure taxonomy directs fixes to the right layer.</li>
+</ul>
+
+<nav><a href="15-production-integration.html">&larr; Previous</a><span></span><a href="17-eval-harness.html">Next: Building an Eval Harness &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

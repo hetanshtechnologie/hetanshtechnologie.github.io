@@ -1,0 +1,109 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>21. Observability, Tracing, and Cost Control</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>21. Observability, Tracing, and Cost Control</h1>
+
+<h2>Why ordinary monitoring is not enough</h2>
+<p>Traditional monitoring asks whether a service is up, how fast it responds, and how often it errors. An agent can be "up" while producing worse answers, calling the wrong tools, and burning through budget. You need to observe the internal trajectory, not just the endpoint.</p>
+<p>Agent observability has three goals: reconstruct any run, detect degradation early, and attribute cost and latency to specific components. If you cannot do all three, debugging becomes guesswork.</p>
+
+<h2>The trace tree</h2>
+<p>A run is a tree of spans. The root is the user request. Children include orchestration steps, model calls, retrieval operations, tool executions, guardrail checks, and approvals. Each span should have a name, start and end time, status, and attributes such as model name, prompt version, token counts, and tool arguments (redacted where needed).</p>
+<pre><code>run: support-answer (2.8s, 14.2k tokens)
+├─ retrieve (180ms) → 5 chunks, top score 0.82
+├─ model.call (1.1s, 6.1k in / 0.9k out)
+├─ tool.find_invoice (240ms) → ok
+├─ guardrail.output (60ms) → allow
+└─ model.call (1.2s, 6.4k in / 0.8k out) → final
+</code></pre>
+<p>This view immediately answers questions that logs cannot: where time went, which step retried, and whether the final answer was produced after a tool result or before it.</p>
+
+<h2>Metrics that matter</h2>
+<table>
+<tr><th>Metric</th><th>Why it matters</th></tr>
+<tr><td>Token input / output per run</td><td>Direct cost driver; reveals prompt bloat</td></tr>
+<tr><td>Steps and tool calls per run</td><td>Detects loops and inefficient paths</td></tr>
+<tr><td>Tool error rate by tool</td><td>Isolates upstream problems</td></tr>
+<tr><td>Handoff count</td><td>Flags multi-agent confusion</td></tr>
+<tr><td>Guardrail block rate</td><td>Shows safety activity and false positives</td></tr>
+<tr><td>Approval wait time</td><td>Measures human bottleneck</td></tr>
+<tr><td>p50 / p95 latency by span</td><td>Localises slowdowns</td></tr>
+</table>
+<p>Segment these metrics by prompt version, model version, and input category. An aggregate spike may be one feature causing trouble.</p>
+
+<h2>Cost attribution</h2>
+<p>Cost should be attributable to a user, feature, agent, and run. Multiply token counts by current prices, include tool costs where applicable, and store the result with the trace. Without attribution, "the AI bill went up" is unactionable.</p>
+<p>Set budgets at multiple levels: per request, per user, per feature, and total. A per-request cap prevents runaway loops. A per-user cap stops abuse. A per-feature cap makes product trade-offs visible. Alert before the cap is reached, not after.</p>
+<div class="tip"><strong>Hidden cost.</strong> Output tokens usually cost more than input tokens. Long explanations, verbose reasoning, and repeated tool summaries are common sources of overspend.</div>
+
+<h2>Latency budgeting</h2>
+<p>Break the end-to-end latency target into span budgets. If a user-facing answer should arrive in five seconds, allocate time to retrieval, first model call, tools, and final generation. Monitor each budget. When a span exceeds it, the system can degrade gracefully: return a shorter answer, skip a nonessential tool, or switch to a cheaper model.</p>
+<p>Streaming progress events improve perceived latency even when total time is unchanged. Show what the agent is doing and when the user will hear from it next.</p>
+
+<h2>Logging without leaking</h2>
+<p>Traces can contain sensitive data. Redact passwords, tokens, and personal identifiers before storage. Decide how long traces are retained and who can see them. Provide a way to delete a user's traces when required. Apply the same discipline you would to application logs, but remember that prompts often contain more context than ordinary logs.</p>
+
+<h2>Debugging workflow</h2>
+<p>When a run fails, follow a consistent sequence: find the trace, inspect the tree, identify the first abnormal span, compare with a successful trace of the same input type, check version metadata, then reproduce with replay. This is faster than reading raw logs and less biased than immediately rewriting the prompt.</p>
+
+<div class="exercise"><strong>Exercise 21.1 — Span design.</strong> List the spans you would emit for a RAG answer with one tool call. For each, name three attributes you would record.</div>
+<div class="exercise"><strong>Exercise 21.2 — Budget plan.</strong> Define per-request and per-user token budgets for a support assistant. Describe what happens when each is exceeded.</div>
+
+<h2>Case study: tracing a 35% cost spike to one span</h2>
+<p>A support assistant handles about 50,000 runs a day. In one week the AI bill rises 35% while request volume grows only 5%. Without attribution, "the AI bill went up" would send the team hunting through model pricing pages. Instead they query their traces by feature and discover that 80% of the increase comes from a single feature, <code>summarise-thread</code>, which condenses a support conversation for handoff. The aggregate token count per run has doubled, but the per-feature breakdown points to a specific path.</p>
+<p>Following the debugging workflow, they open a representative slow trace. The tree shows five spans: retrieval, three model calls, and a guardrail check. The first abnormal span is the second model call, which carries 18,000 input tokens where the baseline was 6,000. Comparing with a healthy trace of the same input type confirms the difference. Version metadata reveals the cause: prompt version 14, deployed four days earlier, began passing the entire conversation history into each of the three calls instead of only the latest turn. A related tool change also made the final answer longer, pushing output tokens — the expensive kind — up by 40%.</p>
+<pre><code>run: summarise-thread (7.8s, 41.2k tokens, ₹1.94)
+├─ retrieve                (210ms) → 5 chunks
+├─ model.call #1           (1.3s, 18.0k in / 1.1k out)  &lt;-- abnormal
+├─ tool.fetch_history      (180ms) → 24 turns
+├─ model.call #2           (1.4s, 17.8k in / 1.2k out)  &lt;-- abnormal
+├─ guardrail.output        ( 60ms) → allow
+└─ model.call #3           (2.1s,  5.4k in / 2.7k out) → final
+budget: per_request_tokens = 12000, warn_at = 10000
+</code></pre>
+<p>The spike is also a latency problem: p95 end-to-end time rose from 4.2 seconds to 7.8 seconds, breaking the five-second user-facing target. Because the team had allocated span budgets, they could see that both model calls and the history-fetch tool exceeded theirs. The fix has four parts: keep only the last six turns in the prompt, put the long system instructions in a stable prefix so prefix caching applies, add a per-request token budget that warns at 10,000 and refuses at 12,000, and cap the tool's returned history. They also add a dashboard alert on "tokens per run by prompt version" so a future prompt change is caught the day it ships, not a week later on the invoice.</p>
+<p>While inspecting the trace, the team notices something more serious than cost: customer names and order numbers appear in prompt and output spans. They add redaction at ingestion, set a 30-day retention limit, restrict trace access to the support-ops group, and implement an endpoint that deletes a user's traces on request. Observability that leaks personal data is a liability, not an asset.</p>
+<p>The incident also sharpens their instrumentation standard. Each span now records a fixed attribute set — span name, duration, status, model and prompt version, input and output tokens, tool name, and a redacted argument summary — so any run can be reconstructed without guesswork. They add an acceptance-rate and retry-count attribute to model spans, which makes the silent-loop pattern visible: a rise in retries is often the earliest sign that a tool or prompt has degraded. Alerting is tiered by severity: a tokens-per-run shift posts to a team channel, a sustained p95 breach opens a ticket, and only a budget-exhaustion event pages the on-call engineer. Each alert carries a trace link, so the responder starts from evidence rather than a blank dashboard.</p>
+<div class="exercise"><strong>Exercise 21.3 — Budget breakdown.</strong> Given a five-second target for a RAG answer, allocate span budgets for retrieval, two model calls, and one tool call. Explain what the system should do when one span exceeds its budget and how you would alert on the pattern without waking anyone at night.</div>
+
+<h2>Design decisions and pitfalls</h2>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Monitoring only uptime and error rate</td><td>An agent can be available while burning budget and degrading quality.</td><td>Instrument the trajectory: spans, tokens, steps, tool calls, and scores.</td></tr>
+<tr><td>Costing only input tokens</td><td>Output tokens usually cost more, and verbose answers are a common source of overspend.</td><td>Multiply both token counts by current prices and store the result with the trace.</td></tr>
+<tr><td>A single global budget</td><td>"The bill went up" is unactionable without knowing which feature or user caused it.</td><td>Attribute cost to user, feature, agent, and run; layer per-request, per-user, and per-feature caps.</td></tr>
+<tr><td>Logging raw prompts</td><td>Prompts often contain more personal data than ordinary application logs.</td><td>Redact before storage, limit retention, and support deletion.</td></tr>
+<tr><td>Debugging by rewriting the prompt first</td><td>Biased guesswork wastes time and can mask the real component.</td><td>Follow the sequence: trace, tree, first abnormal span, comparison, versions, replay.</td></tr>
+</table>
+<p>A subtle trade-off exists between trace fidelity and volume. Recording every attribute of every span gives complete reconstructions but increases storage cost and privacy exposure. A workable compromise is to keep full traces for a sampled slice and all errors, and summary attributes (span names, durations, token counts, versions) for everything else.</p>
+
+<h2>Check your understanding</h2>
+<p>The following questions are for self-checking. Work through them without consulting the text, then revisit any that you cannot answer confidently.</p>
+<ol>
+<li>Why can a healthy uptime dashboard coexist with a badly degraded agent, and what should you observe instead?</li>
+<li>Given a cost spike, how would you use per-feature attribution and span-level token counts to locate the cause?</li>
+<li>Explain the debugging sequence for a failed run and why replay comes near the end rather than the start.</li>
+<li>How does a latency budget turn a single end-to-end target into actionable alarms, and what graceful degradation might a breach trigger?</li>
+<li>What makes a trace both useful for debugging and safe to store, and who should be able to see it?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Observe the trajectory, not just the response.</li>
+<li>Structured trace trees localise latency and errors.</li>
+<li>Attribute cost to user, feature, agent, and run.</li>
+<li>Set layered budgets and alert before exhaustion.</li>
+<li>Redact and govern traces as sensitive data.</li>
+</ul>
+
+<nav><a href="20-guardrails-security.html">&larr; Previous</a><span></span><a href="22-inference-engineering.html">Next: Inference Engineering and Self-Hosting &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

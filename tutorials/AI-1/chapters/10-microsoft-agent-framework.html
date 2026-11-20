@@ -1,0 +1,125 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>10. Microsoft Agent Framework</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>10. Microsoft Agent Framework</h1>
+
+<h2>A lineage, not a sudden invention</h2>
+<p>Microsoft's agent story did not begin with a single product. It grew from two traditions. One is Semantic Kernel, with its emphasis on plugins, planners, memory, and enterprise integration in .NET and Python. The other is AutoGen, with its research-oriented model of conversable agents that solve problems through structured dialogue. The newer Agent Framework consolidates ideas from both into a more opinionated runtime for building, deploying, and governing agents.</p>
+<p>Understanding the lineage helps you read documentation and migration notes. If you see terms like kernel, skill, plugin, or conversation, you are looking at concepts that predate the current name. The underlying questions remain the same: how do we give models capabilities, how do we coordinate them, and how do we run them safely in an organisation?</p>
+
+<h2>The enterprise angle</h2>
+<p>Microsoft's approach tends to emphasise things that matter in large organisations: typed APIs, dependency injection, telemetry, identity, and deployment topology. An agent is not just a loop in a notebook; it is a component with a lifecycle, configuration, and a place in an existing system. That shape will feel familiar to teams already building on .NET or Azure, and instructive to everyone else.</p>
+<table>
+<tr><th>Concern</th><th>How the framework thinks about it</th></tr>
+<tr><td>Composition</td><td>Agents, tools, and workflows are composable objects with clear interfaces.</td></tr>
+<tr><td>Model choice</td><td>Models are pluggable; the same agent can target different providers.</td></tr>
+<tr><td>Execution</td><td>A runtime manages invocation, streaming, and state rather than ad-hoc loops.</td></tr>
+<tr><td>Observability</td><td>Telemetry and tracing are expected to be wired in from the start.</td></tr>
+<tr><td>Governance</td><td>Identity, permissions, and policy fit the broader platform story.</td></tr>
+</table>
+
+<h2>Agents, tools, and workflows</h2>
+<p>An agent in this world has instructions, a model, and tools. Tools are typed functions or services, often registered through the framework so they can be discovered and invoked consistently. Workflows describe how agents and functions connect: sequential pipelines, parallel fan-out, conditionals, and loops. If you know LangGraph, the workflow idea will feel familiar, though the surface and conventions differ.</p>
+<p>The practical advice from Chapter 7 still applies: keep agents narrow, keep tools precise, and put policy in code. A framework can give you building blocks, but it cannot decide what your organisation should allow an agent to do.</p>
+
+<h2>Multi-agent orchestration</h2>
+<p>From the AutoGen side comes the idea that agents can converse. One agent proposes, another critiques, a third decides. This is useful for design review, code generation with tests, and tasks where diverse perspectives improve the outcome. It is also expensive, so use it where the quality gain justifies multiple model calls.</p>
+<p>Conversation-based orchestration needs guardrails of its own: turn limits, a clear termination condition, and a moderator that can stop circular debate. Without them, agents can spend a long time agreeing politely without producing a decision. Log each agent's contribution so you can see whether the dialogue added value or just tokens.</p>
+
+<h2>State, memory, and threads</h2>
+<p>Enterprise agents need memory that survives a session and respects boundaries. The framework separates short-term conversation state from longer-term memory stores. This distinction matters for privacy: a fact learned in one conversation should not automatically become permanent knowledge. Define retention rules explicitly, and allow users to inspect and delete stored memory where required.</p>
+<div class="tip"><strong>Memory hygiene.</strong> Store decisions and preferences, not raw transcripts, when possible. Summarised memory is cheaper to load, easier to govern, and less likely to leak sensitive details.</div>
+
+<h2>Deployment considerations</h2>
+<p>Running an agent in production means deciding where the loop lives. Options include a long-lived service, a queue-driven worker, or serverless functions with durable state. Each has trade-offs. Long-lived services are simple but must handle restarts. Queue-driven workers are resilient and good for background tasks. Serverless scales well but requires careful handling of cold starts and timeouts.</p>
+<p>Whatever you choose, make the agent invocation idempotent where possible and record a correlation ID that ties together model calls, tool calls, and external side effects. This is the same observability discipline from Chapter 21, applied within a specific platform.</p>
+
+<h2>Choosing this framework</h2>
+<ul>
+<li>You are building in a Microsoft-heavy stack and want natural integration.</li>
+<li>You need a runtime that fits existing identity and telemetry systems.</li>
+<li>You want to combine Semantic Kernel-style plugins with multi-agent conversation patterns.</li>
+<li>You value typed, structured APIs over a minimal surface.</li>
+</ul>
+<p>If you need a lightweight experiment, this may feel heavy. If you need something that will be maintained by a large team for years, the structure is an advantage. As with all frameworks, build a small spike before committing.</p>
+
+<div class="exercise"><strong>Exercise 10.1 — Plugin inventory.</strong> List five capabilities in your organisation that could become agent tools. For each, note the identity used, the data touched, and whether the call is read-only.</div>
+<div class="exercise"><strong>Exercise 10.2 — Conversation termination.</strong> Define three termination conditions for a multi-agent design review: one based on output, one on cost, and one on time. Explain which one wins if they conflict.</div>
+
+<h2>A worked example: an enterprise policy-review workflow</h2>
+<p>Imagine a regulated company that must review vendor contracts against an internal policy. Today a small legal team reads each contract and fills a checklist. We will build an assistant that drafts the checklist for human review, using a typed, dependency-injection-friendly design that fits an existing .NET service. The requirements are concrete: every claim must cite a contract clause, the assistant must never approve a contract, and the full run must be traceable with a correlation ID.</p>
+
+<h3>Composing the components</h3>
+<p>We register the tool functions with the framework so they are discovered and invoked consistently. Three plugins cover the work: one extracts clauses, one looks up policy sections, and one writes a draft checklist to the document store. The last one is deliberately draft-only from the agent's point of view — it can write a draft, not a decision. Each plugin declares the identity it runs under and the data it touches, which makes the later security review straightforward.</p>
+<pre><code>builder.Services.AddAgent("ContractReviewer", a =&gt; {
+    a.Model = model.FromConfiguration("review-model");
+    a.Instructions = "Compare the contract to policy. Cite clause IDs. " +
+                     "Draft a checklist; never approve or reject.";
+    a.Tools.Register(extractClauses);   // identity: reviewer-reader
+    a.Tools.Register(lookupPolicy);     // identity: policy-reader
+    a.Tools.Register(saveDraft);        // identity: draft-writer
+});
+</code></pre>
+<p>The three tool identities are not decoration. The clause extractor can read the uploaded document, the policy lookup can read the policy library, and the draft writer can only create a draft record. No single identity can both read sensitive policy and finalise a decision. That separation is what makes the "never approve" constraint enforceable in code rather than just in the prompt.</p>
+
+<h3>Orchestration with a review loop</h3>
+<p>A single pass is not enough, so we compose a workflow: extract clauses in parallel, look up matching policy sections, draft the checklist, then run a second "critic" agent that checks every checklist item for a clause citation. The critic can request one revision. We set a hard turn limit and a cost ceiling, because a critic that keeps finding minor issues can quietly multiply the bill.</p>
+<pre><code>var workflow = Workflow.Sequential(
+    ExtractClauses,
+    LookupPolicy,
+    DraftChecklist,
+    Workflow.WithLimit(
+        ReviewLoop(critic, maxTurns: 2),
+        maxCostUsd: 0.40m,
+        onLimit: OnLimit.ReturnCurrentDraft
+    )
+);
+</code></pre>
+<p>The <code>onLimit</code> behaviour matters. When the ceiling is hit, we return the current draft with a "needs human review" flag rather than failing the request. A partial, clearly-labelled result is useful; an exception is not.</p>
+
+<h3>State, memory, and deployment</h3>
+<p>We keep conversation state in a short-lived thread and store only durable facts in long-term memory: the vendor name, the policy version used, and the reviewer's eventual decision. We do not store raw contract text as memory — it is already in the document store, and duplicating it would create a retention and deletion problem. The workflow runs in a queue-driven worker: the API accepts a contract ID, returns a job ID, and the worker streams progress events to the UI. Every model call, tool call, and side effect carries the same correlation ID, so a question from legal about "that wrong checklist from Tuesday" can be answered by pulling one trace.</p>
+
+<div class="exercise"><strong>Exercise 10.3 — Identity map.</strong> For the contract-review example, draw a table with each tool, the identity it runs under, the data it can read, and the data it can write. Then identify which single tool would be most dangerous if it inherited a broad service credential, and describe the blast radius.</div>
+
+<h2>Decisions to make explicitly</h2>
+<table>
+<tr><th>Trade-off</th><th>Why it matters</th><th>Recommended stance</th></tr>
+<tr><td>One shared service identity vs. per-tool identities</td><td>A shared identity lets any tool read or write everything, turning a small prompt bug into a broad data incident.</td><td>Give each tool the narrowest identity that can do its job; review the map like an API permission matrix.</td></tr>
+<tr><td>Raw transcripts vs. summarised memory</td><td>Transcripts are cheap to store but expensive to govern and easy to load into future prompts by accident.</td><td>Store decisions and preferences; keep raw text behind references with their own retention rules.</td></tr>
+<tr><td>Model-based speaker selection vs. fixed rules</td><td>Flexible selection adds cost and can favour one agent; fixed rules waste turns on obvious transitions.</td><td>Use deterministic rules for clear handoffs and model choice only when the next step is genuinely ambiguous.</td></tr>
+<tr><td>Long-lived service vs. queue-driven worker</td><td>Services are simple but lose in-flight work on restart; queues are resilient but add state and idempotency work.</td><td>Choose request–response for short interactive tasks and queues for anything that can take minutes.</td></tr>
+<tr><td>Inherited telemetry defaults vs. designed spans</td><td>Automatic tracing gives you data, but without a correlation convention you cannot join model, tool, and side-effect events.</td><td>Set the correlation ID at ingestion and pass it through every boundary explicitly.</td></tr>
+<tr><td>Framework weight for a small experiment</td><td>Typed composition and DI have real setup cost that slows early exploration.</td><td>Spike the idea in a lightweight script first; adopt the runtime when maintenance and governance justify it.</td></tr>
+</table>
+
+<h2>Check your understanding</h2>
+<p>Use these to test your grasp of the enterprise concerns in this chapter. Write brief answers before continuing.</p>
+<ol>
+<li>How does the Semantic Kernel and AutoGen lineage explain two different features of the newer framework? Name one inherited idea from each tradition.</li>
+<li>In the contract-review example, why is the "never approve" rule enforced with tool identities rather than relying only on the system prompt?</li>
+<li>Describe a memory-retention decision that a privacy reviewer would approve, and explain why storing raw transcripts would complicate it.</li>
+<li>A multi-agent review loop slowly increases cost across runs. Which two limits would you add, and what should happen when one is reached?</li>
+<li>Why must the same correlation ID appear on model calls, tool calls, and external side effects? What question does that make answerable?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>The framework consolidates ideas from Semantic Kernel and AutoGen.</li>
+<li>It emphasises typed composition, runtime management, and enterprise governance.</li>
+<li>Multi-agent conversation needs turn limits and explicit termination.</li>
+<li>Memory retention and privacy must be designed, not inherited.</li>
+<li>Choose it when platform integration and long-term maintainability matter.</li>
+</ul>
+
+<nav><a href="9-openai-agents-sdk.html">&larr; Previous</a><span></span><a href="11-crewai.html">Next: CrewAI &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

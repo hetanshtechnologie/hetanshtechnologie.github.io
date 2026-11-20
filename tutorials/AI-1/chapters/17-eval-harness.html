@@ -1,0 +1,120 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>17. Building an Eval Harness</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>17. Building an Eval Harness</h1>
+
+<h2>From principles to a runnable system</h2>
+<p>An eval harness is a program that takes a set of cases, runs the system under test, applies scorers, and produces a report. It should run on every change, not only before a major release. The best harnesses are boring: predictable, fast enough, and easy to interpret.</p>
+<p>The harness has four moving parts: a case repository, a runner, a set of scorers, and a reporter. Keeping them separate lets you reuse cases across prompt versions and swap scorers without rewriting the runner.</p>
+
+<h2>Case repository</h2>
+<p>Store cases as data, not in code. A case includes an ID, input, expected properties, tags, and optional context such as retrieved documents or user role. Tags let you filter: run the fast smoke set on every commit and the full set nightly.</p>
+<pre><code>{
+  "id": "support-no-answer-07",
+  "input": "What is our refund window for digital gifts?",
+  "tags": ["no-answer", "billing"],
+  "expect": {
+    "must_abstain": true,
+    "allowed_tools": ["search_policy"],
+    "max_steps": 4
+  }
+}
+</code></pre>
+<p>Notice that there is no expected answer string. We assert properties, which is far more robust for non-deterministic systems.</p>
+
+<h2>Runner</h2>
+<p>The runner executes each case against the current build. It should pin the model version where possible, fix sampling parameters, and record the prompt, tool schemas, and index version used. Run each case multiple times when the system is non-deterministic, and report the distribution rather than a single result.</p>
+<p>Parallelism helps, but be careful with shared state. Each case should start from a clean thread or an explicitly defined starting state. Otherwise one case's memory leaks into another and your results become unreproducible.</p>
+
+<h2>Scorers</h2>
+<p>Scorers come in three flavours:</p>
+<ol>
+<li><strong>Deterministic</strong> — schema validity, allowlists, step counts, token budgets, string containment.</li>
+<li><strong>Statistical</strong> — embedding similarity to a reference, score distributions, pairwise win rates.</li>
+<li><strong>Model-based</strong> — an LLM judge applying a rubric.</li>
+</ol>
+<p>Embedding similarity is useful but limited: a fluent wrong answer can be close to a fluent right one. Use it as a weak signal, not a final verdict.</p>
+
+<h2>LLM judges and rubric design</h2>
+<p>A judge is another model asked to evaluate an answer against criteria. It is useful for qualities that are hard to compute: tone, completeness, appropriate abstention, reasoning quality. The key is a decomposed rubric. Instead of "rate quality 1–5", ask separate questions: Are all claims supported by the sources? Does the answer address every part of the request? Is the tone appropriate? Did it avoid forbidden content?</p>
+<p>Reduce bias by randomising option order in pairwise comparisons, hiding which system produced which answer, and avoiding verbosity cues. Calibrate the judge against human spot-checks: sample fifty judged outputs, have a person score them, and measure agreement. If the judge disagrees with humans, fix the rubric before trusting the score.</p>
+<div class="tip"><strong>Judge hygiene.</strong> Use a different model or a different prompt from the generator when possible. A judge that shares the generator's blind spots will reward the same mistakes.</div>
+
+<h2>Trace replay and span-level scoring</h2>
+<p>Because agents are multi-step, scoring only the final answer loses information. Replay traces and score spans: was the retrieval step relevant? Was the tool choice appropriate? Did the revision actually improve the draft? Span-level scores pinpoint the failing component and make regressions actionable.</p>
+<p>Replay also supports deterministic debugging. Store the exact model responses from a failing run, then rerun the harness with those responses injected. You can reproduce the failure without calling a live model, which makes debugging faster and cheaper.</p>
+
+<h2>Mutation testing for AI-written tests</h2>
+<p>Teams increasingly ask agents to write tests. Those tests can look convincing while checking nothing. Mutation testing exposes this: deliberately break the code — flip a boundary, delete a statement, negate a condition — and see whether the tests fail. If the mutated code still passes, the test suite is not verifying behaviour. Apply the same idea to eval cases: mutate the agent's context slightly and check that the eval detects a change.</p>
+
+<h2>Reporting</h2>
+<p>A useful report answers three questions: did we pass the gate, what got worse, and where should we look? Include pass rates with counts, scores by tag, distribution summaries, top failing cases, and changes since the last run. Avoid a single headline number; it hides segment regressions.</p>
+<p>Store reports over time. Trends matter more than absolute values. A slow decline in groundedness across three prompt changes is a signal that nobody would notice from isolated runs.</p>
+
+<h2>CI integration</h2>
+<p>Run a smoke set on every pull request, the full suite nightly, and a canary comparison before production rollout. Keep the smoke set fast — under two minutes if possible — or developers will ignore it. Fail the build on hard assertions such as policy violations, and warn on softer score changes that require review.</p>
+
+<div class="exercise"><strong>Exercise 17.1 — Rubric decomposition.</strong> Turn "rate the answer quality" into five atomic rubric questions with clear yes/no or numeric criteria.</div>
+<div class="exercise"><strong>Exercise 17.2 — Mutation check.</strong> Take one eval case and create three mutated versions: remove a source, change a number, and add a conflicting instruction. Predict which scorer should catch each mutation.</div>
+
+<h2>Case study: a three-gate harness for a support assistant</h2>
+<p>Consider a team shipping a grounded-answer assistant for an e-commerce help centre. Agents answer questions about orders, returns, and warranties using retrieved policy documents. The team maintains 240 eval cases tagged by intent (<code>order-status</code>, <code>returns</code>, <code>warranty</code>, <code>no-answer</code>, <code>injection</code>) and by difficulty (<code>smoke</code>, <code>core</code>, <code>edge</code>). They wire these cases into three gates, each with a different cost and purpose.</p>
+<p>The first gate is a pull-request smoke set: 18 cases tagged <code>smoke</code>, chosen to cover one representative of every intent. It must finish in under 90 seconds, so developers actually run it. The second gate is the full 240-case suite, run nightly against the current main branch. The third is a pre-release canary comparison: the candidate build and the frozen production build are run on the same 240 cases, and the report is a pairwise win/loss table. A release is blocked on hard assertions (no policy violations, no unauthorised tool calls) and on any segment dropping more than five points versus production.</p>
+<p>The runner pins the model to an immutable snapshot ID rather than a floating alias, sets temperature to zero and a fixed seed, and records the prompt hash, tool schema version, and index build in every result. Each case runs three times; the report shows the distribution, not a single pass. This matters because the support assistant is non-deterministic even at temperature zero — retrieval ordering and minor floating-point differences change tool choices occasionally.</p>
+<pre><code>runner:
+  model: "gpt-4o-2024-11-20"   # immutable snapshot, not "gpt-4o"
+  temperature: 0
+  seed: 42
+  repeats: 3
+  record: [prompt_hash, tool_schema_v, index_build]
+gates:
+  pr_smoke:   { tags: [smoke],             max_seconds: 90 }
+  nightly:    { tags: [smoke, core, edge] }
+  canary:     { compare_against: "prod-2024-11-01", block_on: policy_violation }
+</code></pre>
+<p>The judge is calibrated before it is trusted. The team samples fifty judged outputs, has two support specialists score them independently, and measures agreement. Initial agreement is only 62% on "groundedness" because the rubric asks a single vague question. They decompose it into four atomic checks — is every factual claim traceable to a retrieved chunk, does the cited chunk actually contain the claim, is the answer within the policy's stated scope, and did the agent abstain when evidence was absent — and agreement rises to 88%. That is good enough to use the judge as a gate, provided hard failures are still confirmed by a human.</p>
+<p>Three weeks in, the nightly report flags a regression: groundedness on the <code>returns</code> segment falls from 0.91 to 0.84 after an innocent-looking prompt edit that reordered two sentences. Because scores are segmented by tag, the drop is visible even though the overall average moves only from 0.89 to 0.87. The team uses trace replay to debug: they inject the exact stored model responses from the failing run and rerun the scorer without calling a live model. This isolates the failure to the retrieval span — the reordered prompt changed the query embedding enough to pull a different top document. They revert the edit and add a mutation case that removes the correct document, which the new scorer now catches.</p>
+<div class="exercise"><strong>Exercise 17.3 — Gate design.</strong> For an assistant you know, define three gates with concrete case counts, time limits, and blocking conditions. Explain why each gate's threshold is stricter or looser than the next, and what a developer should do when the PR gate fails.</div>
+
+<h2>Pitfalls and trade-offs in harness design</h2>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>What to do instead</th></tr>
+<tr><td>Asserting an exact answer string</td><td>Fluent, correct answers vary in wording; the suite fails on harmless paraphrases and trains developers to ignore red builds.</td><td>Assert properties and behaviours such as abstention, tool choice, and claim support.</td></tr>
+<tr><td>Using a floating model alias</td><td>The provider can change the underlying weights, so a "passing" build silently becomes a different system.</td><td>Pin immutable model snapshot IDs and record them in every report.</td></tr>
+<tr><td>A single headline score</td><td>Averages hide segment regressions like the one on <code>returns</code> above.</td><td>Report pass rates with counts, broken down by tag and by distribution percentile.</td></tr>
+<tr><td>Uncalibrated LLM judge</td><td>A judge that shares the generator's blind spots rewards its mistakes and gives false confidence.</td><td>Decompose the rubric, calibrate against human scores, and use a different model where possible.</td></tr>
+<tr><td>Shared state between cases</td><td>Memory from one case leaks into another, making results irreproducible and regressions untraceable.</td><td>Start every case from a clean thread with an explicit initial state.</td></tr>
+<tr><td>Slow smoke gate</td><td>If the fast gate takes ten minutes, developers skip it and defects reach the expensive gates.</td><td>Keep the PR set small and under two minutes; move depth to nightly runs.</td></tr>
+</table>
+<p>One trade-off deserves explicit discussion: repeats versus cost. Running every case three times triples model spend and slows the suite, but a single run cannot distinguish a real regression from sampling noise. A reasonable compromise is one run for the PR smoke set, three for nightly, and five for the pre-release canary, where the decision carries the most risk.</p>
+
+<h2>Check your understanding</h2>
+<p>The following questions are for self-checking. Work through them without looking back at the text; if you cannot answer one, revisit the relevant section before moving on.</p>
+<ol>
+<li>Why does a case repository assert properties rather than expected answer strings, and what kind of regression would a string-based suite miss?</li>
+<li>A developer changes a prompt and the overall pass rate is unchanged, but a support ticket rises. How would you use segmentation and trace replay to find the cause?</li>
+<li>Describe the calibration procedure for an LLM judge and explain what a low agreement score tells you about the rubric.</li>
+<li>How does mutation testing expose eval cases that look thorough but verify nothing, both for ordinary code and for agent context?</li>
+<li>You have a budget to run each case once or three times. What factors determine the right choice for a gate that blocks a production release?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>A harness separates cases, runner, scorers, and reporting.</li>
+<li>Cases should assert properties, not exact strings.</li>
+<li>Decompose judge rubrics and calibrate them against humans.</li>
+<li>Score spans, not just final answers, to locate failures.</li>
+<li>Run fast smoke checks on every change and deeper suites on a schedule.</li>
+</ul>
+
+<nav><a href="16-eval-fundamentals.html">&larr; Previous</a><span></span><a href="18-silent-failure.html">Next: Silent Failure and Drift Detection &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

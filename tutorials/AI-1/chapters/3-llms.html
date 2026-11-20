@@ -1,0 +1,118 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3. Large Language Models Demystified</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>3. Large Language Models Demystified</h1>
+
+<h2>The one-sentence model</h2>
+<p>A large language model is a function that, given a sequence of tokens, produces a probability distribution over the token that should come next. It is trained by adjusting billions of parameters so that this distribution matches real text. Everything else — summarisation, translation, coding, reasoning, tool selection — emerges from repeatedly applying that one operation.</p>
+<p>This sounds reductive, but it is liberating. Once you accept that the model is predicting continuations, you stop asking "why did it believe that?" and start asking "what context made that continuation likely?" You also stop expecting perfect reliability and start designing systems that constrain, check, and recover from the output.</p>
+
+<h2>Tokens: the unit of everything</h2>
+<p>Models do not read characters; they read tokens. A token can be a word, part of a word, punctuation, or whitespace. English text averages roughly four characters per token, but the ratio varies with language and content. Code and JSON are token-hungry. This matters for three reasons:</p>
+<ol>
+<li><strong>Context windows</strong> are measured in tokens. A 128k-token window is not 128k words.</li>
+<li><strong>Cost</strong> is usually charged per million input and output tokens.</li>
+<li><strong>Latency</strong> scales with tokens generated; a long answer takes longer than a short one.</li>
+</ol>
+<p>Developers often discover that their carefully written system prompt consumes thousands of tokens before the user's question arrives. That is why token accounting is a first-class engineering concern, developed further in Chapter 27.</p>
+
+<h2>From text to meaning: embeddings and attention</h2>
+<p>During training, the model learns to represent tokens as vectors in a high-dimensional space. Tokens with similar meanings tend to occupy nearby regions. This is the idea behind embeddings, which we will use directly for retrieval in Chapter 5.</p>
+<p>Attention is the mechanism that lets a token look at other tokens in the context and decide which ones matter for the prediction. In a sentence, the word "it" must attend to the correct noun. In an agent trace, a tool result must attend to the question that triggered it. Attention is powerful but bounded: irrelevant tokens in context compete with relevant ones, which is why long, unstructured prompts degrade quality.</p>
+
+<h2>The inference parameters you actually use</h2>
+<table>
+<tr><th>Parameter</th><th>What it changes</th><th>Practical guidance</th></tr>
+<tr><td>Temperature</td><td>Flattening or sharpening the token distribution</td><td>Low for extraction and classification; higher for brainstorming.</td></tr>
+<tr><td>Top-p (nucleus)</td><td>Candidates considered from the probability mass</td><td>Use instead of, not on top of, temperature unless you know why.</td></tr>
+<tr><td>Max tokens</td><td>Upper bound on generated length</td><td>Set it. Unbounded generation is a cost and latency bug.</td></tr>
+<tr><td>Stop sequences</td><td>Strings that end generation</td><td>Useful for formatted outputs and multi-turn templates.</td></tr>
+<tr><td>Seed</td><td>Attempt at deterministic sampling</td><td>Helpful in evals, never a guarantee across model versions.</td></tr>
+<tr><td>Reasoning effort</td><td>How many internal steps the model may take</td><td>Raise only for problems that genuinely need it.</td></tr>
+</table>
+<div class="tip"><strong>Reproducibility warning.</strong> Setting a seed does not freeze a hosted model. Providers update weights and serving stacks. If your eval results change overnight, suspect a model update before suspecting your prompt.</div>
+
+<h2>Instruction tuning and structured behaviour</h2>
+<p>Base models predict text. Instruction-tuned models have been further trained to follow directives and adopt a helpful assistant style. Most applications should use an instruction-tuned model. When you need machine-readable output, do not rely on polite requests alone. Use the provider's structured-output or JSON-mode facility where available, provide a schema, and validate the result in code. Validation is not distrust of the model; it is the boundary between a language system and a typed program.</p>
+
+<h2>Reasoning models</h2>
+<p>A newer class of models spends extra tokens on internal reasoning before answering. They can solve harder multi-step problems and are useful for planning, code debugging, and ambiguous analysis. They are also slower, more expensive, and sometimes worse at simple tasks where a smaller model would do. Treat reasoning as a resource to route to, not a default. Chapter 23 shows how to escalate to a stronger model only when a cheap first pass fails.</p>
+
+<h2>Kinds of failure you should expect</h2>
+<ul>
+<li><strong>Factual drift</strong> — plausible statements that are not supported by the provided evidence.</li>
+<li><strong>Instruction leakage</strong> — earlier instructions are forgotten as context grows.</li>
+<li><strong>Format drift</strong> — output stops matching the expected schema after a long session.</li>
+<li><strong>Sycophancy</strong> — the model agrees with a user's incorrect premise.</li>
+<li><strong>Tool confusion</strong> — a tool is called with invented arguments or at the wrong time.</li>
+</ul>
+<p>None of these are bugs in your code. They are properties of the model layer. Your job is to build the surrounding layers so that these failures are detected, bounded, or harmless.</p>
+
+<h2>A tiny numeric intuition</h2>
+<p>Suppose a response requires 800 input tokens and 200 output tokens, and your model costs ₹0.04 per million input tokens and ₹0.16 per million output tokens. The input cost is 0.0008 × 0.04 = ₹0.000032; the output cost is 0.0002 × 0.16 = ₹0.000032. Output tokens cost four times as much per token, so the two happen to balance here. At 10,000 requests a day, the monthly bill is roughly ₹19.2. Change the average answer to 800 output tokens and the bill quadruples. Small prompt and response decisions compound.</p>
+
+<div class="exercise"><strong>Exercise 3.1 — Token estimate.</strong> Take a prompt you have written. Count its words, estimate tokens as words × 1.3, and calculate the cost of 1,000 calls at a price of your chosen model. Now shorten the prompt by 30% and recalculate.</div>
+<div class="exercise"><strong>Exercise 3.2 — Parameter choice.</strong> For each task — extracting a date from a contract, writing a marketing headline, debugging a stack trace — choose temperature and reasoning effort. Explain the trade-off in one sentence each.</div>
+
+<h2>A worked example: tuning a contract-extraction endpoint</h2>
+<p>Numbers make the model layer less mysterious. Imagine a team extracting three fields — effective date, renewal term, and monthly amount — from vendor contracts. They process 4,000 documents a day, have a latency target of 1.2 seconds, and a budget of ₹3,000 per month. The question is not "which model is smartest" but which combination of prompt, parameters, and model meets those constraints.</p>
+<p><strong>Step 1: measure the token shape.</strong> A sample of 100 contracts shows an average of 2,100 input tokens after OCR cleanup and 90 output tokens for the JSON result. At a price of ₹0.04 per million input tokens and ₹0.16 per million output tokens, one call costs about ₹0.000084 + ₹0.0000144, roughly ₹0.0001. Across 4,000 calls a day for 30 days that is about ₹12 — comfortably inside budget. The output is only 4% of tokens but 15% of cost, which is worth remembering.</p>
+<p><strong>Step 2: set parameters deliberately.</strong> Extraction is not creative work. The team sets temperature to 0, max tokens to 200, and supplies a strict JSON schema with validation. A top-p value is left at the provider default because changing it alongside temperature would confound their experiment. They add a stop sequence only if the provider's JSON mode needs one.</p>
+<p><strong>Step 3: test the failure modes.</strong> On a labelled set of 200 contracts, the first pass gets 96% of fields right. Inspecting the 4% reveals two distinct problems: three contracts have dates written as "01/02/26" with ambiguous month order, and five have OCR artefacts that produce a wrong amount. These are not sampling problems; lowering temperature further will not help. The team adds a clarification rule for ambiguous dates and a confidence flag when OCR quality is low, routing those cases to a human.</p>
+<p><strong>Step 4: decide when to escalate.</strong> A reasoning model raises accuracy to 99% on the hard 5% but costs eight times as much and adds about 2 seconds. The team routes only low-confidence cases to it. Blended accuracy reaches roughly 98.5% at a small fraction of the full-reasoning bill.</p>
+<p>The final configuration can be recorded compactly:</p>
+<pre><code>task: contract_field_extraction
+input_tokens_avg: 2100   output_tokens_cap: 200
+temperature: 0   top_p: default   max_tokens: 200
+schema: strict_json   validate: enum + date_format + range
+route_if: ocr_quality &lt; 0.8 OR date_ambiguous -&gt; reasoning_model
+escalate_pct: ~5%   latency_p50_ms: 780   monthly_cost_inr: ~14
+</code></pre>
+<p>The lesson is that sampling parameters are only one lever. Prompt framing, schema validation, and routing to a stronger model when needed matter more than arguments about temperature. Each lever should change one variable at a time so you can attribute the result.</p>
+<div class="exercise"><strong>Exercise 3.3 — Budget the change.</strong> Suppose the team above doubles the average input to 4,200 tokens by pasting in full contracts instead of cleaned excerpts. Recalculate the monthly cost and the expected latency change. Then propose two ways to recover the budget without lowering accuracy.</div>
+
+<h2>Parameter and inference pitfalls</h2>
+<p>Because the model is a probabilistic function, a surprising amount of trouble comes from how you ask it to sample. These are the mistakes that recur in production.</p>
+<table>
+<tr><th>Pitfall</th><th>What goes wrong</th><th>Correction</th></tr>
+<tr><td>Setting both temperature and top-p "for safety"</td><td>The two controls interact unpredictably; results are hard to attribute and reproduce.</td><td>Change one, document the other, and keep defaults explicit in config.</td></tr>
+<tr><td>Leaving max tokens unset</td><td>A runaway answer burns budget and breaks latency targets.</td><td>Always cap output and alert when the cap is hit.</td></tr>
+<tr><td>Trusting a seed for reproducibility</td><td>Provider updates change weights and serving stacks; identical seeds diverge over time.</td><td>Pin model versions where possible and record the version with every eval.</td></tr>
+<tr><td>Treating structured output as correctness</td><td>A well-formed JSON object can still contain a wrong value.</td><td>Validate ranges, enums, and cross-field rules in application code.</td></tr>
+<tr><td>Using a reasoning model everywhere</td><td>Cost and latency rise while simple tasks may even regress in quality.</td><td>Route to reasoning only when a cheap first pass fails a confidence check.</td></tr>
+<tr><td>Ignoring token ratios across languages</td><td>Non-English text and code can be far denser than the "four characters per token" rule suggests.</td><td>Measure with your own tokenizer before setting a budget.</td></tr>
+</table>
+<p>Another common error is treating every failure as a sampling problem. If the model returns a wrong date because the contract was scanned badly, no temperature change will fix the OCR. If it invents a policy because the retrieved clause was missing, the fix belongs in retrieval. Keep a short failure taxonomy next to your parameter configuration, and classify each error before you touch a knob. That discipline prevents the worst kind of tuning: changing several settings at once and then telling a story that fits whatever result happened.</p>
+<p>One subtle trap is benchmarking on a single prompt. Because the model is a distribution over continuations, a parameter choice that wins on one phrasing may lose on another. Evaluate across a varied set, and treat any improvement smaller than your measurement noise as no improvement at all.</p>
+<div class="note"><strong>Remember the boundary.</strong> None of these settings turn the model into a deterministic database. Sampling controls shape a distribution; they do not guarantee a fact. Systems that need guarantees put them in validation, retrieval, and policy code.</div>
+
+<h2>Self-check questions</h2>
+<p>Answer these in your own words to check whether the model-layer concepts have settled. No answers are provided deliberately.</p>
+<ol>
+<li>Why does a smaller temperature help extraction but hurt a brainstorming task? Explain in terms of the token distribution.</li>
+<li>Two answers cost the same number of total tokens, yet one is much more expensive. Give a plausible reason using input and output prices.</li>
+<li>A colleague claims a fixed seed makes the model fully reproducible. What two things could still make the output change?</li>
+<li>Describe a failure that structured output prevents and a failure that it does not prevent.</li>
+<li>When would you route to a reasoning model, and what evidence would convince you the routing rule is working?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Models predict the next token; context determines which continuations are likely.</li>
+<li>Tokens drive context limits, cost, and latency.</li>
+<li>Attention is finite, so irrelevant context actively hurts.</li>
+<li>Structured output plus validation is the bridge from language to typed systems.</li>
+<li>Reasoning models are a routing decision, not a universal upgrade.</li>
+</ul>
+
+<nav><a href="2-modern-ai-stack.html">&larr; Previous</a><span></span><a href="4-prompting.html">Next: Prompting Patterns That Scale &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

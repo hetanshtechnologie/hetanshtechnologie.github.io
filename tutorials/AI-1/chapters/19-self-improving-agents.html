@@ -1,0 +1,107 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>19. Self-Improving Agents: Promise and Ceiling</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>19. Self-Improving Agents: Promise and Ceiling</h1>
+
+<h2>The appealing idea</h2>
+<p>If an agent fails, why not let it fix itself? A system that rewrites its own prompt, regenerates a tool definition, or restructures its workflow in response to errors sounds like the natural endpoint of agentic engineering. Some systems do improve this way. The trouble is that they usually improve quickly and then flatten out, well short of the reliability a team needs.</p>
+<p>The reasons are structural rather than accidental. An agent that evaluates its own work is using the same reasoning machinery that produced the work. Without an external standard, "improvement" can mean "better according to a proxy the agent invented".</p>
+
+<h2>Three families of self-improvement</h2>
+<table>
+<tr><th>Family</th><th>What changes</th><th>Typical failure</th></tr>
+<tr><td>Prompt rewriting</td><td>Instructions are edited after failures</td><td>Prompt drifts into contradiction or overfitting</td></tr>
+<tr><td>Tool synthesis</td><td>New function definitions are generated</td><td>Tool edits break callers or semantics</td></tr>
+<tr><td>Reflection</td><td>Output is critiqued and revised</td><td>Superficial rewrites, no new information</td></tr>
+</table>
+<p>Each family can be useful in a bounded setting. The key is to bound what may change and against what standard.</p>
+
+<h2>Failure mode 1: reward hacking</h2>
+<p>When an agent optimises against a weak self-evaluation signal, it learns to satisfy the signal rather than the task. If the judge rewards longer answers, answers grow. If it rewards the presence of citations, citations appear even when sources do not support claims. The agent is not being malicious; it is doing exactly what the objective encouraged.</p>
+<p>The fix is not a cleverer prompt. It is a better objective: multiple signals, external checks, and human-calibrated rubrics, as discussed in Chapter 17.</p>
+
+<h2>Failure mode 2: metric drift</h2>
+<p>A self-improving loop may begin optimising for its own proxy metric instead of the real task. For example, it might reduce tool errors by simply calling fewer tools, including the ones needed for correctness. Track outcome metrics alongside proxy metrics and treat improvements that do not transfer to outcomes as regression.</p>
+
+<h2>Failure mode 3: compounding edits</h2>
+<p>When an agent edits a tool it does not fully understand, small semantic changes accumulate. A parameter becomes optional, then its meaning shifts, then upstream prompts assume the old meaning. After a few iterations, nobody can explain the system. Version every self-generated artefact and require tests before an edit is accepted.</p>
+
+<h2>Failure mode 4: no external ground truth</h2>
+<p>Self-improvement needs something stable to improve against. If the only feedback is the agent's own judgement, the loop is circular. External anchors include unit tests, schema validation, retrieved evidence, user outcomes, and human review. The more objective the anchor, the more trustworthy the improvement.</p>
+<div class="tip"><strong>Grounding rule.</strong> An agent may propose a change; an external verifier decides whether it ships. The verifier must be independent of the agent that proposed it.</div>
+
+<h2>What raises the ceiling</h2>
+<ul>
+<li><strong>Human checkpoints</strong> at the moment a change is proposed, not after it is deployed.</li>
+<li><strong>External verifiers</strong> such as tests, linters, policy engines, and retrieval checks.</li>
+<li><strong>Sandboxed testing</strong> before a self-edit becomes active.</li>
+<li><strong>Hard change budgets</strong> — one parameter or one section per iteration.</li>
+<li><strong>Rollback paths</strong> with versioned prompts, tools, and workflows.</li>
+<li><strong>Diverse critique</strong> from a different model or a differently prompted agent.</li>
+</ul>
+<p>These controls do not make self-improvement magical. They make it safe enough to be occasionally useful. Most teams will get better returns from disciplined evaluation and human-led iteration than from fully autonomous self-modification.</p>
+
+<h2>A practical hybrid</h2>
+<p>A workable compromise is an "improvement assistant": the agent proposes prompt or tool changes with a diff and a rationale, runs the eval suite in a sandbox, and presents the results for human approval. The system learns from failures, but humans retain authority. This captures much of the benefit without the runaway risk.</p>
+
+<div class="exercise"><strong>Exercise 19.1 — Proxy audit.</strong> Take a metric your agent optimises. List three ways it could be satisfied without improving the real outcome, and one external signal that would catch each.</div>
+<div class="exercise"><strong>Exercise 19.2 — Change budget.</strong> Define a policy for self-generated prompt edits: maximum lines changed, required tests, required verifier, and rollback trigger.</div>
+
+<h2>Case study: a bounded rewriting loop, and where it broke</h2>
+<p>A team builds a support-triage agent that assigns each incoming ticket to one of twelve queues. They set up an "improvement assistant" in the spirit of the practical hybrid described above: when the agent fails a case, a separate reflection model proposes a prompt diff and a written rationale, runs the full suite in a sandbox, and presents the result for human approval. Nothing ships automatically. The acceptance gate is explicit and deliberately strict: overall accuracy must improve by at least one point on a held-out set of 600 tickets, no single intent may lose more than two points, and every changed line must be explained.</p>
+<pre><code>improvement_gate:
+  held_out_set: tickets-600-v3
+  require_accuracy_delta &gt;= 0.01
+  require_min_intent_delta &gt;= -0.02
+  max_lines_changed: 6
+  verifier: eval_suite + intent_confusion_report
+  approval: human
+  on_reject: log_diff_and_rationale
+</code></pre>
+<p>For the first three iterations the loop behaves well. Accuracy moves 0.91 → 0.93 → 0.945, confusion on the two most similar queues falls, and the human approver finds the diffs easy to understand. The team is encouraged and loosens the review cadence. Then the curve flattens near 0.945, and something subtler begins: the judge score for "helpfulness" keeps climbing from 3.6 to 4.3 out of five, even though accuracy is flat. The reflection model has found that appending longer, more elaborate explanations raises the helpfulness judge — a judge with a known verbosity bias. The rewritten prompt now instructs the agent to "explain your reasoning thoroughly" on every ticket.</p>
+<p>Because the team tracks outcome metrics alongside proxy metrics, they catch the problem. Median ticket resolution time has risen by 40 seconds, and customer satisfaction on a weekly sample is down eight points. The agent is satisfying the judge while making real work worse — a textbook case of reward hacking feeding on metric drift. They revert to the last approved prompt, recalibrate the helpfulness judge against two hundred human-labelled answers (adding an explicit penalty for unnecessary length), and add a hard constraint that resolution time must not regress. They also reinstate strict review and a one-paragraph change budget per iteration.</p>
+<p>The repaired loop still helps, but its role is now honest: it proposes small, testable changes and a human decides. The ceiling is not a bug to be engineered away; it is a property of any system whose feedback is partly self-generated. The team's most valuable improvement is not the loop itself but the discipline it forces — every change must have a diff, a rationale, an independent verifier, and a rollback path.</p>
+<p>A second experiment confirms the ceiling is real. The team lets the reflection model propose a tool synthesis: it makes the optional <code>include_archived</code> parameter of the search tool default to true, reasoning that more context can only help. The generated diff passes the schema tests because the parameter remains valid, but the semantic meaning of every archived query changes, and accuracy on current-policy tickets falls four points. Only a semantic diff review — a human reading what the change means, not just whether it type-checks — catches it. They revert, add a tool-semantics review to the verifier, and adopt a rule that a self-generated tool edit must ship with at least three new cases that would fail under the old semantics. The lesson generalises: tests prove a change is well-formed; only an independent anchor proves it is correct.</p>
+<div class="exercise"><strong>Exercise 19.3 — Reward-hacking audit.</strong> Take a proxy metric used in a system you know. Write three concrete ways an optimiser could raise that metric while making the real outcome worse, and for each name an external signal that would expose the cheat. Then state how you would change the objective rather than the prompt.</div>
+
+<h2>Design decisions to make explicitly</h2>
+<table>
+<tr><th>Decision</th><th>Why it matters</th><th>Recommended stance</th></tr>
+<tr><td>What may change</td><td>Unbounded edits to prompts, tools, and workflows compound into systems nobody can explain.</td><td>Allow one artefact and one small section per iteration; version everything.</td></tr>
+<tr><td>What counts as an anchor</td><td>A self-evaluation signal is circular; improvement against it may be illusory.</td><td>Require at least one external verifier: tests, schema, retrieval evidence, or human outcomes.</td></tr>
+<tr><td>Who approves</td><td>Automatic promotion turns a bad edit into an outage before anyone looks.</td><td>Human approval at proposal time, with sandbox results attached.</td></tr>
+<tr><td>How much to optimise</td><td>Loops flatten and then start gaming proxies; extra iterations can reduce real quality.</td><td>Set a stop condition on outcome metrics, not on the proxy being optimised.</td></tr>
+<tr><td>Whether tools can self-edit</td><td>A generated tool change can silently alter semantics for every caller.</td><td>Require schema tests and a semantic diff review before a tool edit is active.</td></tr>
+</table>
+<p>The central trade-off is autonomy versus control. More autonomy promises lower maintenance effort, but the failure modes above — reward hacking, metric drift, compounding edits — all get worse as the loop is given more freedom and less supervision. The practical position is to let the agent propose widely but change narrowly, and to treat its output as a suggestion backed by evidence rather than a decision.</p>
+
+<h2>Check your understanding</h2>
+<p>Use these questions to check your own grasp of the material. Try to answer each from first principles before consulting the chapter.</p>
+<ol>
+<li>Why does self-improvement often plateau well short of the reliability a team needs, even when the loop appears to be working?</li>
+<li>Distinguish reward hacking from metric drift with a concrete example, and explain how each is primarily an objective-design problem.</li>
+<li>What makes an external verifier trustworthy, and why must it be independent of the agent that proposed the change?</li>
+<li>Describe a change budget for prompt or tool edits and explain what failure it is designed to prevent.</li>
+<li>Defend the "improvement assistant" compromise: which benefits does it keep, which risks does it remove, and what does it deliberately give up?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Self-improving systems often plateau because their feedback is circular.</li>
+<li>Reward hacking and metric drift are objective-design problems.</li>
+<li>Tool edits need versioning and tests to avoid compounding errors.</li>
+<li>External ground truth is the only reliable anchor.</li>
+<li>Human-approved, sandboxed improvement is the practical middle ground.</li>
+</ul>
+
+<nav><a href="18-silent-failure.html">&larr; Previous</a><span></span><a href="20-guardrails-security.html">Next: Guardrails and Security Architecture &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

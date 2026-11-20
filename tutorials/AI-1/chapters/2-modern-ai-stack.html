@@ -1,0 +1,126 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2. The Modern AI Stack</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>2. The Modern AI Stack</h1>
+
+<h2>Why a stack matters</h2>
+<p>It is tempting to think of an AI application as "a prompt plus an API call". That picture survives until the first time the model hallucinates a policy, the first time a user asks a question that needs private data, or the first time a teammate changes a prompt and nobody can tell whether quality improved. A production system is a stack: layers with distinct responsibilities, each of which can fail independently and each of which should be observable.</p>
+<p>When we talk about the modern AI stack, we are not prescribing one vendor's product list. We are describing a set of roles that must be filled. You can fill them with managed services, open-source libraries, or code you write yourself. The important thing is that you know which role you are looking at when you make a decision.</p>
+
+<h2>The seven layers</h2>
+<table>
+<tr><th>Layer</th><th>Responsibility</th><th>Typical artefacts</th></tr>
+<tr><td>Model</td><td>Next-token prediction, reasoning, tool selection</td><td>Foundation model, fine-tune, local checkpoint</td></tr>
+<tr><td>Context</td><td>What the model is allowed to know for this request</td><td>System prompt, retrieved documents, conversation state</td></tr>
+<tr><td>Tool</td><td>Actions the model can request</td><td>Function schemas, MCP servers, APIs, database queries</td></tr>
+<tr><td>Orchestration</td><td>Control flow, retries, handoffs, memory</td><td>LangGraph graph, Agents SDK handoffs, CrewAI crew</td></tr>
+<tr><td>Runtime</td><td>Execution, isolation, concurrency, timeouts</td><td>Containers, serverless functions, queues, sandboxes</td></tr>
+<tr><td>Quality</td><td>Evidence that behaviour is acceptable</td><td>Eval suites, judges, canaries, traces</td></tr>
+<tr><td>Governance</td><td>Permissions, audit, cost, privacy</td><td>Policy engine, allowlists, budget guards, logs</td></tr>
+</table>
+<p>Notice that "prompt engineering" lives in the context layer, not the model layer. Changing a prompt does not change the model; it changes the evidence the model sees. This distinction explains why prompt changes can have dramatic effects and why they need the same change control as code.</p>
+
+<h2>Layer 1: the model</h2>
+<p>The model is a probabilistic function that maps context to a distribution over next tokens. Everything else in the stack exists because that function is powerful but unreliable in specific ways: it can be confidently wrong, it is sensitive to phrasing, it has a finite context window, and it has no direct access to your systems. Choosing a model is therefore a choice about capability, latency, cost, and data handling — not a contest for the largest benchmark score.</p>
+<p>Models also differ in how much they can be steered. Instruction-tuned models respond well to system prompts and structured output constraints. Reasoning-oriented models spend more tokens before answering and can handle multi-step problems, at the price of latency and cost. Smaller local models win on privacy and unit cost but lose on hard reasoning. A healthy architecture treats models as interchangeable behind an interface.</p>
+
+<h2>Layer 2: context</h2>
+<p>Context is the most valuable real estate in the system. It includes the system prompt, developer instructions, conversation history, retrieved documents, tool results, and any schema definitions. Every token in context competes for attention and adds cost. Context engineering is the discipline of putting the right information in the right shape at the right time.</p>
+<p>A useful mental model is to divide context into three zones:</p>
+<ul>
+<li><strong>Stable instructions</strong> — role, tone, constraints, output format. These rarely change.</li>
+<li><strong>Task evidence</strong> — retrieved documents, current user input, recent tool results. These change every request.</li>
+<li><strong>History</strong> — prior turns and long-running state. This grows indefinitely unless you summarise, trim, or store it externally.</li>
+</ul>
+<p>Most context failures come from mixing these zones. When instructions are buried inside a wall of history, they lose force. When retrieved documents are dumped without structure, the model cannot tell evidence from instruction. Chapter 27 develops practical techniques for keeping this layer lean.</p>
+
+<h2>Layer 3: tools</h2>
+<p>A tool is a described capability the model may ask the harness to invoke. The description is a contract: name, purpose, parameters, and expected output shape. The harness decides whether to execute the request, how to validate arguments, what permissions apply, and how to represent the result back to the model.</p>
+<p>Tools are the boundary between language and action. That makes them the most security-sensitive part of the stack. A model can be tricked into calling a tool in a way the developer never intended; the tool itself must enforce the rules. Chapter 6 covers tool loops and Chapter 20 covers the security architecture around them.</p>
+
+<h2>Layer 4: orchestration</h2>
+<p>Orchestration decides what happens next. In a fixed workflow, the developer writes the transitions. In an agent, the model suggests or chooses the next action within a constrained set. Real systems blend the two: a deterministic skeleton with agentic steps inside it.</p>
+<p>The frameworks you will meet in Part II are different answers to the same problem. Graph-based tools make control flow explicit and inspectable. SDK-style tools optimise for fast agent construction with built-in handoffs. Role-based frameworks model collaboration between specialised agents. Conversation-based frameworks treat multi-agent work as a structured dialogue. Underneath, all of them manage the same loop: assemble context, call model, interpret response, execute action, update state, repeat or stop.</p>
+
+<h2>Layer 5: runtime</h2>
+<p>Agent loops are long-running, I/O-heavy, and prone to waiting. The runtime must handle timeouts, retries, cancellation, concurrency, and isolation. Tool code should run with the least privilege necessary, often in a sandbox or a separate process. Long tasks need durable state so a restart does not lose progress. Serverless runtimes are attractive for bursty MCP-style workloads, but cold starts and statelessness must be designed for deliberately.</p>
+<div class="tip"><strong>Runtime rule of thumb.</strong> If a tool can read the internet, write to a database, or spend money, it should run behind a boundary you can reason about: explicit credentials, explicit timeout, explicit audit record.</div>
+
+<h2>Layer 6: quality</h2>
+<p>Quality is not a final testing phase; it is a layer that surrounds every change. Because agent output is non-deterministic, you cannot assert a single expected string. You assert properties: the answer cited an allowed source, the tool call matched the schema, the response stayed within budget, a judged rubric scored above a threshold, and the trace shows no unexpected loop.</p>
+<p>Evaluation also has a second job: it is a communication device. A well-designed eval suite tells you what behaviour the team values. If the suite only rewards brevity, you will get brevity at the expense of correctness. Chapters 16–18 build this layer in detail.</p>
+
+<h2>Layer 7: governance</h2>
+<p>Governance turns good intentions into enforceable behaviour. It includes tool allowlists, per-tool credentials, approval workflows, budget ceilings, data residency rules, retention policies, and audit logs. Governance is not the enemy of speed; it is what allows you to deploy speed safely. An agent with broad access and no audit trail is a liability, not an asset.</p>
+
+<h2>Putting the layers together</h2>
+<p>Consider a support assistant that answers questions from a private knowledge base and can issue refunds. The model generates reasoning and tool calls. Context supplies the system policy and retrieved help articles. Tools expose search, order lookup, and refund APIs. Orchestration decides when to retrieve, when to ask for clarification, and when to stop. Runtime isolates the refund call and enforces a timeout. Quality checks that answers cite sources and that refunds only occur when policy allows. Governance gives the refund tool a scoped credential and requires human approval above a threshold.</p>
+<p>When this system fails, the layers tell you where to look. Wrong answer? Context or model. Unauthorised refund? Tool and governance. Slow responses? Runtime or model choice. No one notices the regression? Quality layer. This diagnostic power is the real reason to learn the stack.</p>
+
+<div class="exercise"><strong>Exercise 2.1 — Layer audit.</strong> Pick an AI feature you know. Assign each of the seven layers a status: present, implicit, or missing. For every implicit or missing layer, write one sentence describing the risk that creates.</div>
+<div class="exercise"><strong>Exercise 2.2 — Boundary drawing.</strong> Draw the tool boundary for a system that can send email. List the arguments the model may supply and the checks the harness must perform before sending. Which checks can be expressed in the tool schema, and which require policy?</div>
+
+<h2>A worked example: seven layers for an expense assistant</h2>
+<p>Layer thinking pays off when you have to make concrete choices. Suppose a company wants an assistant that answers questions about its expense policy and can submit reimbursement claims. The team has a week to produce a design, and every layer needs an owner and a budget.</p>
+<p><strong>Model.</strong> The team picks a mid-size instruction-tuned model for most turns and reserves a reasoning model for disputes over ambiguous policy. Measured on 200 sample questions, the cheap model answers 88% acceptably; the reasoning model reaches 94% but costs roughly six times as much and adds about 2.5 seconds. They route only the 12% flagged as ambiguous, which keeps blended cost near the cheap model while lifting quality.</p>
+<p><strong>Context.</strong> They define three zones: a 600-token stable system message with policy rules, retrieved policy excerpts capped at 1,500 tokens, and a rolling history of the last six turns summarised beyond that. Nothing from a claim form is treated as an instruction.</p>
+<p><strong>Tool.</strong> Three tools are exposed: <code>search_policy</code> (read-only), <code>draft_claim</code> (creates a reversible draft), and <code>submit_claim</code> (irreversible above ₹5,000). The model may supply amounts and dates but never an employee ID; that comes from the session.</p>
+<p><strong>Orchestration.</strong> A deterministic skeleton handles authentication and claim validation. Inside the "answer policy question" node, a small ReAct loop decides whether to retrieve once or twice. The "submit" branch always routes to approval before it can proceed.</p>
+<p><strong>Runtime.</strong> Tools run in separate processes with a five-second timeout and scoped credentials. Submission is idempotent, keyed by a hash of the thread and step, so a retry cannot file the same claim twice.</p>
+<p><strong>Quality.</strong> The eval suite checks that every policy answer cites a section, every claim draft matches the receipt total, and no submission occurs without an approval record. Traces are sampled at 10% for human review.</p>
+<p><strong>Governance.</strong> Each tool has its own credential; the submit credential cannot read policy documents. A monthly budget of ₹8,000 triggers an alert at 70% and a hard stop at 100%. All submissions are logged with the approver's identity.</p>
+<p>The design can be written as a short layer map that reviewers can argue with:</p>
+<pre><code>layer: model       -&gt; mid-size default; reasoning on ambiguous flag (&gt;=0.6)
+layer: context     -&gt; system 600tok | retrieved &lt;=1500tok | history 6 turns
+layer: tool        -&gt; search_policy(ro) | draft_claim(rw) | submit_claim(irrev)
+layer: orchestrate -&gt; fixed skeleton | ReAct inside answer node | approval branch
+layer: runtime     -&gt; sandbox, 5s timeout, idempotency key = hash(thread,step)
+layer: quality     -&gt; citation check | amount match | approval-required assertion
+layer: govern      -&gt; per-tool creds | budget 8000 INR/mo | audit every submit
+</code></pre>
+<p>Now watch the diagnostic power. If answers start citing the wrong policy section, look at context and retrieval. If duplicate claims appear, look at runtime and idempotency. If the bill spikes, look at model routing and the ambiguity threshold. Each symptom maps to a layer, so the team argues about a specific component instead of "the AI being unreliable".</p>
+<div class="exercise"><strong>Exercise 2.3 — Add a requirement.</strong> Extend the design above with a new rule: policy answers must respect region-specific terms for employees in three countries. State which layers change, name the new metadata field you would add, and describe one new eval assertion that would catch a violation.</div>
+
+<h2>Layer boundary mistakes and trade-offs</h2>
+<p>The most expensive errors in an AI system usually happen at the seams between layers. The table below collects the ones that recur.</p>
+<table>
+<tr><th>Mistake</th><th>Why it matters</th><th>Better choice</th></tr>
+<tr><td>Putting business rules only in the prompt</td><td>A prompt can be ignored or diluted by long context; rules that must hold belong in enforceable code.</td><td>Keep policy in the tool and governance layers; use the prompt to explain it.</td></tr>
+<tr><td>Sharing one credential across all tools</td><td>A read-only search tool becomes a path to write access if the credential is over-privileged.</td><td>Issue a separate least-privilege credential per tool.</td></tr>
+<tr><td>Treating quality as a release gate</td><td>Non-deterministic behaviour drifts after release; a one-time test says little about next week.</td><td>Run evals on every prompt, model, and tool change.</td></tr>
+<tr><td>Letting orchestration retry without bound</td><td>Retries multiply cost and can duplicate side effects.</td><td>Bound retries, require idempotency, and emit a metric on exhaustion.</td></tr>
+<tr><td>Choosing a model before defining the interface</td><td>Vendor-specific SDK calls leak into every layer and make swaps expensive.</td><td>Define a thin model interface, then plug implementations behind it.</td></tr>
+</table>
+<p>There is one trade-off worth stating plainly: more layers mean more moving parts. For a prototype with one model call and no tools, seven explicit layers are overhead. Introduce rigour in proportion to consequence. The stack is a diagnostic tool and a checklist, not a ritual — use it to find the seam where a failure occurred, then fix only what that seam demands.</p>
+<div class="tip"><strong>Diagnostic habit.</strong> When something breaks, name the layer before you name the fix. "The context layer dropped the retrieved clause" leads to a different investigation than "the model is stupid", even when the observed symptom is identical.</div>
+
+<h2>Questions for a design review</h2>
+<p>Use these to test your mental model of the stack. Try to answer without referring back to the layer table.</p>
+<ol>
+<li>A support bot sometimes answers in a tone that violates company policy. Which layers could be responsible, and how would you distinguish between them?</li>
+<li>Why does prompt engineering belong to the context layer rather than the model layer? Give a consequence for change control.</li>
+<li>Describe a failure that the quality layer should catch but the governance layer would not, and one that the reverse is true for.</li>
+<li>You must add a tool that sends emails. Which checks belong in the tool schema, and which require policy enforcement outside the model's reach?</li>
+<li>In the expense-assistant design, what breaks if the runtime loses idempotency but every other layer stays the same?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>A production AI application is a stack of seven roles: model, context, tool, orchestration, runtime, quality, governance.</li>
+<li>Prompts belong to context, not to the model.</li>
+<li>Tools are the language-to-action boundary and therefore the primary security surface.</li>
+<li>Quality is a continuous layer, not a final test phase.</li>
+<li>Thinking in layers turns vague failures into specific diagnoses.</li>
+</ul>
+
+<nav><a href="1-welcome.html">&larr; Previous</a><span></span><a href="3-llms.html">Next: Large Language Models Demystified &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

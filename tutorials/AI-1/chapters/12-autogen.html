@@ -1,0 +1,137 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>12. AutoGen</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>12. AutoGen</h1>
+
+<h2>Conversation as computation</h2>
+<p>AutoGen approaches multi-agent work through conversations. Agents are "conversable": they exchange messages, call tools, and react to one another until a termination condition is met. A group chat can include a user proxy, an assistant, a critic, and a tool executor, with a manager deciding who speaks next. The model of computation is a dialogue, and many real tasks really do look like one.</p>
+<p>This framing is particularly useful for problems where nobody knows the full plan in advance. In a debugging session, the first agent reads the error, the second suggests a hypothesis, the third runs a test, and the group reacts to the result. The sequence emerges from the conversation rather than being fixed at design time.</p>
+
+<h2>Core objects</h2>
+<table>
+<tr><th>Object</th><th>Role</th></tr>
+<tr><td>Conversable agent</td><td>An entity that can send, receive, and generate messages</td></tr>
+<tr><td>User proxy</td><td>An agent that represents the human or the local execution environment</td></tr>
+<tr><td>Assistant agent</td><td>A model-driven reasoning and generation agent</td></tr>
+<tr><td>Group chat</td><td>A shared conversation with multiple participants</td></tr>
+<tr><td>Manager</td><td>A component that selects the next speaker</td></tr>
+<tr><td>Termination condition</td><td>The rule that ends the conversation</td></tr>
+</table>
+<p>The user proxy deserves special attention. It can be configured to require human input, to execute code automatically, or to ask before each execution. That choice is a security decision. Automatic code execution inside a conversation is powerful and dangerous; treat it as you would any untrusted code path.</p>
+
+<h2>Code execution and the tool loop</h2>
+<p>AutoGen became popular partly because it made tool use conversational: an agent could write code, a proxy could execute it, and the result could be returned into the dialogue. This is excellent for analysis and prototyping. In production, wrap that capability in the controls from Chapters 6 and 20: sandboxed execution, timeouts, no ambient credentials, and explicit approval for anything with side effects.</p>
+<pre><code># Pseudocode: a guarded code-execution step
+result = sandbox.run(
+    code=agent_proposed_code,
+    timeout_seconds=10,
+    network_access=False,
+    env=minimal_env
+)
+conversation.post(tool_result(summarise(result)))
+</code></pre>
+<p>Return a summary, not a raw dump. Large outputs consume context and can push earlier instructions out of the window. If the full output is needed, store it and give the agent a reference.</p>
+
+<h2>Human in the loop</h2>
+<p>Because the user proxy can require input, human participation is natural. A human can correct a wrong assumption, choose between options, or approve code before execution. Use this deliberately: specify at which points the human is consulted and what information they need. A checkpoint without context is just an interruption.</p>
+<div class="tip"><strong>Design pattern.</strong> Ask the human to approve a <em>plan</em> before execution rather than every tool call. Fewer interruptions, better oversight.</div>
+
+<h2>Termination and cost control</h2>
+<p>Conversations must end. Common conditions include a maximum number of messages, a detected final answer, a cost ceiling, or a human decision. Combine them. A model may claim to be finished while still being wrong, so pair the "final answer" signal with a validator. Track tokens per participant; a chatty critic can dominate the bill.</p>
+<p>Also watch for polite loops: agents thanking each other, restating the plan, or asking permission repeatedly. A simple detector looks at message similarity over the last few turns. When triggered, a manager should summarise and force a decision.</p>
+
+<h2>Group chat management</h2>
+<p>The manager's speaker-selection strategy matters. Round-robin is predictable but wastes turns. Model-based selection is flexible but adds cost and can favour the same agent. A hybrid works well: deterministic rules for obvious transitions, model choice only when ambiguous. Log the reason for each selection so you can debug surprising paths.</p>
+
+<h2>When AutoGen fits</h2>
+<ul>
+<li>The task is exploratory: debugging, analysis, research, or design review.</li>
+<li>You want human participation woven into the loop.</li>
+<li>Code execution is part of the workflow and can be sandboxed.</li>
+<li>You are comfortable with variable conversation paths.</li>
+</ul>
+<p>For transactional workflows with strict SLAs, a deterministic graph is usually a better fit. AutoGen's strength is open-ended problem solving, not repeatable high-throughput processing.</p>
+
+<div class="exercise"><strong>Exercise 12.1 — Group design.</strong> Design a group chat for reviewing a pull request. Define participants, the manager rule, the termination condition, and the one point where a human must approve.</div>
+<div class="exercise"><strong>Exercise 12.2 — Sandbox checklist.</strong> List six restrictions you would place on agent-generated code before executing it. Explain what threat each restriction addresses.</div>
+
+<h2>A worked example: debugging a failing data pipeline</h2>
+<p>Consider a nightly ETL job that started failing after a schema change. A data engineer wants an assistant that can investigate, propose a fix, and verify it — but nothing may be executed against production without approval. This is a natural AutoGen scenario: the investigation path is not known in advance, code execution is useful, and a human should approve the final patch. We will assemble a group chat with four participants and combine several termination conditions.</p>
+
+<h3>Participants and the manager</h3>
+<p>The group contains an assistant agent that reasons about the error, a tool executor that runs diagnostic code in a sandbox, a critic that challenges hypotheses, and a user proxy representing the engineer. A manager selects the next speaker with a hybrid rule: after a tool result, the assistant speaks next; after the assistant proposes a hypothesis, the critic speaks; the human is invited once, before any patch is applied. Round-robin would waste turns here, while pure model selection would sometimes let the critic dominate. The hybrid rule makes transitions predictable without hard-coding the whole investigation.</p>
+<pre><code>group = GroupChat(
+    agents=[assistant, executor, critic, user_proxy],
+    manager=GroupChatManager(
+        selector=hybrid_selector,
+        system_message="After a tool result, the assistant speaks. " +
+                       "After a hypothesis, the critic speaks. " +
+                       "The human is asked only before applying a patch."
+    ),
+    max_round=14
+)
+</code></pre>
+
+<h3>Sandboxed execution</h3>
+<p>The executor never runs code with ambient credentials. Every proposed snippet goes through a sandbox with a ten-second timeout, no network access, a minimal environment, and a read-only mount of the sample data. We return a summary of the result into the conversation, not a raw dump: a short stack trace and the shape of the offending dataframe. A full log is stored and referenced by ID. In an earlier trial we posted the entire log into the chat; it consumed most of the context window and the assistant started reasoning about stale lines from the beginning of the file.</p>
+<pre><code>result = sandbox.run(
+    code=proposed_snippet,
+    timeout_seconds=10,
+    network_access=False,
+    env={"PYTHONPATH": "/sandbox/lib"},
+    mounts=[("sample.parquet", "ro")]
+)
+conversation.post(tool_result(summarise(
+    {"exit": result.code, "error": result.tail(12), "log_ref": result.id}
+)))
+</code></pre>
+<p>Notice that the human proxy is configured to require input for the patch step but not for diagnostics. Approval fatigue is real: if the engineer is asked to confirm every read-only command, they will start clicking through without looking.</p>
+<p>Track tokens per participant as the conversation runs. In the debugging chat, the critic initially produced nearly as many tokens as the assistant because it restated the whole error on every turn. A simple per-agent budget made that visible, and we shortened the critic's instruction to respond only to the specific hypothesis on the table. Logging the reason for each speaker selection also helped: when the manager chose the critic three times in a row, the log showed it was reacting to the same unresolved question rather than looping arbitrarily.</p>
+
+<h3>Termination and the review checkpoint</h3>
+<p>We combine four termination conditions: a maximum of fourteen rounds, a cost ceiling of two dollars, a detected final answer that has passed validation, and a human decision at the checkpoint. The "final answer" signal alone is not trusted — the critic must confirm that the proposed patch addresses the actual schema mismatch, not just makes the test pass. If the cost ceiling is reached first, the run returns the best hypothesis so far with a "needs review" flag. Once the human approves the patch, a separate, non-conversational step applies it; the group chat itself never writes to production. That boundary is deliberate: exploratory dialogue is good at forming hypotheses and poor at being an authority for side effects.</p>
+
+<div class="exercise"><strong>Exercise 12.3 — Termination design.</strong> For the debugging chat above, write four termination conditions with concrete thresholds. Then describe a "polite loop" scenario that could occur and the detector you would add to break it.</div>
+
+<h2>Design decisions and pitfalls</h2>
+<p>Conversation-based systems fail in predictable ways. The table below names the decisions that most affect safety and cost.</p>
+<table>
+<tr><th>Decision</th><th>Risk if handled casually</th><th>Better approach</th></tr>
+<tr><td>Automatic vs. approved code execution</td><td>Untrusted generated code with ambient credentials can exfiltrate data or mutate systems.</td><td>Sandbox by default; require approval only for steps with side effects, not for every read.</td></tr>
+<tr><td>Raw tool output in the conversation</td><td>Large dumps push instructions out of the context window and confuse later reasoning.</td><td>Post a compact summary and a reference to stored full output.</td></tr>
+<tr><td>Round-robin speaker selection</td><td>Predictable but wasteful; agents speak when they have nothing to add.</td><td>Use deterministic rules for obvious transitions and model selection only when ambiguous.</td></tr>
+<tr><td>Single termination signal</td><td>A model may declare victory while wrong; a turn limit alone may cut off a good investigation.</td><td>Combine turn, cost, time, validated-answer, and human conditions.</td></tr>
+<tr><td>Approval on every tool call</td><td>Fatigue leads to rubber-stamping, which is worse than no review at all.</td><td>Ask the human to approve a plan or a patch at one meaningful checkpoint.</td></tr>
+<tr><td>Conversation used as the execution authority</td><td>A dialogue is not an audit trail or an authorisation layer; side effects are hard to govern.</td><td>Keep application of changes in a separate, validated, non-conversational step.</td></tr>
+</table>
+
+<h2>Check your understanding</h2>
+<p>Use these questions to test whether you can reason about conversational systems rather than just assemble them. Answer each in a few sentences.</p>
+<ol>
+<li>Why is the user proxy both a security decision and a usability decision? Describe a configuration that fails on both counts.</li>
+<li>In the debugging example, why is a raw log summary posted to the conversation instead of the full output, and what is stored instead?</li>
+<li>Explain why a "final answer" signal should be paired with a validator and at least one hard resource limit.</li>
+<li>What is a polite loop, and how would a manager detect and break one without ending a productive investigation early?</li>
+<li>Name a task that suits AutoGen's conversational model and a task that would be better served by a deterministic graph. What property separates them?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>AutoGen treats multi-agent work as a structured conversation.</li>
+<li>The user proxy can represent a human or a local execution environment.</li>
+<li>Code execution must be sandboxed, summarised, and often approved.</li>
+<li>Combine termination conditions and watch for polite loops.</li>
+<li>Best suited to exploratory tasks, not strict transactional pipelines.</li>
+</ul>
+
+<nav><a href="11-crewai.html">&larr; Previous</a><span></span><a href="13-mcp-fundamentals.html">Next: Model Context Protocol Fundamentals &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

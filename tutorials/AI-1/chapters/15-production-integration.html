@@ -1,0 +1,123 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>15. Production Integration Patterns</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>15. Production Integration Patterns</h1>
+
+<h2>Agents do not live alone</h2>
+<p>An agent is rarely the whole application. It sits inside a product with authentication, databases, queues, webhooks, monitoring, and business processes. The integration patterns you choose determine whether the agent behaves like a well-behaved service or a unpredictable script that occasionally locks a table.</p>
+<p>This chapter collects the patterns that recur in production systems: synchronous request–response, background jobs, event-driven triggers, streaming interfaces, and identity propagation. The goal is not to prescribe one architecture but to help you match the pattern to the workload.</p>
+
+<h2>Pattern 1: synchronous request–response</h2>
+<p>The simplest integration is an HTTP request that waits for the agent's final answer. It works for short tasks with predictable latency: classification, extraction, simple Q&amp;A. Its weakness is long agent loops. A user-facing request that can take two minutes needs timeouts, progress streaming, and a fallback message.</p>
+<p>Set a hard deadline at the gateway, a shorter deadline inside the agent, and a separate timeout for each tool. When the deadline approaches, return a partial result with a clear status rather than a generic error. Users forgive "still working" far more than a spinner that dies.</p>
+
+<h2>Pattern 2: background jobs</h2>
+<p>For tasks that can take minutes — report generation, bulk analysis, multi-step research — put the agent behind a queue. The API accepts the request, returns a job ID, and a worker performs the work. State is persisted after each step so the job can resume after a failure.</p>
+<ul>
+<li>Store the input, agent version, and prompt version with the job.</li>
+<li>Write checkpoints after each node or tool call.</li>
+<li>Make workers idempotent using a job ID and step number.</li>
+<li>Emit progress events that the UI can display.</li>
+<li>Define a dead-letter path for jobs that fail repeatedly.</li>
+</ul>
+<p>This pattern also makes evaluation easier: a completed job is a complete trace you can replay.</p>
+
+<h2>Pattern 3: event-driven triggers</h2>
+<p>Some agents should react to the world: a new support ticket, a failed deployment, a changed document. An event bus decouples the producer from the agent. The agent subscribes to relevant events, performs its work, and publishes resulting events.</p>
+<p>Event-driven agents need careful idempotency because events may be delivered more than once. Include an event ID in your processing record and skip duplicates. Also define ordering assumptions explicitly; if two events about the same entity arrive out of order, the agent should not produce conflicting actions.</p>
+
+<h2>Pattern 4: streaming interfaces</h2>
+<p>Streaming improves perceived latency and gives users visibility. Stream not only final tokens but structured progress: "searching knowledge base", "found 5 sources", "drafting answer", "awaiting approval". This is especially valuable for long agent runs where silence feels like failure.</p>
+<p>Be careful about what you stream. Intermediate reasoning may contain sensitive details or misleading half-conclusions. Many teams stream tool statuses and final answer tokens, but keep internal reasoning private. Choose deliberately.</p>
+
+<h2>Identity and permission propagation</h2>
+<p>The agent should act with the permissions of the user who invoked it, or with an explicitly defined service identity. There is no third acceptable option. If the agent uses a powerful shared credential, every user effectively gains that credential's reach.</p>
+<div class="tip"><strong>Propagation rule.</strong> Pass a signed user context into tool calls and validate it at the tool boundary. Never accept a user ID or role from model-generated text.</div>
+<p>For background jobs, the invoking user's identity must be captured at submission time and carried through the job. If permissions can change while the job runs, re-check before mutating actions. A user who lost access halfway through a long task should not have data written on their behalf afterwards.</p>
+
+<h2>Data boundaries</h2>
+<p>Define what data may enter the model context. Even with a trusted provider, sending unnecessary customer data increases risk and cost. Redact where possible, retrieve only the minimum needed, and keep raw records behind resource references. If a tool returns a full record, summarise it before placing it in context.</p>
+<p>Retention rules should cover traces as well as primary data. A trace that contains prompts, tool arguments, and outputs can be as sensitive as the database itself. Apply the same access controls and deletion policies.</p>
+
+<h2>Deployment topology</h2>
+<p>A typical production topology includes an API gateway, an orchestration service, a model gateway or provider client, tool servers, a state store, a vector store, and an observability backend. Each boundary should have a clear contract and a failure mode you can describe.</p>
+<p>Model gateways are worth considering even when you use one provider. They give you a single place to enforce budgets, log prompts, route between models, and swap providers. The same logic applies to tool gateways: centralised policy is easier to audit than policy scattered across dozens of agents.</p>
+
+<h2>Change management</h2>
+<p>Agent systems change in more ways than ordinary software: model versions, prompt versions, tool schemas, retrieval indexes, and policies. Treat each as a deployable artefact with a version number. Record all of them in every trace. When behaviour changes, you can identify which dimension moved.</p>
+<p>Rollouts should be gradual. Canary a new prompt or model for a small share of traffic and compare eval metrics and production signals. Chapter 18 covers canaries and drift detection in detail.</p>
+
+<div class="exercise"><strong>Exercise 15.1 — Pattern choice.</strong> For three features — instant translation, weekly executive summary, and real-time fraud alerting — choose request–response, background job, or event-driven. Justify each.</div>
+<div class="exercise"><strong>Exercise 15.2 — Permission audit.</strong> List every place in an agent pipeline where a user identity is established, propagated, and checked. Identify the weakest link.</div>
+
+<h2>A worked example: an invoice-processing service</h2>
+<p>A finance team receives thousands of supplier invoices as email attachments. They want an assistant that classifies each invoice, extracts line items, checks them against a purchase-order system, and flags mismatches for a human. Some steps are quick, some take minutes, and the whole flow must act with the permissions of the department that submitted the invoice. One architecture will not fit every step, so we combine four patterns deliberately.</p>
+
+<h3>Mapping steps to patterns</h3>
+<p>Classification — "is this an invoice, a receipt, or something else?" — is short and predictable, so it runs as a synchronous request–response call at the API edge with a two-second deadline. Extraction and purchase-order matching can take a minute or more, so those run as a background job: the API returns a job ID, a worker performs the steps, and progress events stream to the UI. When a mismatch is found, the worker publishes an <code>invoice.flagged</code> event to a bus; a separate approval agent subscribes to that event. This decoupling means the approval agent does not need to know anything about the extraction worker.</p>
+<pre><code>{
+  "job_id": "inv_4471", "tenant": "finance-eu",
+  "steps": ["classify", "extract", "match_po", "flag"],
+  "checkpoint": "match_po", "agent_version": "3.2.1",
+  "prompt_version": "extract-1.4", "invoker_id": "usr_981"
+}
+</code></pre>
+<p>The stored job record captures versions and the invoking user. That matters for two reasons: a completed job becomes a replayable trace for evaluation, and if permissions change mid-run we can re-check <code>invoker_id</code> before any mutating action.</p>
+
+<h3>Identity and streaming</h3>
+<p>The agent acts with the submitting user's identity, captured at submission time and carried in a signed context. Tool calls validate that context at the boundary; no user ID or role is ever taken from model-generated text. Before the worker writes a flag to the purchase-order system, it re-checks that the user still has the <code>invoice.write</code> scope — a user whose access was revoked during a long job must not have data written on their behalf. The UI streams structured progress — "extracting line items", "matched against PO", "mismatch found" — but never internal reasoning. Tool statuses and final tokens are safe to show; intermediate thoughts may contain sensitive details or misleading half-conclusions.</p>
+<pre><code>def write_flag(job, ctx):
+    if not permissions.has(ctx.user_id, "invoice.write"):
+        return dead_letter(job, reason="permission_revoked")
+    po_client.post_flag(job.mismatch, idempotency_key=job.job_id)
+</code></pre>
+<p>The dead-letter path is deliberate. A job that fails repeatedly because of a revoked permission should not spin; it goes to a queue a human can inspect. Because events may be delivered more than once, the approval agent also records each <code>invoice.flagged</code> event ID and skips duplicates.</p>
+<p>Data boundaries are part of this topology too. The extractor sees the raw invoice, but only the minimum fields needed for matching enter the model context; the full document stays behind a reference in the state store. Traces are treated as sensitive data because they contain prompts, tool arguments, and outputs, so they inherit the same access controls and deletion policy as the invoices themselves. A model gateway enforces budgets centrally, while a tool gateway centralises policy for the extraction and purchase-order servers — one place to audit rather than rules scattered across agents.</p>
+
+<h3>Topology and change management</h3>
+<p>The deployed topology has an API gateway, the orchestration service, a model gateway, tool servers for extraction and purchase-order access, a state store, an event bus, and an observability backend. The model gateway gives us one place to enforce budgets and route between models. We canary each new prompt version for five percent of invoices and compare eval metrics against the current version before widening the rollout. Because model, prompt, tool schema, and policy versions are all recorded in the job record, any behaviour change can be traced to the dimension that moved.</p>
+
+<div class="exercise"><strong>Exercise 15.3 — Boundary audit.</strong> For the invoice example, list every boundary where identity is established, propagated, or checked. Identify the single weakest link and propose a concrete control for it.</div>
+
+<h2>Decisions to make explicitly</h2>
+<table>
+<tr><th>Choice</th><th>Why it matters</th><th>Recommended stance</th></tr>
+<tr><td>Request–response for everything</td><td>Long agent loops exceed gateway deadlines and leave users staring at a dead spinner.</td><td>Use it only for short, predictable tasks; move anything that can take minutes to a job.</td></tr>
+<tr><td>Jobs without checkpoints</td><td>A failure at step eight of ten restarts the whole run, wasting time and money.</td><td>Persist state after each step and make workers idempotent by job ID and step number.</td></tr>
+<tr><td>Events without idempotency</td><td>Duplicate delivery causes duplicate side effects, such as two flags on one invoice.</td><td>Record event IDs and skip duplicates; state your ordering assumptions explicitly.</td></tr>
+<tr><td>Streaming internal reasoning</td><td>Intermediate thoughts can expose sensitive data or misleading half-conclusions.</td><td>Stream tool statuses and final tokens; keep internal reasoning private by default.</td></tr>
+<tr><td>Shared service credential</td><td>Every user effectively inherits the credential's reach, regardless of their own role.</td><td>Use the invoking user's identity or a deliberate, narrow service identity — nothing else.</td></tr>
+<tr><td>One-time permission check</td><td>A long job can outlive a user's access, writing data after revocation.</td><td>Capture identity at submission and re-check before each mutating action.</td></tr>
+<tr><td>Unversioned prompts and tools</td><td>When behaviour changes, you cannot tell which dimension moved.</td><td>Version models, prompts, tools, indexes, and policies, and record them in every trace.</td></tr>
+</table>
+
+<h2>Check your understanding</h2>
+<p>Use these questions to check that you can choose an integration pattern rather than defaulting to one. Answer each in a few sentences.</p>
+<ol>
+<li>For a weekly executive summary and a real-time fraud alert, which pattern would you choose for each, and which property of the workload decided it?</li>
+<li>Why must a background job store the invoking user's identity, and why is a single check at submission insufficient?</li>
+<li>Describe a failure in a multi-step job and explain how checkpoints and idempotency change the recovery story.</li>
+<li>What should a streaming interface show during a long agent run, and what should it deliberately hide?</li>
+<li>Name the artefacts that need version numbers in a production agent trace. What becomes possible when they are all recorded together?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Match integration pattern to latency and durability needs.</li>
+<li>Background jobs need idempotency, checkpoints, and dead-letter paths.</li>
+<li>Event-driven agents must handle duplicates and ordering.</li>
+<li>Act with the invoking user's identity or a deliberate service identity.</li>
+<li>Version models, prompts, tools, indexes, and policies together in traces.</li>
+</ul>
+
+<nav><a href="14-mcp-at-scale.html">&larr; Previous</a><span></span><a href="16-eval-fundamentals.html">Next: Evaluation Fundamentals &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

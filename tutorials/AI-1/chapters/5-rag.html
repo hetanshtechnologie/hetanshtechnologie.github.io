@@ -1,0 +1,137 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>5. Retrieval-Augmented Generation</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>5. Retrieval-Augmented Generation</h1>
+
+<h2>Why retrieval exists</h2>
+<p>A model's parameters are a compressed, outdated snapshot of the internet. They do not contain your private documents, yesterday's policy change, or the customer record in your database. Fine-tuning can change style and embed knowledge, but it is slow and expensive to keep current. Retrieval-augmented generation solves this by looking up relevant material at request time and placing it in the context window.</p>
+<p>RAG is often described as "search plus prompt". That is accurate but incomplete. A good RAG system is a pipeline with measurable quality at each stage. If the answer is wrong, you need to know whether retrieval failed to find the evidence, found it but ranked it low, or the model misread the evidence it was given.</p>
+
+<h2>The pipeline, stage by stage</h2>
+<ol>
+<li><strong>Ingest</strong> — collect documents from sources, track versions, handle deletions.</li>
+<li><strong>Parse</strong> — extract clean text from PDFs, HTML, wikis, and scanned pages.</li>
+<li><strong>Chunk</strong> — split text into passages small enough to be useful and large enough to be meaningful.</li>
+<li><strong>Embed</strong> — convert each chunk into a vector using an embedding model.</li>
+<li><strong>Index</strong> — store vectors plus metadata in a vector store or search engine.</li>
+<li><strong>Retrieve</strong> — find candidate chunks for a query, often combining keyword and vector search.</li>
+<li><strong>Rerank</strong> — reorder candidates with a stronger model or cross-encoder.</li>
+<li><strong>Compose</strong> — place selected chunks into the prompt with labels and source identifiers.</li>
+<li><strong>Generate</strong> — produce an answer that cites the evidence used.</li>
+</ol>
+<p>Every arrow in that list is a place to add evaluation. Retrieval quality is usually the dominant factor in answer quality, yet most teams spend their time tuning the final prompt. Start with retrieval.</p>
+
+<h2>Chunking is a design decision</h2>
+<p>Chunks should align with semantic boundaries: paragraphs, sections, or logical units. A fixed 500-token split that cuts a table in half will produce bad retrieval no matter how good the embedding model is. Practical guidance:</p>
+<ul>
+<li>Prefer structure-aware splitting based on headings and paragraphs.</li>
+<li>Add a small overlap between chunks so context is not lost at boundaries.</li>
+<li>Store metadata: source, title, section, effective date, access level.</li>
+<li>Keep a parent–child relationship so a retrieved sentence can be expanded to its full section.</li>
+<li>Index summaries for long documents and link them to detailed chunks.</li>
+</ul>
+<div class="tip"><strong>Access control belongs in retrieval.</strong> If a user cannot read a document, that document must never be a retrieval candidate. Filter by permission at query time, not after generation.</div>
+
+<h2>Embeddings and similarity</h2>
+<p>An embedding model maps text to a vector such that semantically similar text lands nearby. Retrieval computes a similarity score between the query vector and stored vectors. Cosine similarity is common. This works well for paraphrases and conceptual matches, but poorly for exact identifiers, error codes, and rare names. That is why hybrid retrieval matters.</p>
+<table>
+<tr><th>Method</th><th>Strong at</th><th>Weak at</th></tr>
+<tr><td>Vector search</td><td>Meaning, paraphrase, conceptual similarity</td><td>Exact tokens, numbers, acronyms</td></tr>
+<tr><td>Keyword / BM25</td><td>Exact terms, codes, names</td><td>Synonyms and conceptual queries</td></tr>
+<tr><td>Hybrid</td><td>Covering both cases</td><td>Requires score fusion tuning</td></tr>
+<tr><td>Reranking</td><td>Precision on the shortlist</td><td>Cost and latency on large candidate sets</td></tr>
+</table>
+
+<h2>Reranking and context composition</h2>
+<p>A first-stage retriever optimises recall: give me twenty plausible chunks. A reranker optimises precision: which three actually answer the question? Cross-encoders and LLM-based rerankers are slower but much more accurate than vector similarity alone. A common pattern is to retrieve 30 candidates with hybrid search, rerank to 5, and place those 5 in the prompt.</p>
+<p>Composition matters as much as selection. Label each chunk with its source and order it by relevance. Ask the model to cite source identifiers. If two chunks contradict each other, include both and instruct the model to surface the conflict rather than silently choosing one. This turns a failure into a useful answer.</p>
+
+<h2>Evaluating RAG</h2>
+<p>Measure the stages separately. Useful metrics include:</p>
+<ul>
+<li><strong>Recall@k</strong> — did the correct chunk appear in the top k results?</li>
+<li><strong>Precision@k</strong> — how much of the retrieved context was relevant?</li>
+<li><strong>Faithfulness</strong> — is every claim in the answer supported by the supplied context?</li>
+<li><strong>Answer relevance</strong> — does the answer actually address the question?</li>
+<li><strong>Abstention rate</strong> — does the system say "I don't know" when evidence is missing?</li>
+</ul>
+<p>Build a small labelled set of query–source pairs. You do not need thousands. Fifty carefully chosen queries, including adversarial and no-answer cases, will reveal more than a large random sample. Chapters 16 and 17 show how to expand this into a full harness.</p>
+
+<h2>Freshness and deletion</h2>
+<p>RAG systems rot quietly. Source documents change, pages are removed, and permissions are revoked. Your index must support updates and deletions, and deletion must be verifiable. Track a content hash or version for every chunk. On re-ingest, replace changed chunks and remove missing ones. Log the index version with each answer so you can reproduce a result.</p>
+
+<h2>Common RAG anti-patterns</h2>
+<ul>
+<li>Embedding entire documents as single vectors and wondering why retrieval is vague.</li>
+<li>Using the same embedding model for indexing and querying without checking that it is symmetric.</li>
+<li>Retrieving ten chunks and stuffing all of them into context "just in case".</li>
+<li>Allowing retrieved text to contain instructions the model might follow.</li>
+<li>Celebrating answer quality while never measuring retrieval quality.</li>
+</ul>
+
+<div class="exercise"><strong>Exercise 5.1 — Chunking comparison.</strong> Take one three-page document. Chunk it two ways: fixed 400-token windows and heading-aware sections. Ask five questions, retrieve the top three chunks in each scheme, and record which scheme found the correct evidence.</div>
+<div class="exercise"><strong>Exercise 5.2 — No-answer test.</strong> Add ten questions whose answers are definitely not in your corpus. Measure how often the system abstains. If it invents answers, add a retrieval score threshold and a prompt rule, then measure again.</div>
+
+<h2>A worked example: a policy-search assistant</h2>
+<p>Imagine an internal assistant that answers questions from 1,200 HR policy documents. The team has 60 days, a corpus that changes weekly, and a requirement that every answer cite a document and section. They decide to build the pipeline stage by stage and measure each one before moving on.</p>
+<p><strong>Ingest and parse.</strong> Documents arrive as PDFs and wiki pages. Parsing yields clean text plus metadata: source id, title, section path, effective date, and access level. About 5% of pages are scans and need OCR; the team flags those for manual review rather than trusting the output silently.</p>
+<p><strong>Chunk.</strong> A first attempt uses fixed 500-token windows with 50-token overlap. On 40 test questions, recall@5 is 71%. Switching to heading-aware chunks averaging 320 tokens raises recall@5 to 86%, because policy tables and numbered clauses stay intact. They keep a parent–child link so a matched sentence can be expanded to its full section at composition time.</p>
+<p><strong>Retrieve and rerank.</strong> Hybrid search combines BM25 and vector similarity. On exact-code queries such as "form HR-42", BM25 alone finds the right chunk; on paraphrases like "can I work from a café abroad", the vector side wins. The team fuses the two lists with reciprocal rank fusion, takes the top 30, and reranks to 5 with a cross-encoder. Reranking lifts precision@5 from 0.6 to 0.82 and adds about 180 ms.</p>
+<p><strong>Compose and generate.</strong> Each of the five chunks is labelled with source id, section, and effective date. The system prompt instructs the model to cite these identifiers and to surface contradictions rather than silently choosing one. A retrieval score threshold of 0.72 causes the system to abstain when no strong evidence exists, which cuts invented answers on the no-answer test set from 22% to 3%.</p>
+<p><strong>Freshness.</strong> Every chunk carries a content hash. A weekly job re-ingests sources, replaces changed chunks, deletes missing ones, and records an index version. Answers log that version, so a stale result from last month can be reproduced during an investigation.</p>
+<p>The configuration fits in a short block:</p>
+<pre><code>corpus: 1200 docs | weekly refresh | hash-based diff
+chunk: heading-aware, avg 320tok, overlap 40tok
+retrieve: hybrid(BM25 + vector), rrf_k=60, top 30
+rerank: cross-encoder -&gt; top 5, +180ms
+threshold: score &lt; 0.72 -&gt; abstain
+compose: label(source_id, section, effective_date)
+eval: recall@5 0.86 | precision@5 0.82 | faithfulness 0.93
+</code></pre>
+<p>The numbers tell a story: most of the gain came from chunking and hybrid retrieval, not from the final prompt. That is typical, and it is why this chapter insists on measuring stages separately. A team that only tunes the prompt would have missed both improvements entirely.</p>
+<div class="exercise"><strong>Exercise 5.3 — Find the failing stage.</strong> A user asks a question whose answer exists in the corpus, but the assistant says it does not know. List three stage-level hypotheses, from parsing through generation, and describe one measurement that would confirm or reject each.</div>
+
+<h2>Retrieval design trade-offs</h2>
+<p>Every retrieval decision buys one property at the cost of another. Naming the trade-off out loud makes the choice reviewable.</p>
+<table>
+<tr><th>Trade-off</th><th>Why it is tempting</th><th>What to consider instead</th></tr>
+<tr><td>Smaller chunks</td><td>Sharper similarity scores and less irrelevant text.</td><td>Too small and the answer loses its surrounding context; keep a parent–child link.</td></tr>
+<tr><td>More chunks in context</td><td>Feels safer because "the answer is probably in there somewhere".</td><td>Extra chunks dilute attention and raise cost; rerank to a few and measure precision.</td></tr>
+<tr><td>Vector search only</td><td>Simple to build and handles paraphrases well.</td><td>Fails on exact codes and names; add BM25 for hybrid coverage.</td></tr>
+<tr><td>Filtering permissions after generation</td><td>Easier to implement as a final check.</td><td>Too late — the restricted text already entered the prompt; filter at query time.</td></tr>
+<tr><td>Skipping deletion tracking</td><td>Re-ingest seems sufficient as long as new documents are added.</td><td>Deleted or revoked documents persist silently; verify deletion with content hashes.</td></tr>
+</table>
+<p>Freshness deserves the same scrutiny as accuracy. A retrieval system that was correct last quarter can be quietly wrong today if a policy was replaced and the old chunk was never removed. Schedule a weekly reconciliation job that compares source hashes against the index, and alert on unexpected additions, deletions, or unchanged sources that should have changed. Record the index version with each answer so a reported error can be reproduced against the exact corpus state that produced it. Without that record, a complaint that "the assistant quoted the old rule" is nearly impossible to investigate.</p>
+<p>One more subtlety: retrieved text is untrusted data, not instruction. Delimit it and label it, but do not imagine that delimiters are a security boundary. Real protection lives in tool permissions and output checks, which are covered in later chapters.</p>
+<div class="note"><strong>Measure the retriever first.</strong> If retrieval recall is 70%, no prompt can lift answer accuracy beyond that ceiling. Fix the ceiling before polishing the sentence that sits on top of it.</div>
+
+<h2>Questions to test your pipeline thinking</h2>
+<p>Use these as a self-check on RAG design. Try to answer each from memory before looking back.</p>
+<ol>
+<li>A user asks about error code "E-4471" and retrieval returns unrelated text. Which search method would you add, and why does vector similarity struggle here?</li>
+<li>Explain why recall@5 and faithfulness can move in opposite directions when you change chunk size.</li>
+<li>Why must access-level filtering happen before generation rather than after it? What is the consequence of getting this wrong?</li>
+<li>Your index contains a document that was legally deleted last month. Name two mechanisms that should have prevented this and one log field that would help you investigate.</li>
+<li>Give a scenario where surfacing a contradiction between two retrieved chunks is more useful than silently choosing one.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>RAG supplies fresh, private evidence at request time.</li>
+<li>Chunking, metadata, and access filtering determine retrieval quality.</li>
+<li>Hybrid search plus reranking usually beats vector search alone.</li>
+<li>Evaluate retrieval and generation separately.</li>
+<li>Freshness and deletion are operational requirements, not optional polish.</li>
+</ul>
+
+<nav><a href="4-prompting.html">&larr; Previous</a><span></span><a href="6-tool-calling.html">Next: Tool Calling and Function Execution &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>

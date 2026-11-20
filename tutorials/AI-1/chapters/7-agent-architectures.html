@@ -1,0 +1,114 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>7. Agent Architectures and Control Flow</title><link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>7. Agent Architectures and Control Flow</h1>
+
+<h2>What we mean by architecture</h2>
+<p>An agent architecture is a decision about who controls the next step. At one extreme, the developer writes every transition and the model only fills in content. At the other, the model chooses actions freely within a toolset. Most useful systems sit between these extremes: a deterministic skeleton with model-driven decisions inside carefully chosen nodes.</p>
+<p>Choosing an architecture is not a philosophical exercise. It determines testability, latency, cost, and failure modes. A fully deterministic pipeline is cheap and predictable but brittle when input varies. A fully autonomous agent is flexible but hard to guarantee. Good engineering means placing autonomy where it pays for itself.</p>
+
+<h2>Pattern 1: the ReAct loop</h2>
+<p>ReAct — reason and act — interleaves short reasoning text with tool calls. The model states what it is trying to do, calls a tool, observes the result, and repeats. Its strength is transparency: the trace reads like a work log. Its weakness is verbosity, because reasoning tokens cost money and can drift.</p>
+<p>ReAct works well for exploratory tasks: debugging, research, and situations where the next step genuinely depends on what the last step returned. It is a poor fit for high-volume classification where a single call would suffice.</p>
+
+<h2>Pattern 2: planner–executor</h2>
+<p>A planner breaks a goal into steps; an executor carries them out. The planner can be a stronger model called once, while the executor is a cheaper model called many times. This separation has two benefits: planning gets the reasoning budget it deserves, and execution can be validated step by step.</p>
+<p>The risk is stale plans. If the world changes during execution, the planner's assumptions may no longer hold. Mature implementations allow the executor to flag a failed assumption and trigger replanning, rather than blindly continuing.</p>
+
+<h2>Pattern 3: reflection and critique</h2>
+<p>A generator produces an answer; a critic evaluates it against criteria and requests revision. This improves quality on writing, code, and analysis tasks, but only if the critic has a reliable standard. A vague "is this good?" critique tends to produce superficial changes. A rubric-based critique — checks citation, tone, completeness, and constraint satisfaction — produces useful signal.</p>
+<p>Reflection has diminishing returns and real cost. Two rounds are often enough; five rounds usually rewrite the same sentences. Chapter 19 explores why self-improvement loops plateau.</p>
+
+<h2>Pattern 4: router and specialists</h2>
+<p>A router examines the request and sends it to a specialist agent or tool. This keeps each specialist's context small and lets you use different models for different work. A support system might route billing questions to a policy assistant, technical issues to a diagnostics agent, and abusive messages to a safety handler.</p>
+<p>Routing can be deterministic (rules, keywords), model-based, or a cascade: cheap rules first, model fallback for ambiguity. Measure routing accuracy separately from answer quality. If the wrong specialist receives the request, even a perfect specialist produces a bad outcome.</p>
+
+<h2>Pattern 5: multi-agent collaboration</h2>
+<p>Multiple agents can divide labour: researcher, reviewer, writer; or planner, coder, tester. Collaboration resembles a team, with the same benefits and costs. It allows specialisation and parallel work, but it adds communication overhead, duplicated context, and new failure modes such as agents agreeing on a shared misconception.</p>
+<table>
+<tr><th>Pattern</th><th>Use when</th><th>Watch for</th></tr>
+<tr><td>ReAct</td><td>Next step depends on observations</td><td>Verbose traces, drifting goals</td></tr>
+<tr><td>Planner–executor</td><td>Task decomposes cleanly</td><td>Stale plans</td></tr>
+<tr><td>Reflection</td><td>Quality criteria can be stated</td><td>Superficial revisions, cost</td></tr>
+<tr><td>Router</td><td>Distinct request types</td><td>Misrouting</td></tr>
+<tr><td>Multi-agent</td><td>Genuine parallel specialisation</td><td>Context duplication, groupthink</td></tr>
+</table>
+
+<h2>State is the backbone</h2>
+<p>Whatever pattern you choose, state holds the system together. State includes the conversation, collected facts, plan status, tool results, and control flags such as "awaiting approval". Treat state as explicit data with a defined shape, not as whatever happens to be in the message list.</p>
+<p>Explicit state enables pause and resume, human review, replay in evaluation, and debugging. It also makes checkpointing possible: persist state after each step so a crash does not restart the whole task. Part II's frameworks differ largely in how they help you model and persist state.</p>
+
+<h2>Human in the loop as an architectural element</h2>
+<p>Human involvement is not a UI afterthought. It is a control-flow branch. The system reaches a node where it must wait for approval, a correction, or additional information. That branch needs a timeout, an audit record, and a resumption path. Designing it late usually means bolting a form onto an agent that was never built to pause.</p>
+<div class="tip"><strong>Design rule.</strong> If an action is irreversible or externally visible, assume it needs a human checkpoint. It is much easier to remove a checkpoint later than to add one after an incident.</div>
+
+<h2>Choosing autonomy deliberately</h2>
+<p>A useful exercise is to label each step of your workflow as <em>fixed</em>, <em>bounded choice</em>, or <em>open choice</em>. Fixed steps are ordinary code. Bounded choice means the model picks from a small, validated set. Open choice means the model can generate a novel action. Keep open choices rare and surround them with validation. This is how you get the flexibility people want from agents without giving up the reliability businesses require.</p>
+
+<div class="exercise"><strong>Exercise 7.1 — Pattern selection.</strong> For three tasks — summarising a document, debugging a failing build, and processing insurance claims — choose an architecture pattern. Justify each choice with one sentence about cost and one about failure risk.</div>
+<div class="exercise"><strong>Exercise 7.2 — State shape.</strong> Define the state object for a refund agent. Include conversation, collected facts, approval status, attempt count, and a field that lets you replay a trace deterministically.</div>
+
+<h2>Case study: insurance-claims triage</h2>
+<p>A claims team receives about 900 submissions a day. Each claim includes a description, photographs, and a repair estimate. Today, humans sort every claim into three buckets: auto-approve under ₹10,000, investigate, or escalate to a specialist. The team wants to automate the first bucket while keeping humans in charge of the other two. This is a good architecture problem because the cost of a wrong auto-approval is high and the volume makes manual review expensive.</p>
+<p><strong>Step 1: label the steps.</strong> They map the workflow: extract fields, check policy rules, assess fraud signals, decide bucket, act. Extraction and rule checks are fixed code. Fraud assessment needs judgement and is bounded choice — the model picks from three risk levels with reasons. Only the final bucket decision is model-driven, and even it is constrained to three values.</p>
+<p><strong>Step 2: choose the pattern.</strong> A router sends claims to one of two specialists. The "straightforward" specialist uses a single model call with a schema and a confidence score. Anything below 0.85 confidence, or any claim over ₹8,000, goes to the "investigation" specialist, which uses a short ReAct loop to retrieve policy clauses and inspect the estimate. This keeps the expensive loop to roughly 18% of claims.</p>
+<p><strong>Step 3: add a critic, carefully.</strong> For auto-approval candidates, a second model call checks three rubric items: does the estimate match the description, are all required fields present, and is the policy rule cited correctly. Claims failing any item are routed to a human. The critic adds about 0.6 seconds and ₹0.9 per reviewed claim but prevents the costly class of errors the team cares about.</p>
+<p><strong>Step 4: design state for replay.</strong> Every claim gets a state object that records the routed specialist, the risk level with reasons, the critic's scores, and the final bucket. Because the state is explicit, a disputed decision can be replayed in evaluation with the same inputs, and a human reviewer can see exactly which node made the call.</p>
+<p><strong>Step 5: place the human checkpoint.</strong> Auto-approval is the only autonomous action, and it is limited to ₹10,000. Everything else ends at a node that writes a pending-review record and pauses. The resumption path is a new invocation with the reviewer's decision written into state.</p>
+<p>The control flow reads as a small state machine:</p>
+<pre><code>intake -&gt; extract(fixed) -&gt; rules(fixed) -&gt; route
+route -- confident &amp;&amp; amount &lt;= 8000 --&gt; fast_specialist
+route -- otherwise --&gt; investigation(ReAct, max 4 rounds)
+fast_specialist -&gt; critic(rubric: 3 checks)
+critic -- all pass --&gt; auto_approve(&lt;= 10000 INR)
+critic -- any fail --&gt; pending_human
+investigation -&gt; pending_human | specialist_queue
+state: {claim_id, route, risk, reasons[], critic{}, bucket, reviewer}
+</code></pre>
+<p>Notice what the team did not do: they did not build a crew of agents holding meetings. They placed autonomy in exactly one bounded decision, surrounded it with deterministic checks, and kept humans where mistakes are expensive. That is architecture as an engineering choice rather than a fashion statement.</p>
+<div class="exercise"><strong>Exercise 7.3 — Move the boundary.</strong> Suppose regulations change so that auto-approval is capped at ₹3,000. Which nodes change, which metrics would you re-measure, and what happens to the investigation specialist's workload?</div>
+
+<h2>Architecture trade-offs to make explicitly</h2>
+<p>Every pattern in this chapter buys something and costs something. The table makes those trades visible before you commit to one.</p>
+<table>
+<tr><th>Choice</th><th>Why teams make it</th><th>Cost and alternative</th></tr>
+<tr><td>Fully autonomous ReAct everywhere</td><td>Flexibility and a readable reasoning trace.</td><td>Verbose, slow, and hard to guarantee; use fixed steps for deterministic work.</td></tr>
+<tr><td>Reflection with five rounds</td><td>More rounds feel like more quality.</td><td>Most gains appear in the first two; cap rounds and measure each one.</td></tr>
+<tr><td>Many specialised agents</td><td>Specialisation sounds more accurate.</td><td>Context duplication and groupthink; prefer one agent with a good router.</td></tr>
+<tr><td>Stale plans in planner–executor</td><td>Planning once is efficient.</td><td>The world changes during execution; let executors flag failed assumptions and replan.</td></tr>
+<tr><td>Human approval bolted on at the UI</td><td>Faster to demo.</td><td>The agent cannot pause or resume cleanly; model approval as a graph branch from the start.</td></tr>
+</table>
+<p>Autonomy labels should be revisited after deployment, not just during design. A step you assumed was predictable may start producing novel inputs as traffic grows, and a step you feared may prove routine. Track how often each bounded-choice node falls back to a default or asks for human help; a high fallback rate usually means the step should be handled by fixed code, while a rate near zero suggests the model's discretion is not adding much. These numbers turn an abstract debate about "how agentic should we be" into a measurable tuning problem.</p>
+<p>The common thread is that intelligence should be spent where uncertainty is high. If a step has a deterministic answer, code it. If it has a small set of valid answers, constrain the model to that set. Reserve open-ended generation for the rare step where the space of reasonable actions really is large.</p>
+<div class="note"><strong>Measure routing separately.</strong> In a routed architecture, a perfect specialist receiving the wrong request still produces a bad outcome. Track routing accuracy as its own metric so you do not blame the specialist for a router mistake.</div>
+
+<h2>Understanding the control-flow choices</h2>
+<p>Use these questions to test whether you can reason about architecture rather than name patterns. Short written answers work best.</p>
+<ol>
+<li>Why is a fixed workflow a reasonable choice for a balance-enquiry bot but a poor one for exploratory debugging?</li>
+<li>In the claims case study, what would break if the critic ran after auto-approval instead of before it?</li>
+<li>Explain how explicit state makes human review and deterministic replay possible. What would be missing if state lived only in the message list?</li>
+<li>Describe one failure unique to multi-agent collaboration that would not occur in a single-agent system with the same tools.</li>
+<li>Give a step in your own workflow that you would label fixed, bounded, or open, and justify the label in one sentence each.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Architecture is a decision about who controls the next step.</li>
+<li>ReAct, planner–executor, reflection, routing, and collaboration solve different problems.</li>
+<li>Explicit state enables checkpointing, replay, and human review.</li>
+<li>Human checkpoints are control-flow branches, not UI decorations.</li>
+<li>Keep open-ended model choices rare and bounded.</li>
+</ul>
+
+<nav><a href="6-tool-calling.html">&larr; Previous</a><span></span><a href="8-langgraph.html">Next: LangGraph Deep Dive &rarr;</a></nav>
+</div>
+<script src="../../js/progress.js"></script>
+</body></html>
