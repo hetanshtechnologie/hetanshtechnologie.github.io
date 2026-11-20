@@ -58,7 +58,8 @@ HEAD_SCRIPTS = """<script async src="https://pagead2.googlesyndication.com/pagea
 
 
 def shell(title: str, body: str, *, css_href: str | None = None,
-          inline_css: str | None = None, scripts: str = "") -> str:
+          inline_css: str | None = None, scripts: str = "",
+          imgroot: str = "../../") -> str:
     if css_href is not None:
         head_css = f'<link rel="stylesheet" href="{css_href}">'
     else:
@@ -66,9 +67,9 @@ def shell(title: str, body: str, *, css_href: str | None = None,
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
-<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
-<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="{imgroot}images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="{imgroot}images/favicon-16.png">
+<link rel="apple-touch-icon" href="{imgroot}images/apple-touch-icon.png">
 {HEAD_SCRIPTS}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -166,11 +167,13 @@ def build_chapters(paths: list[Path]) -> None:
         scripts = (
             '<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>\n'
             '<script src="../../js/feedback.js"></script>\n'
+            '<script src="../../js/access.js"></script>\n'
             '<script src="../../js/progress.js"></script>\n'
             '<script src="../../../js/analytics-tracker.js" defer></script>'
         )
         (CHAPTERS / f"{p.stem}.html").write_text(
-            shell(title, body, css_href="../styles.css", scripts=scripts),
+            shell(title, body, css_href="../styles.css", scripts=scripts,
+                  imgroot="../../../"),
             encoding="utf-8",
         )
 

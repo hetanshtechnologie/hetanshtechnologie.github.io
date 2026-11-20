@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 25 — Performance, Reliability, and Cost Optimization</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 25 — Performance, Reliability, and Cost Optimization</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Analyze performance, reliability, and cost as interconnected system qualities rather than isolated targets.</li>
+    <li>Identify common drivers of latency, failure, and spend in model, retrieval, tool, and orchestration layers.</li>
+    <li>Apply optimization strategies such as routing, caching, context control, batching, and graceful degradation appropriately.</li>
+    <li>Use evidence from metrics, traces, and evaluations to prioritize optimizations with real impact.</li>
+    <li>Balance efficiency improvements against quality, safety, and operational risk.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>The optimization triad: fast, dependable, affordable</h3>
+  <p>Production AI systems must deliver useful outcomes within acceptable time and budget while behaving dependably under real conditions. Performance, reliability, and cost are tightly coupled: reducing latency by adding parallel calls can increase spend and failure modes; cutting cost by shrinking context can harm quality; improving reliability with retries and checks can add delay. Effective optimization treats these qualities as a triad with explicit trade-offs rather than independent goals to maximize in isolation.</p>
+  <p>Optimization begins with requirements. Different workflows tolerate different latency, error rates, and cost envelopes. An interactive assistant may prioritize responsiveness, while an offline analysis pipeline may prioritize throughput and cost efficiency. A high-impact decision-support workflow may prioritize correctness and controlled failure behavior over minimum latency. Clear targets—such as response-time thresholds, acceptable fallback rates, and budget per task—enable principled decisions and prevent local optimizations from undermining system intent.</p>
+  <p>Evidence should guide where to optimize. Profiling end-to-end traces often reveals that a small number of steps dominate latency or cost. Addressing the true bottleneck yields more value than broad, speculative tuning. Likewise, reliability improvements should focus on observed failure modes rather than hypothetical ones. Optimization without measurement risks complexity with little benefit.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Choose optimizations that fit the constraint stated in the scenario. The “best” technique depends on whether the priority is latency, quality, reliability, cost, or a balance.</p>
+  </div>
+
+  <h3>Drivers of latency and throughput</h3>
+  <p>Latency in AI workflows accumulates across stages: input processing, retrieval, model inference, tool calls, validation, and post-processing. Model-related factors include input and output size, selected model capability, and concurrency limits. Retrieval latency depends on index performance, query complexity, and candidate/reranking depth. Tool latency reflects external dependencies and network conditions. Orchestration choices—sequential versus parallel steps, retries, and synchronous waits—also shape end-to-end response time.</p>
+  <p>Throughput concerns how much work the system can handle over time. Bottlenecks may arise from rate limits, resource contention, or inefficient pipelines. Improving throughput can involve batching suitable workloads, reducing unnecessary work per request, caching reusable artifacts, and scaling components appropriately. However, throughput gains should not degrade per-request correctness or exceed downstream dependency capacity, which can trigger cascading failures.</p>
+
+  <table>
+    <tr>
+      <th>Latency/capacity driver</th>
+      <th>Typical symptom</th>
+      <th>Potential optimization</th>
+      <th>Trade-off to watch</th>
+    </tr>
+    <tr>
+      <td>Large prompts/context</td>
+      <td>Slow responses, high token cost</td>
+      <td>Context curation, compaction, retrieval selectivity</td>
+      <td>Risk of omitting needed information</td>
+    </tr>
+    <tr>
+      <td>Heavy retrieval/reranking</td>
+      <td>Delay before generation</td>
+      <td>Tune candidate counts, filters, staged retrieval</td>
+      <td>Possible recall/precision impact</td>
+    </tr>
+    <tr>
+      <td>Slow external tools</td>
+      <td>Long waits or timeouts</td>
+      <td>Timeouts, async patterns, fallbacks</td>
+      <td>Reduced completeness or freshness</td>
+    </tr>
+    <tr>
+      <td>Overpowered routing</td>
+      <td>Unnecessary cost and delay</td>
+      <td>Task-appropriate model routing</td>
+      <td>Quality risk on complex cases</td>
+    </tr>
+    <tr>
+      <td>Repeated identical work</td>
+      <td>Avoidable compute and spend</td>
+      <td>Caching and preprocessing reuse</td>
+      <td>Staleness and invalidation complexity</td>
+    </tr>
+  </table>
+
+  <h3>Reliability patterns and graceful degradation</h3>
+  <p>Reliability is the ability to deliver acceptable behavior despite variability and faults. In AI systems, failures include not only outages and exceptions but also quality failures, timeouts, and unsafe or invalid outputs. Reliability engineering combines prevention, detection, and response: validate inputs, constrain behavior, monitor signals, and handle failures predictably. No single mechanism ensures reliability; layered controls and clear fallback strategies are required.</p>
+  <p>Common patterns include timeouts to bound waiting, retries with backoff for transient errors, circuit breakers to protect dependencies, and idempotency for safe repetition. For AI-specific behavior, schema validation, groundedness checks, and escalation paths reduce the impact of incorrect outputs. <strong>Graceful degradation</strong> provides reduced but safe functionality when components fail—for example, returning a partial answer, using cached non-transactional knowledge with disclosure, or handing off to human review. Degradation policies must align with risk: critical transactional claims should not be fabricated when live data is unavailable.</p>
+  <p>Reliability also involves managing variability. Model outputs can differ across runs; external systems can fluctuate. Designing for idempotent workflows, explicit state tracking, and observable fallbacks helps maintain consistent user experience. Testing under failure conditions—such as dependency timeouts or malformed inputs—builds confidence that safeguards work as intended.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Adding retries everywhere without considering idempotency or user impact. Retries can amplify load, increase latency, and duplicate side effects if not controlled.</p>
+  </div>
+
+  <h3>Cost drivers and efficiency strategies</h3>
+  <p>Cost in AI systems arises from model usage (often related to tokens and capability tier), retrieval and storage, tool/service calls, and operational overhead such as logging and evaluation. Inefficiencies compound at scale: verbose prompts, unnecessary high-capability routing, repeated retrieval of unchanged data, and low-value context all increase spend. Understanding unit economics—cost per successful task or per user outcome—provides a clearer view than raw infrastructure cost alone.</p>
+  <p>Efficiency strategies should preserve required quality. Context control reduces token usage by including only relevant information. Model routing assigns simpler tasks to efficient paths and reserves higher-capability processing for cases that need it. Caching and preprocessing reuse avoid repeated computation. Batching suits asynchronous workloads. Output constraints can reduce unnecessary verbosity. Each strategy requires safeguards: routing needs quality monitoring, caching needs invalidation, and compaction needs preservation of critical details.</p>
+  <p>Cost optimization is most effective when paired with value assessment. Spending more may be justified for high-impact tasks where accuracy or risk reduction matters; spending less may be appropriate for low-risk, high-volume tasks if quality remains acceptable. Decisions should be revisited as usage patterns, models, and requirements evolve.</p>
+
+  <table>
+    <tr>
+      <th>Strategy</th>
+      <th>Primary benefit</th>
+      <th>Best fit</th>
+      <th>Safeguard</th>
+    </tr>
+    <tr>
+      <td>Model routing</td>
+      <td>Balance quality and spend</td>
+      <td>Mixed-complexity workloads</td>
+      <td>Monitor segmented quality</td>
+    </tr>
+    <tr>
+      <td>Prompt/context trimming</td>
+      <td>Lower latency and tokens</td>
+      <td>Bloated or redundant contexts</td>
+      <td>Preserve critical constraints/evidence</td>
+    </tr>
+    <tr>
+      <td>Caching/reuse</td>
+      <td>Avoid repeated work</td>
+      <td>Stable instructions and data</td>
+      <td>Freshness and scope-aware keys</td>
+    </tr>
+    <tr>
+      <td>Batching</td>
+      <td>Throughput efficiency</td>
+      <td>Non-urgent offline jobs</td>
+      <td>Respect latency requirements</td>
+    </tr>
+    <tr>
+      <td>Graceful degradation</td>
+      <td>Maintain safe service under faults</td>
+      <td>Dependency variability</td>
+      <td>Risk-aligned fallback policies</td>
+    </tr>
+  </table>
+
+  <h3>Evidence-based tuning and governance</h3>
+  <p>Optimizations should be evaluated against the same multidimensional criteria used elsewhere: task quality, safety, latency, reliability, and cost. A change that reduces token spend but increases unsupported claims is not a net improvement. Dashboards and traces provide visibility into effects, while controlled evaluations confirm impact on representative cases. Rollouts can be staged to limit risk, with clear rollback criteria if key indicators regress.</p>
+  <p>Governance ensures optimizations remain aligned with policy and user expectations. Routing rules, cache policies, timeout settings, and fallback behaviors encode assumptions that may become outdated. Periodic review—especially after traffic growth, new features, or provider changes—helps keep the system within targets. Documenting trade-offs and decisions supports transparency and future maintenance.</p>
+
+  <pre><code class="language-yaml">optimization_profile:
+  targets:
+    p95_latency_ms: 4000
+    task_success_rate: ">= baseline_segmented"
+    max_cost_per_task_usd: 0.03
+  levers:
+    routing:
+      simple_tasks: "efficient_model"
+      complex_tasks: "higher_capability_model"
+    context:
+      max_evidence_chunks: 5
+      compaction: "after_phase_change"
+    reuse:
+      prompt_prefix_cache: true
+      retrieval_cache_ttl_minutes: 20
+  reliability:
+    timeouts_ms:
+      retrieval: 1500
+      tool_call: 2000
+    fallback:
+      non_transactional: "cached_with_disclosure"
+      transactional: "report_unavailable_no_guess"</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Identify the single largest contributor to latency or cost in a workflow trace. Propose one targeted change and define which quality metric you must monitor to ensure no harmful regression.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>An internal research assistant helps analysts summarize findings from multiple sources. Usage has grown, and the team faces three pressures: response times have increased, monthly operating cost is rising, and occasional timeouts from an external lookup service cause incomplete answers. Leadership wants faster and cheaper responses but insists that summaries remain accurate and clearly grounded in available sources.</p>
+
+  <h3>Analysis</h3>
+  <p>Trace analysis shows that large retrieved contexts and long generated summaries drive much of the latency and token cost. All requests are routed to a high-capability model even when questions are straightforward. External lookup timeouts are handled inconsistently, sometimes leading to partial answers without explanation. These findings indicate multiple targeted opportunities rather than a single fix: control context size, route by task complexity, and define reliable fallback behavior for dependency failures.</p>
+  <p>Optimizations must preserve grounding and quality. Aggressive trimming or cheaper routing could reduce accuracy on complex synthesis tasks. Caching stable instruction prefixes and reusable preprocessing may save cost with low risk. Timeout and fallback policies must avoid presenting unavailable external information as current. Success should be measured with segmented quality checks, latency percentiles, timeout handling correctness, and cost per completed task.</p>
+
+  <h3>Resolution</h3>
+  <p>The team implements selective routing: simple lookup-and-summarize requests use an efficient path, while multi-source synthesis requests use a higher-capability path. Retrieval selection is tightened to prioritize the most relevant, diverse chunks within a fixed budget, and summaries are constrained to required sections to limit verbosity. Stable prompt segments are cached, and preprocessing artifacts are reused for unchanged sources.</p>
+  <p>For external lookup timeouts, the assistant returns available grounded findings, clearly states which external check could not be completed, and avoids guessing. Monitoring tracks latency, cost, groundedness, and fallback frequency by request type. Results show improved response times and reduced cost for simple requests without measurable loss in synthesis quality for complex cases, while timeout handling becomes consistent and transparent.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Optimizing a single metric (such as cost) without evaluating impact on quality, safety, or user outcomes.</li>
+    <li>Applying broad changes without profiling to identify the true latency or cost bottlenecks.</li>
+    <li>Using retries, fallbacks, or caching without considering idempotency, correctness, and staleness risks.</li>
+    <li>Routing all tasks to one model tier regardless of complexity and requirements.</li>
+    <li>Failing to monitor segmented effects, allowing regressions in critical cases to be hidden by averages.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Performance, reliability, and cost are interdependent qualities that must be balanced against explicit requirements.</li>
+    <li>Latency and spend are driven by context size, retrieval depth, model routing, tool dependencies, and repeated work.</li>
+    <li>Reliability depends on layered controls, safe failure handling, and graceful degradation aligned with risk.</li>
+    <li>Efficiency techniques—routing, context control, caching, batching—require safeguards to protect correctness and freshness.</li>
+    <li>Evidence-based, segmented measurement and governance ensure optimizations deliver real and durable value.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>Why should performance, reliability, and cost be considered together?</p>
+      <p>A. Because improving one never affects the others<br>
+      B. Because changes in one area often create trade-offs in the others<br>
+      C. Because cost is irrelevant in production systems<br>
+      D. Because reliability eliminates the need for measurement</p>
+    </li>
+    <li>
+      <p>Which action most directly reduces unnecessary token cost in a bloated prompt?</p>
+      <p>A. Adding more retrieved chunks by default<br>
+      B. Curating context to include only relevant, high-value information<br>
+      C. Disabling all validation checks<br>
+      D. Increasing output verbosity</p>
+    </li>
+    <li>
+      <p>When is graceful degradation appropriate?</p>
+      <p>A. When a dependency fails and the system must respond safely within defined limits<br>
+      B. When fabricating missing transactional data is convenient<br>
+      C. Only when no users are affected<br>
+      D. As a replacement for all reliability controls</p>
+    </li>
+    <li>
+      <p>What is a key risk of model routing based solely on cost?</p>
+      <p>A. Improved quality on complex tasks<br>
+      B. Under-serving complex cases that require higher capability<br>
+      C. Guaranteed latency reduction in all scenarios<br>
+      D. Automatic grounding improvements</p>
+    </li>
+    <li>
+      <p>Which evidence best identifies a true optimization bottleneck?</p>
+      <p>A. Assumptions without measurement<br>
+      B. End-to-end traces and metrics showing where time or cost is concentrated<br>
+      C. A single user comment unrelated to patterns<br>
+      D. The number of features deployed</p>
+    </li>
+    <li>
+      <p>How should caching be applied in a system with changing source data?</p>
+      <p>A. Cache everything indefinitely<br>
+      B. Use scope-aware keys and invalidation/freshness controls aligned to change rates<br>
+      C. Avoid any measurement of hit rates<br>
+      D. Ignore authorization differences between users</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Optimizations often involve trade-offs across speed, dependability, and spend. A, C, and D are incorrect.</li>
+    <li><strong>Correct: B.</strong> Relevant, curated context reduces unnecessary tokens and latency. A and D increase usage, and C harms reliability.</li>
+    <li><strong>Correct: A.</strong> Degradation should provide safe, bounded behavior during faults. B is unsafe, and C and D mischaracterize its role.</li>
+    <li><strong>Correct: B.</strong> Cost-only routing can harm quality on tasks needing greater capability. A, C, and D are not assured outcomes.</li>
+    <li><strong>Correct: B.</strong> Traces and metrics reveal actual hotspots for targeted optimization. A, C, and D lack sufficient evidence.</li>
+    <li><strong>Correct: B.</strong> Correctness-aware caching requires appropriate keys, invalidation, and authorization considerations. A, C, and D create staleness or security risks.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 25.</em></p>
+
+  <nav>
+    <a href="24-experiments-diagnosis-and-hallucinations.html">&larr; Previous</a>
+    <a href="26-failures-screening-and-human-oversight.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

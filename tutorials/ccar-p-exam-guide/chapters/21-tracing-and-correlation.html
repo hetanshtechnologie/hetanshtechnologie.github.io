@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 21 — Tracing Requests and Correlating Behavior</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 21 — Tracing Requests and Correlating Behavior</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Explain how tracing reveals the path of a request across prompts, tools, retrieval, models, and downstream services.</li>
+    <li>Use correlation identifiers, spans, and attributes to connect events into an end-to-end execution view.</li>
+    <li>Design trace data that supports debugging, evaluation, safety review, and operational accountability.</li>
+    <li>Balance observability depth with privacy, security, cost, and data minimization requirements.</li>
+    <li>Diagnose common multi-step failures by following evidence across correlated traces.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Why tracing matters in AI systems</h3>
+  <p>AI-enabled workflows often involve more than a single request and response. A user interaction may trigger input validation, context retrieval, tool calls, model generations, policy checks, retries, and downstream updates. When outcomes are wrong, slow, or unsafe, the visible response alone rarely explains why. Tracing provides structured visibility into execution: what happened, in what order, with which inputs and outputs (appropriately handled), and with what results. It turns opaque behavior into diagnosable behavior.</p>
+  <p>Tracing is especially valuable because model behavior is probabilistic and context-dependent. Two similar requests can follow different paths depending on retrieved evidence, tool availability, or intermediate decisions. Without trace data, teams may attribute failures to the wrong component—blaming the model for a retrieval miss, or blaming a tool for a malformed instruction. Good traces support root-cause analysis, regression detection, and evidence-based improvement.</p>
+  <p>Tracing also supports accountability. In governed environments, organizations may need to explain why an action was taken, which sources were used, and whether required checks occurred. Correlated records do not replace judgment, but they provide the factual basis for review, audit, and learning from incidents.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> In multi-component scenarios, look for answers that include end-to-end correlation (request/session/trace identifiers) and stage-level visibility, not just final-output logging.</p>
+  </div>
+
+  <h3>Traces, spans, and correlation identifiers</h3>
+  <p>A <strong>trace</strong> represents the end-to-end journey of a request or workflow instance. It is composed of <strong>spans</strong>, each representing a unit of work such as a retrieval query, model call, tool invocation, validation step, or external API request. Spans typically record start and end times, status, parent-child relationships, and attributes. Together they form a timeline and dependency structure that shows how work flowed and where time or errors accumulated.</p>
+  <p><strong>Correlation identifiers</strong> connect related events across components and systems. A trace identifier links spans within one execution; request or session identifiers may link multiple traces in a conversation or business process. Propagating these identifiers across boundaries—model orchestration, tool adapters, queues, and downstream services—is essential. If identifiers are dropped at a handoff, visibility fragments and diagnosis becomes guesswork.</p>
+  <p>Attributes enrich spans with context needed for analysis: model or prompt version, tool name, retrieval candidate counts, cache hit/miss, retry count, policy decision, latency, token usage, and error codes. Attributes should be chosen deliberately. Too few make traces uninformative; too many increase cost and risk capturing sensitive data. A consistent schema across components improves queryability and comparison.</p>
+
+  <table>
+    <tr>
+      <th>Tracing element</th>
+      <th>What it captures</th>
+      <th>Diagnostic value</th>
+      <th>Design consideration</th>
+    </tr>
+    <tr>
+      <td>Trace ID</td>
+      <td>End-to-end execution grouping</td>
+      <td>Follow one request across components</td>
+      <td>Propagate through every hop</td>
+    </tr>
+    <tr>
+      <td>Span</td>
+      <td>A timed operation or step</td>
+      <td>Locate latency, failure, retries</td>
+      <td>Define meaningful boundaries</td>
+    </tr>
+    <tr>
+      <td>Parent/child links</td>
+      <td>Execution structure</td>
+      <td>Understand dependencies and fan-out</td>
+      <td>Preserve nesting across async steps</td>
+    </tr>
+    <tr>
+      <td>Attributes/tags</td>
+      <td>Metadata about the step</td>
+      <td>Filter, compare, explain behavior</td>
+      <td>Standardize names; avoid sensitive payloads</td>
+    </tr>
+    <tr>
+      <td>Events/logs in span</td>
+      <td>Notable moments or decisions</td>
+      <td>Explain transitions and outcomes</td>
+      <td>Keep concise and structured</td>
+    </tr>
+  </table>
+
+  <h3>What to trace in AI workflows</h3>
+  <p>Useful AI tracing covers both model-centric and system-centric steps. Model steps may include prompt template/version, input size, selected model or route, latency, token counts, finish reason, and safety or validation outcomes. Retrieval steps may include query form, filters applied, candidate counts, selected sources, and freshness indicators. Tool steps may include tool name, authorization context, validation result, execution status, and whether approval was required or obtained. Control-flow steps may record routing decisions, retries, fallbacks, and terminal outcomes.</p>
+  <p>Capturing <em>why</em> a path was taken is often as important as capturing <em>what</em> happened. For example, recording that a request was routed to a higher-capability model due to complexity classification, or that a fallback answer was used because retrieval returned no authorized results, makes behavior explainable. These decision points should be represented as explicit attributes or events rather than inferred later from fragmentary logs.</p>
+  <p>Tracing should also include quality and safety signals where available: schema validation pass/fail, citation presence, policy filter outcomes, or human review decisions. This connects operational traces to evaluation concerns and helps teams identify patterns—such as specific query classes causing repeated validation failures—that warrant targeted fixes.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Logging only final responses and errors. Without intermediate spans, teams cannot see where context was lost, which tool failed, or why a fallback was triggered.</p>
+  </div>
+
+  <h3>Privacy, security, and cost in trace design</h3>
+  <p>Trace data can contain sensitive information: user inputs, personal data, proprietary documents, credentials, or confidential tool outputs. Observability must follow data minimization and security principles. Instead of recording full payloads by default, systems can capture hashes, references, redacted summaries, field-level allowlists, or sampled excerpts where justified. Access to traces should be controlled, and retention periods should reflect operational and compliance needs.</p>
+  <p>Cost and performance are practical constraints. High-volume tracing with rich attributes and payload capture can become expensive and add overhead. Sampling strategies—such as tracing all errors, a percentage of successful requests, and targeted classes of interest—can balance visibility with efficiency. However, sampling must be designed carefully: if rare but critical incidents are undersampled, diagnosis suffers. For high-risk workflows, comprehensive tracing of key steps may be warranted.</p>
+  <p>Consistency and governance improve trace usefulness. Teams should define naming conventions, required attributes, redaction rules, and ownership for instrumentation. When schemas drift across services, cross-system queries become unreliable. Treat trace schemas as evolving contracts, reviewed and versioned like other interfaces.</p>
+
+  <table>
+    <tr>
+      <th>Concern</th>
+      <th>Risk</th>
+      <th>Mitigation</th>
+      <th>Trade-off</th>
+    </tr>
+    <tr>
+      <td>Sensitive payload capture</td>
+      <td>Privacy/compliance exposure</td>
+      <td>Redaction, allowlists, references</td>
+      <td>Less raw detail for debugging</td>
+    </tr>
+    <tr>
+      <td>High trace volume</td>
+      <td>Cost and storage pressure</td>
+      <td>Sampling, tiered retention</td>
+      <td>Possible gaps in coverage</td>
+    </tr>
+    <tr>
+      <td>Inconsistent instrumentation</td>
+      <td>Hard-to-query, misleading data</td>
+      <td>Standards, shared libraries, reviews</td>
+      <td>Upfront coordination effort</td>
+    </tr>
+    <tr>
+      <td>Missing propagation</td>
+      <td>Broken end-to-end visibility</td>
+      <td>Mandatory correlation headers/fields</td>
+      <td>Integration work across components</td>
+    </tr>
+  </table>
+
+  <h3>Using traces for diagnosis and improvement</h3>
+  <p>Traces are most valuable when integrated into diagnostic workflows. During an incident, responders can filter by error status, latency spikes, customer segment, or model version to find representative executions, then inspect span timelines to locate bottlenecks or failures. Comparing a failed trace to a successful one often reveals differences in retrieval results, routing, or tool behavior. Over time, aggregated trace data can inform optimization: identifying slow steps, frequent retries, low cache hit rates, or common validation failures.</p>
+  <p>Traces also support evaluation and change management. Before and after a prompt, model, or retrieval change, teams can examine whether execution paths, latencies, and quality signals shift as expected. This connects observability to controlled experimentation. The key is to treat traces as evidence: hypotheses about system behavior should be tested against trace data rather than assumed.</p>
+
+  <pre><code class="language-yaml">trace_policy:
+  identifiers:
+    propagate: ["trace_id", "request_id", "session_id"]
+  spans:
+    - name: "input_validation"
+      attributes: ["status", "policy_flags"]
+    - name: "retrieval"
+      attributes: ["query_type", "filters", "candidate_count", "selected_count", "freshness_ok"]
+    - name: "model_generation"
+      attributes: ["model_route", "prompt_version", "latency_ms", "token_in", "token_out"]
+    - name: "tool_call"
+      attributes: ["tool_name", "scope", "approved", "status", "retry_count"]
+  redaction:
+    mode: "allowlist_and_mask"
+    exclude: ["secrets", "raw_sensitive_fields"]
+  sampling:
+    errors: "100%"
+    successes: "10%"</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Pick one recent failure and attempt to reconstruct its full path from available logs. Every gap you encounter is a candidate for improved correlation or span coverage.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>An operations assistant answers employee questions by retrieving policy documents and, when needed, calling a tool to fetch case-specific status. Users report intermittent incorrect answers: sometimes the assistant cites an outdated policy, and other times it claims a case is unresolved when records show it was completed. Logs show only the final response text and occasional tool error messages, making investigation slow and inconclusive.</p>
+
+  <h3>Analysis</h3>
+  <p>The symptoms suggest multiple possible failure points—retrieval freshness, filtering, tool execution, or response synthesis—but current logging cannot isolate them. Without traces, the team cannot tell whether outdated citations came from stale retrieval results, missing version filters, or generation ignoring fresher evidence. Similarly, incorrect case status could result from tool authorization failure, fallback behavior, or misinterpretation of tool output. Lack of correlation identifiers prevents linking retrieval and tool events to the user-visible response.</p>
+  <p>A tracing design should capture end-to-end request flow with spans for retrieval, tool lookup, and generation, including attributes such as source version timestamps, filter criteria, tool status, and fallback reasons. Sensitive details must be redacted, but enough metadata is needed to explain decisions. This evidence will enable targeted fixes rather than broad, speculative changes.</p>
+
+  <h3>Resolution</h3>
+  <p>The team instruments the workflow with propagated trace and request identifiers across all components. Retrieval spans record applied filters, candidate and selected counts, and source version dates. Tool spans record scope, success or failure, and whether a fallback path was taken. Generation spans record prompt and model version plus validation outcomes. Payloads are redacted, but source identifiers and status codes are retained.</p>
+  <p>Analysis of new traces reveals two distinct causes: some outdated answers occur when version filters are omitted for a subset of queries, and some incorrect status answers occur when the tool times out and the system silently falls back to an earlier summary. With this evidence, the team fixes filter application, removes silent fallback for transactional status, and adds alerts for repeated timeouts. Trace-based diagnosis turns ambiguous complaints into specific, correctable issues.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Failing to propagate correlation identifiers across asynchronous or cross-service boundaries.</li>
+    <li>Capturing only final outputs, leaving intermediate decisions and failures invisible.</li>
+    <li>Recording excessive sensitive payloads instead of structured, redacted attributes.</li>
+    <li>Using inconsistent span names and schemas that prevent reliable analysis across components.</li>
+    <li>Collecting traces but not integrating them into incident response, evaluation, and improvement workflows.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Tracing provides end-to-end visibility into multi-step AI workflows, enabling diagnosis, accountability, and improvement.</li>
+    <li>Traces, spans, and propagated correlation identifiers connect events into a coherent execution story.</li>
+    <li>Effective AI tracing captures model, retrieval, tool, and control-flow steps with meaningful, structured attributes.</li>
+    <li>Trace design must balance observability with privacy, security, performance, and cost constraints.</li>
+    <li>When used as evidence in operations and evaluation, traces reveal root causes and guide targeted fixes.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>What is the main benefit of propagating a trace identifier across all components?</p>
+      <p>A. It reduces model latency automatically<br>
+      B. It allows events from different services to be correlated into one execution view<br>
+      C. It replaces the need for access control<br>
+      D. It guarantees correct answers</p>
+    </li>
+    <li>
+      <p>Which span attribute is most useful for diagnosing outdated retrieved evidence?</p>
+      <p>A. Button color in the UI<br>
+      B. Source version or freshness timestamp<br>
+      C. Total number of users online<br>
+      D. Marketing campaign name</p>
+    </li>
+    <li>
+      <p>Why is logging only final responses insufficient in agentic workflows?</p>
+      <p>A. Because intermediate steps never matter<br>
+      B. Because failures and decisions in retrieval, tools, or routing become invisible<br>
+      C. Because traces cannot include errors<br>
+      D. Because final responses contain all needed metadata</p>
+    </li>
+    <li>
+      <p>What is a good practice for handling sensitive data in traces?</p>
+      <p>A. Record all secrets for completeness<br>
+      B. Use redaction, allowlists, and references to minimize exposure<br>
+      C. Disable tracing for all workflows<br>
+      D. Store traces in publicly accessible logs</p>
+    </li>
+    <li>
+      <p>A trace shows retrieval succeeded but returned zero authorized candidates, followed by a fallback answer. What does this indicate?</p>
+      <p>A. The model ignored available evidence<br>
+      B. The outcome may be explained by missing authorized context and fallback behavior<br>
+      C. The tool call must have duplicated<br>
+      D. Correlation identifiers were unnecessary</p>
+    </li>
+    <li>
+      <p>How can sampling be used responsibly in tracing?</p>
+      <p>A. Sample only successful requests and ignore all errors<br>
+      B. Define policies such as full capture for errors and partial capture for successes based on risk<br>
+      C. Avoid any consistency in sampling decisions<br>
+      D. Replace all attributes with random values</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Correlation identifiers connect distributed events into one trace. A, C, and D are not effects of propagation.</li>
+    <li><strong>Correct: B.</strong> Version/freshness metadata helps explain stale retrieval. A, C, and D are irrelevant.</li>
+    <li><strong>Correct: B.</strong> Intermediate spans reveal where and why behavior diverged. A, C, and D are incorrect.</li>
+    <li><strong>Correct: B.</strong> Minimization and redaction protect sensitive data while preserving useful signals. A, C, and D create risk or lose visibility.</li>
+    <li><strong>Correct: B.</strong> The trace evidence points to lack of authorized evidence and fallback logic as likely causes. A and C are unsupported, and D is false.</li>
+    <li><strong>Correct: B.</strong> Risk-aware sampling balances coverage and cost. A, C, and D undermine diagnosability.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 21.</em></p>
+
+  <nav>
+    <a href="20-connectivity-and-interoperability.html">&larr; Previous</a>
+    <a href="22-observability-and-operations.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

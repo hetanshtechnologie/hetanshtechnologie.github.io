@@ -233,7 +233,7 @@ function ecRenderProductCard(p) {
     : '';
   const reviewText = p.review_count ? `(${p.review_count})` : '';
   const isTutorial = !!p.tutorial_slug;
-  const FREE_SLUGS = ['html-tutorial','css-tutorial','nodejs-tutorial','pwa-tutorial','react-tutorial','android-tutorial','dotnetcore-tutorial','c-tutorial','python-tutorial','ios-tutorial','fastapi-tutorial','playwright-tutorial','angular-tutorial','voip-project-delivery','senior-product-owner','terraform-tutorial','devops-tutorial','docker-tutorial','ccao-f-complete-exam-prep','ccao-f-exam-guide','ccar-f-full-prep','ccar-f','ccar-p-exam-guide','ccdv-f-course','ccdv-f-exam-guide','ai-1'];
+  const FREE_SLUGS = ['html-tutorial','css-tutorial','nodejs-tutorial','pwa-tutorial','react-tutorial','android-tutorial','dotnetcore-tutorial','c-tutorial','python-tutorial','ios-tutorial','fastapi-tutorial','playwright-tutorial','angular-tutorial','voip-project-delivery','senior-product-owner','terraform-tutorial','devops-tutorial','docker-tutorial'];
   const isFree = FREE_SLUGS.indexOf(p.slug) !== -1;
   const tutorialUrl = isTutorial ? '../tutorials/' + p.tutorial_slug + '/' : '';
   let extraBtn = '';
@@ -262,7 +262,7 @@ function ecRenderProductCard(p) {
             ${isTutorial && isFree ? '<span class="text-lg font-bold text-green-600">FREE</span>' : `<span class="text-lg font-bold text-gray-900">${price}</span>`}
             ${hasDiscount ? `<span class="text-sm text-gray-400 line-through">${compare}</span>` : ''}
           </div>
-          ${isTutorial && isFree ? '' : `<div class="flex items-center gap-2 mt-1">${hasDiscount ? `<span class="text-xs text-green-600 font-medium">${discountPct}% off</span>` : ''}<span class="inline-block text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">GST ${p.gst_rate || 18}%</span></div>`}
+          ${isTutorial && isFree ? '' : `<div class="flex items-center gap-2 mt-1">${hasDiscount ? `<span class="text-xs text-green-600 font-medium">${discountPct}% off</span>` : ''}<span class="inline-block text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">GST ${(p.gst_rate != null ? p.gst_rate : 18)}%</span></div>`}
           ${extraBtn}
         </div>
       </div>
@@ -466,7 +466,7 @@ async function ecCreateOrder(addressId, razorpayPaymentId) {
     if (!p) continue;
     const qty = ci.quantity;
     const unitPrice = parseFloat(p.price);
-    const gstRate = parseFloat(p.gst_rate || 18);
+    const gstRate = parseFloat((p.gst_rate != null ? p.gst_rate : 18));
     const lineTotal = unitPrice * qty;
     const gstAmount = lineTotal * gstRate / 100;
     subtotal += lineTotal;
@@ -584,7 +584,7 @@ function ecGenerateInvoice(order) {
     const qty = item.quantity;
     const unitPrice = parseFloat(item.unit_price);
     const taxable = qty * unitPrice;
-    const gstRate = parseFloat(item.gst_rate || 18);
+    const gstRate = parseFloat((item.gst_rate != null ? item.gst_rate : 18));
     const gstAmt = taxable * gstRate / 100;
     const cgst = gstAmt / 2;
     const sgst = gstAmt / 2;

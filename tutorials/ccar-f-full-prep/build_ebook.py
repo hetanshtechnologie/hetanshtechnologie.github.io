@@ -84,22 +84,23 @@ def word_count(paths: list[Path]) -> int:
     return total
 
 
-def shell(title: str, body: str) -> str:
+def shell(title: str, body: str, scripts: str = "", imgroot: str = "../../") -> str:
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{title}</title>
-<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
-<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="{imgroot}images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="{imgroot}images/favicon-16.png">
+<link rel="apple-touch-icon" href="{imgroot}images/apple-touch-icon.png">
 <style>
 {EMBEDDED_CSS}
 </style>
 </head>
 <body>
 {body}
+{scripts}
 </body>
 </html>
 """
@@ -161,8 +162,15 @@ def build_chapters(paths: list[Path]) -> None:
   <nav>{prev_link}<span></span>{next_link}</nav>
 </div>
 """
+        scripts = (
+            '<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>\n'
+            '<script src="../../js/feedback.js"></script>\n'
+            '<script src="../../js/access.js"></script>\n'
+            '<script src="../../js/progress.js"></script>\n'
+            '<script src="../../../js/analytics-tracker.js" defer></script>'
+        )
         (CHAPTERS / f"{p.stem}.html").write_text(
-            shell(title, body), encoding="utf-8"
+            shell(title, body, scripts, imgroot="../../../"), encoding="utf-8"
         )
 
 

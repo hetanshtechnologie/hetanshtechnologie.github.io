@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 24 — Experiments, Diagnosis, and Hallucination Control</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 24 — Experiments, Diagnosis, and Hallucination Control</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Run controlled experiments to improve AI system behavior and attribute effects to specific changes.</li>
+    <li>Diagnose failures across instructions, context, retrieval, tools, model behavior, and validation layers.</li>
+    <li>Explain common causes of hallucinations and unsupported outputs in grounded and ungrounded tasks.</li>
+    <li>Apply corrective strategies such as grounding, constraints, verification, and escalation to reduce hallucination risk.</li>
+    <li>Use evidence from traces, evaluations, and user feedback to prioritize durable fixes over superficial tweaks.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Experimentation as disciplined improvement</h3>
+  <p>Improving an AI-enabled system requires more than intuition. Prompts, retrieval settings, model routes, tool schemas, and guardrails interact in ways that can produce surprising outcomes. Disciplined experimentation treats each change as a hypothesis: if we adjust X, we expect Y to improve for Z cases without unacceptable regressions elsewhere. Experiments should define the target problem, the change under test, the evaluation dataset and criteria, and the decision rule for adoption. This structure turns iteration into learning rather than trial-and-error churn.</p>
+  <p>Control is central to attribution. When multiple variables change at once, observed improvements or regressions cannot be reliably assigned to a cause. Where practical, vary one factor at a time and compare against a baseline on the same representative cases. Because outputs can be variable, repeated runs or variance-aware interpretation may be necessary. Results should be segmented by case type and risk level; an overall gain that hides failures in critical scenarios is not a true improvement.</p>
+  <p>Experimentation should be connected to operations. Production signals—failure patterns, escalations, user corrections, and trace evidence—identify where experiments are most valuable. Conversely, offline wins must be validated in realistic conditions before broad rollout. A change that improves benchmark-like cases but degrades latency, cost, or robustness may not be acceptable in practice.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Attribute improvements to evidence. Prefer controlled comparisons and segmented results over adopting a change because it “seems better” on a few examples.</p>
+  </div>
+
+  <h3>Diagnosing failures across the system</h3>
+  <p>When a system produces a poor outcome, diagnosis should locate the stage where behavior diverged from intent. A useful approach follows the request path: Was the input understood and scoped correctly? Did retrieval return relevant, authorized, and current evidence? Was the context assembled and prioritized well? Did the model receive clear instructions and constraints? Were tool calls valid and successful? Did validation or safety checks behave as intended? Did generation respect available evidence? Many apparent “model problems” originate upstream or downstream.</p>
+  <p>Evidence sources include traces, logs, evaluation cases, and reproduced runs. Comparing failed and successful executions can reveal differences in retrieved sources, context length, routing, or error handling. Diagnosis should distinguish <strong>absence of evidence</strong> (the system never had the needed information), <strong>misuse of evidence</strong> (information was present but ignored or misinterpreted), and <strong>fabrication</strong> (content was produced without support). Each points to different remedies.</p>
+  <p>Prioritization matters. Not all failures warrant the same response. High-impact, frequent, or safety-relevant issues deserve immediate mitigation and durable fixes. Rare, low-impact issues may be monitored. Diagnosis should therefore assess severity and recurrence, not just technical curiosity.</p>
+
+  <table>
+    <tr>
+      <th>Observed failure</th>
+      <th>Possible layer</th>
+      <th>Evidence to inspect</th>
+      <th>Candidate remedy</th>
+    </tr>
+    <tr>
+      <td>Answer cites wrong/outdated source</td>
+      <td>Retrieval/indexing</td>
+      <td>Filters, source versions, selected chunks</td>
+      <td>Fix metadata, freshness, selection rules</td>
+    </tr>
+    <tr>
+      <td>Answer ignores provided evidence</td>
+      <td>Prompt/context assembly</td>
+      <td>Final prompt, ordering, instructions</td>
+      <td>Improve grounding instructions and context curation</td>
+    </tr>
+    <tr>
+      <td>Invalid or incomplete output format</td>
+      <td>Instruction/validation</td>
+      <td>Prompt schema, validator results</td>
+      <td>Clarify format, add deterministic checks/retries</td>
+    </tr>
+    <tr>
+      <td>Incorrect action taken</td>
+      <td>Tooling/permissions/control flow</td>
+      <td>Tool args, auth scope, approvals</td>
+      <td>Tighten schema, scopes, approval gates</td>
+    </tr>
+    <tr>
+      <td>Confident claim without support</td>
+      <td>Grounding/behavior/policy</td>
+      <td>Evidence availability, uncertainty handling</td>
+      <td>Require citations, abstain/escalate, verify</td>
+    </tr>
+  </table>
+
+  <h3>Understanding hallucinations and unsupported outputs</h3>
+  <p>In this context, a hallucination is an output presented as if known or supported when it is not grounded in available evidence, valid computation, or authorized sources. Hallucinations can take many forms: fabricated facts, invented citations, incorrect summaries, nonexistent entities, or plausible but wrong procedural steps. They are not always malicious or obvious; fluent language can make unsupported content appear credible. Controlling hallucination risk is therefore a core quality and safety concern.</p>
+  <p>Causes are varied. Missing or weak evidence can lead a system to fill gaps. Ambiguous prompts may fail to require grounding or uncertainty disclosure. Overlong or noisy context can bury relevant facts. Retrieval may surface irrelevant but similar passages. Tool failures may be masked by fallback generation. Even with evidence present, generation may misattribute or overgeneralize. Because causes differ, mitigation must be targeted: adding more generation freedom rarely fixes a grounding problem.</p>
+  <p>Risk depends on task and impact. Brainstorming or drafting may tolerate speculative content if clearly framed, while policy guidance, technical instructions, or decision support may require strict grounding and verification. Evaluation and product design should define acceptable behavior for uncertainty: when to answer, when to qualify, when to ask for more information, and when to refuse or escalate.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Treating hallucinations as a single defect with a single fix. Effective control requires identifying whether the cause is missing evidence, poor retrieval, weak instructions, or absent verification.</p>
+  </div>
+
+  <h3>Corrective strategies: grounding, verification, and safe behavior</h3>
+  <p>Grounding strategies increase the likelihood that outputs reflect available evidence. These include retrieval of relevant sources, clear instruction to use provided context, citation or evidence-linking requirements, and context curation that prioritizes authoritative material. Grounding is necessary but not sufficient; systems must also handle cases where evidence is incomplete or conflicting. Instructions should specify uncertainty behavior, such as stating limits, distinguishing inference from fact, or requesting clarification.</p>
+  <p>Verification adds checks beyond initial generation. Deterministic validators can enforce formats and constraints. Rule-based or programmatic checks can verify fields against known data. Secondary review steps—human or automated—can assess claim support in high-risk contexts. Verification is especially important for side-effecting actions and consequential advice. However, verification has cost and complexity, so it should be applied proportionally to risk.</p>
+  <p>Safe fallback behaviors reduce harm when confidence or evidence is insufficient. Rather than guessing, the system can abstain, provide partial answers with explicit gaps, retrieve additional evidence, or escalate to a human. These behaviors should be designed and tested, not left to chance. Over time, analysis of hallucination incidents can inform upstream fixes: better chunking, improved filters, clearer prompts, or tighter tool contracts.</p>
+
+  <table>
+    <tr>
+      <th>Strategy</th>
+      <th>Addresses</th>
+      <th>Example control</th>
+      <th>Limitation</th>
+    </tr>
+    <tr>
+      <td>Grounding</td>
+      <td>Unsupported claims due to missing/unused evidence</td>
+      <td>Retrieve sources; require citations</td>
+      <td>Depends on retrieval quality and coverage</td>
+    </tr>
+    <tr>
+      <td>Instruction clarity</td>
+      <td>Ambiguous behavior under uncertainty</td>
+      <td>“State unknown if not supported”</td>
+      <td>Not an enforcement mechanism</td>
+    </tr>
+    <tr>
+      <td>Validation/verification</td>
+      <td>Format and factual/constraint errors</td>
+      <td>Schema checks, evidence checks, review gates</td>
+      <td>Adds latency and complexity</td>
+    </tr>
+    <tr>
+      <td>Abstention/escalation</td>
+      <td>High uncertainty or high impact</td>
+      <td>Defer to human or request more info</td>
+      <td>May reduce automation if overused</td>
+    </tr>
+    <tr>
+      <td>Observability feedback</td>
+      <td>Recurring, undiagnosed causes</td>
+      <td>Trace analysis, incident review, regression tests</td>
+      <td>Requires instrumentation and follow-through</td>
+    </tr>
+  </table>
+
+  <pre><code class="language-yaml">hallucination_control:
+  grounding:
+    require_evidence_for_factual_claims: true
+    cite_source_ids: true
+  uncertainty:
+    if_evidence_missing: "state_gap_or_escalate"
+    if_sources_conflict: "surface_conflict"
+  verification:
+    deterministic: ["schema", "required_fields"]
+    conditional_review: ["high_impact_claims"]
+  diagnosis_loop:
+    inputs: ["traces", "eval_failures", "user_feedback"]
+    actions: ["classify_cause", "target_fix", "add_regression_case"]</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Review ten incorrect responses and label each as missing evidence, evidence ignored, or fabricated detail. The dominant label should guide your next mitigation priority.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A compliance support assistant answers questions using an internal policy knowledge base. Reviewers find that it occasionally provides confident answers that include requirements not present in the cited policy sections. In some cases, the relevant policy is not retrieved; in others, the correct section appears in the context but the answer adds extra steps. The team considers switching to a more capable model as the primary fix.</p>
+
+  <h3>Analysis</h3>
+  <p>The reported issues have at least two different causes. When relevant policy is not retrieved, the failure is upstream: missing evidence can lead to unsupported generation. When evidence is present but the answer adds non-existent requirements, the failure involves grounding and response control. A model change alone may not address retrieval gaps and could even increase fluent but unsupported elaboration. Diagnosis must separate these cases using traces and evaluation examples.</p>
+  <p>Corrective actions should be layered. Retrieval quality and filtering need review for the “missing evidence” cases, including chunking and query behavior. For “evidence ignored or overextended” cases, instructions should require claims to be supported by provided sources, responses should distinguish quoted/supported points from uncertainty, and validation can flag answers that introduce requirements not traceable to retrieved text in high-risk contexts. Regression cases should capture both patterns.</p>
+
+  <h3>Resolution</h3>
+  <p>The team classifies recent failures by cause using traces and source comparisons. They improve retrieval for affected policy topics and enforce version filters, reducing cases where evidence is absent. They update response instructions to require source-supported claims and to state when a requirement is not found in provided material. A targeted verification step checks high-impact responses for unsupported procedural assertions against selected evidence.</p>
+  <p>Controlled evaluation shows reduced unsupported claims across both failure classes, with modest added latency from verification. The team retains the option to test model routing changes later, but bases decisions on segmented evidence rather than assumption. By addressing root causes—evidence availability, grounding behavior, and verification—the system becomes more trustworthy without relying on a single speculative fix.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Changing multiple system components at once, preventing clear attribution of improvement or regression.</li>
+    <li>Assuming hallucinations always originate in the model and ignoring retrieval or context failures.</li>
+    <li>Requesting citations without ensuring evidence is available, relevant, and actually used.</li>
+    <li>Applying no safe behavior for uncertainty, leading to confident guesses in high-impact cases.</li>
+    <li>Failing to convert diagnosed incidents into regression tests and monitored indicators.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Controlled experiments with clear hypotheses and segmented results enable reliable, attributable improvement.</li>
+    <li>Effective diagnosis traces failures across input handling, retrieval, context, model behavior, tools, and validation.</li>
+    <li>Hallucinations arise from multiple causes, including missing evidence, weak grounding, ambiguity, and insufficient verification.</li>
+    <li>Grounding, explicit uncertainty handling, verification, and safe escalation reduce unsupported-output risk proportionally.</li>
+    <li>Operational evidence and regression practices turn incidents into durable system improvements.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>What makes an experiment “controlled” in this context?</p>
+      <p>A. Changing all components to maximize impact<br>
+      B. Defining a hypothesis and comparing specific changes against a baseline on consistent cases<br>
+      C. Using only one anecdotal example<br>
+      D. Skipping segmentation of results</p>
+    </li>
+    <li>
+      <p>Which diagnosis best fits a case where correct evidence was retrieved but the answer adds unsupported steps?</p>
+      <p>A. Pure indexing absence with no other factors<br>
+      B. Evidence misuse or insufficient grounding/constraint despite available context<br>
+      C. Guaranteed tool authentication failure<br>
+      D. Improved freshness handling</p>
+    </li>
+    <li>
+      <p>Why is “switch to a bigger model” not always the right fix for hallucinations?</p>
+      <p>A. Because model choice never affects quality<br>
+      B. Because hallucinations may stem from missing evidence, poor retrieval, or weak controls<br>
+      C. Because grounding is irrelevant<br>
+      D. Because verification always solves the root cause alone</p>
+    </li>
+    <li>
+      <p>What is an appropriate behavior when evidence is insufficient for a high-impact factual claim?</p>
+      <p>A. Provide a confident best guess<br>
+      B. State the limitation, seek more information, or escalate according to policy<br>
+      C. Hide the uncertainty from the user<br>
+      D. Generate a longer explanation</p>
+    </li>
+    <li>
+      <p>How do regression cases support hallucination control?</p>
+      <p>A. They replace the need for diagnosis<br>
+      B. They ensure previously observed failure patterns remain covered in future evaluations<br>
+      C. They eliminate all runtime variability<br>
+      D. They only measure latency</p>
+    </li>
+    <li>
+      <p>Which combination most directly strengthens grounded responses?</p>
+      <p>A. No retrieval, vague instructions, and no checks<br>
+      B. Relevant evidence, clear grounding constraints, and proportionate verification<br>
+      C. Maximum verbosity with random sources<br>
+      D. Disabling uncertainty handling</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Controlled experiments isolate variables and compare against baselines with defined criteria. A, C, and D reduce attribution quality.</li>
+    <li><strong>Correct: B.</strong> Available but unused or overextended evidence points to grounding/constraint issues. A, C, and D do not fit the evidence described.</li>
+    <li><strong>Correct: B.</strong> Hallucinations have multiple possible causes beyond model capability. A, C, and D are incorrect generalizations.</li>
+    <li><strong>Correct: B.</strong> Safe handling acknowledges uncertainty and follows appropriate escalation or clarification paths. A and C increase risk; D does not address support.</li>
+    <li><strong>Correct: B.</strong> Regression cases preserve coverage of known issues over time. A, C, and D are not their purpose.</li>
+    <li><strong>Correct: B.</strong> Grounded systems combine evidence access, clear constraints, and checks suited to risk. A, C, and D undermine grounding.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 24.</em></p>
+
+  <nav>
+    <a href="23-evaluation-strategy-and-datasets.html">&larr; Previous</a>
+    <a href="25-performance-reliability-and-cost.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

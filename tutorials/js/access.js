@@ -31,7 +31,11 @@
     'mindset-mastery':'mindset-mastery-tutorial','cost-takeout-sourcing':'cost-takeout-sourcing-tutorial',
     'rpa-ai':'rpa-ai-tutorial','enterprise-architecture-ai-governance':'enterprise-architecture-ai-governance-tutorial',
     'ai-fundamentals':'ai-fundamentals-tutorial',
-    'data-science':'data-science-tutorial'
+    'data-science':'data-science-tutorial',
+    'AI-1':'ai-1','CCAR-F':'ccar-f',
+    'ccao-f-complete-exam-prep':'ccao-f-complete-exam-prep','ccao-f-exam-guide':'ccao-f-exam-guide',
+    'ccar-f-full-prep':'ccar-f-full-prep','ccar-p-exam-guide':'ccar-p-exam-guide',
+    'ccdv-f-course':'ccdv-f-course','ccdv-f-exam-guide':'ccdv-f-exam-guide'
   };
   var productSlug = PRODUCT_SLUGS[slug];
   if (!productSlug) return;
