@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 27 — Tracing, Errors, Recovery, and Monitoring</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 27</span>
+  <h1 id="chapter-27-tracing-errors-recovery-and-monitoring">Chapter 27 — Tracing, Errors, Recovery, and Monitoring</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Separate failures caused by your integration from failures caused by the model, and explain why that distinction changes the fix.</li>
+<li>Read a trace in sequence to locate the first step where a request stopped being correct.</li>
+<li>Recognize the main error families — authentication, validation, timeouts, and rate limits — and the signature each one leaves behind.</li>
+<li>Choose a retry strategy, including backoff and jitter, that suits the specific error rather than retrying everything.</li>
+<li>Build lightweight monitoring that surfaces quality regressions before users report them.</li>
+<li>Decide when to fail fast, when to retry automatically, and when to hand a failure to a human.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="two-suspects-the-integration-or-the-model">Two suspects: the integration or the model</h3>
+<p>When a request goes wrong, there are only two broad places to look. The first is the integration: everything your application controls around the model call — the credentials, the request shape, the network route, and the way you parse the response. The second is the model: the output it produces, its habit of ignoring a rule, inventing a fact, or declining a harmless request.</p>
+<p>Keeping the suspects distinct prevents wasted effort. If the service rejects a request before the model sees it, rewriting the prompt cannot help. If the model produced a good answer but your parser discarded the field you needed, changing the instructions is equally pointless. Only a record of what actually happened separates the two.</p>
+<p>Integration faults tend to be deterministic: the same bad key fails every time, and a single code change fixes it. Model faults tend to be probabilistic: identical input may produce a good answer nine times and a poor one on the tenth. Those call for evaluation sets, clearer instructions, guardrails, and thresholds rather than one code fix.</p>
+<p>A middle category also exists: the model behaved as asked, but its data was wrong. A retrieval step fetched an outdated document, or a tool returned an empty result treated as authoritative. The answer looks like a model failure, yet the model reasoned correctly from bad inputs. A trace separates the two.</p>
+<blockquote>
+<p><strong>Exam note:</strong> Scenario questions often describe a symptom and ask what to investigate first. A rejected request or a parse failure points at the integration. An answer that is present but wrong or unsafe points at the model or its inputs. Read the symptom before you choose the layer.</p>
+</blockquote>
+<h3 id="reading-a-trace-to-find-the-first-wrong-step">Reading a trace to find the first wrong step</h3>
+<p>A trace is an ordered record of one request: what was sent, what was retrieved, which tools ran, and what was produced. The useful skill is not collecting traces but reading them in order, to find the first step where reality stopped matching your expectation. Every step after that is built on a compromised foundation.</p>
+<p>Ask one question at each stage, in order: is this what I intended? Check the user text, the assembled prompt, the retrieved documents, each tool call and result, and finally the output. Stop at the first mismatch. A wrong answer that follows a missing document is a retrieval bug in disguise; polishing the wording will not restore the document.</p>
+<p>Symptoms travel downstream. A malformed tool argument produces an empty result, then a thin context, then a vague answer, then a low grade. Starting at the low grade invites a guess about the prompt; walking forward catches the malformed argument and fixes the real defect in one edit.</p>
+<p>That discipline requires a trace that records every stage. Logging only input and final text hides the middle. A diagnostic trace should capture identifiers, versions, assembled messages, retrieved context, tool calls and results, and the outcome.</p>
+<table>
+<thead>
+<tr>
+<th>Trace field</th>
+<th>What it lets you confirm</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Request and session identifiers</td>
+<td>Which calls belong to one user action, so a multi-step flow can be replayed as a unit</td>
+</tr>
+<tr>
+<td>Timestamp</td>
+<td>The order of events and the moment a problem began</td>
+</tr>
+<tr>
+<td>Model and prompt-template versions</td>
+<td>Whether a behavior change followed a version change or a code edit</td>
+</tr>
+<tr>
+<td>Assembled messages</td>
+<td>Exactly what the model was told after templates and context were merged</td>
+</tr>
+<tr>
+<td>Retrieved context</td>
+<td>Which documents or records were actually supplied</td>
+</tr>
+<tr>
+<td>Tool calls and results</td>
+<td>What the model attempted and what each action returned</td>
+</tr>
+<tr>
+<td>Token counts and latency</td>
+<td>Whether context or cost grew unexpectedly before the failure</td>
+</tr>
+<tr>
+<td>Output and grade</td>
+<td>What was produced and how it was judged</td>
+</tr>
+</tbody>
+</table>
+<p>Keep instrumentation consistent across environments; a production trace that hides tool results guarantees unexplainable failures. Treat traces as sensitive data, since they hold user text and sometimes secrets, and apply access, retention, and redaction rules accordingly.</p>
+<blockquote>
+<p><strong>Try it:</strong> Take one recent failure and explain it using only the input and final output. Then open its tool calls and retrieved context. Note how often the real cause was invisible in the short version. That gap argues for richer traces.</p>
+</blockquote>
+<h3 id="a-field-guide-to-common-error-types">A field guide to common error types</h3>
+<p>Group failures by where they surface and what they mean. Four families dominate integration troubleshooting: authentication, validation, timeouts, and rate limits. Each leaves a recognizable signature and has a cheap first check. The failure-signature table is a starting vocabulary, not an exhaustive list.</p>
+<table>
+<thead>
+<tr>
+<th>Failure signature</th>
+<th>Typical signal</th>
+<th>Likely cause</th>
+<th>First check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Authentication</td>
+<td>Rejection before any output, often a 401 or 403</td>
+<td>Missing, expired, or wrong-scope credential; wrong environment</td>
+<td>Confirm the credential exists at runtime and belongs to the intended project or tenant</td>
+</tr>
+<tr>
+<td>Validation</td>
+<td>Immediate refusal of the request, often a 400 or 422</td>
+<td>Malformed JSON, unknown parameter, wrong message role, schema mismatch</td>
+<td>Validate the request body against the documented shape before sending</td>
+</tr>
+<tr>
+<td>Timeout</td>
+<td>No response within the deadline, sometimes after a long delay</td>
+<td>Network path, overloaded upstream, or an unrealistic deadline</td>
+<td>Measure where the time went and compare with the configured deadline</td>
+</tr>
+<tr>
+<td>Rate limit</td>
+<td>Explicit throttling response, often a 429, sometimes with a retry time</td>
+<td>Too many requests in a window, bursty concurrency, shared quota</td>
+<td>Read the returned retry guidance and inspect concurrency and quota usage</td>
+</tr>
+<tr>
+<td>Parse failure</td>
+<td>Response arrives but your code cannot decode it</td>
+<td>Assumptions about format, truncated stream, or unexpected wrapper</td>
+<td>Log the raw response and check it against the parser's expected shape</td>
+</tr>
+</tbody>
+</table>
+<p>Authentication and validation failures are deterministic and client-side in origin. They recur on every attempt until something changes, which is exactly why retrying them is wasted work. Timeouts and rate limits are often transient; a later attempt may succeed. Parse failures sit in between: one malformed response may be a fluke worth a retry, while a systematic mismatch means parser and producer disagree.</p>
+<p>Model-specific families need a parallel vocabulary. Instruction-following failures ignore a stated rule; fabrication states unsupported facts; grounding failures use stale context; format failures fail validation; refusals decline safe tasks; safety failures produce withheld content. Match the response to severity: repair a format slip automatically, flag a fabrication, and stop and escalate a safety failure.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating every bad answer as a reason to rewrite the prompt. If the trace shows the required document was never retrieved, a more elaborate prompt cannot supply information the model never received. Fix the supply, then judge the answer.</p>
+</blockquote>
+<h3 id="retry-backoff-and-knowing-when-to-stop">Retry, backoff, and knowing when to stop</h3>
+<p>A retry helps only when the cause is likely gone by the next attempt. That holds for transient network faults, brief overload, and rate limits that reset; it fails for bad credentials, invalid payloads, and most quality problems. Retrying a safety failure is harmful, since it multiplies the chance that one attempt finally produces the disallowed output.</p>
+<p>Backoff means waiting longer between attempts, usually doubling each delay. Without it, aggressive retries keep an overloaded service overloaded. Jitter adds a small random amount, stopping many clients from retrying in lockstep; together they spread a thundering herd into a trickle.</p>
+<p>A sound policy has a ceiling: cap the attempts and the delay, respect server guidance, then fail clearly rather than hanging. In an agent loop a retry also consumes steps and tokens, so the step budget belongs in the same decision.</p>
+<p>The snippet below retries only plausibly transient errors, honors an explicit retry time when the server provides one, and adds jitter to a capped exponential delay.</p>
+<pre><code class="language-python">import random
+import time
+
+NON_RETRYABLE = {400, 401, 403, 422}
+
+def call_with_backoff(call, *, max_attempts=5, base=0.5, cap=8.0):
+    for attempt in range(max_attempts):
+        try:
+            return call()
+        except ApiError as exc:
+            if exc.status in NON_RETRYABLE:
+                raise                       # auth or validation: a retry cannot help
+            if exc.status == 429 and exc.retry_after:
+                delay = exc.retry_after     # follow the server's own guidance
+            else:
+                delay = min(cap, base * (2 ** attempt))
+            delay += random.uniform(0, delay * 0.25)   # jitter spreads clients out
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(delay)
+</code></pre>
+<p>Note what the code does not retry: authentication and validation errors are raised immediately, since repeating them cannot change the result. The exponential term grows the delay, the cap bounds it, and jitter breaks synchronization. In production the sleep would be asynchronous.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Wrapping every call in an unlimited retry loop. This hides deterministic bugs, inflates cost and latency, and can turn one throttling event into a sustained flood. A retry policy is a decision, not a reflex.</p>
+</blockquote>
+<h3 id="monitoring-quality-and-stopping-regressions">Monitoring quality and stopping regressions</h3>
+<p>Fixing today's failure is half the work; the other half is noticing tomorrow's before a user does. Monitoring has two layers: operational signals about whether the system works, and quality signals about whether its answers remain good.</p>
+<p>Operational signals include error rates, latency percentiles, token usage, tool-call success, and throttling. A step change after a deployment points at that change; a slow rise in empty retrieval results points at data going stale. Plot signals against deployment and prompt-edit markers.</p>
+<p>Quality signals come from graded samples; a representative sample plus a fixed regression set suffices. Track task success, unsupported claims, false refusals, format validity, and critical categories. Report per-category results, since a stable average can conceal a collapsing slice.</p>
+<table>
+<thead>
+<tr>
+<th>Monitoring question</th>
+<th>Signal to watch</th>
+<th>Response when it moves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Is the service reachable?</td>
+<td>Error rate by family, timeout rate</td>
+<td>Investigate integration; page an engineer if sustained</td>
+</tr>
+<tr>
+<td>Are we within budget and quota?</td>
+<td>Tokens per request, 429 count, cost per request</td>
+<td>Tune context, concurrency, or caching</td>
+</tr>
+<tr>
+<td>Did a change hurt quality?</td>
+<td>Graded regression-set score by category</td>
+<td>Block rollout; compare versions; inspect failing traces</td>
+</tr>
+<tr>
+<td>Are answers drifting over time?</td>
+<td>Unsupported-claim and refusal rates over days</td>
+<td>Inspect source freshness and data pipelines</td>
+</tr>
+<tr>
+<td>Are critical cases still safe?</td>
+<td>Safety-gate failures, blocked actions</td>
+<td>Stop rollout and escalate immediately</td>
+</tr>
+</tbody>
+</table>
+<p>Thresholds need tolerance bands because output varies between runs. Define a floor and a maximum allowed drop from the last accepted baseline, with stricter limits for critical and safety categories. Record each metric's definition beside its value so future comparisons are meaningful.</p>
+<p>Make changes reviewable: pin the model version, version prompt templates, and scrutinize tool schemas and retrieval settings as behavior-defining artifacts. Turn each found regression into a permanent test so every incident leaves the system more observable.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A canary release — exposing a change to a small share of traffic — complements a fixed regression set. The set catches known failures deterministically; the canary catches novel ones while limiting the number of affected users.</p>
+</blockquote>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal:</strong> Build a small diagnostic loop that can classify a failure and choose a retry policy from a recorded trace.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Create a scratch script that wraps one model call and logs, in order: request identifier, assembled messages, tool calls and results, raw response, and elapsed time.</li>
+<li>Introduce four deliberate faults one at a time: a wrong credential, a malformed request field, a forced timeout, and a simulated throttling response with retry guidance.</li>
+<li>For each fault, record which trace field first revealed the problem and whether a retry would have helped.</li>
+<li>Add the backoff function from this chapter and confirm that it raises immediately for the authentication and validation faults but waits and retries for the other two.</li>
+<li>Add a tiny regression set of five cases and a score comparison that flags a drop greater than a chosen margin.</li>
+</ol>
+<p><strong>Expected observation:</strong> The two deterministic faults fail identically on every attempt and are rejected without sleeping. The transient faults follow the retry policy, with visibly increasing delays. The trace shows the first wrong step for each fault at a different stage, so a single canned response cannot handle all four.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A support assistant answers questions from a document store. After engineers enable a new model version, the share of "unusable" answers climbs sharply. Rather than soften the prompt, an engineer reads traces first.</p>
+<p>The traces reveal two clusters. In one, the answer is empty and the tool log shows a throttling response followed by rapid retries that all failed. In the other, a full answer is present but the retrieved context contains a document from an older policy revision. Different first wrong steps require different fixes.</p>
+<p>For the throttling cluster, the retry code attempts calls immediately with no backoff. Each burst deepens the overload. Replacing the tight loop with capped exponential backoff and jitter, and honoring server guidance, returns the error rate to normal without touching the prompt.</p>
+<p>For the stale-document cluster, the model is not at fault either. The retrieval filter still points at an archived collection that was not updated when the policy migrated. The assistant faithfully answered from an outdated source. Reindexing the active collection and correcting the filter removes the cluster.</p>
+<p>The new model version is a coincidence in time, not a cause. Had the team rewritten the prompt on the first morning, both defects would have remained, and the edit would have made attribution harder. Recorded versions let the engineer rule the model out quickly.</p>
+<p>The engineer adds both signatures to the regression set, separates throttling errors from quality grades on the dashboard, and alerts on retrieval freshness. The lesson is procedural: find the first wrong step, classify the error, apply a matching fix, and make the incident impossible to miss.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Changing a prompt before reproducing the failure and reading the trace.</li>
+<li>Logging only inputs and outputs, which hides the middle of the request where most faults live.</li>
+<li>Retrying authentication, validation, or safety failures as though they were transient.</li>
+<li>Retrying with a fixed, short delay and no jitter, which can amplify an overload.</li>
+<li>Trusting a stable aggregate score while a small critical category collapses.</li>
+<li>Treating a wrong answer as a model defect when the retrieved context was missing or stale.</li>
+<li>Failing to pin model and prompt versions, making later attribution guesswork.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Failures come from the integration or from the model or its inputs, and the distinction determines the fix.</li>
+<li>Read a trace forward and stop at the first wrong step; downstream symptoms mislead.</li>
+<li>A useful trace carries identifiers, timestamps, versions, messages, context, tool calls, results, and outcomes.</li>
+<li>Authentication and validation errors are deterministic; timeouts and rate limits are often transient.</li>
+<li>Backoff with jitter, an attempt ceiling, and respect for retry guidance make retries safe.</li>
+<li>Never retry safety failures; escalate them instead.</li>
+<li>Monitor both operational signals and graded quality signals, sliced by category.</li>
+<li>Pin versions, use tolerance bands, and convert every incident into a regression case.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A request is rejected immediately with an authentication error before any output is produced. What is the best first action?</li>
+</ol>
+<p>A. Rewrite the system prompt to be more explicit.</p>
+<p>B. Confirm the credential exists at runtime and belongs to the intended environment.</p>
+<p>C. Add three automatic retries with a short delay.</p>
+<p>D. Lower the effort setting to reduce cost.</p>
+<ol start="2">
+<li>In a trace, the final answer is vague, and the retrieved-context field is empty. What is the first wrong step?</li>
+</ol>
+<p>A. The final answer's wording.</p>
+<p>B. The output parser.</p>
+<p>C. The retrieval step that produced no context.</p>
+<p>D. The model's temperature.</p>
+<ol start="3">
+<li>Which failure is most appropriate for automatic retry with backoff?</li>
+</ol>
+<p>A. A malformed request payload.</p>
+<p>B. An expired API key.</p>
+<p>C. A transient timeout followed by a throttling response.</p>
+<p>D. A safety-policy violation.</p>
+<ol start="4">
+<li>Why does jitter accompany exponential backoff?</li>
+</ol>
+<p>A. It makes each delay exactly twice the previous one.</p>
+<p>B. It prevents many clients from retrying at the same instant.</p>
+<p>C. It removes the need for an attempt ceiling.</p>
+<p>D. It converts deterministic errors into transient ones.</p>
+<ol start="5">
+<li>Which trace fields best support attributing a quality change to a specific edit?</li>
+</ol>
+<p>A. Output text and word count only.</p>
+<p>B. Token counts and latency only.</p>
+<p>C. Model version and prompt-template version.</p>
+<p>D. Timestamp and session identifier only.</p>
+<ol start="6">
+<li>A grading report shows a flat overall score but a sharp fall in one small critical category. What does this illustrate?</li>
+</ol>
+<p>A. That the application needs more retries.</p>
+<p>B. That aggregate scores can hide localized regressions, so per-category thresholds are needed.</p>
+<p>C. That the trace has too many fields.</p>
+<p>D. That rate limiting is the true cause.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> An early authentication rejection is deterministic and points at credential configuration. A is wrong because the prompt is never reached. C is wrong because repeating a bad credential cannot succeed and wastes calls. D addresses effort and cost, which are unrelated to authentication.</p>
+</li>
+<li>
+<p><strong>C.</strong> The empty context precedes and explains the vague answer, so it is the first wrong step. A describes a downstream symptom rather than the cause. B is wrong because the parser received a valid, if poor, answer. D is a plausible-sounding guess that the trace does not support.</p>
+</li>
+<li>
+<p><strong>C.</strong> Transient timeouts and throttling may clear after a wait, so backoff is suitable. A is a validation fault that fails identically every time. B is an authentication fault with the same problem. D must be blocked, never retried, because repetition increases risk.</p>
+</li>
+<li>
+<p><strong>B.</strong> Jitter spreads attempts across time so clients do not synchronize. A describes exponential growth, which is the role of the doubling term, not jitter. C is false because an attempt ceiling is still required. D is false because jitter cannot change an error's nature.</p>
+</li>
+<li>
+<p><strong>C.</strong> Version fields identify which change accompanied the behavior shift. A records symptoms without attribution. B speaks to cost and speed, not cause. D orders events but does not name the changed component.</p>
+</li>
+<li>
+<p><strong>B.</strong> A stable average with a failing slice shows why thresholds must apply per category. A invents a retry problem not present in the scenario. C misreads the situation as excessive logging. D assumes throttling without evidence.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 27.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="26-configuration.html">&larr; Previous</a><a href="28-failure-modes.html">Next: Failure Modes, Model-as-Judge, and Evaluation Decisions &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

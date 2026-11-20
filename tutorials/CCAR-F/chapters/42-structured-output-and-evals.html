@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>42. Structured Output and Evaluation</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>42. Structured Output and Evaluation</h1>
+<p>Prose is a poor interface between a model and a program. If downstream code must parse a paragraph to find an invoice total, the system will eventually break on a polite sentence like "I'd say it's around forty dollars." Structured output turns model responses into typed data, and evaluation turns "seems good" into a measured claim. This chapter covers both: how to obtain reliable structured data and how to know whether the whole system is working.</p>
+
+<h2>Why structure is an architectural concern</h2>
+<p>A free-text response has unbounded shape; a program expects a bounded one. The gap between them is where silent bugs live. Consider an extraction pipeline that reads contracts. If the model returns <code>"date": "next Tuesday"</code> instead of an ISO date, a naive parser may store the literal string and a later comparison will quietly fail. Structure is not cosmetic — it is the contract that lets components trust one another.</p>
+<p>Three approaches exist, in increasing order of strictness: ask for JSON in the prompt (soft), enable a JSON mode that guarantees syntactically valid JSON (medium), and supply a schema that constrains the output to exact types and allowed values (strict). Choose based on what breaks if the format is wrong. A chat UI can recover from soft JSON; a payment processor cannot.</p>
+<div class="tip">Even with a strict schema, validate in your application. A schema guarantees shape, not truth. A field can be perfectly typed and completely wrong, so pair structural validation with semantic checks such as "total equals the sum of line items."</div>
+
+<h2>JSON mode and schema-constrained extraction</h2>
+<p>JSON mode ensures the response parses as JSON. It does not ensure the keys you want are present. Schema-constrained extraction goes further: you provide a definition with required fields, types, enums, and nested objects, and the decoder is nudged or forced to conform. The practical difference shows up in failure rates. In a small invoice test set of 200 documents, a soft prompt might yield 8 percent malformed outputs, JSON mode might cut that to 1 percent, and a strict schema with a retry gate often reaches near zero malformed outputs after one retry.</p>
+<p>Write schemas that express real constraints. Prefer <code>enum</code> over free strings for categorical values, use <code>integer</code> in the smallest unit (cents) to avoid floating-point drift, and mark fields <code>required</code> only when their absence should fail the task. Over-constraining produces brittle extraction when a document legitimately omits a value; under-constraining pushes ambiguity into your code.</p>
+<pre><code>{
+  "type": "object",
+  "required": ["vendor", "total_cents", "currency", "line_items"],
+  "properties": {
+    "vendor": {"type": "string", "minLength": 1},
+    "total_cents": {"type": "integer", "minimum": 0},
+    "currency": {"type": "string", "enum": ["USD", "EUR", "GBP"]},
+    "line_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["description", "amount_cents"],
+        "properties": {
+          "description": {"type": "string"},
+          "amount_cents": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}</code></pre>
+<p>The <code>additionalProperties: false</code> flag is worth emphasizing. Without it, models sometimes invent helpful-looking extras such as a confidence note or a guessed tax field. Those extras then flow into storage and pollute downstream reports. Closed schemas keep the data surface small and predictable.</p>
+
+<h2>Tool-based extraction as an alternative</h2>
+<p>Instead of asking for a final JSON answer, you can define an extraction <em>tool</em> whose parameter list is the target schema, then let the model call it. This looks like a tool call but functions as structured output. The advantage is that the call site is explicit in the transcript: you can see which document produced which record, and you can attach the call to a specific turn. It also composes well with agentic flows where several extractors run in sequence.</p>
+<table>
+<thead><tr><th>Technique</th><th>Guarantees valid JSON</th><th>Guarantees required keys</th><th>Best use</th></tr></thead>
+<tbody>
+<tr><td>Prompt request</td><td>No</td><td>No</td><td>Prototypes, low-stakes display</td></tr>
+<tr><td>JSON mode</td><td>Yes</td><td>No</td><td>Log parsing, drafts</td></tr>
+<tr><td>Schema-constrained</td><td>Yes</td><td>Yes</td><td>Ingestion, APIs</td></tr>
+<tr><td>Tool-based call</td><td>Yes</td><td>Yes</td><td>Multi-step agents, provenance-heavy work</td></tr>
+</tbody>
+</table>
+<p>The trade-off is verbosity and cost: each tool call carries schema overhead in the prompt. For a single extraction on a short input, direct schema output is simpler. For a pipeline with five linked extractors, the tool form gives you a clean audit trail.</p>
+
+<h2>Validation loops and retry gates</h2>
+<p>A validation loop is a deterministic check wrapped around the model call. It has three possible outcomes: accept, retry with feedback, or reject. Retries must be bounded and must change something — repeating the identical prompt after a malformed response usually reproduces the same error.</p>
+<ol>
+<li><strong>Parse and schema-check.</strong> If invalid, record the exact validation error path, such as <code>line_items[2].amount_cents: expected integer</code>.</li>
+<li><strong>Add semantic checks.</strong> Compare totals, check that dates fall in a plausible range, and verify enums against a lookup table.</li>
+<li><strong>Retry with the error text.</strong> Feed the failure back as a short correction instruction, at most two times, with a lower temperature on each retry.</li>
+<li><strong>Gate the result.</strong> If checks still fail, route to a human queue or a fallback parser instead of passing bad data downstream.</li>
+</ol>
+<pre><code>attempt = 0
+while attempt &lt; 3:
+    raw = model.generate(prompt + corrections, temperature=0.2 - 0.05*attempt)
+    ok, errors = validate_against_schema(raw)
+    if ok &amp;&amp; semantic_checks_pass(raw):
+        return raw
+    corrections.append("Fix these fields: " + errors)
+    attempt += 1
+return route_to_review_queue(raw)</code></pre>
+<p>Notice the guard uses both escaped comparison and logical operators. The important design point is that the loop cannot run forever: <code>attempt &lt; 3</code> and the explicit review fallback make the behaviour testable. A retry without a gate is just an expensive way to produce the same error three times.</p>
+<div class="warn">Do not let retries mask systemic problems. If more than a few percent of outputs need a retry, the schema, the examples, or the source document quality is wrong. Track retry rate as a first-class metric, not a hidden detail.</div>
+
+<h2>Multi-pass review and evaluation workflow</h2>
+<p>Some tasks benefit from a second pass: extract, then review. The reviewer receives the structured record plus the source, and answers a narrow question — "does each field have support in the source?" This catches plausible hallucinations that schema validation cannot. Keep the reviewer's output structured too, for example a list of field-level objections, so its result can be acted on automatically.</p>
+<p>Evaluation makes improvement measurable. A practical workflow has five steps:</p>
+<ol>
+<li><strong>Build a dataset.</strong> Sample 100 to 300 real cases, including edge cases and known failures. Label the expected output or the expected rubric score.</li>
+<li><strong>Define a rubric.</strong> Score dimensions such as correctness, completeness, and format compliance on a 0–3 scale with written anchors for each level.</li>
+<li><strong>Choose a grader.</strong> Use exact match for deterministic fields, a programmatic check for arithmetic, and model grading for subjective dimensions. Calibrate the model grader against human labels on a small set first.</li>
+<li><strong>Run in batch.</strong> Execute the full dataset asynchronously, store every input/output pair, and compare against a baseline version.</li>
+<li><strong>Triage regressions.</strong> Group failures by cause — schema, retrieval, reasoning, or grader error — before changing the prompt.</li>
+</ol>
+<p>Model grading is useful but biased. Graders tend to favour verbose, confident answers and may penalise correct terse ones. Mitigate this by hiding which system produced an answer (blind comparison), randomising presentation order, and measuring agreement with human raters. If agreement is below roughly 80 percent, fix the rubric before trusting the score.</p>
+<div class="exercise"><strong>Exercise 42.1 — Build a schema and retry gate.</strong> Define a schema for extracting a shipping address with five fields, including an enum for country and an integer postal code where applicable. Write a validation loop that allows at most two retries, lowers temperature on each retry, and routes to review on failure. List three semantic checks beyond schema validity.</div>
+<div class="exercise"><strong>Exercise 42.2 — Design an evaluation set.</strong> For a customer-email classifier, propose 120 test cases spread across at least four categories, including 15 deliberate edge cases. Write a 0–3 rubric with anchors for one subjective dimension, and explain how you would check whether a model grader agrees with a human rater.</div>
+
+<h2>Closing the loop</h2>
+<p>Structured output and evaluation are two halves of one idea: make the model's contribution legible to the rest of the system, and make the system's quality legible to you. Schemas, validation loops, and tool-based extraction handle the first half. Datasets, rubrics, batch runs, and calibrated graders handle the second. When a regression appears, the combination lets you answer not just "something changed" but "field X failed on documents of type Y after we altered the enum." That specificity is what separates a prototype from a maintainable system.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Explain the difference between JSON mode and schema-constrained extraction using an example where JSON mode still fails the task.</li>
+<li>Why is <code>additionalProperties: false</code> often desirable in an extraction schema?</li>
+<li>Describe a validation loop with a retry gate and explain why each retry must change the input.</li>
+<li>When is tool-based extraction preferable to direct schema output?</li>
+<li>Name two sources of bias in model grading and one mitigation for each.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Treat output format as a contract; choose soft prompts, JSON mode, schemas, or tool calls by the cost of a format error.</li>
+<li>Express real constraints with enums, integers, required fields, and closed schemas.</li>
+<li>Wrap model calls in bounded validation loops with semantic checks and an explicit review fallback.</li>
+<li>Use multi-pass review to catch plausible but unsupported values that schemas cannot detect.</li>
+<li>Evaluate with a labelled dataset, a written rubric, calibrated graders, batch runs, and cause-based triage.</li>
+</ul>
+<nav><a href="41-multi-turn-design.html">&larr; Previous</a><span></span><a href="43-context-window.html">Next: The Context Window &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

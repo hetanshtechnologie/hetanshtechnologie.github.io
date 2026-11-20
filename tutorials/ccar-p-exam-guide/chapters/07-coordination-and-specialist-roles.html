@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 7 — Coordination, Specialist Roles, and Multi-Component Costs</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 7 — Coordination, Specialist Roles, and Multi-Component Costs</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Explain when coordinating multiple specialized components improves outcomes compared with a single generalist flow.</li>
+    <li>Describe orchestrator-worker patterns, role specialization, task contracts, and aggregation strategies.</li>
+    <li>Identify coordination costs such as latency, token spend, context fragmentation, and compounding error risk.</li>
+    <li>Design handoffs and boundaries that preserve clarity, accountability, and recoverability across components.</li>
+    <li>Evaluate whether added coordination complexity is justified by measurable benefits under stated constraints.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Why split work across specialized roles</h3>
+  <p>As tasks grow in scope or complexity, a single component asked to do everything may struggle with focus, context limits, or conflicting instructions. Dividing work across specialized roles can improve outcomes when each role has a clear purpose, appropriate tools, and a narrower context. One component may gather information, another may analyze options, and a third may format or validate results. Specialization can reduce cognitive load per step, enable parallel execution of independent subtasks, and make behavior easier to reason about because responsibilities are separated.</p>
+  <p>However, specialization is not inherently superior. Every boundary between components introduces communication overhead and potential misunderstanding. Information must be transferred, summarized, or shared; decisions must be aggregated; and failures in one part can affect others. A design that splits work unnecessarily may become slower, more expensive, and harder to debug than a simpler approach. The architectural question is whether specialization addresses a real limitation—such as context capacity, parallelism opportunity, or distinct capability needs—in a way that justifies its coordination costs.</p>
+  <p>Professional scenarios often present a complex objective and ask for the most appropriate structure. Strong answers look for evidence that subtasks are separable, that roles benefit from different instructions or tools, and that results can be combined reliably. If those conditions are absent, a well-instructed single flow or a deterministic pipeline may be preferable.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Introduce multiple specialized components to solve a specific problem (focus, isolation, parallelism, or capability separation), not because distributed designs appear more sophisticated.</p>
+  </div>
+
+  <h3>Orchestrator-worker patterns</h3>
+  <p>A common coordination structure uses an orchestrator to manage overall progress and one or more workers to perform delegated tasks. The orchestrator interprets the goal, decomposes work, assigns subtasks, monitors results, and synthesizes outputs. Workers focus on bounded assignments using instructions and tools suited to their role. This separation allows the orchestrator to maintain a global view while workers operate with narrower, relevant context.</p>
+  <p>Effective orchestration depends on clear task contracts. A task contract specifies the objective, required inputs, available tools or sources, constraints, expected output format, and completion criteria. Without a contract, workers may interpret assignments differently, return incompatible results, or pursue unnecessary work. Contracts reduce ambiguity at boundaries and make aggregation feasible. They also support accountability: when an outcome is wrong, the architect can examine whether the task was specified poorly or executed poorly.</p>
+  <p>Aggregation is the counterpart to delegation. The orchestrator must combine worker outputs into a coherent result, resolving conflicts, filling gaps, and checking completeness. Aggregation strategies range from simple concatenation of independent results to structured comparison, voting, or synthesis with validation. The chosen strategy should reflect the nature of the subtasks: independent findings may be merged, while conflicting analyses require reconciliation rules or escalation.</p>
+
+  <table>
+    <tr>
+      <th>Element</th>
+      <th>Purpose</th>
+      <th>What to define clearly</th>
+      <th>Risk if unclear</th>
+    </tr>
+    <tr>
+      <td>Orchestrator role</td>
+      <td>Manage goal, delegation, and synthesis</td>
+      <td>Authority, stopping conditions, aggregation rules</td>
+      <td>Drift, incomplete synthesis, uncontrolled iteration</td>
+    </tr>
+    <tr>
+      <td>Worker role</td>
+      <td>Execute bounded subtask</td>
+      <td>Scope, tools, inputs, expected output</td>
+      <td>Scope creep, irrelevant work, inconsistent results</td>
+    </tr>
+    <tr>
+      <td>Task contract</td>
+      <td>Align expectations at boundary</td>
+      <td>Objective, constraints, format, success criteria</td>
+      <td>Misinterpretation and rework</td>
+    </tr>
+    <tr>
+      <td>Aggregation strategy</td>
+      <td>Combine outputs into final result</td>
+      <td>Merge rules, conflict handling, validation</td>
+      <td>Contradictions, omissions, false confidence</td>
+    </tr>
+  </table>
+
+  <h3>Handoffs, context isolation, and information flow</h3>
+  <p>Handoffs are moments where information crosses component boundaries. A good handoff transfers what the next component needs and omits what it does not. Excessive context can overwhelm the recipient, increase cost, and introduce noise; insufficient context can force guesswork or repeated work. Structured summaries, key findings, evidence references, and explicit open questions often make better handoff artifacts than raw transcripts or unfiltered intermediate outputs.</p>
+  <p>Context isolation is one of the main benefits of multi-component designs. A worker exploring a large document set or testing multiple hypotheses can generate substantial intermediate material. If all of that material flows back into the orchestrator’s context, the global view becomes cluttered and expensive. Isolating exploration within workers and returning concise, structured results preserves focus at the coordination level. Isolation can also limit the spread of untrusted or low-quality content, provided boundaries and checks are enforced.</p>
+  <p>Information flow should be intentional. Architects should decide which data is shared, in what form, and with what provenance. When workers rely on external sources, returning source identifiers or evidence snippets enables the orchestrator to validate claims. When tasks are sensitive, handoffs must respect data boundaries and least-privilege principles. Treating handoffs as informal messages rather than designed interfaces is a frequent source of coordination failure.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Returning full intermediate transcripts to the coordinator. This inflates context, obscures key findings, and can propagate noise or sensitive data unnecessarily.</p>
+  </div>
+
+  <h3>Coordination costs and failure modes</h3>
+  <p>Multi-component coordination introduces costs that must be weighed against benefits. <strong>Latency</strong> can increase due to sequential handoffs, aggregation time, or synchronization waits, even if some work runs in parallel. <strong>Cost</strong> can increase because multiple model calls, larger total token usage, and orchestration overhead accumulate. <strong>Complexity</strong> increases in design, testing, and operations: more components mean more interfaces, more states, and more potential failure points.</p>
+  <p>Coordination also creates characteristic failure modes. Tasks may be decomposed poorly, leaving gaps or overlaps. Workers may duplicate effort if assignments are not mutually clear. Outputs may conflict, and naive aggregation can produce a plausible but incorrect synthesis. Errors can compound: a small mistake in an early worker’s output may be treated as fact by later steps. Diagnosing these issues requires end-to-end tracing that shows task assignments, inputs, outputs, and decisions at each boundary.</p>
+
+  <table>
+    <tr>
+      <th>Cost or failure mode</th>
+      <th>How it appears</th>
+      <th>Mitigation</th>
+      <th>What to measure</th>
+    </tr>
+    <tr>
+      <td>Added latency</td>
+      <td>Slower end-to-end responses</td>
+      <td>Parallelize independent work, limit handoffs</td>
+      <td>Stage and total duration</td>
+    </tr>
+    <tr>
+      <td>Higher spend</td>
+      <td>More calls and tokens per request</td>
+      <td>Right-size roles, cap iterations, reuse context</td>
+      <td>Cost per successful task</td>
+    </tr>
+    <tr>
+      <td>Context fragmentation</td>
+      <td>Lost details across boundaries</td>
+      <td>Structured handoff contracts and evidence links</td>
+      <td>Rework and omission rates</td>
+    </tr>
+    <tr>
+      <td>Compounding errors</td>
+      <td>Early mistake amplified in synthesis</td>
+      <td>Validation at boundaries, confidence checks</td>
+      <td>Defect origin and propagation</td>
+    </tr>
+    <tr>
+      <td>Coordination overhead</td>
+      <td>More effort managing than solving</td>
+      <td>Simplify roles or revert to single flow</td>
+      <td>Success rate vs complexity</td>
+    </tr>
+  </table>
+
+  <h3>Deciding when multi-component coordination pays off</h3>
+  <p>A justified multi-component design typically shows one or more clear advantages: independent subtasks that can run in parallel; distinct roles requiring different tools, permissions, or instructions; context isolation that prevents overload; or improved quality from focused specialization. The benefits should be observable through metrics such as task success rate, time to completion, or reduced error rates compared with a simpler baseline. If the baseline performs adequately within constraints, added coordination is difficult to defend.</p>
+  <p>It is also important to consider operational maturity. Coordinated systems demand stronger observability, clearer contracts, and disciplined evaluation. A team without the ability to trace and test multi-step behavior may struggle to operate a complex design safely. In such cases, a staged approach—starting simple, measuring limitations, and introducing coordination where evidence supports it—reduces risk.</p>
+
+  <pre><code class="language-yaml">coordination_plan:
+  goal: "produce a comparative vendor brief"
+  orchestrator:
+    responsibilities: ["decompose", "assign", "validate", "synthesize"]
+    max_iterations: 3
+  workers:
+    - role: "source_researcher"
+      task: "collect approved facts per vendor"
+      output: {fields: ["vendor", "findings", "sources"]}
+    - role: "risk_reviewer"
+      task: "identify compliance and delivery risks"
+      output: {fields: ["vendor", "risks", "evidence"]}
+  aggregation:
+    method: "structured_merge"
+    conflict_policy: "flag_and_escalate"
+  budgets:
+    max_total_tool_calls: 12
+    timeout_seconds: 45</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Compare a single-flow and a coordinated design for the same task. List one expected benefit, one added cost, and one metric that would confirm whether coordination was worthwhile.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A procurement team needs comparative briefs on several potential suppliers. For each supplier, analysts must gather approved company information, review compliance notes, and summarize delivery risks. The current process is slow because one analyst handles each case sequentially and must repeatedly switch contexts. Leadership wants faster turnaround but requires that every claim in the brief be traceable to an approved source and that conflicting findings be flagged rather than silently reconciled.</p>
+
+  <h3>Analysis</h3>
+  <p>The objective contains separable subtasks: information gathering and risk review can be defined independently for each supplier, and supplier-level work can proceed in parallel. These characteristics suggest potential value in coordination and specialization. However, the requirements for traceability and conflict handling create strict boundary conditions. Workers must return evidence-linked findings, and the orchestrator must apply an explicit aggregation rule that preserves disagreements for review.</p>
+  <p>Risks include duplicated searches, inconsistent output formats, and compounding errors if unsupported claims are merged into the final brief. Latency and cost may rise if too many workers are launched or if handoffs are verbose. The design must therefore balance parallelism with clear contracts, bounded budgets, and structured synthesis.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect designs an orchestrator-worker pattern. The orchestrator assigns each supplier a research worker and a risk-review worker, both constrained to approved sources and required to return structured outputs with source references. Workers operate in isolated contexts to avoid overwhelming the coordinator. Once outputs are collected, the orchestrator performs a structured merge: aligned findings are combined, missing evidence is flagged, and conflicting risk assessments are escalated for human review rather than averaged away.</p>
+  <p>Budgets cap total tool calls and execution time, and telemetry records task assignments, durations, and validation outcomes. Compared with a single sequential flow, the design reduces turnaround time through parallelism and improves clarity through specialization. Traceability and conflict policy address the key constraints, making the added coordination defensible for this workload.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Splitting work into roles without clear task contracts, leading to incompatible or incomplete outputs.</li>
+    <li>Returning unstructured, verbose intermediate context that obscures findings and increases cost.</li>
+    <li>Assuming parallel coordination always reduces latency despite handoff and aggregation overhead.</li>
+    <li>Merging conflicting outputs without explicit reconciliation or escalation rules.</li>
+    <li>Ignoring compounding error risk by treating early worker outputs as verified facts.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Specialized roles can improve focus, parallelism, and context isolation when subtasks are separable and well defined.</li>
+    <li>Orchestrator-worker designs rely on clear task contracts, intentional handoffs, and explicit aggregation strategies.</li>
+    <li>Coordination introduces costs—latency, spend, complexity, and compounding errors—that must be justified by measurable benefits.</li>
+    <li>Structured, evidence-linked handoffs and boundary validation reduce fragmentation and error propagation.</li>
+    <li>Multi-component coordination pays off when evidence shows advantages over a simpler baseline within operational constraints.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>What is a primary benefit of context isolation in a multi-component design?</p>
+      <p>A. It eliminates the need for aggregation<br>
+      B. It keeps intermediate exploration from overwhelming the coordinator’s context<br>
+      C. It guarantees that workers never make mistakes<br>
+      D. It removes all latency overhead</p>
+    </li>
+    <li>
+      <p>Which element best reduces ambiguity when delegating work to a specialized worker?</p>
+      <p>A. A vague goal statement<br>
+      B. A clear task contract with scope, inputs, constraints, and expected output<br>
+      C. Allowing unrestricted tool access<br>
+      D. Returning raw transcripts only</p>
+    </li>
+    <li>
+      <p>Why can adding more components sometimes increase end-to-end latency?</p>
+      <p>A. Parallel work is never possible<br>
+      B. Handoffs, synchronization, and aggregation introduce overhead<br>
+      C. Validation always removes the need for coordination<br>
+      D. Structured outputs slow model generation in all cases</p>
+    </li>
+    <li>
+      <p>How should conflicting worker outputs be handled in a high-accountability scenario?</p>
+      <p>A. Merge them silently to produce a single answer<br>
+      B. Discard all outputs and retry indefinitely<br>
+      C. Apply explicit reconciliation rules and escalate unresolved conflicts<br>
+      D. Prefer the longest response</p>
+    </li>
+    <li>
+      <p>Which situation most strongly justifies multi-component coordination?</p>
+      <p>A. A simple, stable task with clear single-step logic<br>
+      B. Separable subtasks that benefit from parallelism or distinct roles within budgets<br>
+      C. A need to avoid defining interfaces<br>
+      D. Lack of observability and evaluation capability</p>
+    </li>
+    <li>
+      <p>What is compounding error in coordinated systems?</p>
+      <p>A. A cost increase from caching<br>
+      B. An early mistake that is propagated and amplified through later steps<br>
+      C. A delay caused by parallel execution<br>
+      D. A conflict resolved by explicit rules</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Isolation prevents large intermediate material from cluttering the coordinator’s context. A is false because aggregation is still required. C and D overstate guarantees.</li>
+    <li><strong>Correct: B.</strong> A clear task contract aligns expectations at the boundary. A, C, and D increase ambiguity, risk, or noise.</li>
+    <li><strong>Correct: B.</strong> Coordination overhead can offset or exceed parallel gains. A is incorrect, and C and D do not explain the general cause.</li>
+    <li><strong>Correct: C.</strong> Explicit reconciliation and escalation preserve accountability when outputs conflict. A hides disagreement, B is uncontrolled, and D is not a valid criterion.</li>
+    <li><strong>Correct: B.</strong> Separable subtasks with clear benefits and manageable costs justify coordination. A favors simplicity, C undermines good design, and D increases operational risk.</li>
+    <li><strong>Correct: B.</strong> Compounding error occurs when early inaccuracies influence later reasoning or synthesis. A, C, and D describe different phenomena.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 7.</em></p>
+
+  <nav>
+    <a href="06-autonomy-spectrum-and-selection.html">&larr; Previous</a>
+    <a href="08-decomposing-complex-work.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

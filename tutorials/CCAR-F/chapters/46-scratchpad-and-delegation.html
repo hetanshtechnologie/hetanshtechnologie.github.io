@@ -1,0 +1,110 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>46. Scratchpads and Delegated Discovery</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>46. Scratchpads and Delegated Discovery</h1>
+<p>Some problems cannot be solved in a single pass because the agent does not yet know what it needs to know. It must explore, record what it finds, and change direction. Two structures make this reliable: a durable scratchpad that holds intermediate findings outside the fragile conversation, and delegation that sends discovery work to a focused subagent. This chapter explains how to design both and how to keep them from becoming dumping grounds.</p>
+
+<h2>Durable scratchpad design</h2>
+<p>A scratchpad is not the same as the chat transcript. The transcript is a record of messages; a scratchpad is a working set of claims with structure and status. It lives in your application storage, is updated after each reasoning step, and is injected into the model as a compact view. The model may propose changes, but your code decides what is committed.</p>
+<p>Design the scratchpad around questions, not paragraphs. A useful record has an id, a question, the evidence collected so far, a current status, and a next action. Statuses should be small and explicit: <code>open</code>, <code>supported</code>, <code>contradicted</code>, <code>abandoned</code>. This turns "the agent is thinking" into an inspectable state machine.</p>
+<pre><code>{
+  "scratchpad_id": "SP-220",
+  "goal": "Explain why the batch job failed on 2026-11-18",
+  "entries": [
+    {"id": "Q1", "question": "Which service emitted the first error?",
+     "evidence": ["log:worker-3 line 812 at 02:14"],
+     "status": "supported", "next": "none"},
+    {"id": "Q2", "question": "Did the retry policy change that week?",
+     "evidence": ["diff:config/retry.yaml shows max_attempts 3 -&gt; 1"],
+     "status": "supported", "next": "confirm deployment time"},
+    {"id": "Q3", "question": "Was the upstream API degraded?",
+     "evidence": [],
+     "status": "open", "next": "query status archive"}
+  ],
+  "guard": "open_entries &lt;= 5 &amp;&amp; total_evidence &lt;= 40"
+}</code></pre>
+<p>The two guards enforce hygiene. Unlimited open questions lead to aimless exploration; unlimited evidence recreates the context problem the scratchpad was meant to solve. When a guard is hit, the agent must close or merge a question before opening another.</p>
+<div class="tip">Give each evidence item a stable reference — a log line, a diff id, a document and offset. An evidence string with no reference cannot be checked later, and an unchecked finding is just a guess wearing a lab coat.</div>
+
+<h2>Hygiene and limits</h2>
+<p>A scratchpad that never shrinks becomes a second context window with the same problems. Apply three hygiene rules on every update.</p>
+<ol>
+<li><strong>One owner per entry.</strong> An entry is either a question or a finding, never a mixture. Mixed entries are hard to mark resolved.</li>
+<li><strong>Append evidence, overwrite conclusions.</strong> Evidence accumulates; the current conclusion is replaced when new evidence arrives, with the previous conclusion retained in a short history.</li>
+<li><strong>Close before you open.</strong> Cap open questions at a small number — five is a reasonable default — and require a decision to close one before adding another.</li>
+</ol>
+<p>Set numeric limits on the scratchpad view injected into the prompt. A practical view includes at most ten entries, at most three evidence items per entry, and a total of roughly 2,000 tokens. Older or lower-priority entries remain in storage and can be fetched on demand. This mirrors the memory discipline from earlier chapters: keep the hot set small, keep the full record available.</p>
+<p>Hygiene also means deciding when to discard. If a question has been open for more than a fixed number of tool cycles without new evidence, mark it abandoned and record why. Continuing to carry a dead question wastes attention and invites the model to fabricate an answer to close it.</p>
+<div class="warn">A scratchpad is not proof. A claim marked <code>supported</code> means "there is a recorded reference," not "the reference was verified." For high-stakes conclusions, add a verification pass that actually opens the cited evidence.</div>
+
+<h2>Why delegate discovery</h2>
+<p>Discovery is the search for information whose shape you do not know in advance. It is a poor fit for the main agent for three reasons. First, it is noisy: failed searches and irrelevant documents pollute the main conversation. Second, it is long: exploring twenty sources consumes context that the main agent needs for reasoning. Third, it is separable: the exploration task has its own goal and can be judged independently.</p>
+<p>Delegation addresses all three. A subagent receives a narrow question, explores freely within its own context, and returns a compact summary with references. The main agent never sees the noise, only the result. This is a form of attention isolation — the expensive mess stays in one place.</p>
+<table>
+<thead><tr><th>Work type</th><th>Keep with main agent</th><th>Delegate</th><th>Reason</th></tr></thead>
+<tbody>
+<tr><td>Understand the user's goal</td><td>Yes</td><td>No</td><td>Needs full conversational nuance</td></tr>
+<tr><td>Search twenty documents for a value</td><td>No</td><td>Yes</td><td>High noise, clear stop condition</td></tr>
+<tr><td>Reconcile two conflicting findings</td><td>Yes</td><td>No</td><td>Requires authority and judgement</td></tr>
+<tr><td>Verify a citation actually supports a claim</td><td>No</td><td>Yes</td><td>Mechanically checkable</td></tr>
+<tr><td>Choose the final answer</td><td>Yes</td><td>No</td><td>Accountability stays with the main agent</td></tr>
+</tbody>
+</table>
+<p>Delegate exploration and verification; keep interpretation and decisions. If you delegate the decision as well, you lose the clear line of accountability and make it harder to explain why an action was taken.</p>
+
+<h2>Delegation prompts and returns</h2>
+<p>A delegation prompt must be self-contained. The subagent cannot see the main conversation, so include the goal, the specific question, the sources it may use, the output format, and the stopping rule. Ambiguity here produces a confident but irrelevant report.</p>
+<p>A strong prompt follows a fixed skeleton:</p>
+<ol>
+<li><strong>Context:</strong> one or two sentences of background, without conversational filler.</li>
+<li><strong>Task:</strong> a single question with a measurable answer.</li>
+<li><strong>Allowed sources:</strong> an explicit list or a tool with a bounded scope.</li>
+<li><strong>Return format:</strong> a structured envelope with findings, evidence references, and an unresolved list.</li>
+<li><strong>Stop rule:</strong> a budget such as "at most 12 tool calls, then report what you have."</li>
+</ol>
+<pre><code>return {
+  "task_id": "D-77",
+  "answer": "max_attempts changed from 3 to 1",
+  "findings": [
+    {"claim": "config changed on 2026-11-17",
+     "evidence": "diff:config/retry.yaml#hunk2", "confidence": 0.93}
+  ],
+  "unresolved": ["deployment time not confirmed"],
+  "tool_calls_used": 9,
+  "status": "partial"
+}</code></pre>
+<p>Note the <code>status</code> and <code>unresolved</code> fields. A subagent that returns only a tidy answer hides its gaps. Requiring it to list what it could not determine lets the main agent decide whether to accept, ask the user, or delegate a follow-up. Cap the return at a fixed size — a few hundred tokens — so delegation genuinely reduces context rather than relocating the bloat.</p>
+<p>When several subagents run in parallel, give each a disjoint scope and a unique task id. Overlapping scopes produce duplicate findings and conflicting references; unique ids let the main agent merge results deterministically. If two subagents disagree, do not average their answers — carry both claims with their evidence into the main scratchpad and resolve explicitly.</p>
+<div class="exercise"><strong>Exercise 46.1 — Build a scratchpad schema.</strong> Define a scratchpad for diagnosing a failing deployment with at least five questions, evidence references, and statuses. Write the two guards you would enforce in code and the rule for abandoning a stale question. Explain how you would produce a 2,000-token view for the prompt.</div>
+<div class="exercise"><strong>Exercise 46.2 — Write a delegation contract.</strong> Draft a self-contained delegation prompt for a subagent asked to find all policy clauses relevant to a refund request. Include context, a single measurable task, allowed sources, a structured return envelope, and a stop rule with a numeric tool budget. State how the main agent should handle a <code>partial</code> status.</div>
+
+<h2>Combining the two patterns</h2>
+<p>The scratchpad and delegation reinforce each other. The main agent records what it needs to know as open questions; a subagent is dispatched to resolve one or two of them; its structured return becomes evidence attached to those entries; the status changes from <code>open</code> to <code>supported</code> or <code>contradicted</code>. Because every finding carries a reference and a task id, the chain from final answer back to source is complete.</p>
+<p>This loop also makes cost predictable. Each delegation has a tool budget, each scratchpad has an entry cap, and each return has a size cap. You can estimate the maximum work for a task before it starts, which is exactly what you need when an agent runs unattended. Durable discovery is not about letting the model wander; it is about giving wandering a container, a budget, and a memory that survives the trip.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>How does a scratchpad differ from the chat transcript, and who decides what is committed?</li>
+<li>Name three hygiene rules for a scratchpad and the numeric limit you would set for open questions.</li>
+<li>Give two reasons to delegate discovery rather than performing it in the main conversation.</li>
+<li>What five elements belong in a self-contained delegation prompt?</li>
+<li>Why must a subagent return an <code>unresolved</code> list and a <code>status</code> field?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>A scratchpad is a structured working set of questions, evidence, and statuses stored outside the transcript.</li>
+<li>Enforce hygiene with one owner per entry, append-only evidence, and a cap on open questions.</li>
+<li>Delegate noisy, bounded discovery; keep interpretation and final decisions with the main agent.</li>
+<li>Write self-contained prompts with sources, a return envelope, and a numeric stop rule.</li>
+<li>Merge delegated findings into the scratchpad so every claim retains a reference and an owner.</li>
+</ul>
+<nav><a href="45-escalation-and-propagation.html">&larr; Previous</a><span></span><a href="47-coherence-and-compaction.html">Next: Coherence and Compaction &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

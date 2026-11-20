@@ -1,0 +1,161 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>26. MCP Prompts and Clients</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>26. MCP Prompts and Clients</h1>
+
+<p>Tools let a model act. Resources give it something to read. Prompts are the third primitive: a reusable, parameterized message sequence that a server publishes and a client can insert into a conversation. They are the right home for instructions that a team wants to own centrally — a revision checklist, an incident triage form, a standard way to summarize a document — without asking every user to remember the exact wording.</p>
+
+<h2>Why put prompts on the server</h2>
+
+<p>A prompt stored in a client's settings is a local convenience. A prompt stored on a server is a governed artifact. It can be updated once for every user, tested against a fixed set of inputs, and versioned alongside the tools it references. When the schema of a tool changes, the prompt that teaches a model to use that tool can ship in the same release.</p>
+
+<p>The division of labor is worth stating plainly. A tool executes. A resource provides content. A prompt supplies a starting point for a conversation: a list of messages with roles and text, possibly with resource references attached. A prompt does not run code and does not guarantee a particular model output. It is a template the client chooses to use, usually after a user selects it by name.</p>
+
+<div class="note">Prompts are user-invoked by default. A client typically lists available prompts for a user to pick from, gathers the required arguments, and then inserts the resulting messages. Do not design a prompt as if it were an invisible system instruction that always applies; use server-side instructions or a project instruction file for that.</div>
+
+<h2>Designing a prompt template</h2>
+
+<p>A declaration has a name, a description, and an argument list. A <code>prompts/get</code> request supplies the name plus concrete argument values and returns messages. Each message has a role — usually <code>user</code> or <code>assistant</code> — and content that may be plain text, an image, or an embedded resource.</p>
+
+<pre><code>{
+  "name": "review_release_notes",
+  "description": "Produces a release-note review with a risk section.
+  Use before publishing notes that mention an API change.",
+  "arguments": [
+    {"name": "version", "description": "Release tag, e.g. 2.4.0", "required": true},
+    {"name": "audience", "description": "internal or external", "required": false}
+  ]
+}
+
+// Client request
+{"method": "prompts/get", "params": {
+  "name": "review_release_notes",
+  "arguments": {"version": "2.4.0", "audience": "external"}
+}}
+
+// Server response (abridged)
+{"messages": [
+  {"role": "user", "content": {"type": "text",
+   "text": "Review the notes for version 2.4.0. Flag any claim
+   that a field was added when it was actually renamed."}},
+  {"role": "user", "content": {"type": "resource",
+   "uri": "doc://releases/2.4.0/notes", "mimeType": "text/markdown"}}
+]}
+
+# Before rendering, the server validates argument values
+if len(version) &lt; 5 or len(version) &gt; 24:
+    raise InvalidParams("version must be 5-24 characters")
+if audience != "internal" &amp;&amp; audience != "external":
+    raise InvalidParams("audience must be internal or external")</code></pre>
+
+<p>Keep returned text short. A prompt that embeds 4,000 words of boilerplate consumes context before the model sees the user's data. Prefer a resource reference: the message says <em>read this document</em>, and the client decides whether to inline it. Only the client knows the remaining context budget.</p>
+
+<p>Write the description as a selection rule, not a label: "Reviews release notes for API claims; use when a version touches public interfaces." Avoid promising an outcome the server cannot control.</p>
+
+<h2>Arguments, defaults, and validation</h2>
+
+<p>Arguments are declared as strings in most implementations, even when they represent numbers or dates. The server therefore owns type coercion and validation. An argument named <code>limit</code> that arrives as <code>"50"</code> must be parsed, bounds-checked, and rejected with a clear message if it is outside the allowed range.</p>
+
+<table>
+<tr><th>Argument kind</th><th>Rule</th><th>Failure mode if omitted</th></tr>
+<tr><td>Required identifier</td><td>Match a documented pattern</td><td>Prompt silently targets the wrong record</td></tr>
+<tr><td>Enum-like choice</td><td>Validate against a fixed set</td><td>Free text changes the prompt's behavior</td></tr>
+<tr><td>Numeric limit</td><td>Parse, then bound to 1–100</td><td>Oversized context or empty result</td></tr>
+<tr><td>Optional label</td><td>Substitute a default explicitly</td><td>Different clients render different blanks</td></tr>
+</table>
+
+<p>Every argument value should be treated as untrusted text. A user may paste a value containing instruction-like sentences, delimiters, or newlines. Place values inside clear delimiters in the rendered message, escape delimiter characters, and never concatenate an argument directly into a system-level instruction. Validate length as well as type: an <code>audience</code> value of 20,000 characters is almost always a mistake or an attempt to smuggle extra directions.</p>
+
+<div class="exercise"><strong>Exercise 26.1 — Make a prompt template safe</strong>
+<ol>
+<li>A <code>summarize_ticket</code> prompt accepts a free-text <code>ticket_id</code>. Write a pattern that requires two uppercase letters, a hyphen, and four digits, and state what error message the server should return on a mismatch.</li>
+<li>Show how to render the value inside delimiters so that newlines in the value cannot be mistaken for new instructions.</li>
+<li>Add a default for an optional <code>detail</code> argument and explain why the default must appear in the declaration.</li>
+</ol>
+</div>
+
+<h2>How clients discover what is available</h2>
+
+<p>Discovery starts with an initialization exchange. The client announces its protocol version and capabilities; the server replies with its own capabilities. A server that supports prompts advertises that fact, and the client then calls <code>prompts/list</code>. Lists may be paginated: a response can include a <code>nextCursor</code>, and the client must keep requesting pages until none remains. Treating the first page as the whole catalog is a common bug that makes prompts appear to vanish.</p>
+
+<p>Clients should cache declarations for the life of a session but refresh them after a change notification. Capabilities are negotiated once; renegotiating mid-session is not part of the normal flow. If a client requests a method the server did not advertise, the expected result is a method-not-found error, not a silent empty list. A practical client keeps three separate caches — tools, resources, and prompts — because they change at different rates.</p>
+
+<p>Name collisions are inevitable when several servers are connected. A tool or prompt called <code>search</code> on two servers is ambiguous from the user's perspective. Prefix declarations with the server alias during registration, keep the original name in the request sent to that server, and display both in any selection UI. The mapping belongs in the client, not in the server's public name.</p>
+
+<h2>Connecting to servers</h2>
+
+<p>Local servers are usually launched as child processes with a command, arguments, and environment variables. Remote servers are addressed by URL with headers for authentication. Both forms end up as connection entries that the client reads at startup.</p>
+
+<pre><code>{
+  "mcpServers": {
+    "docs-local": {
+      "command": "python",
+      "args": ["-m", "docs_server", "--root", "/srv/handbook"],
+      "env": {"DOCS_INDEX": "production", "LOG_LEVEL": "warn"}
+    },
+    "tickets-remote": {
+      "url": "https://mcp.example.internal/tickets",
+      "headers": {"Authorization": "Bearer ${TICKETS_TOKEN}"},
+      "timeoutMs": 30000
+    }
+  }
+}</code></pre>
+
+<p>Keep credentials out of configuration files committed to a repository. Reference environment variables or a secret store, and rotate tokens without editing the file. Set an explicit connection timeout — 30 seconds is a reasonable default for a remote server — and fail fast at startup if a required variable is missing. A server that starts with an empty token and reports "no results" is far harder to diagnose than one that refuses to start.</p>
+
+<p>Connection lifecycle deserves a little discipline. Start the process, wait for readiness, exchange initialization, load declarations, and only then expose the server's capabilities to the user. On shutdown, close the transport and reap the child process. A leaked child process holds file descriptors and ports, so repeated restarts of a client can exhaust resources by the end of a day.</p>
+
+<h2>Error handling across the boundary</h2>
+
+<p>Two error channels coexist and should not be confused. Protocol-level failures arrive as JSON-RPC error objects with numeric codes: <code>-32602</code> for invalid parameters, <code>-32601</code> for an unknown method, <code>-32603</code> for an internal error. Business-level failures from a tool are normally returned inside the result as a tool error, because the request itself was well formed and the model needs to see the failure text.</p>
+
+<table>
+<tr><th>Situation</th><th>Channel</th><th>Client response</th></tr>
+<tr><td>Missing required argument</td><td><code>-32602</code> invalid params</td><td>Ask the user for that value</td></tr>
+<tr><td>Server process exited</td><td>Transport error</td><td>Report offline; do not retry blindly</td></tr>
+<tr><td>Tool found no matching record</td><td>Tool error in result</td><td>Let the model explain or broaden the query</td></tr>
+<tr><td>Request exceeded deadline</td><td>Transport timeout</td><td>Retry once if the call is read-only</td></tr>
+</table>
+
+<p>Retry policy follows the same read-versus-action boundary used for tool design. Retry a read after a timeout or a transient transport error, with a small backoff and a cap of two attempts. Never automatically retry a mutation unless it carries an idempotency key, because the first attempt may have succeeded and the acknowledgement was lost. Surface the raw error code in logs but translate it into plain language for the user: "the ticket server is unavailable" is more useful than a stack trace.</p>
+
+<div class="warn">A tool error should not be escalated to a protocol error simply to make it look important. Doing so hides the failure from the model, which then cannot adapt its next step. Keep the error in the channel the receiving layer can act on.</div>
+
+<div class="exercise"><strong>Exercise 26.2 — Classify and handle failures</strong>
+<ol>
+<li>A client sends <code>prompts/get</code> with a misspelled prompt name. Name the error code and state whether the client should retry.</li>
+<li>A tool call to create a booking times out after 30 seconds. Explain why an immediate retry is unsafe and what the tool contract should include to make retry safe.</li>
+<li>Write the user-facing sentence for each failure, keeping protocol codes out of the message.</li>
+</ol>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>What distinguishes a prompt from a tool and a resource in an MCP server?</li>
+<li>Why should a returned prompt prefer a resource reference over thousands of words of inlined text?</li>
+<li>What is <code>nextCursor</code> for, and what bug appears when a client ignores it?</li>
+<li>Where should credentials for remote servers live, and what should happen at startup if one is missing?</li>
+<li>Explain the difference between a protocol error and a tool error, and give one retry rule for each.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Prompts are server-owned, parameterized message templates that users choose to insert into a conversation.</li>
+<li>A declaration lists the name, description, and arguments; <code>prompts/get</code> returns the rendered messages.</li>
+<li>Servers must coerce and validate arguments because most arrive as strings.</li>
+<li>Discovery is capability-based and paginated; keep separate caches for tools, resources, and prompts.</li>
+<li>Launch local servers as managed child processes and address remote servers by URL with secret-backed headers.</li>
+<li>Protocol errors and tool errors are different channels; only idempotent reads are safe to retry automatically.</li>
+</ul>
+
+<nav><a href="25-exposing-tools-resources.html">&larr; Previous</a><span></span><a href="27-mcp-transports.html">Next: STDIO and Streamable HTTP &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

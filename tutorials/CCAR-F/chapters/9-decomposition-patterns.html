@@ -1,0 +1,134 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>9. Hierarchical, Sequential, and Parallel Decomposition</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>9. Hierarchical, Sequential, and Parallel Decomposition</h1>
+
+<p>Chapter 8 treated decomposition as the act of splitting a goal. This chapter treats the <em>shape</em> of the split as a separate decision. Two plans can contain the same subtasks yet behave very differently: one runs them as a tree of delegations, another threads them through a fixed chain, and a third scatters them across identical workers. The shape decides who holds context, how many calls you pay for, and how quickly a wrong answer becomes an expensive one. Skipping this decision produces plans that are executable but absurd — twelve sequential calls where twelve shards would do, or forty workers for stages that genuinely depend on one another.</p>
+
+<h2>Three shapes, three different cost curves</h2>
+
+<p>Name the shapes before comparing them. A <strong>hierarchical</strong> plan is a tree: a parent owns an outcome, splits it into children, and merges their results. A <strong>sequential</strong> plan is a chain: stage <em>k</em> consumes the typed output of stage <em>k</em>&minus;1. A <strong>parallel</strong> plan is scatter/gather: a dispatcher partitions a collection, workers process disjoint slices, and a collector reduces them. Systems combine all three, but each shape has a distinct cost model.</p>
+
+<table>
+<tr><th>Shape</th><th>Work units</th><th>Wall time driver</th><th>Token driver</th><th>Dominant failure</th></tr>
+<tr><td>Hierarchical</td><td>1 + sum of branch nodes</td><td>Depth &times; per-level latency</td><td>Every level re-reads child summaries</td><td>Summary drift between levels</td></tr>
+<tr><td>Sequential</td><td>Number of stages</td><td>Sum of stage latencies</td><td>Context grows along the chain</td><td>Early error contaminates all later stages</td></tr>
+<tr><td>Parallel</td><td>Number of shards + 1 merge</td><td>Slowest worker + merge</td><td>Workers &times; slice size, plus merge</td><td>Partial failure and write conflicts</td></tr>
+</table>
+
+<p>Depth and fan-out are the two knobs here. A depth of 3 with fan-out 4 yields 4 + 16 + 64 = 84 leaves plus the root: 85 invocations for "one research job," roughly 128,000 tokens at 1,500 tokens each. That may be the only way to cover sixty-four questions, but it must be explicit. Stop splitting when a leaf fits one sentence and its answer fits in 200 to 800 tokens of structured output.</p>
+
+<h2>Hierarchical plans: divide until each leaf is small enough</h2>
+
+<p>Hierarchy buys <em>scope reduction</em>: a parent decides which children exist and how to reconcile their answers without holding every document. It suits wide, heterogeneous work — auditing a codebase, surveying competitors, reconciling reports — because the parent works with an abstraction of each child, not raw evidence.</p>
+
+<p>That abstraction is also the weak point. A two-sentence child summary cannot support verification of a discarded detail. Use a fixed return shape: <code>claim</code>, <code>evidence_ids</code>, <code>confidence</code>, <code>open_questions</code>. Evidence IDs let the parent fetch the artifact without re-running the leaf; confidence weights contradictory children; open questions preserve uncertainty rather than converting it into fact.</p>
+
+<div class="warn"><strong>Hierarchy failure mode — sibling contradiction.</strong> Two leaves can return mutually exclusive answers because they saw different source versions. The parent must compare a <code>source_version</code> or <code>as_of</code> field before merging. Without it, the merge step becomes a vote between stale and fresh evidence, and the fresher answer can lose.</div>
+
+<p>Set a depth ceiling and node budget first, for example "depth 3, 60 nodes, stop when estimated output is under 600 tokens." At the ceiling, switch strategy — sample, summarise, or escalate — rather than adding a level. Unbounded recursion makes the plan grow faster than any result.</p>
+
+<h2>Sequential plans: typed stages in a fixed order</h2>
+
+<p>Sequence is mandatory when one stage's output is the next stage's input: you cannot publish before validation or validate before extraction. The plan makes that dependency explicit and gives each stage a narrow contract. Consider a five-stage document workflow:</p>
+
+<table>
+<tr><th>#</th><th>Stage</th><th>Input</th><th>Required output</th><th>Gate</th></tr>
+<tr><td>1</td><td>Extract</td><td>Raw PDF</td><td>12 sections with offsets</td><td>Page count &gt; 0</td></tr>
+<tr><td>2</td><td>Normalise</td><td>Sections</td><td>Canonical fields, units</td><td>Required fields present</td></tr>
+<tr><td>3</td><td>Verify</td><td>Canonical fields</td><td>Each figure with source line</td><td>0 unresolved conflicts</td></tr>
+<tr><td>4</td><td>Compose</td><td>Verified figures</td><td>Draft with citations</td><td>Citation count = figure count</td></tr>
+<tr><td>5</td><td>Publish</td><td>Draft</td><td>Versioned artifact ID</td><td>Reviewer approval token</td></tr>
+</table>
+
+<p>Gates matter more than prompts. A gate is a cheap deterministic check between expensive probabilistic stages: if stage 2 emits a string where stage 3 expects a number, reject before stage 3 reasons about garbage. Return a structured error naming the field and expected type so the previous stage can repair its own output.</p>
+
+<p>Errors propagate multiplicatively. Five stages at 0.98 reliability give 0.98<sup>5</sup> &asymp; 0.904 clean runs; at 0.95 it is about 0.774. Long chains need checkpoints, not just gates. Persist each validated output keyed by <code>run_id</code>, <code>stage_name</code>, and <code>input_digest</code>, and replay from the last good stage. A stage that mutates the outside world must record its external side-effect ID so recovery does not duplicate it.</p>
+
+<div class="tip"><strong>When a chain is too long.</strong> Chains of eight or more stages usually indicate that some stages can be merged or moved inside a parallel sharding step. Merge stages when the handoff loses more information than the separation gains. Split stages when different failure policies are needed — for example, a permissive drafting step followed by a strict validation step.</div>
+
+<h2>Parallel plans: independence is the entry requirement</h2>
+
+<p>Parallelism is legitimate only when slices are independent. Shard 240 tickets into 12 groups of 20 with the same instruction and output schema. Wall time is about <code>max(worker_time) + merge_time</code>; token cost is the sum: 12 &times; 2,500 plus a 6,000-token merge, about 36,000 tokens. Parallelism trades tokens for latency, not economy.</p>
+
+<p>Three problems follow. <strong>Race conditions</strong>: two workers writing the same key need a deterministic key such as <code>ticket_id + ":" + checksum</code> and a collector that detects duplicates. <strong>Partial failure</strong>: at 0.9 per worker, all 12 succeeding has probability 0.9<sup>12</sup> &asymp; 0.28. Declare a policy — all-must-pass, quorum (say 90% coverage), or best-effort with a gap list. <strong>Barriers</strong> stop the collector starting early; close them on all-success, timeout, or terminal failure, and handle late results deliberately.</p>
+
+<pre><code>plan:
+  shape: parallel
+  shard_key: ticket_id
+  workers: 12
+  barrier:
+    wait_for: all | quorum | timeout
+    quorum_coverage: 0.90
+    timeout_seconds: 120
+  policy: if (coverage &lt; 0.90 &amp;&amp; retries_left &gt; 0) retry_missing()
+  merge: dedupe_by( ticket_id ) -&gt; sort( severity ) -&gt; emit( report )</code></pre>
+
+<p>Barrier and policy are data, not prompt prose: a dispatcher can enforce them without interpreting language.</p>
+
+<h2>Choosing a shape: a decision table and a hybrid</h2>
+
+<p>Use dependency structure as the primary signal, then adjust for risk and budget. If every step needs the same 30,000-token reference, a chain or shared artifact beats a tree that copies it into every leaf.</p>
+
+<table>
+<tr><th>Signal</th><th>Prefer hierarchical</th><th>Prefer sequential</th><th>Prefer parallel</th></tr>
+<tr><td>Subtask dependencies</td><td>Parent needs child results; siblings independent</td><td>Strict producer/consumer order</td><td>None between slices</td></tr>
+<tr><td>Data homogeneity</td><td>Heterogeneous subproblems</td><td>Each stage does a different job</td><td>Identical job on many items</td></tr>
+<tr><td>Latency target</td><td>Moderate; depth dominates</td><td>Loose; sum dominates</td><td>Tight; longest shard dominates</td></tr>
+<tr><td>Token budget</td><td>Medium to high</td><td>Lowest for narrow tasks</td><td>High; one call per shard</td></tr>
+<tr><td>Failure containment</td><td>Good if parent validates children</td><td>Poor without checkpoints</td><td>Good with per-slice retries</td></tr>
+<tr><td>Verification</td><td>Per-leaf evidence required</td><td>Gate at every boundary</td><td>Sample or full-check at merge</td></tr>
+</table>
+
+<p>Hybrids are the norm: a regional analysis might use a tree at the top (one coordinator, four leads), a pipeline per region (extract &rarr; normalise &rarr; verify), and shards inside extraction. Use hierarchy for abstraction, sequence for order, parallelism for throughput. Never add a shape without naming the problem it solves.</p>
+
+<h2>Cost and coordination in practice</h2>
+
+<p>Estimate invocations, tokens per invocation, and coordination messages. Summarising 60 tickets hierarchically (1 root, 6 clusters, 60 leaves) costs 67 calls and about 134,000 tokens. Four sequential stages at 8,000 tokens cost 32,000 but propagate upstream errors. Twelve shards at 2,500 plus a 6,000-token merge cost 36,000 and finish in one shard's time. An 8% retry rate raises expected calls to about 72, 4.3, and 13; messages add latency and places for state to get lost.</p>
+
+<div class="note"><strong>Architect's heuristic.</strong> Choose the least expensive shape whose dependency structure matches the task. Add hierarchy only when one context cannot hold the problem; add sequence only where order is real; add parallelism only where slices are independent. A shape that does not correspond to a real property of the work is pure overhead.</div>
+
+<div class="exercise"><strong>Exercise 9.1 — Choose and justify a shape</strong>
+<p>For each case, name the primary shape, one reason based on dependencies, and one failure mode you would guard against.</p>
+<ol>
+<li>A system reads 900 invoices, extracts 14 fields from each, and writes a CSV. Fields do not depend on other invoices.</li>
+<li>A team asks an agent to assess a 400-file codebase for security risk, produce a ranked list, and cite the exact lines involved.</li>
+<li>A legal assistant must draft a clause, check it against a policy manual, obtain an approval token, and archive the approved version.</li>
+</ol>
+<p>Hints: (1) sharding; (2) evidence IDs; (3) gates and checkpoints.</p>
+</div>
+
+<div class="exercise"><strong>Exercise 9.2 — Estimate the bill</strong>
+<p>A plan processes 96 documents. Compare a chain of 4 stages at 9,000 tokens each with 16 parallel shards of 6 documents at 2,200 tokens each plus a 5,000-token merge. Assume a 10% retry rate on invocations, and coordination messages of 120 tokens each: 3 messages per invocation for the chain, 4 per shard for the parallel plan. Which plan costs fewer tokens, and which finishes sooner if each model call takes 6 seconds and messages add no measurable latency?</p>
+<p>Hint: count base tokens, then add 10% retries and message overhead separately for each plan before comparing latency.</p>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>What distinguishes a hierarchical plan from a parallel plan with one aggregation step, even when both use the same number of workers?</li>
+<li>Why do gates belong between probabilistic stages rather than only at the end of a chain?</li>
+<li>Given five stages with 0.96 success probability each, approximately what is the probability that a run completes without any stage failing?</li>
+<li>Name three policies a fan-in collector can apply when one shard fails, and state when each is appropriate.</li>
+<li>You are given a narrow task with a small input and strict ordering. Which shape is usually the best default, and why?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Hierarchy reduces scope through abstraction; its risk is information loss between levels.</li>
+<li>Sequence encodes real dependency order; its risk is error propagation and serial latency.</li>
+<li>Parallelism buys latency at the price of more tokens, retries, and merge complexity.</li>
+<li>Choose the shape from task structure first, then adjust for budget and verification needs.</li>
+<li>Express barriers, policies, and output contracts as data so they can be enforced without prompt interpretation.</li>
+</ul>
+
+<nav><a href="8-task-decomposition.html">&larr; Previous</a><span></span><a href="10-sequential-pipelines.html">Next: Sequential Pipelines &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

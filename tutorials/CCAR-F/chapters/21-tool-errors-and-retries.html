@@ -1,0 +1,128 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>21. Tool Errors, Retries, and Partial Success</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>21. Tool Errors, Retries, and Partial Success</h1>
+
+<p>When a tool fails, the agent does not just receive bad news — it receives the raw material for its next decision. A vague error forces the model to guess; a precise error lets it repair, retry, or stop cleanly. This chapter treats errors as part of the tool's interface, designs payloads an agent can act on, and addresses the awkward middle ground where a tool succeeds for some items and fails for others.</p>
+
+<h2>What Makes an Error Payload Useful</h2>
+
+<p>A human-facing error message is written for reading; an agent-facing error payload is written for branching. The payload should be a structured object with a stable code, a classification, a human-readable explanation, and a remediation hint. It should also carry a correlation identifier so that a log entry can be found later.</p>
+
+<pre><code>{
+  "ok": false,
+  "code": "RATE_LIMITED",
+  "retryable": true,
+  "fatal": false,
+  "message": "Quota of 100 requests per minute exceeded.",
+  "retry_after_ms": 1200,
+  "remediation": "wait_and_retry_once",
+  "correlation_id": "req_01HQ8K3P"
+}</code></pre>
+
+<p>Compare this with the string <code>"Error: something went wrong"</code>. The structured version tells the agent exactly what the outer policy should do. The string invites three bad behaviours: immediate retry, abandonment, or a fabricated explanation in the final answer. Every field has a job — <code>retryable</code> drives the loop, <code>fatal</code> tells the agent to stop the run, <code>retry_after_ms</code> supplies the backoff, and <code>remediation</code> names the next action.</p>
+
+<p>Keep the code set small and documented. Ten stable codes with clear meanings beat forty codes invented per handler. Reserve a generic <code>UNKNOWN</code> code for genuine surprises, and log the underlying exception separately so that the agent is not exposed to implementation details or secrets.</p>
+
+<div class="tip">Never put stack traces, credentials, or raw SQL in an agent-facing error. Return a safe summary plus a correlation ID; keep the detail in the server log where a human can find it.</div>
+
+<h2>Retryable Versus Fatal</h2>
+
+<p>The first classification decision is whether repeating the same call could ever succeed. Transient conditions — rate limits, brief network failures, temporary lock contention, cold-start timeouts — are retryable with backoff. Deterministic conditions — invalid arguments, missing permissions, unknown identifiers, unsupported operations — are not. Between them sit repairable errors: the call was rejected for a reason the agent can fix, such as a missing required field or a stale ID.</p>
+
+<table>
+<thead><tr><th>Error code</th><th>Class</th><th>Agent action</th></tr></thead>
+<tbody>
+<tr><td><code>RATE_LIMITED</code></td><td>Retryable</td><td>Wait <code>retry_after_ms</code>, at most three attempts</td></tr>
+<tr><td><code>UPSTREAM_TIMEOUT</code></td><td>Retryable if read-only</td><td>Backoff, then use fallback source</td></tr>
+<tr><td><code>INVALID_ARGUMENT</code></td><td>Repairable</td><td>Correct fields from the error detail, then retry once</td></tr>
+<tr><td><code>FORBIDDEN</code></td><td>Fatal</td><td>Stop and request authorization</td></tr>
+<tr><td><code>NOT_FOUND</code></td><td>Fatal for this route</td><td>Re-plan; do not guess another identifier</td></tr>
+<tr><td><code>WRITE_CONFLICT</code></td><td>Conditional</td><td>Re-read version, then retry with version token</td></tr>
+</tbody>
+</table>
+
+<p>A circuit breaker prevents a retryable storm. After five failures from one upstream in a short window, the tool should report <code>UPSTREAM_UNAVAILABLE</code> with <code>retryable: false</code> rather than letting every agent in the system hammer the service. The agent then uses a fallback path or escalates. This is a case where the tool's classification changes with system state, and that is correct — the question is not "is this error type usually transient" but "is repeating this specific call likely to work now".</p>
+
+<h2>Idempotency and Safe Repeats</h2>
+
+<p>Retries are only safe when repeating an operation has the same effect as performing it once. Reads are naturally idempotent. Writes are not: a refund request retried after a lost response can refund twice. The standard remedy is an idempotency key — a unique token supplied by the caller and stored by the server. If the same key appears again within the deduplication window, the server returns the original result instead of executing the operation.</p>
+
+<pre><code>def create_payment(args, idem_key, seen):
+    if args["amount_usd"] &lt;= 0:
+        return {"ok": False, "code": "INVALID_ARGUMENT"}
+    if idem_key in seen:
+        return seen[idem_key]           # replay original result
+    result = payment_api.charge(
+        account=args["account_id"],
+        amount=args["amount_usd"],
+        token=idem_key)
+    seen[idem_key] = result             # keep for 24 hours
+    return result</code></pre>
+
+<p>The key should be generated before the first attempt and held constant across retries; generating a fresh key per attempt defeats the mechanism. Derive it from a deterministic tuple — task ID, step number, and target — so that a restarted agent can reconstruct the same value. Store results for at least as long as the maximum plausible retry window; twenty-four hours is a common choice.</p>
+
+<p>Where idempotency keys are unavailable, prefer naturally idempotent write shapes: set a value to a target state rather than incrementing it, use <code>put</code> with a version token instead of blind append, and include an expected-version field so a stale retry is rejected. Document the tool's repeat semantics in its description; the agent cannot infer them from the schema alone.</p>
+
+<h2>Partial Results and Progressive Output</h2>
+
+<p>Batch tools often finish some items and fail others. Reporting the whole call as a failure throws away useful work; reporting it as a success hides gaps. Use a partial-success envelope that carries completed items, failed items with individual codes, and a status field.</p>
+
+<pre><code>{
+  "ok": "partial",
+  "completed": [{"id": "A1", "score": 0.82}],
+  "failed": [{"id": "A2", "code": "NOT_FOUND",
+              "retryable": false}],
+  "counts": {"total": 8, "succeeded": 7, "failed": 1},
+  "next": "retry_only_failed_items"
+}</code></pre>
+
+<p>The <code>next</code> field is important: it states the recommended action, so the agent does not re-run the entire batch and duplicate the seven successful items. This connects back to idempotency — a retry of only the failed subset must be safe. For progressive output, where results stream in over time, emit a sequence of envelopes with an <code>is_final</code> flag and a monotonically increasing sequence number. The agent can then reason with early results without mistaking them for the complete answer.</p>
+
+<div class="warn">Do not average away failures. If seven of eight records were scored, the result is "seven scores plus one missing record", not "eight scores at 87.5 percent confidence". Preserve the missing item as a first-class fact.</div>
+
+<h2>Error Contracts the Model Can Use</h2>
+
+<p>An error contract is the set of codes, fields, and meanings shared across all tools in a system. Consistency matters more than any individual code: if one tool signals rate limiting with <code>429</code> in text, another with <code>busy</code>, and a third with an empty result, the agent must learn three dialects. Standardise on one envelope and list the common codes in each tool's description where relevant.</p>
+
+<p>The contract should also say what the agent is expected to do. A short table in the tool documentation — code, class, recommended action — turns error handling into a lookup rather than an inference. Include the contract in tests: every simulated error must produce a payload with the required fields, and every code must appear in the documented set. When a new code is added, update the documentation and the tests in the same change.</p>
+
+<h2>Testing the Error Path</h2>
+
+<p>Error handling is usually the least tested part of a tool. Build a fault-injection harness that can make each dependency fail in a specified way: return a 429, delay for two seconds, drop the connection mid-response, return a malformed body, or succeed for half a batch. Run the same scenario against the agent and check three things — that it classifies the error correctly, that the number of retries respects the policy, and that the final answer reflects the degradation.</p>
+
+<p>Track metrics that expose bad handling: retries per successful call, fraction of errors classified as fatal, and rate of answers that claim success after a tool reported failure. A rising retries-per-success ratio usually means the agent is treating deterministic errors as transient. A falling fatal rate may mean the policy has become too permissive about retries.</p>
+
+<div class="exercise"><strong>Exercise 21.1 — Write error contracts.</strong> Define a structured payload for each situation: a search service returns HTTP 503; a caller supplies an invalid date format; a write succeeds but the response is lost. Include code, <code>retryable</code>, <code>fatal</code>, remediation, and any extra field the agent needs. For each, state the agent's correct next action and one action that would be unsafe.</div>
+
+<div class="exercise"><strong>Exercise 21.2 — Make a batch safe to retry.</strong> A tool processes twelve records; nine succeed, two return <code>NOT_FOUND</code>, and one times out. Design the partial-success envelope, the recommended <code>next</code> action, and an idempotency scheme that prevents the nine successful records from being processed twice. Explain what the final user-facing report should say about the three unfinished records.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+  <li>Which fields make an error payload actionable for an agent, and why is a plain text message insufficient?</li>
+  <li>Explain the difference between retryable, repairable, and fatal errors with one example of each.</li>
+  <li>How does an idempotency key make a retried write safe, and why must the key stay constant across attempts?</li>
+  <li>What does a partial-success envelope preserve that a simple success/failure flag discards?</li>
+  <li>Name two metrics that reveal poor error handling in production.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+  <li>Design errors as structured payloads with stable codes, classification, remediation, and a correlation ID.</li>
+  <li>Retry only when repeating the specific call can work; use repair steps for fixable errors and stop for fatal ones.</li>
+  <li>Protect writes with idempotency keys or naturally idempotent shapes, and record results for the full retry window.</li>
+  <li>Report partial success explicitly, keep failed items visible, and direct retries to the unfinished subset.</li>
+  <li>Standardise an error contract across tools and test it with injected failures and safety metrics.</li>
+</ul>
+
+<nav><a href="20-tool-schemas.html">&larr; Previous</a><span></span><a href="22-tool-scoping.html">Next: Tool Scoping and Large Catalogs &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>22. Tool Scoping and Large Catalogs</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>22. Tool Scoping and Large Catalogs</h1>
+
+<p>Giving an agent every tool it might ever need feels generous, but it makes both the agent and the system worse. A smaller tool set is easier to reason about, cheaper to present, safer to expose, and more reliable to route. This chapter covers least-privilege scoping, how catalogs break down as they grow, and the discovery patterns that let a system have hundreds of tools without showing all of them to every agent.</p>
+
+<h2>Least Privilege as a Default</h2>
+
+<p>Least privilege is usually discussed as a security rule, but for agents it is also an accuracy rule. Every irrelevant tool is a candidate the model must reject. Remove the candidates that can never be right for this task and you remove a class of wrong answers before they start.</p>
+
+<p>Apply the principle at three levels. At the <strong>environment</strong> level, an agent gets credentials only for the systems it is allowed to touch. At the <strong>tool</strong> level, the catalog exposes only operations permitted for the current role. At the <strong>task</strong> level, phase-based scopes can further narrow the set: a planning phase gets read-only tools, an execution phase gets the write tools needed for the approved plan.</p>
+
+<table>
+<thead><tr><th>Scope</th><th>Example</th><th>Benefit</th></tr></thead>
+<tbody>
+<tr><td>Environment</td><td>Staging credentials, not production</td><td>Blast radius limited by infrastructure</td></tr>
+<tr><td>Role</td><td>Support agent cannot issue refunds</td><td>Policy enforced before any call</td></tr>
+<tr><td>Task phase</td><td>Draft phase has no publish tool</td><td>Sequence enforced by availability</td></tr>
+<tr><td>Tenant</td><td>Tool arguments bound to one account</td><td>Cross-tenant access impossible by design</td></tr>
+</tbody>
+</table>
+
+<div class="tip">Start with an empty tool set and add tools when a logged task requires them. The reverse — start with everything and remove tools after an incident — leaves a long tail of forgotten capabilities.</div>
+
+<h2>Scoping Tools per Agent</h2>
+
+<p>In a multi-agent design, scoping is what gives each role its identity. An orchestrator may need planning and coordination tools but no domain writes. A research worker may need search and read tools; a drafting worker may need templates and a revision store; only a publishing agent should see the publish operation. These boundaries are more reliable than instructions telling an agent not to use a tool it can see.</p>
+
+<pre><code>agents:
+  planner:
+    tools: ["list_tasks", "estimate_cost", "ask_human"]
+  researcher:
+    tools: ["search_docs", "get_record", "scratchpad_write"]
+  publisher:
+    tools: ["get_draft", "validate_draft", "publish"]
+    requires_approval: ["publish"]
+  defaults:
+    deny_unlisted: true</code></pre>
+
+<p>Handoffs need care. When a subagent sends a result to the orchestrator, the receiving agent should not inherit the sender's tools; it should receive only the data it is allowed to act on. If a write capability must move between roles, do it with an explicit capability token that names the operation, target, and expiry. Silent inheritance is how a read-only planner acquires write access.</p>
+
+<p>Dynamic scoping within one agent is useful too. A support agent in discovery mode sees lookup tools; after the issue is identified, the relevant remediation tools are added for that turn. This narrows decisions at each step while keeping the overall system capable. The scope change should be recorded in the trace so that post-incident review can reconstruct what the agent could see.</p>
+
+<h2>How Catalogs Degrade Selection</h2>
+
+<p>Catalog growth creates four problems. First, <strong>attention dilution</strong>: with fifty plausible tools, distinguishing the right one requires much finer judgement than with five. Second, <strong>description collision</strong>: large catalogs accumulated over time tend to contain near-duplicates — two search tools, three variants of "get user" — that confuse routing. Third, <strong>context cost</strong>: a catalog of 120 tools with roughly 60 tokens of name, description, and schema each consumes about 7,200 tokens before the user's request is even considered. Fourth, <strong>drift</strong>: nobody remembers why each tool exists, so stale entries survive indefinitely.</p>
+
+<p>These effects interact. A large catalog raises cost, which encourages trimming descriptions, which reduces routing signal, which increases misselection. The result is a system that is expensive and unreliable at the same time. There is a practical ceiling: beyond roughly twenty to thirty simultaneously visible tools, most agents benefit from discovery-based patterns rather than a flat list.</p>
+
+<div class="warn">Adding a tool is a permanent cost unless someone removes it. Treat a new tool as a change to the routing surface, not as an isolated feature addition.</div>
+
+<h2>Search Patterns for Large Catalogs</h2>
+
+<p>The standard solution is two-stage discovery. In stage one, the agent sees a small set of core tools, including a <code>find_tool</code> operation backed by an index of the full catalog. The agent describes what it needs; the index returns the top few matching tools with their descriptions and schemas. In stage two, the agent calls one of the discovered tools using its now-complete contract.</p>
+
+<pre><code>def discover(need, top_k=3, min_score=0.55):
+    hits = index.search(need, fields=["name", "description",
+                                      "tags", "example_intent"])
+    chosen = [h for h in hits if h.score &gt;= min_score][:top_k]
+    if not chosen:
+        return {"tools": [], "hint": "no_match_ask_user"}
+    return {"tools": chosen, "hint": "inspect_then_call"}</code></pre>
+
+<p>Several details make this work. The index should be built from the same descriptions the model sees, so there is no gap between what search matches and what the agent reads. Keep a handful of universal tools always available — asking the user, checkpointing, and the discovery tool itself — so the agent is never stranded. Cache discovery results within a session: if a tool was found three steps ago, its description is already in context and need not be returned again.</p>
+
+<p>Set an explicit relevance threshold. A search that always returns three tools will occasionally return three wrong tools, and the agent may act on the least-bad one. Returning nothing with a <code>no_match</code> hint is safer; the agent can rephrase the need or ask a person. For high-risk domains, require the discovered tool to be confirmed by a policy gate before execution.</p>
+
+<h2>Layered and Namespace Designs</h2>
+
+<p>An alternative to retrieval is hierarchy. Tools are grouped into namespaces such as <code>billing.*</code>, <code>docs.*</code>, and <code>repo.*</code>. The agent first selects a namespace, then sees only that namespace's tools. This mirrors how people navigate large APIs and produces predictable, explainable routing. The cost is an extra decision step and the need to maintain sensible categories.</p>
+
+<p>Hybrid designs are common: a small core catalog plus namespace-level browsing plus search for everything else. Namespaces help humans reason about ownership and permissions; search helps agents find unfamiliar capabilities. Whichever design you choose, document the discovery path — a tool that cannot be found is functionally absent, no matter how well implemented.</p>
+
+<h2>Measuring Scoping Quality</h2>
+
+<p>Track four numbers. <strong>Selection accuracy</strong> is the fraction of decisions where the chosen tool was the intended one. <strong>Unused tool rate</strong> is the share of exposed tools never called in a representative sample; persistently unused tools are candidates for removal. <strong>Denial rate</strong> counts calls blocked by policy gates, which reveals whether agents are reaching for capabilities they should not have. <strong>Context overhead</strong> measures tokens spent on tool definitions per successful task.</p>
+
+<p>Review the catalog monthly: add nothing without a logged need, merge near-duplicates, and archive tools with no calls for thirty days. Re-run a fixed benchmark suite after each change so that a scope reduction does not silently break a rare but important workflow.</p>
+
+<div class="exercise"><strong>Exercise 22.1 — Scope a tool set.</strong> A customer-support system exposes twenty-six tools, including billing writes, account deletion, ticket search, and internal analytics. Define tool sets for a triage agent, a resolution agent, and an auditor. State which tools are always denied, which need approval, and how a triage agent obtains a write capability when a case is escalated. Explain how your scopes reduce both risk and misselection.</div>
+
+<div class="exercise"><strong>Exercise 22.2 — Design discovery.</strong> A platform has 180 tools. Design a two-stage discovery flow with an always-available core set, an index schema, a relevance threshold, and cache rules. Describe what happens when search returns no match and how you would prevent a discovered tool from being executed without authorization. List two metrics you would monitor for a month after launch.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+  <li>Why is least privilege an accuracy rule as well as a security rule for agents?</li>
+  <li>How should tool sets differ between an orchestrator, a research worker, and a publisher?</li>
+  <li>Name four ways a growing catalog degrades system behaviour.</li>
+  <li>Why should a discovery search have a relevance threshold instead of always returning the top three tools?</li>
+  <li>What does an unused tool rate tell you about a catalog, and what action should it prompt?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+  <li>Scope tools by environment, role, and task phase; unlisted capabilities should be denied by default.</li>
+  <li>Per-agent tool sets create real role boundaries; handoffs carry data, not inherited capabilities.</li>
+  <li>Large catalogs dilute attention, collide in description, cost context tokens, and drift over time.</li>
+  <li>Two-stage discovery with a small core set, a searchable index, thresholds, and caching scales better than a flat list.</li>
+  <li>Measure selection accuracy, unused tools, denial rate, and context overhead, and review the catalog regularly.</li>
+</ul>
+
+<nav><a href="21-tool-errors-and-retries.html">&larr; Previous</a><span></span><a href="23-mcp-fundamentals.html">Next: MCP Fundamentals and Primitives &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

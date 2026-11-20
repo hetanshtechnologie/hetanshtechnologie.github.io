@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 24 — Large Codebases, Human Review, and Data Provenance</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f2f4f8;color:#1f2937;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(30,41,59,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#4f46e5;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#312e81;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#4b5563;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#6b7280}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9ca3af;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#312e81}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #6366f1;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#4338ca}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#3730a3}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #dbe2f0;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#312e81;color:#fff;font-weight:600}
+td{background:#fafbff}
+pre{background:#1e2233;color:#e8ecf8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#e8e9fb;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#3730a3}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#eef0ff;border-left:4px solid #6366f1;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#4338ca}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #dbe2f0;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#312e81;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #e6eaf5}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#4338ca;text-decoration:none;display:inline-block;margin-bottom:16px}
+.callout{background:#eef0ff;border-left:4px solid #6366f1;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#6b7280;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+
+<div class="chapter">
+  <a class="back" href="../">&larr; Back to the Full Prep Course</a>
+  <h1 id="chapter-24-large-codebases-human-review-and-data-provenance">Chapter 24 — Large Codebases, Human Review, and Data Provenance</h1>
+<p>The final context layer question is not how much text a model can hold, but how a system stays reliable when the relevant material is vast, distributed, and not entirely consistent. Large repositories and document collections have this character. No single session can contain them, and no single source within them is guaranteed to be current. This chapter connects context management to two practical disciplines: deciding how much human review a use case needs, and tracking where each fact came from.</p>
+<p>The exam often combines these ideas in a case question. You may be given a large codebase, a proposed change, and several sources that disagree. The correct answer will usually involve selective context, delegation, review matched to impact, and provenance that makes claims checkable.</p>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain why a large repository cannot be handled by loading everything into one context.</li>
+<li>Describe how scratchpads and bounded delegation keep the main thread clean.</li>
+<li>Match the depth of human review to the failure affordance of the use case.</li>
+<li>Record the origin of each claim so it can be verified, updated, or challenged.</li>
+<li>Attach provenance metadata to retrieved material and keep it with the claim it supports.</li>
+<li>Detect conflicts between sources and decide how they should be resolved.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="working-in-a-large-repository">Working in a large repository</h3>
+<p>A large repository is not merely a big text file. It is a structure of modules, dependencies, generated files, historical branches, and indirect relationships. Loading it wholesale is impossible, and even loading a large fraction is wasteful, because most of it is irrelevant to any single task. The assistant must work the way a developer does: form a hypothesis about where the relevant code lives, search for symbols and call sites, read targeted sections, and expand the search when the evidence points elsewhere.</p>
+<p>The main thread should hold a <em>map</em> of the work, not the entire territory. That map includes the task, the relevant paths, the current hypothesis, the decisions made, and the open questions. Detailed file contents belong in the context only long enough to support a decision, after which they should be distilled into notes. An assistant that keeps rereading the same large files to recover facts it already saw is spending budget on retrieval instead of reasoning.</p>
+<p>Partial understanding is the central risk. A change made after reading three files can break a caller in a fourth that was never examined. This is not a context-size problem alone; it is a coverage problem. Good practice pairs selective reading with explicit checks for completeness: search for all references to a changed symbol, list the callers, and state what was not inspected. Honesty about coverage is more useful than an confident claim that the change is safe.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a question describes an edit in a large codebase based on a few files, look for the answer that checks call sites or delegates a broader search, not the one that reads more of the same file.</p>
+</blockquote>
+<h3 id="scratchpads-and-delegation">Scratchpads and delegation</h3>
+<p>A scratchpad is an external note space where intermediate findings are recorded. Instead of carrying every discovered detail in the conversation, the assistant writes a compact record: paths examined, symbols found, hypotheses tested, and decisions reached. The main thread then refers to the scratchpad as a stable summary. This keeps the active context small and gives later steps a reliable place to look. It also survives compaction, because it lives outside the conversation.</p>
+<p>Delegation is the related practice of assigning a bounded investigation to a separate worker with its own context. A worker might be asked to find every call site of a function, map the responsibilities of a module, or compare two implementations. Its brief should specify the question, the scope, and the form of the answer. It returns a distilled result, not a transcript of its exploration. The main thread receives conclusions and can request elaboration if needed.</p>
+<p>The combination is powerful because it separates exploration from decision-making. Workers explore in isolation, where their large intermediate contexts do no harm. The main thread holds only findings, which keeps attention on the overall task. Delegation also allows parallel investigations when questions are independent. Its risks are familiar: a worker may return an incorrect conclusion, may duplicate another worker's effort, or may exceed its scope. Results should therefore be treated as claims to verify, especially when they will drive an edit.</p>
+<p>A useful rule is to delegate questions that can be answered with a short response and to keep decisions in the main thread. Searching, counting, and mapping are good delegation tasks. Choosing an architecture or accepting a risky change is not, because those decisions need the broader context the main thread is responsible for.</p>
+<h3 id="human-review-points-and-failure-affordance">Human review points and failure affordance</h3>
+<p>Not all work should receive the same human attention. The right depth of review depends on the <em>failure affordance</em> of the use case: how easily a wrong result can be noticed and undone, and how much harm it can do before anyone sees it. A generated commit message has high affordance; a bad one is obvious and harmless. A change to a permissions check has low affordance; a subtle error may persist unnoticed and cause serious harm. The more severe and less visible the failure, the deeper the review should be.</p>
+<p>Review depth is a spectrum. At one end, automated checks alone may suffice. At the other, a formal sign-off by a responsible reviewer is appropriate. Between them are spot checks and targeted reviews of the specific areas most likely to be wrong. The design task is to place review points where they change the outcome, not to add review uniformly. A review that always happens but never influences a decision is ceremony.</p>
+<p>A well-placed review point also has a clear object. Reviewers should be asked to examine a specific claim or change, with the evidence attached, rather than to approve an entire process. In code work, that might mean reviewing a diff with the list of call sites checked. In document work, it might mean confirming a conclusion against the source excerpts. Focused review is both faster and more reliable than broad review.</p>
+<table>
+<thead>
+<tr>
+<th>Review depth</th>
+<th>When it fits</th>
+<th>Reviewer effort</th>
+<th>Typical mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Automated only</td>
+<td>Reversible, low-impact, easily tested</td>
+<td>None beyond checks</td>
+<td>Validators and test suites</td>
+</tr>
+<tr>
+<td>Spot check</td>
+<td>Routine output with occasional errors</td>
+<td>Brief sampling</td>
+<td>Reviewer scans a subset</td>
+</tr>
+<tr>
+<td>Targeted review</td>
+<td>Specific high-risk area identified</td>
+<td>Focused examination</td>
+<td>Review of a diff or claim with evidence</td>
+</tr>
+<tr>
+<td>Full review</td>
+<td>Low failure affordance, meaningful impact</td>
+<td>Detailed reading</td>
+<td>Line-by-line or claim-by-claim check</td>
+</tr>
+<tr>
+<td>Formal sign-off</td>
+<td>Irreversible or regulated action</td>
+<td>Accountable approval</td>
+<td>Named approval step with record</td>
+</tr>
+</tbody>
+</table>
+<p>Notice that the table is keyed to consequence and visibility, not to the size of the output. A short change can require deep review, while a long generated summary may need only sampling.</p>
+<h3 id="tracking-where-facts-came-from">Tracking where facts came from</h3>
+<p>A claim without an origin is hard to trust, hard to update, and hard to defend. Provenance is the practice of recording where each fact came from: a file path, a line range, a section of a document, a database record, or a tool result. The record should be specific enough that another person could look up the same source and reach the same conclusion. A vague note such as "from the documentation" is not provenance.</p>
+<p>It is also important to distinguish kinds of claims. A <em>reported</em> fact copies information from a source. An <em>inferred</em> fact is a conclusion drawn from several sources. An <em>assumed</em> fact is a working premise that has not been verified. Each kind deserves a label, because the appropriate treatment differs. Reported facts can be checked against the source, inferred facts can be examined for reasoning errors, and assumed facts should be tested or explicitly accepted before they drive an action.</p>
+<p>Provenance pays off when things change. If a source file is updated, a system with provenance can identify which conclusions need revisiting. Without it, the team must assume everything might be stale. Provenance also supports disagreement: when two conclusions conflict, their source records reveal whether the inputs differed or the reasoning diverged.</p>
+<h3 id="provenance-for-retrieved-material">Provenance for retrieved material</h3>
+<p>Retrieval systems return chunks of text, and chunks without metadata are dangerous. A passage may come from an outdated version, a draft rather than the approved release, or a section that has since been amended. To use retrieved material responsibly, attach metadata at the moment of retrieval: a stable source identifier, the exact location within the source, a version or commit where available, and the time of retrieval. Relevance or similarity scores can be included but should not be confused with authority.</p>
+<p>The metadata should travel with the claim it supports. A provenance log that sits in a separate file and is never updated becomes misleading. When an assistant states that a policy requires a certain step, the accompanying record should name the policy version and section. When a code change relies on an interface definition, the record should name the file and revision. This habit turns a conclusion into an auditable statement.</p>
+<p>Not all sources carry equal weight. An approved policy outranks a draft, a release branch outranks a personal branch, and a system of record outranks a copied summary. A source-authority table or rule makes this ordering explicit so that conflicts are resolved by policy rather than by whichever passage was retrieved first.</p>
+<table>
+<thead>
+<tr>
+<th>Source property</th>
+<th>Why it matters</th>
+<th>Example value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Stable identifier</td>
+<td>Lets a reviewer find the same material later</td>
+<td>A repository path or document identifier</td>
+</tr>
+<tr>
+<td>Exact location</td>
+<td>Narrow the check to the relevant passage</td>
+<td>A line range or section heading</td>
+</tr>
+<tr>
+<td>Version or revision</td>
+<td>Detects staleness and change</td>
+<td>A commit reference or document version</td>
+</tr>
+<tr>
+<td>Retrieval time</td>
+<td>Shows whether newer material may exist</td>
+<td>A phase label or timestamp</td>
+</tr>
+<tr>
+<td>Authority level</td>
+<td>Resolves conflicts by policy</td>
+<td>Approved, draft, or superseded</td>
+</tr>
+<tr>
+<td>Relevance score</td>
+<td>Indicates closeness to the query, not truth</td>
+<td>A similarity value from retrieval</td>
+</tr>
+</tbody>
+</table>
+<h3 id="detecting-conflicts-between-sources">Detecting conflicts between sources</h3>
+<p>Conflicts arise for ordinary reasons. Two documents describe the same rule at different times. A copied summary diverges from its original. Two modules encode different assumptions about a shared interface. The danger is not that sources disagree but that a system silently blends them into an answer that appears coherent. A claim assembled from incompatible sources can look authoritative while being wrong in a way nobody notices.</p>
+<p>Detection starts with comparing claims about the same entity. If two passages give different values for the same limit, they conflict. Version metadata often explains the conflict: the older passage was superseded. When versions do not explain it, authority rules decide which source governs. If neither version nor authority resolves the disagreement, the correct response is escalation with both sources presented, not an averaging of the two.</p>
+<p>Conflicts should be recorded, not just resolved. A provenance record that lists conflicting sources and the reason for the chosen resolution gives future reviewers the context they need. It also reveals recurring problems: if the same two sources regularly disagree, one of them may need to be corrected or retired.</p>
+<blockquote>
+<p><strong>Try it:</strong> Take a conclusion your workflow recently produced and list every source behind it. Check the versions. If two sources disagree, notice whether the disagreement was detected automatically or only by chance.</p>
+</blockquote>
+<h3 id="a-provenance-record-format">A provenance record format</h3>
+<p>A compact, consistent record is more useful than a long narrative. The format below is deliberately simple so it can be attached to claims in many contexts.</p>
+<pre><code class="language-text">CLAIM: &quot;Approvals above the stated limit require a second reviewer.&quot;
+SOURCE_ID: policy/approvals.md
+LOCATION: section &quot;Exceptions&quot;, paragraph 3
+VERSION: document version 4, approved
+RETRIEVED: during phase 2, tool = document_search
+STATUS: reported
+CONFLICTS: [policy/legacy-limits.md version 2, superseded]
+VERIFICATION: matched against the approved version by section heading
+NOTES: legacy source gives a different limit; ignored by authority rule
+</code></pre>
+<p>Each field has a purpose. <code>CLAIM</code> states exactly what is being asserted, which prevents a reviewer from checking a nearby but different statement. <code>SOURCE_ID</code> and <code>LOCATION</code> make the source findable. <code>VERSION</code> and <code>RETRIEVED</code> expose staleness. <code>STATUS</code> distinguishes reported, inferred, and assumed content. <code>CONFLICTS</code> records disagreements, and <code>VERIFICATION</code> says what was actually checked. <code>NOTES</code> captures the reasoning behind a resolution that might otherwise look arbitrary.</p>
+<p>The discipline of filling these fields has a side benefit: writing a record often reveals that a claim is less well supported than it appeared. An assistant that cannot name a source for a statement should not present that statement as established fact.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A maintenance team asks an assistant to update a function in a large repository and to adjust the related documentation. The assistant searches for the function, reads the file containing it, and makes a plausible edit. Tests pass in the local module, but a downstream service that calls the function through a wrapper breaks in production. A reviewer asks what went wrong.</p>
+<p>The investigation shows that the assistant read only the defining file. It never searched for call sites, and the wrapper lived in a different package with a name that did not match the function. The scratchpad for the task contained the edit but no map of dependencies. The assistant had also read a documentation file from a personal branch, which described the old interface, and used it to update the docs. No provenance was recorded, so nobody noticed the source was outdated until the documentation conflicted with the code.</p>
+<p>An architect redesigns the workflow. The main thread now holds a task brief, a map of paths considered, and a decision log. Before any edit, two workers are delegated bounded questions: one lists every call site and wrapper, and one identifies the authoritative documentation source and its version. Each returns a short report with source identifiers. The main thread records these findings in a scratchpad and uses them to plan the change.</p>
+<p>Provenance records are attached to each significant claim. The call-site list cites files and line ranges. The documentation source cites an approved location and version. When a legacy document disagrees with the approved one, the conflict is recorded and resolved by an authority rule that prefers approved material. The review point is set to targeted review because an error in this function has low failure affordance: it can pass local tests and break a dependent service later. The reviewer receives the diff, the call-site list, and the provenance records, and asks to see the one wrapper that looked unusual.</p>
+<p>The revised change passes because the wrapper is updated as well. The documentation matches the approved source. When a later task touches the same function, the scratchpad and provenance records make the earlier investigation reusable rather than forcing a fresh exploration. The team also adds a check that flags any edit where the call-site list is missing, turning a lesson into a gate.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Loading large files into the main context when a targeted search and a short excerpt would answer the question.</li>
+<li>Making an edit based on one file without searching for callers or dependants.</li>
+<li>Recording exploration detail in the conversation instead of in an external scratchpad, which bloats context and disappears on compaction.</li>
+<li>Delegating a decision rather than a bounded question, so the worker returns a choice the main thread cannot defend.</li>
+<li>Treating delegated findings as verified facts without checking the ones that drive risky actions.</li>
+<li>Applying the same review depth to every change regardless of failure affordance or impact.</li>
+<li>Writing provenance as vague references that a reviewer cannot locate or verify.</li>
+<li>Silently blending conflicting sources instead of resolving them by version, authority, or escalation.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Large repositories require selective reading, a maintained map, and explicit checks for coverage; the main thread should hold conclusions rather than raw files.</li>
+<li>Scratchpads preserve findings outside the conversation, while bounded delegation isolates exploration and returns distilled results.</li>
+<li>Human review depth should follow failure affordance: how visible and reversible an error is, and how much harm it can do.</li>
+<li>Provenance records the origin of each claim, distinguishes reported from inferred and assumed content, and supports updates when sources change.</li>
+<li>Retrieved material should carry a stable identifier, location, version, retrieval context, authority level, and relevance signal.</li>
+<li>Conflicts are detected by comparing claims about the same entity and resolved by version, authority, or escalation, with the resolution recorded.</li>
+<li>A compact provenance format turns conclusions into auditable statements and often exposes weak support before it matters.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>What should the main thread of a large-repository task primarily hold?</li>
+</ol>
+<p>A. The full text of every file that might be relevant.
+B. A task brief, a map of paths considered, decisions, and open questions.
+C. A complete transcript of every delegated investigation.
+D. Only the final diff, with no supporting context.</p>
+<ol start="2">
+<li>Which task is best suited to delegation?</li>
+</ol>
+<p>A. Deciding whether a risky architectural change should be accepted.
+B. Choosing which of two strategies the team should follow.
+C. Listing every call site of a named function and returning file locations.
+D. Approving a change without further review.</p>
+<ol start="3">
+<li>A change is easily reversible and its errors are obvious in routine output. Which review depth is most appropriate?</li>
+</ol>
+<p>A. Formal sign-off with an accountable approver.
+B. Full line-by-line review by a specialist.
+C. Automated checks or a light spot check.
+D. No checks of any kind.</p>
+<ol start="4">
+<li>Which provenance record is strongest?</li>
+</ol>
+<p>A. "Based on the documentation."
+B. "From an internal source, probably current."
+C. "policy/approvals.md, version 4 approved, section 'Exceptions', paragraph 3, verified by heading."
+D. "The assistant was confident about this."</p>
+<ol start="5">
+<li>Two sources give different values for the same limit, and version metadata does not explain the difference. What should happen?</li>
+</ol>
+<p>A. Average the two values and proceed.
+B. Use whichever passage was retrieved first.
+C. Resolve by an authority rule if one applies, otherwise escalate with both sources presented.
+D. Ignore the conflict because retrieved material is usually consistent.</p>
+<ol start="6">
+<li>Why distinguish reported, inferred, and assumed facts in a provenance record?</li>
+</ol>
+<p>A. Because inferred facts never need checking.
+B. Because each kind requires a different treatment: checking a source, examining reasoning, or testing a premise.
+C. Because reported facts are always true.
+D. Because the labels make records longer and therefore more authoritative.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B</strong> is correct because the main thread needs a map and decisions, not raw material. <strong>A</strong> is wrong because loading everything defeats selective reading and overflows context. <strong>C</strong> is wrong because full transcripts reintroduce the exploration cost delegation was meant to remove. <strong>D</strong> is wrong because a diff without context cannot be evaluated.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because enumerating call sites is a bounded question with a short answer. <strong>A</strong> and <strong>B</strong> are wrong because architectural choices and strategy decisions need the broader responsibility of the main thread. <strong>D</strong> is wrong because delegation does not confer approval authority.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because high failure affordance and reversibility justify light review. <strong>A</strong> and <strong>B</strong> are wrong because they over-invest in a low-impact case. <strong>D</strong> is wrong because automated checks still have value.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because it names a stable source, version, exact location, and verification step. <strong>A</strong> is too vague to locate. <strong>B</strong> is uncertain about currency and therefore unverifiable. <strong>D</strong> confuses confidence with evidence.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because authority resolves disagreements when versions do not, and unresolved conflicts should be escalated. <strong>A</strong> is wrong because averaging incompatible claims invents a value. <strong>B</strong> is wrong because retrieval order carries no authority. <strong>D</strong> is wrong because conflicts are common and must be handled deliberately.</p>
+</li>
+<li>
+<p><strong>B</strong> is correct because the labels tell a reviewer what kind of checking a claim needs. <strong>A</strong> is wrong because inferred facts can contain reasoning errors. <strong>C</strong> is wrong because reported facts can be copied from a stale or wrong source. <strong>D</strong> is wrong because length does not create authority.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 24.</em></p>
+  <nav><a href="23-escalation-containment.html">&larr; Previous</a><span></span><a href="25-cross-layer-antipatterns.html">Next &rarr;</a></nav>
+</div>
+
+</body>
+</html>

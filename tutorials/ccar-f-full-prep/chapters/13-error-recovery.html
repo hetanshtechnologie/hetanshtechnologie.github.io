@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 13 — Error Responses, Recovery, and Reliability</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f2f4f8;color:#1f2937;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(30,41,59,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#4f46e5;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#312e81;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#4b5563;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#6b7280}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9ca3af;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#312e81}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #6366f1;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#4338ca}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#3730a3}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #dbe2f0;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#312e81;color:#fff;font-weight:600}
+td{background:#fafbff}
+pre{background:#1e2233;color:#e8ecf8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#e8e9fb;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#3730a3}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#eef0ff;border-left:4px solid #6366f1;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#4338ca}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #dbe2f0;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#312e81;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #e6eaf5}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#4338ca;text-decoration:none;display:inline-block;margin-bottom:16px}
+.callout{background:#eef0ff;border-left:4px solid #6366f1;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#6b7280;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+
+<div class="chapter">
+  <a class="back" href="../">&larr; Back to the Full Prep Course</a>
+  <h1 id="chapter-13-error-responses-recovery-and-reliability">Chapter 13 — Error Responses, Recovery, and Reliability</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Treat error results as a designed part of the tool interface rather than an afterthought.</li>
+<li>Classify failures as retryable, terminal, or conditional, and encode that classification in the result.</li>
+<li>Write error payloads that give the model a specific, safe next action.</li>
+<li>Report partial success honestly and preserve the work that already completed.</li>
+<li>Explain why idempotency matters when a model may repeat a call.</li>
+<li>Apply retry budgets and backoff at a principle level, and know when to stop retrying.</li>
+<li>Use structured failure logs to diagnose and improve a system without exposing sensitive data.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="errors-as-part-of-the-tool-contract">Errors as part of the tool contract</h3>
+<p>A tool call has two possible kinds of outcome: it succeeds, or it does not. Many designs treat the second case as an exception that escapes the tool and is handled somewhere outside the agent loop. That is a mistake for an agentic system. If an exception escapes, the model receives no structured information about what happened and cannot reason about a next step. It may retry blindly, abandon a task that could have been completed, or invent a result that was never produced.</p>
+<p>A better design treats a failed call as a normal result with a distinct shape. The tool returns a value that says, in machine-readable form, that the operation did not complete and why. This keeps the failure inside the observe phase of the loop, where the model can read it alongside the rest of the context. The model then decides whether to retry, change its approach, ask for clarification, or report the problem. Failure becomes a branch in the workflow rather than a crash.</p>
+<p>This shift has a practical consequence for tool authors: the error result deserves as much design attention as the success result. It needs stable field names, a controlled vocabulary of codes, and text written for a reader who must act quickly. A vague error such as "something went wrong" is almost useless to a model. A precise error that names the failing parameter and suggests a corrective call is enormously valuable, because it converts a dead end into a small detour.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a scenario describes an agent that gets stuck after a tool failure, look at whether the failure re-enters the loop as structured data. Silent exceptions and unstructured messages are common root causes.</p>
+</blockquote>
+<h3 id="classifying-failures-retryable-terminal-and-conditional">Classifying failures: retryable, terminal, and conditional</h3>
+<p>Not all failures deserve the same response. The first distinction is between failures that may succeed if repeated and failures that cannot succeed without a change. A transient network interruption, a temporary resource shortage, or a rate limit are retryable: the same call might work later. A malformed argument, a missing permission, a reference to a nonexistent record, or a business rule that forbids the action are terminal with respect to the current attempt: repeating the identical call will fail in the same way.</p>
+<p>A third category is conditional. The operation might succeed, but only after something changes outside the tool: a user provides missing information, an approval is granted, or a conflicting state is resolved. These failures are not retries in the narrow sense, but they are not dead ends either. The correct response is to surface the condition to the model and let it decide whether to ask, to wait, or to switch approach. Treating a conditional failure as terminal loses a recoverable path; treating it as retryable wastes steps on a call that cannot yet work.</p>
+<p>The classification should travel with the error result. A code that tells the model "retryable with backoff" or "terminal, do not repeat" removes the need for the model to infer behavior from prose. Inference is fragile because the same underlying condition can be described in many ways. A stable category field makes the decision consistent across different tools and different parts of a workflow.</p>
+<table>
+<thead>
+<tr>
+<th>Failure class</th>
+<th>Typical causes</th>
+<th>Correct response</th>
+<th>Model guidance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Retryable</td>
+<td>Temporary outage, rate limit, resource contention</td>
+<td>Retry with limits and backoff</td>
+<td>"retry after a short wait"</td>
+</tr>
+<tr>
+<td>Terminal</td>
+<td>Invalid argument, missing permission, forbidden action</td>
+<td>Do not repeat the identical call</td>
+<td>"change the request or stop"</td>
+</tr>
+<tr>
+<td>Conditional</td>
+<td>Missing input, required approval, conflicting state</td>
+<td>Resolve the condition first</td>
+<td>"ask or switch approach"</td>
+</tr>
+<tr>
+<td>Partial</td>
+<td>Some items succeeded, others failed</td>
+<td>Preserve successes, retry remainder</td>
+<td>"report counts and continue"</td>
+</tr>
+</tbody>
+</table>
+<h3 id="anatomy-of-an-actionable-error-result">Anatomy of an actionable error result</h3>
+<p>An error result should be compact but complete. At minimum it should carry a stable code, a human-readable message, a category, and a suggested action. A request identifier lets an operator correlate the failure with logs, and a field that names the offending parameter helps the model repair its call. Where a retry is appropriate, the result can include a hint about whether waiting is required, without prescribing a precise delay that the model must interpret.</p>
+<p>The suggested action is the field that most distinguishes a good error contract from a poor one. It should be phrased as an instruction the model can follow: supply a valid value for a named parameter, request approval, or ask the user for a missing detail. Avoid suggestions that are really just restatements of the problem. "Check the input" is not actionable; "replace the channel value with one from the supported list" is.</p>
+<p>It is also useful to separate the diagnostic message from the user-facing message. The diagnostic text can be technical and precise because it is read by the model and by logs. The user-facing text can be shorter and safer, avoiding internal identifiers or details that should not leave the system. Returning both in separate fields prevents the common mistake of either overwhelming the user with internals or starving the model of the detail it needs to recover.</p>
+<pre><code class="language-text">{
+  &quot;ok&quot;: false,
+  &quot;code&quot;: &quot;INVALID_CHANNEL&quot;,
+  &quot;category&quot;: &quot;terminal&quot;,
+  &quot;message&quot;: &quot;The channel value is not one of the supported channels.&quot;,
+  &quot;offending_field&quot;: &quot;channel&quot;,
+  &quot;suggested_action&quot;: &quot;Choose a channel from the supported list and retry.&quot;,
+  &quot;request_id&quot;: &quot;req-8842&quot;,
+  &quot;user_message&quot;: &quot;That destination is not available. Please choose another.&quot;
+}
+</code></pre>
+<blockquote>
+<p><strong>Try it:</strong> Read each field of the payload above from the point of view of a model that has never seen the tool before. If any field is ambiguous, rewrite it until a single clear next step emerges.</p>
+</blockquote>
+<h3 id="the-next-action-guiding-recovery-in-the-loop">The next action: guiding recovery in the loop</h3>
+<p>A failure result is only useful if the loop does something with it. The model reads the result and chooses a next move, but it needs guardrails that keep that choice bounded. Without them, a model may retry a terminal failure repeatedly, cycling through variations until it exhausts the context window or the step budget. This is one of the most common ways an agent becomes stuck rather than waiting.</p>
+<p>The first guardrail is the category field discussed earlier. The orchestration layer can reject a retry of a terminal result before the model even considers it, turning a suggestion into a rule. The second is a per-tool retry count maintained outside the model, so that repeated attempts are tracked by code rather than remembered by the model. A model operating in a long session may forget how many times it has tried; a counter in the orchestration layer does not.</p>
+<p>The third guardrail is a clear escalation path. Some failures should end the current branch and hand control back to a person or a higher-level planner. The error result can signal this by setting a field that requests escalation, and the workflow can treat that signal as a stop condition.</p>
+<h3 id="partial-success-and-honest-reporting">Partial success and honest reporting</h3>
+<p>Many operations touch multiple items. A batch write may update several records and fail on the rest. A search across several sources may return results from some and time out on others. Reporting such an outcome as a simple success or a simple failure is misleading. A simple success hides the gap; a simple failure invites the model to repeat the whole operation, duplicating the work that already succeeded.</p>
+<p>Partial success should be represented explicitly. The result should state that the operation completed for a subset, give counts or identifiers for what succeeded, and describe what did not. The suggested action should focus on the remainder: retry only the failed items, continue with the available results, or stop and report the gap. This lets the model preserve completed work and avoid repeating it.</p>
+<p>Honesty matters because the model will build its next decision on the reported state. If a result claims full success when only part of it completed, downstream steps may assume records exist that do not, and errors propagate quietly. If it claims total failure, the model may reissue writes that were already applied. A precise partial result is the difference between a contained incident and a cascade.</p>
+<p>In workflows that mix independent items, one useful pattern is to make each item its own operation so that isolation is natural. Where batching is necessary for efficiency, the result structure should still itemize outcomes. The extra structure costs little and pays for itself the first time a retry would otherwise duplicate a write.</p>
+<h3 id="idempotency-and-duplicate-calls">Idempotency and duplicate calls</h3>
+<p>A model may call a tool more than once for reasons that are entirely reasonable: a retry after a timeout, a recovery step after a partial failure, or a repeated plan branch in a long loop. If the tool has side effects, a duplicate call can produce duplicate effects. Two charges, two messages, or two created records are the classic examples, and each is worse than the original failure that triggered the retry.</p>
+<p>Idempotency is the property that repeating the same operation yields the same final state as performing it once. Read-only operations are naturally idempotent. Side-effecting operations must be designed for it. The usual mechanism is an idempotency key: a stable identifier attached to the request that the tool records, so that a repeated request with the same key returns the original result instead of applying the effect again. The key should be created by the caller and kept stable across retries, not regenerated on each attempt.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Risk without idempotency</th>
+<th>Safer design</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Retry after timeout</td>
+<td>Effect applied twice</td>
+<td>Stable key with recorded outcome</td>
+</tr>
+<tr>
+<td>Repeated plan branch</td>
+<td>Duplicate record created</td>
+<td>Upsert semantics on a natural identifier</td>
+</tr>
+<tr>
+<td>Partial batch recovery</td>
+<td>Completed items repeated</td>
+<td>Item-level keys and status</td>
+</tr>
+<tr>
+<td>Long session resume</td>
+<td>Old action replayed</td>
+<td>Key carried in the handoff state</td>
+</tr>
+</tbody>
+</table>
+<p>The tool definition should tell the model how to supply the key and when to keep it stable. If the model regenerates the identifier on each attempt, the protection disappears. This is another reason the boundary between definition design and error design is thin: the instructions that make retries safe live in the same contract that tells the model how to call the tool.</p>
+<h3 id="retry-budgets-backoff-and-diagnostic-logging">Retry budgets, backoff, and diagnostic logging</h3>
+<p>Retries should be bounded. A retry budget is a limit on how many attempts a workflow may make for a given operation or across a whole task. Keeping that budget in orchestration code rather than in the prompt makes it enforceable. When the budget is exhausted, the loop stops retrying and takes the escalation path, instead of continuing until the context fills or the run is cancelled. A budget that is too small causes premature failure; one that is too large wastes time and cost on operations that cannot succeed.</p>
+<p>Backoff means waiting longer between successive retries. The principle is simple: if a service is overloaded, immediate retries add pressure and make recovery less likely. Increasing delays give the service room to recover. A bounded number of attempts with increasing gaps is more reliable than rapid repetition, and a small element of variation prevents many calls from arriving at the same moment. The model does not need to compute the schedule; the orchestration layer can apply it and report only that a retry followed a wait.</p>
+<p>Diagnostic logging turns failures into improvement. Each failed call should record the tool name, the error code, the category, the request identifier, and enough context to reproduce the condition, without capturing secrets or sensitive content. Logs should be structured so that an operator can count failure classes, spot a tool with an unusual rate of invalid arguments, and trace a particular request through a chain of attempts. Aggregated signals drive definition fixes: a spike in one code often points to a misleading description or a schema that invites the wrong call.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Logging full arguments on failure. This frequently captures sensitive values and creates a privacy problem in a system whose reliability was otherwise sound.</p>
+</blockquote>
+<h3 id="worked-error-contract-example">Worked error-contract example</h3>
+<p>Consider a tool that reserves an appointment slot. An early definition returned a bare failure string whenever anything went wrong. The model could not tell a full slot from an invalid date, so it sometimes retried the same impossible request many times and sometimes told the user that no slots existed when only one date was unavailable.</p>
+<p>The revised contract distinguishes three outcomes. A full slot is terminal for that date and suggests choosing another date. An invalid date is terminal and names the offending field. A temporary reservation-service outage is retryable and carries a request identifier. A fourth result represents partial success when several requested slots are booked together.</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Code returned</th>
+<th>Category</th>
+<th>Suggested action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Requested date fully booked</td>
+<td>SLOT_UNAVAILABLE</td>
+<td>terminal</td>
+<td>Offer nearby dates</td>
+</tr>
+<tr>
+<td>Malformed date text</td>
+<td>INVALID_DATE</td>
+<td>terminal</td>
+<td>Supply a valid date value</td>
+</tr>
+<tr>
+<td>Service temporarily down</td>
+<td>RESERVATION_UNAVAILABLE</td>
+<td>retryable</td>
+<td>Retry with bounded backoff</td>
+</tr>
+<tr>
+<td>Some slots booked</td>
+<td>PARTIAL_RESERVATION</td>
+<td>partial</td>
+<td>Keep confirmed slots, retry rest</td>
+</tr>
+</tbody>
+</table>
+<p>The payload below shows the partial case. It reports what was secured, what was not, and a single call to make next. Because the confirmed slots are returned as identifiers, the model can carry them forward without reissuing their reservations.</p>
+<pre><code class="language-text">{
+  &quot;ok&quot;: &quot;partial&quot;,
+  &quot;code&quot;: &quot;PARTIAL_RESERVATION&quot;,
+  &quot;category&quot;: &quot;partial&quot;,
+  &quot;confirmed&quot;: [&quot;slot-17&quot;, &quot;slot-19&quot;],
+  &quot;unconfirmed&quot;: [
+    {&quot;slot&quot;: &quot;slot-22&quot;, &quot;reason&quot;: &quot; SLOT_UNAVAILABLE&quot;}
+  ],
+  &quot;category_for_unconfirmed&quot;: &quot;terminal&quot;,
+  &quot;suggested_action&quot;: &quot;Keep the confirmed slots and offer alternate times for slot-22.&quot;,
+  &quot;request_id&quot;: &quot;req-1190&quot;
+}
+</code></pre>
+<p>This contract also changes the loop: a partial result records confirmed identifiers as state, so a resumed session does not reserve the same slots twice. Error design, idempotency, and continuity are one connected problem.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A support workflow used a tool that looked up account status and then a tool that issued a credit. During a busy period, the status lookup began timing out intermittently. The model responded by retrying the lookup several times, then gave up and issued a credit based on an assumption, even though the account had not been verified. A reviewer needed to make the workflow reliable without removing the credit capability.</p>
+<p>The diagnosis separated two issues. The timeout was retryable, but the result carried no category, so the model treated it like any other failure and eventually improvised. The credit tool had no idempotency key, so a retry after an ambiguous timeout could have issued a second credit. Both problems were in the contracts, not in the underlying services.</p>
+<p>The team changed the lookup tool to return a structured result with a category of retryable and a bounded retry hint. They added a rule in the orchestration layer that a credit call is not permitted unless a fresh, successful status result is present in state, converting a best practice into an enforced gate. They added an idempotency key to the credit tool and required it in the schema. Finally, they made the failure log record the category and request identifier, so a recurring timeout pattern would be visible.</p>
+<p>With these changes, a timeout produced a bounded series of retries followed by an escalation, not an assumed status. A credit call could not proceed without verification, and repeated calls could not duplicate a credit. The workflow did not become more complex in its reasoning; it became better constrained at its boundaries.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Letting exceptions escape the tool so the model never sees a structured failure.</li>
+<li>Using a single generic error code for both retryable and terminal conditions.</li>
+<li>Repeating an identical terminal call because the result did not say not to.</li>
+<li>Reporting a partial operation as a total failure and duplicating completed work.</li>
+<li>Regenerating an idempotency key on each retry, defeating duplicate protection.</li>
+<li>Embedding retry limits only in prompt text, where they cannot be enforced.</li>
+<li>Logging full tool arguments on failure and capturing sensitive values.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Errors should re-enter the loop as structured results that the model can reason about.</li>
+<li>Classify failures as retryable, terminal, conditional, or partial, and carry the class in the result.</li>
+<li>An actionable error result names the offending field and gives one clear next step.</li>
+<li>Partial success must be reported explicitly so completed work is preserved.</li>
+<li>Idempotency keys keep repeated calls from duplicating side effects.</li>
+<li>Retry budgets and backoff belong in orchestration code, with a clear escalation path.</li>
+<li>Structured, minimal failure logs support diagnosis and governance without leaking sensitive data.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A lookup fails because the service is temporarily overloaded. Which classification and response are most appropriate?</li>
+</ol>
+<ul>
+<li>A. Terminal; stop and report failure.</li>
+<li>B. Retryable; retry with a bounded budget and backoff.</li>
+<li>C. Conditional; ask the user for different input.</li>
+<li>D. Partial; report the items that succeeded.</li>
+</ul>
+<ol start="2">
+<li>Which field most directly helps a model repair an invalid tool call?</li>
+</ol>
+<ul>
+<li>A. A generic message such as "operation failed."</li>
+<li>B. A suggested action that names the offending field and a valid alternative.</li>
+<li>C. A long description of the tool's implementation.</li>
+<li>D. A timestamp in the log.</li>
+</ul>
+<ol start="3">
+<li>A batch operation updates four records and fails on the fifth. What is the best result to return?</li>
+</ol>
+<ul>
+<li>A. A single failure, so the model knows to redo the whole batch.</li>
+<li>B. A single success, so the model continues without concern.</li>
+<li>C. A partial result listing confirmed items and the unconfirmed item with a reason.</li>
+<li>D. No result, so the orchestration layer can handle it silently.</li>
+</ul>
+<ol start="4">
+<li>Why must an idempotency key remain stable across retries?</li>
+</ol>
+<ul>
+<li>A. Because a changing key creates a new logical operation and allows duplicate effects.</li>
+<li>B. Because keys must be short.</li>
+<li>C. Because the model prefers familiar strings.</li>
+<li>D. Because logs reject repeated keys.</li>
+</ul>
+<ol start="5">
+<li>Where should a retry budget be enforced for reliable behavior?</li>
+</ol>
+<ul>
+<li>A. In the prompt, as a polite suggestion to the model.</li>
+<li>B. In the tool description, as a warning.</li>
+<li>C. In orchestration code, as a hard limit with an escalation path.</li>
+<li>D. In the user interface, as a visual hint.</li>
+</ul>
+<ol start="6">
+<li>Which logging practice is most consistent with good error handling?</li>
+</ol>
+<ul>
+<li>A. Record every full argument value to maximize detail.</li>
+<li>B. Record the tool name, error code, category, and request identifier without sensitive values.</li>
+<li>C. Record only the final success of a run.</li>
+<li>D. Avoid logging entirely to reduce storage use.</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p>Correct: B. A temporary overload is the classic retryable case, and bounded retries with backoff give the service room to recover. A is wrong because a transient condition is not terminal. C is wrong because new user input does not address an overload. D is wrong because nothing succeeded yet.</p>
+</li>
+<li>
+<p>Correct: B. A specific suggestion tied to the offending field turns an error into a repair step. A is wrong because a generic message gives no direction. C is wrong because implementation detail does not guide the next call. D is wrong because a timestamp helps logs, not call repair.</p>
+</li>
+<li>
+<p>Correct: C. A partial result preserves the confirmed records and isolates the failed one. A is wrong because redoing the batch duplicates four writes. B is wrong because it hides a real gap. D is wrong because the model receives no information and cannot proceed.</p>
+</li>
+<li>
+<p>Correct: A. A stable key identifies one logical operation; changing it makes each retry look new, permitting duplicates. B is irrelevant to correctness. C is an anthropomorphic distraction. D is wrong because logs normally welcome repeated keys for correlation.</p>
+</li>
+<li>
+<p>Correct: C. Code-enforced limits cannot be ignored by the model and can trigger escalation. A and B are wrong because prompt text is guidance, not enforcement. D is wrong because a visual hint does not constrain an automated loop.</p>
+</li>
+<li>
+<p>Correct: B. Structured, minimal records support diagnosis while respecting privacy. A is wrong because full arguments often contain sensitive data. C is wrong because failures are exactly what need recording. D is wrong because no logging prevents diagnosis.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 13.</em></p>
+  <nav><a href="12-tool-definitions.html">&larr; Previous</a><span></span><a href="14-mcp-architecture.html">Next &rarr;</a></nav>
+</div>
+
+</body>
+</html>

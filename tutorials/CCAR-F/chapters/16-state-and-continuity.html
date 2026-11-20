@@ -1,0 +1,128 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>16. State, Memory, and Session Continuity</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>16. State, Memory, and Session Continuity</h1>
+
+<p>An agent that remembers nothing must rediscover everything; one that remembers too much rereads history and acts on obsolete facts. State management decides what the system knows, where it lives, how long it stays valid, and how it survives a crash. Chapter 15 covered messages; this chapter covers the durable substrate beneath them: a message is an event, state is the accumulated result of events the system chose to keep.</p>
+
+<h2>In-context state versus external state</h2>
+
+<p>In-context state is what the model sees now: instructions, conversation, tool results, injected notes. External state lives in files, databases, caches, or artifact stores. In-context data is immediately available but expensive, volatile, and capped by the window; external data is durable and cheap per byte but needs an explicit read and can be stale.</p>
+
+<table>
+<tr><th>Property</th><th>In-context</th><th>External</th></tr>
+<tr><td>Availability</td><td>Immediate, no tool call</td><td>Requires lookup and parsing</td></tr>
+<tr><td>Durability</td><td>Lost when the call or session ends</td><td>Survives process restarts</td></tr>
+<tr><td>Practical size</td><td>Thousands of tokens, competing with reasoning</td><td>Megabytes to terabytes</td></tr>
+<tr><td>Cost of access</td><td>Paid on every turn that includes it</td><td>Paid only when read</td></tr>
+<tr><td>Sharing</td><td>Not shareable between agents</td><td>Shareable with locking or versioning</td></tr>
+<tr><td>Failure risk</td><td>Silent omission after compaction</td><td>Missing key, stale version, corrupt write</td></tr>
+</table>
+
+<p>Keep the <em>current objective, active constraints, recent decisions, and artifact identities</em> in context; keep full documents and transcripts externally. In a 200,000-token window, reserving 8,000 to 16,000 tokens for a compact state block is a reasonable start. Loading 150,000 tokens of history "just in case" raises cost every turn and hides relevant details.</p>
+
+<h2>Four key spaces, not one bag of memory</h2>
+
+<p>Separate remembered data into four namespaces with different lifetimes and owners:</p>
+
+<ul>
+<li><strong>Run state</strong> — ephemeral facts for one execution: plan version, current stage, retry counters, checkpoints. Lifetime: one run. Owner: orchestrator.</li>
+<li><strong>Session memory</strong> — user preferences, confirmed facts, and decisions that should persist across runs in the same conversation. Lifetime: one session, with expiry. Owner: session manager.</li>
+<li><strong>Artifact store</strong> — immutable outputs such as drafts, extracted tables, and evidence files, addressed by content hash. Lifetime: project or retention policy. Owner: the system.</li>
+<li><strong>Knowledge and configuration</strong> — instructions, schemas, reference documents. Lifetime: until explicitly changed. Owner: maintainers.</li>
+</ul>
+
+<p>Use explicit, versioned keys such as <code>run:8f3c:stage:2:checkpoint</code>. A key should say what it holds and who owns it; naming state <code>data</code> invites unrelated overwrites. Store a <code>schema_version</code> too: a checkpoint from plan version 3 must not be replayed by version 4 without migration, since field meanings may have changed.</p>
+
+<div class="tip"><strong>Content addressing.</strong> Name artifacts by a hash of their bytes, for example <code>sha256:9c41...:v1</code>. Two agents that produce identical content get the same key, which makes deduplication free and makes "did this result change?" answerable by comparing strings instead of rereading documents.</div>
+
+<h2>Persistence and write discipline</h2>
+
+<p>State is useful only if a write is complete or absent — never half-finished. Use atomic checkpoints: write to a temporary key, then swap the pointer. For files, write a temporary file and rename it; for object stores, write a versioned object and update an index. Include a checksum and timestamp so readers can detect corruption or staleness.</p>
+
+<p>The order of writes matters around side effects. Before an irreversible external action — sending a message, paying an invoice, deleting a record — write an <em>intent</em> containing the action, its target, and a unique idempotency key. After the action succeeds, write the completion record with the external transaction ID. If the process dies between the two writes, recovery sees an intent without a completion and can query the external system using the idempotency key instead of blindly repeating the action. This pattern is small, but it removes the most dangerous ambiguity in agent recovery: "did I already do it?"</p>
+
+<pre><code>checkpoint:
+  run_id: run-8f3c
+  stage: verify
+  schema_version: 2
+  input_digest: sha256:4a10bd9e
+  status: intent | complete | failed
+  side_effect: { type: publish, key: pub-771, external_id: null }
+  guard: if ( status == "intent" &amp;&amp; external_id == null ) -&gt; query_before_retry
+  freshness: if ( age_seconds &gt; 3600 ) -&gt; revalidate_source</code></pre>
+
+<p>Escape weathering as a design requirement too. Not every fact deserves forever: customer preferences might live for 90 days, extracted source facts until the source version changes, and derived summaries until their inputs are replaced. Give each namespace a default time-to-live and a way to mark a fact as confirmed by a user, which typically extends its lifetime. Without expiry, a system gradually becomes confident in contradictions.</p>
+
+<h2>Crash recovery: replay, repair, or resume</h2>
+
+<p>Imagine a six-step run that crashes immediately after step 3 writes its artifact but before it marks step 3 complete. Recovery has three options, in increasing order of sophistication:</p>
+
+<ol>
+<li><strong>Restart</strong> from step 1. Safe but wasteful, and unsafe if step 1 has side effects.</li>
+<li><strong>Resume</strong> from the last completed checkpoint, step 2, repeating step 3. Requires step 3 to be idempotent.</li>
+<li><strong>Repair</strong> by inspecting the partial artifact from step 3, confirming it against the intent record, and marking it complete if valid.</li>
+</ol>
+
+<p>Most production systems implement option 2 and add option 3 for expensive or externally visible steps. To make resume correct, every step must be idempotent: the same input digest and the same step name must produce the same key and the same effect. Retry counters belong in run state, with a cap — commonly 3 attempts for transient failures and 0 for validation failures, since repeating a malformed input will not repair it. A recovery routine should also log <em>why</em> it chose a path: "resumed at step 3 because checkpoint complete and digest matched" is far easier to audit than a silent jump.</p>
+
+<div class="warn"><strong>Do not replay on stale inputs.</strong> A checkpoint is only valid for the input digest and configuration version it recorded. If the source document changed while the process was down, replaying step 3 against the old digest produces a result that no longer matches reality. Revalidate the digest before resuming; if it differs, invalidate downstream checkpoints and restart from the affected stage.</div>
+
+<h2>Session identity and continuity across interactions</h2>
+
+<p>Three identifiers prevent most continuity bugs. A <strong>run ID</strong> identifies one execution attempt. A <strong>session ID</strong> identifies a conversation or user engagement across many runs. A <strong>thread or task ID</strong> identifies a line of work inside a session, which may span several runs and be resumed after a pause. Persist all three in the state block, and include them in tool calls and logs. When a user asks "continue where you left off," the system needs to resolve the session to the right thread, then the thread to the latest run, then the run to its last valid checkpoint. Without explicit IDs, the system guesses from recent text — and guesses become particularly unreliable after context compaction.</p>
+
+<p>Continuity also has a social dimension. A session that stores personal data needs a retention policy, an access boundary, and a way for a user to inspect or delete remembered facts. Treat memory writes as privileged operations: record what was stored, why, and on whose authority. When resuming after a long gap, present a short digest of remembered facts ("I still have the target schema and your preference for metric units") and let the user correct it. That single step catches a surprising number of stale assumptions before they turn into bad work.</p>
+
+<h2>Security and cost trade-offs</h2>
+
+<p>Every remembered byte is a potential liability and a potential expense. Credentials should never enter session memory or artifacts; keep them in a secret store and pass short-lived handles. Logs should record state keys and digests, not full values, unless the values are explicitly non-sensitive. On the cost side, load state in tiers: a compact always-present block, a second tier fetched when a task touches a specific namespace, and a third tier of raw artifacts fetched by identifier. A useful budget test is to ask what happens if the second tier is unavailable: a well-designed agent degrades to asking for clarification rather than inventing missing facts.</p>
+
+<div class="note"><strong>Exam mindset.</strong> When a question describes lost context after a restart, the correct answer is usually external durable state plus an explicit resume protocol — not a longer prompt. When it describes a duplicated side effect, look for a missing idempotency key or a missing intent record, not a retry-count problem.</div>
+
+<div class="exercise"><strong>Exercise 16.1 — Classify the state</strong>
+<p>Sort each item into run state, session memory, artifact store, or knowledge/configuration, and give each a versioned key pattern.</p>
+<ol>
+<li>The user's preference for British spelling.</li>
+<li>The number of retries remaining for a failed tool call.</li>
+<li>A 40-page source PDF used by three different agents.</li>
+<li>The current definition of the required output schema.</li>
+</ol>
+<p>Hint: ask who owns each item and how long it should survive, then encode that in the key.</p>
+</div>
+
+<div class="exercise"><strong>Exercise 16.2 — Recover from a crash</strong>
+<p>A seven-stage pipeline crashes after stage 4 publishes a draft and writes its artifact, but before it records completion. Stage 5 composes the final report, stage 6 validates it, stage 7 emails it. The run state contains: stage 4 intent with key <code>pub-771</code>, artifact digest <code>sha256:4a10</code>, and no external transaction ID. Write the recovery sequence, including how you avoid a duplicate publication and what you do if the artifact digest no longer matches the source.</p>
+<p>Hint: query before retrying, record what you learn, and invalidate downstream checkpoints if the digest changed.</p>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why is in-context state a poor place for a full historical transcript?</li>
+<li>What information belongs in an intent record written before an irreversible side effect?</li>
+<li>Explain why a checkpoint must include an input digest and a schema version.</li>
+<li>Distinguish a run ID from a session ID and from a thread ID.</li>
+<li>When should a recovery routine repair a partial artifact instead of resuming from the previous checkpoint?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Keep current goals and artifact identities in context; keep full data and history externally.</li>
+<li>Separate run state, session memory, artifacts, and configuration into distinct versioned namespaces.</li>
+<li>Write checkpoints atomically, and record intent before side effects with an idempotency key.</li>
+<li>Validate digests and versions before resume; invalidate downstream checkpoints when inputs change.</li>
+<li>Use run, session, and thread IDs to make "continue where you left off" deterministic.</li>
+<li>Apply retention, access control, and tiered loading to keep memory useful and inexpensive.</li>
+</ul>
+
+<nav><a href="15-messages-and-handoffs.html">&larr; Previous</a><span></span><a href="17-errors-and-recovery.html">Next: Error Classes, Detection, and Recovery &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

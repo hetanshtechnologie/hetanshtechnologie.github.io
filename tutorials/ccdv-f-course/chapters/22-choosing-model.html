@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 22 — Choosing a Model Under Constraints</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 22</span>
+  <h1 id="chapter-22-choosing-a-model-under-constraints">Chapter 22 — Choosing a Model Under Constraints</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain how quality, latency, and cost interact when selecting a model for a workload.</li>
+<li>Convert a requirement into selection criteria: error cost, deadline, volume, context size, and feature needs.</li>
+<li>Use a decision matrix to compare candidate configurations instead of relying on impressions.</li>
+<li>Design an escalation path that starts with a small model and promotes only the requests that need more.</li>
+<li>Distinguish a moving model alias from a pinned snapshot and state the risk of each.</li>
+<li>Recognize common breaking changes and describe a rollout that limits their damage.</li>
+<li>Decide when an upgrade is justified and what evidence should accompany it.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="the-selection-triangle">The selection triangle</h3>
+<p>Model choice is a negotiation among three goals. A more capable model usually improves accuracy on difficult inputs, but it tends to cost more per token and take longer, especially at the slow tail. A faster model shortens the wait and lowers the unit price, but it may miss a constraint that a stronger model would catch. Lowering cost by trimming context or output can help, yet removing the wrong material damages quality.</p>
+<p>You cannot maximize all three at once, so the useful question is not "which model is best" but "which constraint binds here." A nightly backfill has no user waiting, so latency barely matters and cost dominates. A checkout assistant has a hard two-second budget, so a cheaper model that sometimes takes four seconds is disqualified regardless of its average. A medical or financial decision may have a high error cost, so a small saving per call is irrelevant beside the risk of one wrong answer.</p>
+<table>
+<thead>
+<tr>
+<th>Constraint</th>
+<th>Question to ask</th>
+<th>Effect on selection</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Error cost</td>
+<td>What happens when the answer is wrong?</td>
+<td>High cost favors a capable tier and a review step</td>
+</tr>
+<tr>
+<td>Deadline</td>
+<td>Is a person waiting on each result?</td>
+<td>Tight deadlines favor fast serving and shorter output</td>
+</tr>
+<tr>
+<td>Volume</td>
+<td>How many calls per day or month?</td>
+<td>High volume magnifies small per-call differences</td>
+</tr>
+<tr>
+<td>Context size</td>
+<td>How much material must be in the window?</td>
+<td>Long, noisy context favors a model that tracks distant details</td>
+</tr>
+<tr>
+<td>Feature needs</td>
+<td>Thinking, tools, structured output, images?</td>
+<td>A cheaper tier may not support the required feature</td>
+</tr>
+<tr>
+<td>Detectability</td>
+<td>Can a downstream check catch errors cheaply?</td>
+<td>Detectable errors justify a cheaper first pass</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Exam note:</strong> When two options both look reasonable, find the explicit constraint in the scenario. A deadline eliminates slow options; an expensive mistake eliminates cheap ones. The answer usually follows from one stated fact, not from a general preference.</p>
+</blockquote>
+<h3 id="a-decision-matrix-you-can-actually-use">A decision matrix you can actually use</h3>
+<p>A matrix turns vague preference into a repeatable routine. Write the candidate configurations as rows and the constraints as columns, then mark each cell as a pass, a risk, or a failure. A failure on a hard constraint removes the option regardless of how well it scores elsewhere.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Binding constraint</th>
+<th>First choice</th>
+<th>Fallback</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Short label on high-volume stream</td>
+<td>Cost and throughput</td>
+<td>Fast tier, no thinking</td>
+<td>Balanced tier if accuracy slips</td>
+<td>Errors are visible and cheap to fix</td>
+</tr>
+<tr>
+<td>Customer-facing answer with a two-second target</td>
+<td>First-token latency</td>
+<td>Balanced tier, fast serving, streaming</td>
+<td>Capable tier for flagged cases</td>
+<td>A cheap model that misses the deadline fails the requirement</td>
+</tr>
+<tr>
+<td>Reconciliation of conflicting records</td>
+<td>Error cost</td>
+<td>Capable tier with bounded reasoning</td>
+<td>Human review of low-confidence results</td>
+<td>Intermediate checks matter more than unit price</td>
+</tr>
+<tr>
+<td>Long-document question answering</td>
+<td>Context handling</td>
+<td>Capable tier with retrieved passages</td>
+<td>Balanced tier after compression</td>
+<td>Details buried in the middle are easily lost</td>
+</tr>
+<tr>
+<td>Nightly bulk enrichment</td>
+<td>Cost per item</td>
+<td>Small or balanced tier in a batch job</td>
+<td>Capable tier for a failed subset</td>
+<td>Nobody waits, so time is exchangeable for price</td>
+</tr>
+<tr>
+<td>Ambiguous request with tool use</td>
+<td>Adaptation and safety</td>
+<td>Capable tier with a bounded loop</td>
+<td>Escalate to a person</td>
+<td>The next step cannot be predicted in advance</td>
+</tr>
+</tbody>
+</table>
+<p>Notice that the matrix names a <em>configuration</em>, not just a model. Serving mode, thinking settings, output limits, and routing rules are part of the choice. Two teams can use the same model and get very different results because one adds a cached prefix and an output cap while the other sends unbounded history.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Comparing models on a leaderboard score instead of on your own test set. A model that wins a general benchmark can still be the wrong choice for a narrow task with a strict deadline.</p>
+</blockquote>
+<h3 id="escalation-start-small-and-promote-selectively">Escalation: start small and promote selectively</h3>
+<p>A single global choice forces you to buy the capability of the hardest request for every easy one. Escalation inverts that. Send each request to a small, inexpensive model first, then promote only the cases that the first pass cannot handle. Promotion can be triggered by an explicit signal from the caller, a cheap rule over structured fields, a schema validation failure, a confidence estimate, or a review flag.</p>
+<p>The design works best when the first pass produces something useful even if it is not final. A small model might extract the fields, propose a label, and set a flag when the source text contains conflicting numbers. Those fields let your code decide whether to answer or escalate. Escalation then becomes a normal control flow step rather than an admission of failure.</p>
+<p>The pattern has costs. A promoted request pays for two calls, so savings depend on a small promotion rate. A confidence score is not proof; a confidently wrong first answer fires no trigger. Deterministic checks — schema validation, business rules, sampled review — must sit alongside it, and the promotion rate deserves its own metric because drift can erase the saving.</p>
+<pre><code class="language-python">def handle(question, metadata):
+    draft = small_model.answer(question, schema=&quot;policy_answer&quot;)
+    if not draft.valid or metadata.get(&quot;has_exception&quot;):
+        return capable_model.answer(question, schema=&quot;policy_answer&quot;)
+    if draft.low_confidence:
+        return review_queue.submit(question, draft)
+    return draft
+</code></pre>
+<p>The snippet shows three distinct exits: accept, escalate to a stronger model, or escalate to a person. Conflating the last two is a common design error. A stronger model reduces model error; it does not grant authority to make a consequential decision.</p>
+<blockquote>
+<p><strong>Try it:</strong> On a sample of real requests, count how often your escalation rule fires and how many of those cases the small model actually got wrong. If the rule promotes many correct answers, tighten it; if it misses wrong ones, add a deterministic check.</p>
+</blockquote>
+<h3 id="version-identifiers-and-pinning">Version identifiers and pinning</h3>
+<p>The string you pass as a model identifier is not always the same thing. Some identifiers are aliases that move as a provider improves a model or releases a new default. Others name a dated snapshot that stays fixed for the lifetime of the product. A third category is an internal alias in your own configuration that resolves to a chosen snapshot per environment, giving you one name in code and controlled movement behind it.</p>
+<table>
+<thead>
+<tr>
+<th>Identifier style</th>
+<th>What it resolves to</th>
+<th>Behaviour over time</th>
+<th>Advantage</th>
+<th>Risk</th>
+<th>Use when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Moving alias</td>
+<td>Provider's current recommended version</td>
+<td>Can change without your deploy</td>
+<td>Automatic improvements and fixes</td>
+<td>Output or limits may shift under you</td>
+<td>Early prototypes and low-stakes tools</td>
+</tr>
+<tr>
+<td>Dated snapshot</td>
+<td>A fixed model release</td>
+<td>Stable until you edit configuration</td>
+<td>Reproducible tests and audit trails</td>
+<td>Misses improvements and security fixes</td>
+<td>Production systems with regression tests</td>
+</tr>
+<tr>
+<td>Internal logical name</td>
+<td>Your mapping to a snapshot</td>
+<td>Changes only when you change configuration</td>
+<td>One code path across environments</td>
+<td>Requires discipline to keep mappings aligned</td>
+<td>Teams with staging and production separation</td>
+</tr>
+<tr>
+<td>Per-environment override</td>
+<td>Different snapshot per environment</td>
+<td>Canary in staging, stable in production</td>
+<td>Safe evaluation of new releases</td>
+<td>Drift if environments are not compared</td>
+<td>Controlled upgrades</td>
+</tr>
+</tbody>
+</table>
+<p>Pinning does not forbid upgrades; it makes them deliberate events with test results attached rather than invisible production changes. Record the resolved identifier in every trace so a strange result can be tied to its exact version.</p>
+<blockquote>
+<p><strong>Exam note:</strong> If a scenario mentions reproducibility, auditability, or a regression that appeared without a deploy, suspect a moving alias. The fix is to pin a snapshot and log the resolved version.</p>
+</blockquote>
+<h3 id="breaking-changes-and-controlled-rollout">Breaking changes and controlled rollout</h3>
+<p>An upgrade can change more than answer quality. A thinking budget equal to the output ceiling may be rejected; a tool definition once tolerated may fail stricter validation; response blocks may appear in new combinations that break a text-only parser. Context limits, features, and pricing can move too.</p>
+<table>
+<thead>
+<tr>
+<th>Change surface</th>
+<th>Symptom</th>
+<th>Pre-rollout guard</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Output and thinking allowance</td>
+<td>Validation error on budget values</td>
+<td>Assert budget plus expected answer is below the ceiling</td>
+</tr>
+<tr>
+<td>Tool schemas</td>
+<td>Rejected tool definitions at request time</td>
+<td>Validate definitions against the new contract in staging</td>
+</tr>
+<tr>
+<td>Response blocks</td>
+<td>Parser errors on an unfamiliar block type</td>
+<td>Parse by block type and ignore unknown blocks safely</td>
+</tr>
+<tr>
+<td>Feature availability</td>
+<td>Mode flagged as unsupported</td>
+<td>Capability check before enabling the mode</td>
+</tr>
+<tr>
+<td>Pricing and limits</td>
+<td>Unexpected cost or rate-limit errors</td>
+<td>Re-run the cost model with published rates for the new version</td>
+</tr>
+</tbody>
+</table>
+<p>A controlled rollout keeps the damage local. Freeze an evaluation set, run the candidate version against it, and compare both quality and tail latency with the pinned baseline. Canary a small share of traffic, watch error rates and spend, then widen gradually. Keep the previous snapshot available so that a rollback is a configuration change rather than a frantic code edit.</p>
+<h3 id="deciding-when-to-upgrade">Deciding when to upgrade</h3>
+<p>Upgrade when you gain something you can name: a measurable improvement on your evaluation set, a capability that removes a workaround, a lower price at equal quality, or the end of support for the old version. "It is newer" is not a reason by itself. Equally, do not postpone forever: an old snapshot may miss safety fixes, lose support, or lock you out of features that would simplify the system.</p>
+<p>The decision is revisable. Record why the current model was chosen, what evidence would justify moving, and who reviews that evidence. A quarterly check with a frozen test set is often enough. When the workload changes — new input types, a tighter deadline, a different error cost — reopen the decision instead of assuming the old choice still holds.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Upgrading every model in every environment at once. Without a canary and a rollback path, a subtle change in response structure becomes a broad outage.</p>
+</blockquote>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal.</strong> Compare two model configurations under one explicit constraint and practice a safe version change.</p>
+<p><strong>Steps.</strong></p>
+<ol>
+<li>Freeze ten representative requests with expected outcomes in a scratch test file.</li>
+<li>Run them with a small model and a capable model, recording accuracy, latency at the slow tail, and token usage.</li>
+<li>Write a decision matrix with cost, deadline, and error cost as columns, then mark each configuration pass, risk, or failure against a two-second target.</li>
+<li>Pin both versions by resolved identifier and repeat one test after switching to a moving alias, noting any difference you can observe.</li>
+<li>Change one configuration field that the newer version treats differently, such as a reasoning budget, and observe the validation error before fixing it.</li>
+</ol>
+<p><strong>Expected observation.</strong> The small model is cheaper and faster but loses accuracy on the hardest examples. The matrix disqualifies one configuration on the deadline even if it is cheaper. The pinned runs are repeatable, the alias makes version identity less certain, and the invalid budget is rejected rather than silently adjusted.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A freight company parses supplier invoices. Most follow one of two layouts; a minority contain handwritten adjustments. Extraction feeds a payment queue, so a bad total can cause a wrong payment. Uploads need a response within five seconds, at roughly 60,000 invoices a month.</p>
+<p>They write constraints before picking a model. The deadline excludes slow reasoning on the main path; the error cost is asymmetric, since a wrong total is worse than a slow parse. Volume makes each cent visible, and image input plus structured output are required, while thinking is not.</p>
+<p>The first configuration uses a small tier for known layouts, a strict schema, and code that recomputes line-item sums. A layout classifier sends unusual invoices to a capable tier with a bounded budget, holding those results for review before payment.</p>
+<p>Three hundred archived invoices verify the design: the small tier handles known layouts well and the capable tier recovers most handwritten cases. A moving alias then causes a slight accuracy shift without a deploy, so they switch to a pinned snapshot, log the resolved version, and add a regression check on every mapping change.</p>
+<p>A newer snapshot promising better handwriting is tested on the frozen set and canaried on five percent of uploads, comparing accuracy and promotion rate. It wins without hurting known layouts, so the rollout widens while the old mapping stays available for one release cycle. Each step carries evidence.</p>
+<blockquote>
+<p><strong>Exam note:</strong> The reasoning pattern is reusable: name the binding constraint, measure candidates on your own data, pin what you deploy, and promote versions gradually with a rollback available.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Selecting by product reputation instead of by an explicit constraint from the requirement.</li>
+<li>Ignoring tail latency because the average response looks acceptable.</li>
+<li>Escalating every request to a stronger model, which removes the point of escalation.</li>
+<li>Treating a confidence score as proof of correctness and deleting deterministic checks.</li>
+<li>Using a moving alias in a system that needs reproducible results.</li>
+<li>Assuming an upgrade changes only answer quality and cannot affect configuration validation.</li>
+<li>Rolling out a new version everywhere at once without a canary or rollback path.</li>
+<li>Upgrading solely because a newer version exists, with no measurement to justify it.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Quality, latency, and cost trade against each other; the binding constraint decides the choice.</li>
+<li>Error cost, deadline, volume, context size, and feature needs turn a requirement into criteria.</li>
+<li>A decision matrix records configurations against constraints and removes options that fail a hard requirement.</li>
+<li>Escalation starts with a small model and promotes flagged cases, with deterministic checks as a backstop.</li>
+<li>Moving aliases update without a deploy; pinned snapshots trade automatic improvement for reproducibility.</li>
+<li>Upgrades can break budget validation, tool schemas, and response parsing, so canary and rollback matter.</li>
+<li>Upgrade on named evidence: measured quality, needed capability, lower price, or support requirements.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A nightly job enriches archived records and nobody waits for individual results. Which constraint should dominate model selection?</li>
+</ol>
+<p>A. Time to first token</p>
+<p>B. Cost per item and throughput</p>
+<p>C. The model's general benchmark rank</p>
+<p>D. The number of content blocks in each response</p>
+<ol start="2">
+<li>A checkout assistant must answer within two seconds and a wrong answer is easily spotted by the user. Which configuration is the best first candidate?</li>
+</ol>
+<p>A. Capable tier with deep reasoning on every request</p>
+<p>B. Small tier in a batch job with a long timeout</p>
+<p>C. Fast or balanced tier with streaming and a short prompt</p>
+<p>D. Any tier with the largest possible context window</p>
+<ol start="3">
+<li>What is the main risk of escalating from a small model to a larger one?</li>
+</ol>
+<p>A. The larger model never improves any answer</p>
+<p>B. Promoted requests pay for two calls, and confidently wrong first answers may never trigger promotion</p>
+<p>C. Escalation is only possible with batch processing</p>
+<p>D. The small model cannot produce structured output</p>
+<ol start="4">
+<li>Which identifier gives the strongest reproducibility for a production regression test?</li>
+</ol>
+<p>A. A moving alias that tracks the provider's current default</p>
+<p>B. A dated snapshot recorded in configuration and in traces</p>
+<p>C. The model name written in a design document</p>
+<p>D. The most expensive model available at test time</p>
+<ol start="5">
+<li>After an upgrade, requests fail with a validation error about the reasoning budget. What is the most likely explanation?</li>
+</ol>
+<p>A. The new release requires a different API key for reasoning</p>
+<p>B. The provider now disables all reasoning features</p>
+<p>C. The prompt must contain a special instruction to enable budgeting</p>
+<p>D. The budget and maximum output now conflict, leaving no room for the answer</p>
+<ol start="6">
+<li>What is the proper role of a canary rollout?</li>
+</ol>
+<p>A. To replace regression testing entirely</p>
+<p>B. To expose a small share of traffic to a candidate version before a wider switch</p>
+<p>C. To guarantee that no configuration can ever fail</p>
+<p>D. To remove the need for logging resolved versions</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> With no deadline pressure, price and throughput are the levers. A is wrong because nobody is watching first-token speed. C is wrong because general rank does not predict cost efficiency on a narrow task. D is wrong because block structure is a parsing detail, not a selection constraint.</p>
+</li>
+<li>
+<p><strong>C.</strong> A short prompt, quick serving, and streaming fit a tight deadline with detectable errors. A is wrong because deep reasoning adds delay before the answer. B is wrong because batch work cannot meet a two-second target. D is wrong because a large window does not create speed and may add cost.</p>
+</li>
+<li>
+<p><strong>B.</strong> Double calls and silent confident errors are the real costs of escalation. A is wrong because promotion often helps. C is wrong because escalation works on ordinary request paths. D is wrong because small tiers commonly support structured output.</p>
+</li>
+<li>
+<p><strong>B.</strong> A fixed snapshot plus logged identity makes a test repeatable and auditable. A is wrong because a moving alias can change between runs. C is wrong because a document does not pin what the service actually called. D is wrong because price says nothing about identity.</p>
+</li>
+<li>
+<p><strong>D.</strong> Budget and output limits draw from the same allowance, so equal values leave nothing for the reply. A is wrong because credentials are not the issue. B is wrong because the error is a configuration conflict, not a missing feature. C is wrong because budgeting is an API-level setting.</p>
+</li>
+<li>
+<p><strong>B.</strong> A canary limits exposure while real traffic is observed. A is wrong because tests are still required. C is wrong because no rollout can guarantee zero failures. D is wrong because version logging remains essential during and after the canary.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 22.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="21-model-families.html">&larr; Previous</a><a href="23-token-budgets.html">Next: Token Budgets, Pinning, and Cost Models &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

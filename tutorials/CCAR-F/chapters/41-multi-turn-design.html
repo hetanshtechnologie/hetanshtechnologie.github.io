@@ -1,0 +1,96 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>41. Multi-Turn Interactions and State</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>41. Multi-Turn Interactions and State</h1>
+<p>A single prompt is a transaction. A conversation is a process. The moment an assistant must remember what was said three turns ago, honour a decision made five turns ago, or notice that the user has quietly changed the goal, you are no longer writing a prompt — you are designing a turn-taking system with state. This chapter treats the turn as the smallest unit of design and shows how context, state, and repair interact over a long exchange.</p>
+
+<h2>Turns as the unit of design</h2>
+<p>Most failure reports say "the model gave a wrong answer," but the defect is usually in how the turn was framed. A turn has four parts: the user's contribution, the context the model can see, the action the model takes, and the state that survives when the turn ends. Design all four, not just the first two.</p>
+<p>Begin by classifying turns. In a support assistant, a typical session contains a <strong>goal turn</strong> (state the problem), zero or more <strong>clarification turns</strong> (fill missing slots), one or more <strong>action turns</strong> (call a tool, fetch data), and a <strong>close turn</strong> (confirm resolution). Each class deserves a different system instruction and a different stopping rule. A clarification turn should end with exactly one focused question; an action turn should end only after the tool result has been observed and interpreted.</p>
+<p>A useful discipline is the "one job per turn" rule. Ask the model to advance exactly one piece of the task per response. When a turn tries to clarify, decide, act, and summarise simultaneously, the output becomes hard to validate and harder to repair. In practice, splitting a three-job turn into two or three turns raises latency slightly but sharply reduces the rate of silent errors.</p>
+<div class="tip">Name your turn types in code, not just in prose. An enum such as <code>GOAL | CLARIFY | ACT | CONFIRM | REPAIR</code> lets you attach the right tools, temperature, and stopping rule to each turn instead of relying on the model to infer the mode.</div>
+
+<h2>How context accumulates across turns</h2>
+<p>Every turn adds tokens. If the assistant echoes a long tool result back on each reply, the transcript grows quadratically: turn one carries 2,000 tokens, turn two carries 4,000, turn ten carries 20,000, and the cost of each subsequent reply climbs with it. Accumulation is not free, and it is not neutral — distant instructions compete with recent ones for influence.</p>
+<p>Three patterns keep accumulation controlled:</p>
+<ul>
+<li><strong>Append only the deltas.</strong> Store the user message, the assistant's message, and a compact record of any tool call. Do not reinsert full tool payloads into the conversational transcript when a short citation would do.</li>
+<li><strong>Pin the contract, rotate the evidence.</strong> Keep the system instruction and the task goal fixed at the front. Let the middle of the context hold the current evidence, replacing stale evidence as the conversation moves on.</li>
+<li><strong>Anchor with a recap.</strong> After every three to five substantive turns, insert a short "current understanding" block that restates the goal, the confirmed facts, and the open questions. This gives later turns a reliable summary even if earlier detail fades.</li>
+</ul>
+<p>Consider a flight-rebooking dialogue. The original goal — "move my Tuesday flight to Wednesday" — is stated in turn one. By turn eight the transcript is full of seat maps and fare rules. Without a pinned goal, the model may happily start optimising a seat it was never asked about. The recap block is the cheap insurance that keeps the objective in view.</p>
+<div class="warn">A recap block is a convenience, not an authority. If the recap contradicts the user's latest message, the latest user message wins. Always timestamp or version recaps and re-derive them from the source turns when a conflict is detected.</div>
+
+<h2>Turn management policies</h2>
+<p>Turn management decides when to ask, when to act, and when to stop. Three policies cover most systems.</p>
+<table>
+<thead><tr><th>Policy</th><th>Best for</th><th>Failure mode</th><th>Mitigation</th></tr></thead>
+<tbody>
+<tr><td>Fixed script (state machine)</td><td>Regulated flows, forms, KYC</td><td>Feels rigid; user cannot skip ahead</td><td>Allow "out of order" slots to be captured and parked</td></tr>
+<tr><td>Model-led (model decides next turn)</td><td>Open-ended troubleshooting</td><td>Loops, premature closure</td><td>Hard turn cap and an explicit "still unresolved?" check</td></tr>
+<tr><td>Hybrid (-scripted skeleton, model-filled slots)</td><td>Most production assistants</td><td>Boundary confusion between stages</td><td>Publish the active stage to the model each turn</td></tr>
+</tbody>
+</table>
+<p>Regardless of policy, set numeric bounds. A common configuration is a maximum of 12 user turns, a maximum of 3 clarification questions before escalation, and a maximum of 5 tool calls per action turn. When a bound is hit, the assistant should not silently keep going; it should hand off or state what is blocking completion. Bounds convert an infinite vague problem into a finite, testable one.</p>
+<p>Also budget the <em>kinds</em> of turns. If clarification turns exceed roughly 25 percent of a session, the intake prompt is probably missing fields that could be collected in one structured form. If action turns dominate but resolution stays low, the tools are likely failing and the model is retrying rather than reporting.</p>
+
+<h2>Carrying state across turns</h2>
+<p>State is the data that must survive the boundary between turns. Distinguish three kinds:</p>
+<ol>
+<li><strong>Conversation state</strong> — the goal, the slot values collected so far, and the open questions.</li>
+<li><strong>World state</strong> — facts about the external system, such as the current booking reference or the balance after a transaction.</li>
+<li><strong>Control state</strong> — counters, retry budgets, and the active turn type.</li>
+</ol>
+<p>Keep state outside the model. The transcript is a <em>view</em> of state, not the state itself. Maintain a structured record in your application, inject the relevant slice into the prompt at each turn, and update it from a validated model response rather than from free text. This makes state inspectable, diffable, and recoverable after a crash.</p>
+<p>A compact state record might look like this. Notice that each field has an owner and a confidence, so the system knows which values are user-provided and which were inferred.</p>
+<pre><code>{
+  "session_id": "S-4821",
+  "turn_index": 6,
+  "active_stage": "ACT",
+  "goal": "rebook Tuesday flight to Wednesday",
+  "slots": {
+    "passenger": {"value": "A. Rao", "source": "user", "confidence": 1.0},
+    "date": {"value": "2026-11-25", "source": "user", "confidence": 0.95},
+    "fare_class": {"value": null, "source": "inferred", "confidence": 0.4}
+  },
+  "control": {"clarifications_asked": 1, "tool_calls": 3, "retries_left": 2},
+  "guard": "retries_left &gt; 0 &amp;&amp; turn_index &lt;= 12"
+}</code></pre>
+<p>The <code>guard</code> string is not executable by the model; it is evaluated by your application before a tool call is permitted. Keeping guards in code is the difference between "the model was told to stop" and "the model was made to stop."</p>
+
+<h2>Repairing a derailed conversation</h2>
+<p>Conversations drift. The user answers a question from two turns late, the model misreads a negation, or a tool returns stale data that the model treats as current. Repair is the explicit act of bringing the dialogue back to a known-good state.</p>
+<p>Use a three-step repair pattern. First, <strong>detect</strong>: compare the latest user message against the active slot set and flag contradictions, or trigger when a confidence drops below a threshold. Second, <strong>acknowledge</strong>: name the mismatch plainly — "I had noted the 25th, but you just said the 26th; which is correct?" Third, <strong>rewrite</strong>: update the state record, invalidate any dependent facts, and restate the plan.</p>
+<p>Invalidation matters more than it seems. If the travel date changes, every derived fact — available flights, quoted fare, seat hold — becomes stale. A repair that updates the date but keeps the old fare quote is worse than no repair, because it looks coherent. Propagate the change through the dependency graph, or mark downstream slots as unknown and re-collect them.</p>
+<div class="exercise"><strong>Exercise 41.1 — Design a turn ledger.</strong> Take a workflow you know (for example, resetting a password or filing an expense). List the turn types it contains, assign a maximum count to each, and write the state record fields with an owner and confidence for every slot. Then state two guards your application would enforce in code rather than in the prompt.</div>
+<div class="exercise"><strong>Exercise 41.2 — Repair a derailed dialogue.</strong> Write a six-turn dialogue in which a user changes a key requirement in turn four and the assistant has already acted on the old value in turn three. Mark the exact turn where drift begins, list every state field that must be invalidated, and draft the acknowledgement and rewrite messages. Explain how you would test that no stale value survives.</div>
+
+<h2>A worked policy in one paragraph</h2>
+<p>Put together, a robust multi-turn assistant pins a fixed contract, tags each turn with a type, injects a structured state slice, enforces numeric bounds in code, recaps every few turns, and treats repair as a first-class turn type. When you can describe all of that in a paragraph, you can also turn it into a test suite: assert the state after each turn, assert the guard fires at the bound, and assert that a deliberate contradiction produces a repair rather than a confident wrong answer. Multi-turn design is therefore less about clever phrasing and more about making the invisible state visible and enforceable.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why does reinserting full tool results into every turn cause quadratic rather than linear growth in context size?</li>
+<li>Name the three kinds of state and give one example of each from a booking assistant.</li>
+<li>What is the purpose of a recap block, and what rule decides precedence when it conflicts with the latest user message?</li>
+<li>Describe the three-step repair pattern and explain why invalidation of downstream slots is essential.</li>
+<li>A session hits its clarification limit of three questions. What should the system do, and why is continuing in prompt-only fashion unsafe?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Design the turn, not just the prompt: user input, visible context, action, and surviving state.</li>
+<li>Append deltas, pin the contract, rotate evidence, and recap every three to five turns.</li>
+<li>Choose a turn-management policy — fixed, model-led, or hybrid — and enforce numeric bounds in code.</li>
+<li>Keep a structured state record outside the model with owners and confidence for each slot.</li>
+<li>Repair drift by detecting, acknowledging, and rewriting state, including all dependent facts.</li>
+</ul>
+<nav><a href="40-steering-and-sampling.html">&larr; Previous</a><span></span><a href="42-structured-output-and-evals.html">Next: Structured Output and Evaluation &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

@@ -1,0 +1,108 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>47. Coherence and Compaction</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>47. Coherence and Compaction</h1>
+<p>A conversation that runs for an hour is not many short conversations placed together. It is a single object whose meaning depends on continuity: what was agreed, what was corrected, what is still pending. Coherence is the property that keeps that object intact, and compaction is the mechanism that lets it survive a finite context window. This chapter treats both as engineering problems with triggers, invariants, and tests.</p>
+
+<h2>Where long conversations lose coherence</h2>
+<p>Coherence fails in recognisable ways. Watermark each one in your tests so you know which you are fixing.</p>
+<ul>
+<li><strong>Goal drift.</strong> The assistant gradually adopts a nearby objective — optimising a price when the user asked only to change a date.</li>
+<li><strong>Contradiction.</strong> The assistant states a fact in turn twelve that it correctly denied in turn four, because the correction has been pushed out of view.</li>
+<li><strong>Persona or policy drift.</strong> Tone and rules loosen over time; a formal assistant starts making casual promises it has no authority to keep.</li>
+<li><strong>Looping.</strong> The same clarification is asked repeatedly because the answer was given but not recorded in a retrievable place.</li>
+<li><strong>Stale action.</strong> A tool is called with a value that was valid earlier but was superseded by a later correction.</li>
+</ul>
+<p>Notice that most of these are memory failures with a delayed fuse. The model did not forget in the human sense; the relevant fact was no longer in the assembled context, or it was present but buried among distractors. The fix is therefore structural: preserve the right facts, place them where they will be seen, and detect contradictions before they propagate.</p>
+<div class="tip">Run a "continuity probe" every ten turns: ask the model to restate the goal, the three most important confirmed facts, and the open question, using only the current context. Compare its restatement with your structured state. A mismatch is an early warning of drift.</div>
+
+<h2>Compaction triggers</h2>
+<p>Compaction is the process of replacing a long history with a shorter representation while preserving what matters. It should happen at a defined point, not whenever an engineer notices the prompt is getting large. Use triggers from three families.</p>
+<table>
+<thead><tr><th>Trigger family</th><th>Example condition</th><th>Action</th></tr></thead>
+<tbody>
+<tr><td>Size-based</td><td>History exceeds 24,000 tokens or 70% of its cap</td><td>Compact before the next turn</td></tr>
+<tr><td>Turn-based</td><td>More than 12 user turns since last compaction</td><td>Compact proactively</td></tr>
+<tr><td>Event-based</td><td>A major decision or correction occurred</td><td>Write a checkpoint immediately</td></tr>
+</tbody>
+</table>
+<p>Event-based compaction is the most underused. When the user corrects a value or approves a plan, that moment is the ideal time to write a short checkpoint: the old value, the new value, the reason, and the consequences. Doing it at the moment of change avoids relying on the model to reconstruct the correction later from a compressed narrative.</p>
+<p>Compaction should be idempotent and recoverable. Idempotent means running it twice does not degrade the content further; recoverable means the original transcript is archived and can be replayed if the compacted version proves wrong. Store the archive by session id and record which span of turns each checkpoint covers, so you can answer "what did the model actually see at turn 30?" during an incident review.</p>
+
+<h2>Session memory and what belongs in it</h2>
+<p>Session memory is the compact representation carried forward after compaction. It is not a summary of everything said; it is a curated set of fields that future turns need. Keep it small — roughly 400 to 1,200 tokens for most assistants — and divide it into fixed sections.</p>
+<ol>
+<li><strong>Identity and goal.</strong> Who is involved and what outcome is wanted, in one or two sentences.</li>
+<li><strong>Confirmed facts.</strong> The pinned fact block with sources and timestamps, copied verbatim.</li>
+<li><strong>Decisions.</strong> What was chosen, by whom, and what alternatives were rejected.</li>
+<li><strong>Open items.</strong> Unanswered questions and pending actions with their owners.</li>
+<li><strong>Constraints.</strong> Policies, limits, and preferences that must continue to apply.</li>
+<li><strong>Correction log.</strong> The last two or three changes with old and new values.</li>
+</ol>
+<p>Fixed sections are valuable because the model learns where to look. If the goal is always first and the correction log always last, positioning effects become predictable. It also lets your application validate the memory: assert that the pinned fact block in the memory matches the canonical store, and reject a compaction whose copy has drifted.</p>
+<pre><code>{
+  "session_id": "S-4821",
+  "covers_turns": "1-18",
+  "goal": "Rebook flight; date changed from 24 to 26 Nov",
+  "pinned_facts": ["passenger=A. Rao", "order=ORD-77150"],
+  "decisions": [
+    {"choice": "accept change fee", "by": "user", "turn": 15}
+  ],
+  "open_items": ["confirm seat", "send confirmation email"],
+  "constraints": ["no refund above 200 units without approval"],
+  "corrections": [
+    {"field": "date", "old": "2026-11-24", "new": "2026-11-26", "turn": 17}
+  ],
+  "guard": "corrections.length &lt;= 3 &amp;&amp; open_items.length &lt;= 6"
+}</code></pre>
+<p>The guard on corrections is deliberate. If more than three corrections accumulate, the memory is becoming a changelog rather than a state description. At that point, start a new session with an explicit handoff instead of compacting again.</p>
+
+<h2>Server-side compaction and its risks</h2>
+<p>Some model services offer automatic compaction: when a conversation approaches the context limit, the provider summarises older messages behind the scenes. This is convenient, but it moves a critical decision outside your control. You may not know exactly when it happened, what was retained, or whether a pinned identifier survived.</p>
+<p>If you rely on it, compensate in three ways. First, keep your own canonical fact block outside the provider's conversation and re-inject it every turn; then a lossy provider summary cannot erase it. Second, maintain your own turn counter and compact deliberately before the service does, so you choose the checkpoint. Third, log every response's token usage so you can infer when automatic compaction likely occurred and inspect the session around that point.</p>
+<div class="warn">Never assume server-side compaction preserves exact values. Treat it as a convenience for narrative continuity, not as a storage layer. Anything that must be exact lives in your structured state and is validated there.</div>
+<p>The general principle: automatic compaction is acceptable for a chat experience, not for a system of record. An agent that creates bookings, modifies accounts, or issues approvals needs a deterministic memory it owns.</p>
+
+<h2>Preserving invariants across compaction</h2>
+<p>An invariant is a statement that must remain true after compaction. Define them before you implement the summariser, then test them on every compacted session. Five invariants cover most cases:</p>
+<ol>
+<li>The current goal is present and matches the canonical goal field.</li>
+<li>Every pinned fact appears with the same value and source as before compaction.</li>
+<li>The most recent correction is included, with old and new values.</li>
+<li>No decision recorded as final is described as open, and vice versa.</li>
+<li>The compacted representation is at least 60 percent shorter than the span it replaces, or compaction is considered failed.</li>
+</ol>
+<p>Implement these as assertions in code, not as instructions in the summarisation prompt. A prompt can ask the summariser to "keep all important details," but only an assertion can tell you whether it did. If an assertion fails, retry compaction with a more targeted instruction, then fall back to keeping the raw transcript and starting a new session.</p>
+<p>Measure coherence over long runs with a simple benchmark. Run a scripted 40-turn conversation containing two corrections, one policy reminder, and one deliberate contradiction. At turns 10, 20, 30, and 40, probe the goal, the facts, and the decision list. Record the first turn at which any invariant breaks. That number — "coherent through turn 26" — is a far more useful specification than "supports long conversations."</p>
+<div class="exercise"><strong>Exercise 47.1 — Define compaction invariants.</strong> For an agent that manages a multi-day travel itinerary, write five invariants that must hold after compaction, including at least one numeric threshold. Show how you would assert each one in code and what fallback you would use if an assertion fails.</div>
+<div class="exercise"><strong>Exercise 47.2 — Design a long-run coherence test.</strong> Specify a 30-turn scripted conversation with one correction, one decision, and one policy reminder. List the probes you would run at turns 8, 16, and 24, the expected answers, and the metric you would report. Explain how the test distinguishes compaction failure from retrieval failure.</div>
+
+<h2>Coherence as a maintained property</h2>
+<p>Coherence is not something a model has; it is something a system maintains. The transcript is periodically compressed, facts are copied and re-copied, and corrections must outlive the messages that contained them. Treat each compaction as a risky migration with a schema, invariants, and a rollback path. When you do, a two-hour conversation becomes as testable as a two-turn one, and "it lost the plot" becomes a failing assertion with a known turn number.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Name three coherence failures and explain why most are delayed memory failures rather than reasoning failures.</li>
+<li>What are the three families of compaction trigger, and why is event-based compaction valuable?</li>
+<li>List the fixed sections of a session memory and state the recommended size range.</li>
+<li>Why is server-side compaction unsuitable as a system of record?</li>
+<li>Give three invariants that must be asserted after compaction and explain why code assertions beat prompt instructions.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Long conversations drift through goal changes, contradictions, looping, and stale actions.</li>
+<li>Compact on size, turn count, or significant events, and keep an archived, replayable transcript.</li>
+<li>Carry a small fixed-section session memory with pinned facts, decisions, open items, and corrections.</li>
+<li>Use provider-side compaction only for narrative convenience; own the exact state yourself.</li>
+<li>Assert invariants after every compaction and measure coherence with scripted long-run probes.</li>
+</ul>
+<nav><a href="46-scratchpad-and-delegation.html">&larr; Previous</a><span></span><a href="48-confidence-and-provenance.html">Next: Confidence, Sampling, and Provenance &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

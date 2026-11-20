@@ -1,0 +1,132 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>30. The Tool System and Context Management</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>30. The Tool System and Context Management</h1>
+
+<p>Tools are the hands of the coding environment; context is its field of view. A capable model with poor tool discipline wastes time opening the wrong files. A good tool set with a cluttered context produces edits that ignore constraints stated twenty turns ago. This chapter treats both as engineering concerns with measurable failure modes.</p>
+
+<h2>The tool families</h2>
+
+<p>Most work is done with five families. File reading and searching locate information. Editing tools change files. Shell tools run commands and verify results. Web tools fetch current external information. MCP tools connect to systems outside the repository. Each family has a different risk profile and a different verification strategy.</p>
+
+<table>
+<tr><th>Family</th><th>Strengths</th><th>Principal risk</th></tr>
+<tr><td>Read and search</td><td>Fast, repeatable, no side effects</td><td>Flooding context with whole files</td></tr>
+<tr><td>Edit and write</td><td>Precise changes to known locations</td><td>Ambiguous match changes the wrong text</td></tr>
+<tr><td>Shell</td><td>Verification, builds, git operations</td><td>Destructive or long-running commands</td></tr>
+<tr><td>Web</td><td>Fresh documentation and facts</td><td>Untrusted text treated as instructions</td></tr>
+<tr><td>MCP</td><td>Domain data and actions</td><td>Over-broad tool catalogs</td></tr>
+</table>
+
+<p>A useful mental rule: reads are cheap, edits are consequential, shell commands are powerful, and external content is untrusted. The order in which you grant these capabilities should follow that rule, especially when setting permissions for automated sessions.</p>
+
+<h2>Reads, search, and file discovery</h2>
+
+<p>Effective discovery narrows a search in stages. Start with a filename pattern or a directory listing, then search for a symbol within the candidate files, then read a bounded line range around the match. Asking for "the whole repository" at once is the equivalent of dumping every book in a library onto a desk: the answer you need is present but buried.</p>
+
+<pre><code># 1. Locate candidate files by name, excluding generated output
+find src -name "*invoice*" -not -path "*/generated/*" -print
+
+# 2. Locate the symbol inside those candidates
+rg -n "class Invoice|def calculate_total" src --glob '!**/vendor/**'
+
+# 3. Read only the relevant window (line numbers from step 2)
+sed -n '118,176p' src/billing/invoice.py
+
+# 4. Guardrails the assistant should apply to itself
+if match_count &gt; 40 or file_lines &gt; 400:
+    narrow_the_query()      # add a path, a type, or a date bound
+if text_contains("&lt;generated&gt;"):
+    skip_file()             # generated content is noise, not source</code></pre>
+
+<p>Line references matter. "Look at <code>src/billing/invoice.py:118–176</code>" is actionable; "look at the invoice code" is a search task. When you already know the location, give it. When you do not, ask the assistant to report the paths it used so you can judge whether the exploration was sensible.</p>
+
+<p>Search results should be treated as leads, not truth. A symbol may have three definitions, only one of which is used on the path you care about. Follow imports or call sites for one more hop before assigning a behavior to a file. That extra hop is inexpensive compared with editing the wrong implementation.</p>
+
+<h2>Edits: from strings to patches</h2>
+
+<p>Small edits are usually expressed as an exact string replacement: locate a unique block and substitute a new one. Larger edits are better expressed as a patch with surrounding context lines. Both approaches rely on uniqueness. If the target string appears in five files, or twice in the same file, an edit may land somewhere you did not intend.</p>
+
+<p>Before authorizing a multi-file change, ask which files will be touched and why. After the edit, require a diff review and a test run. Re-reading the modified region is worthwhile: a successful tool result means the operation ran, not that the resulting code is correct. Watch for whitespace normalization, line-ending changes, and accidental edits to generated files that will be overwritten by the next build.</p>
+
+<div class="exercise"><strong>Exercise 30.1 — Make an edit unambiguous</strong>
+<ol>
+<li>A function named <code>parse()</code> appears in four modules. Describe two ways to make an edit request target the correct one.</li>
+<li>Write a short instruction that requires a diff and a test command after the change.</li>
+<li>Name two files in a typical repository that should never be edited by hand, and explain why.</li>
+</ol>
+</div>
+
+<h2>Shell and web tools</h2>
+
+<p>The shell is the verification engine. Use it to run tests, type checks, linters, migrations in a scratch database, and git commands that show the current state. A workflow that edits code but never runs the project's checks is relying on hope. Give commands explicit timeouts — 120 seconds for unit tests, longer for a full build — and ask for the exit code, not just the last few lines of output.</p>
+
+<p>Some commands deserve a hard stop. Anything that deletes files outside a scratch directory, force-pushes a branch, rewrites git history, or installs an unvetted package should require human approval every time. A useful safeguard is to work on a feature branch so that an unwanted change can be discarded by returning to the previous commit.</p>
+
+<p>Web tools answer questions the repository cannot: current library behavior, API changes, and version-specific guidance. Fetch documentation from primary sources when possible, and treat every retrieved page as untrusted data. A documentation page can contain prompt-like phrases embedded in examples or comments; those phrases are content to summarize, not instructions to follow. Ask for a source URL with each factual claim so you can check it.</p>
+
+<div class="warn">Never copy a shell command from a web page into an approval prompt without reading it. The same caution applies to configuration snippets and "quick fix" scripts found in issue threads.</div>
+
+<h2>Adding context on purpose</h2>
+
+<p>Context is most valuable when it is specific and small. Tell the assistant which files define the contract, which tests express the expected behavior, and which decision from an earlier discussion still applies. Include type definitions or schemas rather than describing them in prose. If output shape matters, show one example of the desired result.</p>
+
+<table>
+<tr><th>Context you add</th><th>When it pays off</th></tr>
+<tr><td>Exact path and line range</td><td>The relevant code is already known</td></tr>
+<tr><td>A schema or type definition</td><td>Data shape drives the implementation</td></tr>
+<tr><td>One worked example</td><td>Output format must be consistent</td></tr>
+<tr><td>A constraint from earlier</td><td>Long sessions risk losing it</td></tr>
+<tr><td>The test command</td><td>Success needs an objective check</td></tr>
+</table>
+
+<p>Progressive disclosure beats bulk loading. Start with a short request that identifies the goal and asks which files are needed. Supply additional files only when the assistant's questions show a genuine gap. This keeps the context window available for reasoning and for the tool results that arrive later.</p>
+
+<div class="tip">If you find yourself pasting the same background into several requests, that background belongs in an instruction file rather than in conversation. Repeated context is a signal to move knowledge into configuration.</div>
+
+<h2>Indexing, ignore rules, and large repositories</h2>
+
+<p>File discovery is shaped by ignore rules. Generated directories, dependency folders, build output, and large binary assets should be excluded so that searches return source rather than noise. A monorepo with 80,000 files and no ignore configuration turns every search into an expensive scan and every answer into a list of duplicates from three generated copies.</p>
+
+<p>Check that hidden files and untracked files are visible when they matter. A new module not yet added to version control may still need to be discovered, while a local secrets file must stay out of any context that will be transmitted. Review the effective set of included paths before a large investigation, and consider a separate tool or MCP server for repositories whose structure defeats simple search.</p>
+
+<p>Index freshness is a common failure. An index built before a branch switch still describes the old tree, producing references to files that no longer exist. Rebuild or invalidate cached indexes after switching branches, pulling large changes, or generating code. If search results consistently mention a deleted path, suspect stale state before suspecting the model.</p>
+
+<div class="exercise"><strong>Exercise 30.2 — Tune discovery in a large repository</strong>
+<ol>
+<li>A search for a symbol returns 300 matches, half of them inside build output. Name two configuration changes that would reduce the noise.</li>
+<li>You switch branches and the assistant keeps opening a file that was deleted. Explain the cause and the fix.</li>
+<li>List three categories of file that should never enter model context in your project, and give a reason for each.</li>
+</ol>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Which tool family is safest to grant broadly, and which deserves the strictest approval policy?</li>
+<li>Describe a three-stage discovery sequence for finding a bug in a large repository.</li>
+<li>Why is an exact-string edit risky when the target text is not unique?</li>
+<li>How should text fetched from the web be treated, and what should accompany a factual claim from it?</li>
+<li>What symptom indicates a stale index, and what should you do about it?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Reads, edits, shell commands, web access, and MCP tools form a capability set with distinct risks.</li>
+<li>Narrow discovery from filenames to symbols to bounded line ranges; cite paths and line numbers.</li>
+<li>Make edits unique, require a diff, and verify with the project's own checks.</li>
+<li>Use the shell for objective verification and the web for fresh facts, never as a source of instructions.</li>
+<li>Add small, specific context: file ranges, schemas, examples, constraints, and test commands.</li>
+<li>Configure ignore rules and refresh indexes so file discovery reflects the current branch.</li>
+</ul>
+
+<nav><a href="29-claude-code-architecture.html">&larr; Previous</a><span></span><a href="31-permission-modes.html">Next: Permission Modes &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>20. Input Schemas and Strict Validation</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>20. Input Schemas and Strict Validation</h1>
+
+<p>A tool description tells the model what a tool is for; its input schema tells the model what a valid request looks like. The schema is also the contract enforced at the boundary: anything that reaches the implementation has passed a structural check, which turns a large class of runtime surprises into predictable rejections. Good schemas are small, closed, and specific. This chapter covers how to design them and how strict validation changes the model's behaviour.</p>
+
+<h2>A Schema Is a Contract</h2>
+
+<p>Most tool interfaces accept a JSON object described with JSON Schema. The model reads that description and produces arguments; the runtime validates those arguments before calling the implementation. This split matters: the model is a probabilistic generator, but the validator is deterministic. A schema is the place where you convert "the model will probably send something sensible" into "only sensible values get through".</p>
+
+<pre><code>{
+  "type": "object",
+  "properties": {
+    "customer_id": {"type": "string", "pattern": "^cus_[0-9]{8}$"},
+    "days": {"type": "integer", "minimum": 1, "maximum": 90,
+             "default": 30},
+    "status": {"type": "string",
+               "enum": ["open", "paid", "overdue"]}
+  },
+  "required": ["customer_id"],
+  "additionalProperties": false
+}</code></pre>
+
+<p>Every field in this example carries information. The pattern rejects guessed identifiers that do not match the real ID format. The range on <code>days</code> prevents an unbounded scan. The enum prevents the model from inventing a status like "maybe-paid". Setting <code>additionalProperties</code> to false prevents hallucinated fields from slipping through. The schema is doing design work, not merely documenting the API.</p>
+
+<div class="tip">Design the schema before writing the handler. If you cannot express the valid call precisely in the schema, the tool's purpose is probably too broad — split it into two narrower tools.</div>
+
+<h2>Required, Optional, and Defaults</h2>
+
+<p>The <code>required</code> list is a statement of what the model must supply. Keep it short. Every required field is another chance for the model to fabricate a value or omit the field and trigger a repair cycle. Ask yourself for each field: can the implementation derive this from context, a stored setting, or a safe default? If yes, make it optional.</p>
+
+<p>Optional fields are not free, either. A default such as <code>30</code> days silently changes the meaning of a request when the user said "recent" without a number. Defaults should be conservative and visible: prefer a smaller window over a larger one, and include the applied default in the tool's result so the agent can report it. A missing field, an explicit <code>null</code>, and an empty string are different states; collapse them only when the distinction genuinely does not matter.</p>
+
+<table>
+<thead><tr><th>Design choice</th><th>Effect on the model</th><th>When to use</th></tr></thead>
+<tbody>
+<tr><td>Field in <code>required</code></td><td>Model must produce a value; may guess</td><td>Value is essential and cannot be derived</td></tr>
+<tr><td>Optional with default</td><td>Model may omit; default applies silently</td><td>Safe, conservative fallback exists</td></tr>
+<tr><td>Optional with <code>null</code></td><td>Model can express "not specified"</td><td>Distinguishing unknown from absent matters</td></tr>
+<tr><td>Nested object</td><td>Model must construct structure</td><td>Related values always travel together</td></tr>
+</tbody>
+</table>
+
+<p>A common anti-pattern is a schema with fifteen required fields, ten of which are internal flags the model cannot possibly know. Move those into server-side configuration. Another is a single "options" object with no constraints, which hides the actual contract from both the model and the validator.</p>
+
+<h2>Enums and Closed Vocabularies</h2>
+
+<p>Free-text string fields are the largest source of invalid tool arguments. An enum converts an open-ended guess into a choice from a small set. Use enums for statuses, sort orders, formats, regions, and operation modes — anywhere the implementation branches on a known value.</p>
+
+<p>Enum values should be short, stable machine tokens; human explanation belongs in the field description. A value such as <code>last_30_days</code> is better than <code>recent</code>, whose meaning drifts. If the user's vocabulary differs from the tool's — they say "urgent" while the enum says <code>high</code> — state the mapping in the tool description so the model can translate.</p>
+
+<p>Closed vocabularies do create a maintenance obligation. Adding a value changes the contract, so clients and tests must be updated together. That is a healthy constraint: it forces an explicit decision about whether a new category is real. If the set is genuinely open, provide a documented escape hatch such as an <code>other</code> enum value plus a separate <code>notes</code> field, rather than allowing arbitrary strings.</p>
+
+<div class="warn">Do not use an enum to express a permission boundary. A model can select any value in the enum; authorization must be checked server-side. Enums prevent typos, not misuse.</div>
+
+<h2>Constraints That Prevent Bad Calls</h2>
+
+<p>Beyond types and enums, JSON Schema offers constraints that encode operational limits. Each one prevents a specific failure mode before the handler runs.</p>
+
+<table>
+<thead><tr><th>Constraint</th><th>Failure it prevents</th><th>Example</th></tr></thead>
+<tbody>
+<tr><td><code>minimum</code>/<code>maximum</code></td><td>Negative or runaway counts</td><td><code>limit</code> between 1 and 100</td></tr>
+<tr><td><code>minLength</code>/<code>maxLength</code></td><td>Empty queries, oversized payloads</td><td>query 1–500 characters</td></tr>
+<tr><td><code>pattern</code></td><td>Malformed identifiers</td><td>ID with expected prefix</td></tr>
+<tr><td><code>minItems</code>/<code>maxItems</code></td><td>Empty batch or huge fan-out</td><td>1–20 IDs per batch</td></tr>
+<tr><td><code>uniqueItems</code></td><td>Duplicate work in a batch</td><td>no repeated customer IDs</td></tr>
+<tr><td><code>additionalProperties: false</code></td><td>Hallucinated fields</td><td>closed object shape</td></tr>
+</tbody>
+</table>
+
+<p>Use constraints that a human could justify in one sentence. A pattern that encodes a 40-character internal format may be accurate but opaque; if the model cannot satisfy it from available information, validation failures will rise. Prefer a simple pattern plus a clear description over an exotic regular expression.</p>
+
+<h2>Strict Mode and Additional Properties</h2>
+
+<p>Strict validation means the runtime rejects anything that does not exactly match the declared shape: unknown fields, missing required fields, wrong types, and values outside constraints. In some APIs, strict mode also requires every property to appear in the <code>required</code> list, with optionality expressed by allowing <code>null</code> as a type. That convention makes the model choose explicitly for every field rather than silently omitting one.</p>
+
+<p>The practical benefit is a sharp drop in "almost valid" calls that fail deep inside a handler. The cost is more visible failures when the schema and the user's request are misaligned. That is a good trade: a rejection at the boundary produces a clear error the agent can repair, while a subtle mismatch inside the handler produces wrong data.</p>
+
+<pre><code>def validate_strict(args, schema):
+    errors = []
+    for key in args:
+        if key not in schema["properties"]:
+            errors.append("unknown_field:" + key)
+    for key in schema.get("required", []):
+        if key not in args:
+            errors.append("missing_required:" + key)
+    if len(errors) &gt; 0:
+        return None, errors
+    return args, []</code></pre>
+
+<p>When a strict call is rejected, return the list of offending field names to the model together with the expected shape. Generic messages such as "invalid arguments" force the model to guess; specific messages such as "missing_required: customer_id; unknown_field: cust_id" make repair deterministic.</p>
+
+<h2>Examples as Anchors</h2>
+
+<p>Schemas describe what is allowed; examples show what is typical. A single valid argument object in the tool description can reduce errors more than another paragraph of prose, especially for nested structures and enum translations. Include one example for a common case and, when a field is tricky, one for the edge case.</p>
+
+<p>Keep examples consistent with the schema — validators and tests should check them. A stale example is worse than none, because the model will imitate it confidently. Avoid examples that embed placeholder values which look real; use obvious dummy values such as <code>cus_00000001</code> so accidental leakage is visible in logs.</p>
+
+<div class="exercise"><strong>Exercise 20.1 — Design a tight schema.</strong> Create a JSON Schema for a tool that books a meeting room. Requirements: room code formatted like <code>RM-204</code>, duration between 15 and 240 minutes, start time in ISO-8601, optional attendee count defaulting to 1, and a purpose enum of <code>review</code>, <code>interview</code>, <code>workshop</code>. Mark required fields, add constraints, set <code>additionalProperties</code> to false, and write one valid example and one invalid example with the expected validation error.</div>
+
+<div class="exercise"><strong>Exercise 20.2 — Repair a failing tool.</strong> A tool with eight required fields fails on 18 percent of calls. Logs show frequent values like <code>limit: 5000</code>, invented <code>account_type: "premium-plus"</code>, and stray fields named <code>user</code> and <code>uid</code>. Diagnose each failure against the schema features in this chapter, propose specific changes, and explain which failures should be fixed in the schema versus in the tool description.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+  <li>Why is a schema considered a contract rather than just documentation?</li>
+  <li>What is the cost of marking too many fields as required, and how should defaults be chosen?</li>
+  <li>Why are enums useful for tool arguments, and what maintenance obligation do they create?</li>
+  <li>Name three constraints besides type and enum, and the failure mode each prevents.</li>
+  <li>How should a strict-validation error be reported back to the agent to make repair deterministic?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+  <li>A schema converts probable model behaviour into a deterministic boundary check before the handler runs.</li>
+  <li>Keep required fields few, defaults conservative and visible, and distinguish absent from explicit null when it matters.</li>
+  <li>Use enums and closed vocabularies for branch points; enforce permissions server-side, not through enum values.</li>
+  <li>Ranges, lengths, patterns, item counts, and closed objects each prevent a concrete class of bad calls.</li>
+  <li>Strict validation plus specific error messages and fresh examples produces reliable, repairable tool calls.</li>
+</ul>
+
+<nav><a href="19-tool-selection.html">&larr; Previous</a><span></span><a href="21-tool-errors-and-retries.html">Next: Tool Errors, Retries, and Partial Success &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

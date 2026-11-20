@@ -1,0 +1,121 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>34. Slash Commands and Skills</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>34. Slash Commands and Skills</h1>
+
+<h2>What a custom command actually is</h2>
+<p>A slash command is a stored prompt template that a person invokes by name. Unlike free-form typing, it is reproducible: the same command expands to the same instructions in the same order every time. Commands are ordinary markdown files, not programs. When you type <code>/review</code>, the environment inserts the file's content into the conversation as a user turn. Nothing executes at expansion time unless the prompt asks the model to execute something.</p>
+<p>That distinction matters for safety and for testing. A command is data that shapes attention; it is not a hidden script. Use commands for work with a stable shape: reviewing a staged diff, producing a release note, scaffolding a test file, translating a ticket into a plan, or running a prescribed investigation. Avoid them for one-off questions where typing naturally is faster.</p>
+<p>A practical heuristic: if you have written the same 200-word instruction more than three times, write a command. If a teammate cannot predict the result from the command name alone, rename it.</p>
+
+<h2>Anatomy of a command file</h2>
+<p>Project commands live under <code>.claude/commands/</code> and are committed with the repository; personal commands live in the user-level configuration directory. A file's name becomes the command name, and subdirectories form namespaces. Frontmatter at the top declares metadata; everything below it is the prompt body.</p>
+
+<pre><code>---
+description: Review the staged diff for correctness and risk
+argument-hint: [focus-area]
+allowed-tools: Bash(git diff --cached), Read, Grep
+---
+
+Review the currently staged changes. Focus on $ARGUMENTS if provided.
+
+Steps:
+1. Read the diff with git diff --cached.
+2. For each changed file, list one concrete risk with a file:line reference.
+3. Check the convention in @CONTRIBUTING.md before commenting on style.
+4. End with a verdict: APPROVE, REQUEST_CHANGES, or NEEDS_CONTEXT.
+
+Do not modify files. Do not run tests unless I ask explicitly.
+Verify with `npm run lint &amp;&amp; npm test` only when I say "verify".
+Keep the response under 400 words and use a markdown table.
+</code></pre>
+
+<p>The <code>description</code> is shown in command listings, so write it as an action phrase, not a noun. <code>argument-hint</code> documents what follows the command name. <code>allowed-tools</code> is a whitelist for that invocation; treat it as a boundary, not a suggestion. A review command that grants write access can quietly become an editing command, which defeats the purpose of a separate review step.</p>
+<p>Notice how the body ends with explicit output constraints: length, structure, and a closed set of verdict values. Without those lines, the model produces a useful but variable essay each time. Variability is acceptable in conversation and harmful in a repeatable procedure.</p>
+
+<h2>Arguments, file references, and tool permissions</h2>
+<p><code>$ARGUMENTS</code> substitutes the entire text after the command name. Positional placeholders such as <code>$1</code> and <code>$2</code> let you structure input: <code>/migrate users status draft</code> can map to a table name and a target value. Always tell the model what to do when an argument is missing — either ask for it or use a documented default. Silent substitution of an empty string is a common source of confusing output.</p>
+<p>A reference written as <code>@path/to/file</code> injects that file's content at expansion time. This is excellent for small, stable policy documents and poor for large generated files. Every injected file consumes context on every invocation, so a 900-line style guide attached to a frequently used command is a recurring tax. Prefer a short pointer that tells the model to read the file only if the task requires it.</p>
+<div class="warn"><strong>Failure mode:</strong> a command that says "check everything and fix what you find." It combines a broad scope with write permission and no stopping condition. Split it into a read-only diagnostic command and a separate, explicitly invoked fix command. Narrow tools and a clear terminal condition are more reliable than a polite request to be careful.</div>
+<p>Permission boundaries should match the job. A command that only summarizes code needs read and search tools. A command that applies a codemod needs write access but should still avoid shell access unless the codemod is invoked through a fixed script. Grant the minimum capability and make the command fail visibly when it cannot complete, rather than silently degrading to a weaker behaviour.</p>
+
+<h2>Distributing commands across a team</h2>
+<p>Project-scoped commands are ordinary repository files, so the normal review process applies. Require a second reviewer for changes to commands that can modify files or run shell commands. Keep the repository copy authoritative; a personal command with the same name creates confusing divergence between teammates. If both scopes are present, document which one should win and verify it once rather than debating it repeatedly.</p>
+<p>Namespaces reduce collisions. A command stored as <code>.claude/commands/team/release.md</code> reads as <code>/team/release</code> and signals ownership. Use verbs in names: <code>/team/audit-schema</code> is clearer than <code>/team/schema</code>. Keep descriptions under roughly a dozen words, and make them distinguish similar commands — "review a staged diff for risk" and "review an OpenAPI contract for breaking changes" are two different tools that a generic "review code" description would blur together.</p>
+<p>Version commands alongside the code they operate on. When a build script changes its flags, the command that invokes it must change in the same pull request. A stale command is worse than no command because it produces confident, obsolete instructions.</p>
+
+<h2>Deciding between a command and a skill</h2>
+<p>Commands and skills differ mainly in who decides to use them. A command is user-invoked: a person types the name. A skill is model-invoked: the model reads its description and chooses to load it when the task appears relevant. That single difference drives most design decisions.</p>
+<table>
+<tr><th>Question</th><th>Command</th><th>Skill</th></tr>
+<tr><td>Trigger</td><td>Person types <code>/name</code></td><td>Model matches the description</td></tr>
+<tr><td>Best for</td><td>Fixed procedure with a known start</td><td>Capability that composes across tasks</td></tr>
+<tr><td>Discovery</td><td>Listed by name in help</td><td>Found by semantic relevance</td></tr>
+<tr><td>Context cost</td><td>Paid only when invoked</td><td>Paid when selected; body can be loaded in stages</td></tr>
+<tr><td>Failure signature</td><td>Never invoked, or invoked with wrong input</td><td>Never selected, or selected too often</td></tr>
+</table>
+<div class="note"><strong>A useful test:</strong> ask who should be surprised. With a command, the user should be surprised if the procedure does not run. With a skill, the user should be surprised if the model fails to notice that the skill is relevant. If neither sentence feels true, the behaviour probably belongs in an instruction file instead.</div>
+<p>Choose a command when the workflow has a clear boundary — a release, an audit, a handoff. Choose a skill when the capability may be needed incidentally inside many different workflows, such as interpreting a particular file format or applying an organisation-specific analysis method. You can combine them: a command may state that a certain skill should be used, but keep the decision explicit rather than hoping both mechanisms trigger correctly.</p>
+
+<h2>Authoring and testing a reusable skill</h2>
+<p>A skill is typically a directory containing a <code>SKILL.md</code> file plus optional reference documents and deterministic scripts. The frontmatter carries a name and a description. The description is routing logic: it must name both the capability and the situations that should trigger it.</p>
+
+<pre><code>---
+name: api-contract-review
+description: Review an OpenAPI contract for breaking changes. Use when a task
+  mentions an API spec, OpenAPI, Swagger, endpoint compatibility, or
+  versioning a public interface.
+---
+
+# API contract review
+
+1. Locate the specification (default: docs/openapi.yaml).
+2. Compare it with the last released copy in docs/releases/.
+3. Classify each change as compatible, additive, or breaking.
+4. Require a migration note for every breaking change.
+
+Rules:
+- A renamed required field is breaking even when its type is unchanged.
+- Adding an optional response field is additive.
+- Never approve a breaking change without a version bump.
+
+Reference: @references/compatibility-matrix.md
+Checker: python scripts/check_contract.py --strict &amp;&amp; echo PASS
+</code></pre>
+
+<p>Keep the main skill file short enough to read in one pass; detailed tables, examples, and edge cases belong in referenced files that are loaded only when needed. This is progressive disclosure: the model sees the existence of knowledge without paying for all of it up front. Scripts should do deterministic work that language models are unreliable at — comparing two schemas, computing a checksum, enumerating missing fields — and return compact, structured results.</p>
+<p>Test a skill with three prompts. The first is a clear match that should select it. The second is a near miss that shares vocabulary but should not select it. The third is an unrelated task that should ignore it. If the clear match fails, sharpen the trigger words in the description. If the near miss selects the skill, narrow the description and add an explicit "do not use when" line. A vague description such as "helps with APIs" is the most common authoring error.</p>
+
+<div class="exercise"><strong>Exercise 34.1 — Write a project command.</strong> Create a command named <code>/audit-deps</code> that checks newly added dependencies against an allowlist. Include frontmatter with a description, an argument hint for the package name, and a read-only tool set. Specify a five-row output table and a rule for what happens when the argument is missing.</div>
+
+<div class="exercise"><strong>Exercise 34.2 — Tune a skill description.</strong> A skill for interpreting SQL query plans is selected for tasks about database indexes, which is correct, but also for tasks about CSS layout because the word "plan" appears. Rewrite the description with positive triggers and negative boundaries. Then list the three test prompts you would run to confirm the fix.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why is a command considered data rather than an executable program?</li>
+<li>What does <code>allowed-tools</code> accomplish, and why should a review command avoid write access?</li>
+<li>When is a <code>@path</code> file reference expensive, and what is the alternative?</li>
+<li>State two differences between a user-invoked command and a model-invoked skill.</li>
+<li>What does progressive disclosure mean in the context of a skill directory?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Commands are versioned prompt templates invoked by a person; skills are capabilities selected by the model.</li>
+<li>Frontmatter controls discovery, arguments, and tool boundaries; the body controls the procedure and output.</li>
+<li>Inject small stable documents, not large generated ones, and always define missing-argument behaviour.</li>
+<li>Use namespaces, verb-based names, and review for commands that can modify state.</li>
+<li>Write skill descriptions as routing rules, keep the main file short, and test match, near-miss, and non-match prompts.</li>
+</ul>
+
+<nav><a href="33-claude-md-patterns.html">&larr; Previous</a><span></span><a href="35-subagents-hooks-plan-mode.html">Next: Subagents, Hooks, and Plan Mode &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

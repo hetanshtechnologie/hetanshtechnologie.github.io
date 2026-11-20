@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 7 — The Orchestration Loop and Session Model</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f2f4f8;color:#1f2937;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(30,41,59,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#4f46e5;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#312e81;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#4b5563;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#6b7280}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9ca3af;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#312e81}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #6366f1;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#4338ca}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#3730a3}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #dbe2f0;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#312e81;color:#fff;font-weight:600}
+td{background:#fafbff}
+pre{background:#1e2233;color:#e8ecf8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#e8e9fb;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#3730a3}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#eef0ff;border-left:4px solid #6366f1;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#4338ca}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #dbe2f0;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#312e81;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #e6eaf5}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#4338ca;text-decoration:none;display:inline-block;margin-bottom:16px}
+.callout{background:#eef0ff;border-left:4px solid #6366f1;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#6b7280;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+
+<div class="chapter">
+  <a class="back" href="../">&larr; Back to the Full Prep Course</a>
+  <h1 id="chapter-7-the-orchestration-loop-and-session-model">Chapter 7 — The Orchestration Loop and Session Model</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Describe the perceive, reason, act, observe, repeat cycle and the role of each stage.</li>
+<li>Explain why control belongs in orchestration code rather than in the model's instructions.</li>
+<li>Distinguish step budgets from stop conditions and explain how they work together.</li>
+<li>Trace how a tool result becomes the observation that drives the next decision.</li>
+<li>Tell the difference between a loop that is waiting and one that is stuck.</li>
+<li>Read a loop trace and identify the point where a safeguard should be added.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="the-loop-as-the-heart-of-an-agent">The loop as the heart of an agent</h3>
+<p>A single prompt produces a single response. An agent does something more: it keeps working across a series of decisions, using the results of its own actions to choose what to do next. The mechanism that makes this possible is an orchestration loop. It repeatedly gives the model a view of the current situation, asks for a next move, carries out that move through a tool or a state change, and then feeds the result back as new evidence.</p>
+<p>The cycle has five stages: perceive, reason, act, observe, and repeat. Perceive means assembling what the model can currently see: the goal, the rules, the history so far, and the most recent results. Reason means deciding what to do next, either by choosing a tool call or by concluding that the task is finished. Act means executing the chosen move under the constraints set by the system. Observe means interpreting the outcome and adding it to the session record. Repeat means starting over with an updated view, unless a stop condition has been met.</p>
+<p>The word "loop" is important. The model is not given a long script to follow from memory. It is consulted again and again, each time with a slightly different working set. That is why small changes in tool results can produce large changes in behaviour: the result is not merely logged, it becomes the model's next perception. A design that ignores this feedback path will keep making the same mistake, because the same mistaken view is reconstructed on every turn.</p>
+<h3 id="the-stages-in-detail">The stages in detail</h3>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>What happens</th>
+<th>Main input</th>
+<th>Main output</th>
+<th>Failure signal</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Perceive</td>
+<td>Assemble the current working view</td>
+<td>Goal, rules, history, last result</td>
+<td>A bounded prompt context</td>
+<td>Missing or stale facts in the view</td>
+</tr>
+<tr>
+<td>Reason</td>
+<td>Choose a next move or declare completion</td>
+<td>Working view and available actions</td>
+<td>A proposed action with arguments</td>
+<td>A proposal outside granted authority</td>
+</tr>
+<tr>
+<td>Act</td>
+<td>Execute the proposal under constraints</td>
+<td>Proposed action</td>
+<td>Tool result or state change</td>
+<td>Rejected call, timeout, partial effect</td>
+</tr>
+<tr>
+<td>Observe</td>
+<td>Interpret and record the outcome</td>
+<td>Raw result</td>
+<td>A concise, provenance-bearing observation</td>
+<td>Ambiguous or bloated result</td>
+</tr>
+<tr>
+<td>Repeat</td>
+<td>Decide whether another cycle is allowed</td>
+<td>Observation plus budgets</td>
+<td>Next cycle or a clean stop</td>
+<td>Repetition without progress</td>
+</tr>
+</tbody>
+</table>
+<p>Perceive is a design responsibility, not a passive read. Deciding which facts enter the working view determines what the model can reason about. If the most recent tool result is buried under an old transcript, the model may act on outdated information. If the goal statement has drifted out of view, it may pursue a sub-goal that no longer matters. A well-built loop treats perception as a curated step.</p>
+<p>Reason is where the model contributes most, but its contribution is a proposal. It may suggest calling a tool with certain arguments, or it may signal that the goal is met. The orchestration code decides whether that proposal is acceptable. That separation is what makes the loop safe to operate: the model can be creative within a corridor, while the corridor itself is fixed.</p>
+<p>Act is where reasoning becomes effect. The tool may read something, compute something, or change something. Effects carry risk, so this stage is where permissions, approval gates, and idempotency matter. A read operation that fails can simply be retried; a write operation that half-succeeds needs careful reporting.</p>
+<p>Observe converts a raw tool result into a usable observation. A search that returns hundreds of matches is not yet an observation the model can reason about well; it is a pile of data. The loop should reduce it to the few facts that matter, preserve source identifiers, and state clearly whether anything new was found. This stage is the bridge to the next perception.</p>
+<p>Repeat is governed by budgets and stop conditions. It is tempting to think of the loop as running until the model says it is finished, but that handing over too much control. The system needs its own criteria for stopping, including criteria that override an optimistic model.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a loop problem is described as "the model keeps trying," look for the mechanism that should have intervened. In a well-designed system the stop decision belongs to orchestration code, not to a stronger instruction inside the prompt.</p>
+</blockquote>
+<h3 id="treating-the-loop-like-a-request-handler">Treating the loop like a request handler</h3>
+<p>A useful engineering analogy is a service that handles requests. A session arrives with a goal and a set of permissions, much like a request arrives with parameters and an identity. The loop acts as the handler: it manages state for the duration of the session, calls downstream capabilities, applies timeouts and budgets, and returns a final result. When the session ends, the handler's working state is discarded or handed off, just as a request-scoped store is cleared.</p>
+<p>This analogy clarifies several design questions. The first is isolation. Two sessions must not share working memory unless sharing is explicitly intended; otherwise one task's facts can leak into another. The second is scope. Permissions should be attached to the request, so a tool that is available in one session is not automatically available in another. The third is observability. A handler should emit a trace of each stage so that a reviewer can reconstruct what happened without guessing.</p>
+<p>The analogy also has limits. A conventional service usually follows a fixed control flow, while an agent's loop chooses its next call based on results. That difference means the handler must be defensive about anything the model proposes. Validation at the act stage plays the role that input validation plays at a public interface: it keeps a surprising decision from becoming an unsafe effect.</p>
+<h3 id="where-control-lives">Where control lives</h3>
+<p>Control lives in the orchestration code. The model supplies judgements: which tool seems useful, what arguments seem appropriate, whether the goal appears satisfied. The surrounding code supplies enforcement: which tools are registered, which calls are permitted, how many cycles may run, and when the session must end. Confusing these two roles is one of the most common design errors in agentic systems.</p>
+<p>A prompt can say "stop after a few attempts," but a prompt is advice. The model might ignore it, reinterpret it, or lose it when context is trimmed. A step counter in code is a fact. It cannot be argued with, and it does not depend on attention. Similarly, a prompt can say "do not send messages," but only the tool registry determines whether a messaging capability exists to be called. Governance expressed as policy in code is durable; governance expressed only as instruction is fragile.</p>
+<p>This does not make prompts unimportant. Instructions shape the quality of each proposal, reduce the chance of invalid calls, and help the model produce legible observations. The point is that safeguards should not rely on the model's compliance when code can enforce them. Exam questions often test this distinction by offering an option that strengthens wording and another that changes the loop's enforcement. The enforcement option usually wins for safety questions.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating a stronger instruction as equivalent to a technical control. If the system must guarantee a limit, the limit belongs in the loop's implementation.</p>
+</blockquote>
+<h3 id="step-budgets-and-stop-conditions">Step budgets and stop conditions</h3>
+<p>A budget is a limit on resources consumed. A stop condition is a rule about when to end. Both are needed, and they are not interchangeable. A budget might allow a certain number of cycles, a certain amount of generated text, a certain spend, or a certain elapsed time. A stop condition might be that the goal is achieved, that approval is required, that a terminal error occurred, that no new information appeared, or that the user cancelled.</p>
+<p>Budgets answer "how much is allowed?" Stop conditions answer "when is it right to finish?" A loop can stop well before its budget is exhausted when a stop condition is met. Conversely, a budget can force a stop even when the model believes more work would help. Forcing a clean stop is better than letting a session run without bound: the loop should return its best current result, state what remains unfinished, and hand off clearly.</p>
+<p>Good stop conditions are observable. "No new information in the last observation" can be checked; "the model seems confused" cannot. Designers often add a progress fingerprint: a compact summary of what changed in the last cycle. If the fingerprint is unchanged across cycles, the loop concludes that it is repeating itself. This is more reliable than asking the model whether it is making progress, because a model asked to assess its own progress may answer optimistically.</p>
+<p>Budgets should be visible to the model as well as enforced in code. If the loop knows it has limited cycles remaining, it can prioritize the most valuable next action instead of exploring. That visibility must be honest: telling the model it has ample room when the code is about to stop creates inconsistency between perception and enforcement.</p>
+<h3 id="tool-results-as-the-next-decisions-input">Tool results as the next decision's input</h3>
+<p>Every tool result re-enters the loop as new perception. Its shape therefore influences the next decision as much as the original instruction does. A result that says only "failure" gives the model nothing to work with; it may retry the same call indefinitely. A result that says "not found, the record may be archived, try the archive index" supplies a next action. Designing results for the loop means designing them for decision-making, not merely for correctness.</p>
+<p>Useful results carry at least three things: a status that distinguishes success from retryable failure from terminal failure, the substantive payload, and provenance that says where the information came from. They should also say whether anything changed relative to the previous cycle. That last field is what allows the loop to detect empty progress. When results are large, the observe stage should distill them before they re-enter the working view, preserving enough detail for verification without crowding out the goal.</p>
+<h3 id="waiting-versus-stuck">Waiting versus stuck</h3>
+<p>A loop that is waiting is blocked by something legitimate: an approval, a scheduled job, an external system that is slow, or a human review. It has a handle for resuming, an expected condition that will release it, and a timeout that converts indefinite waiting into a reportable event. Waiting is a state the session model can represent and recover from.</p>
+<p>A loop that is stuck is consuming cycles without changing anything. It issues the same call with the same arguments, receives the same result, and draws the same conclusion. The difference is not the passage of time but the absence of state change. A stuck loop can look busy in logs, which is why activity metrics alone are misleading. Detection relies on comparing fingerprints, counting repeated calls, and requiring each cycle to either add information or move toward a stop condition.</p>
+<p>The remedy differs too. A waiting loop needs a resume mechanism and clear ownership of the pending item. A stuck loop needs a guard: a repeated-call limit, a requirement that each call include a new parameter, or a rule that identical results are reported as terminal for this session. In exam scenarios, the word "repeatedly" is a strong hint that the design lacks progress detection.</p>
+<h3 id="a-loop-skeleton">A loop skeleton</h3>
+<p>The <code>text</code> block below sketches the control structure in pseudocode. It shows that the model is consulted inside a loop whose boundaries are set by code.</p>
+<pre><code class="language-text">session_loop(goal, permissions, budgets):
+    history = initial_record(goal, permissions)
+    fingerprint = empty
+
+    while budgets_remain():
+        view = perceive(goal, rules, bounded(history))
+        proposal = ask_model(view, allowed_tools(permissions))
+
+        if proposal.says_done:
+            return summarize(history)
+
+        if not authorized(proposal, permissions):
+            record(&quot;rejected: outside authority&quot;)
+            continue
+
+        result = execute(proposal, budgets)
+        observation = distill(result, previous=fingerprint)
+        record(observation)
+
+        if terminal(result) or approval_required(result):
+            return handoff(history, reason)
+
+        if observation.fingerprint == fingerprint:
+            record(&quot;no progress&quot;)
+            return handoff(history, reason=&quot;stuck&quot;)
+
+        fingerprint = observation.fingerprint
+
+    return handoff(history, reason=&quot;budget exhausted&quot;)
+</code></pre>
+<p>Notice that every exit closes the session with a reason. There is no path that simply ends with an unexplained silence. That habit matters for session continuity: the next handler, or the human reviewer, needs to know why the loop stopped and what remains open.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A loop that returns a partial result with an explicit reason is usually a better answer than one that keeps trying. Partial progress with honest handoff is a feature of a bounded design.</p>
+</blockquote>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A travel-assistance service helps reviewers prepare refund decisions for cancelled bookings. The assistant may read a booking, look up the refund policy, and draft a decision note. It may not issue a refund; that action belongs to a human with ledger access. The session model treats each case as a separate request with its own permissions and budgets.</p>
+<p>A case arrives for a customer whose flight was cancelled. The loop begins by perceiving the goal, the permission set, and the case identifier. It reasons that the booking details are needed first, calls the read tool, and observes a record showing a cancelled flight and a ticket that was partly used. It then looks up the policy and receives a clause stating that partly used tickets may qualify for a partial refund pending documentation.</p>
+<p>The trace then goes wrong. The loop calls the policy lookup again with the same query, receives the same clause, and concludes that documentation is still needed. It calls the lookup again. The observation is identical each time, and the fingerprint does not change. From outside, the session appears active: calls are being made and text is being generated. In reality it is stuck, because no new information is entering the working view and no decision is being advanced.</p>
+<table>
+<thead>
+<tr>
+<th>Cycle</th>
+<th>Perceive</th>
+<th>Reason</th>
+<th>Act</th>
+<th>Observe</th>
+<th>Loop decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>One</td>
+<td>Case goal and identifier</td>
+<td>Need booking facts</td>
+<td>Read booking</td>
+<td>Cancelled flight, partly used</td>
+<td>Continue</td>
+</tr>
+<tr>
+<td>Two</td>
+<td>Booking facts added</td>
+<td>Need policy rule</td>
+<td>Look up policy</td>
+<td>Partial refund clause, documentation needed</td>
+<td>Continue</td>
+</tr>
+<tr>
+<td>Three</td>
+<td>Same policy clause</td>
+<td>Recheck rule</td>
+<td>Look up policy again</td>
+<td>Identical clause</td>
+<td>Continue, unsafe</td>
+</tr>
+<tr>
+<td>Four</td>
+<td>Identical clause again</td>
+<td>Recheck rule</td>
+<td>Look up policy again</td>
+<td>Identical fingerprint</td>
+<td>Stop as stuck</td>
+</tr>
+</tbody>
+</table>
+<p>The fix is not a stronger instruction telling the model to avoid repetition. The fix is a progress rule in the observe stage: if a result's fingerprint matches the previous one, record that no new information was obtained and stop with a handoff. The handoff should include the draft decision note, the policy clause with its source, and a statement that documentation is outstanding. A reviewer can then complete the case without reconstructing the loop's history.</p>
+<p>Two additional safeguards fit the same design. Because the session is request-scoped, the case's facts cannot leak into another case. Because the permission set excludes refund issuance, even a strong suggestion from the model cannot produce a ledger change. The loop's intelligence is useful precisely because it is bounded by these structural facts.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Assuming the model controls how long the loop runs.</li>
+<li>Treating a budget and a stop condition as the same mechanism.</li>
+<li>Letting raw tool results re-enter the working view without distillation.</li>
+<li>Measuring activity instead of progress when diagnosing a stuck session.</li>
+<li>Allowing a loop to end silently instead of returning a reason and a handoff.</li>
+<li>Sharing working state across sessions in the name of efficiency.</li>
+<li>Trying to fix repetition by rewriting the prompt when the loop lacks a progress rule.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>The orchestration loop cycles through perceive, reason, act, observe, and repeat.</li>
+<li>The model proposes next moves; orchestration code owns authority, budgets, and stopping.</li>
+<li>Budgets limit resources while stop conditions define when finishing is correct.</li>
+<li>Tool results become the next perception, so their shape steers subsequent decisions.</li>
+<li>Waiting has a resumable handle; stuck means repeated cycles without state change.</li>
+<li>Every loop exit should return a reason and a usable handoff.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>Which component should enforce a limit on the number of loop cycles?</li>
+</ol>
+<ul>
+<li>A. The model's system instruction</li>
+<li>B. The orchestration code</li>
+<li>C. The wording of the user's goal</li>
+<li>D. The tool description text</li>
+</ul>
+<ol start="2">
+<li>In the five-stage cycle, which stage converts a raw tool result into something the next decision can use?</li>
+</ol>
+<ul>
+<li>A. Perceive</li>
+<li>B. Reason</li>
+<li>C. Observe</li>
+<li>D. Repeat</li>
+</ul>
+<ol start="3">
+<li>What is the main difference between a budget and a stop condition?</li>
+</ol>
+<ul>
+<li>A. A budget limits resources; a stop condition says when ending is correct.</li>
+<li>B. A stop condition limits resources; a budget says when ending is correct.</li>
+<li>C. Both are instructions written into the prompt.</li>
+<li>D. Both apply only to external tools.</li>
+</ul>
+<ol start="4">
+<li>A loop issues the same call repeatedly with identical results. What is the best diagnosis?</li>
+</ol>
+<ul>
+<li>A. The loop is waiting for approval.</li>
+<li>B. The loop is stuck because no state is changing.</li>
+<li>C. The loop has met its goal and should exit.</li>
+<li>D. The loop needs a larger step budget.</li>
+</ul>
+<ol start="5">
+<li>Which field in a tool result best supports detection of empty progress?</li>
+</ol>
+<ul>
+<li>A. A decorative title</li>
+<li>B. A change indicator relative to the previous result</li>
+<li>C. A long narrative description</li>
+<li>D. A list of all possible queries</li>
+</ul>
+<ol start="6">
+<li>Why is request-scoped state important in a session model?</li>
+</ol>
+<ul>
+<li>A. It prevents facts from one case leaking into another.</li>
+<li>B. It makes the model's instructions longer.</li>
+<li>C. It removes the need for tool permissions.</li>
+<li>D. It guarantees that every loop finishes successfully.</li>
+</ul>
+<ol start="7">
+<li>A loop stops after exhausting its budget while the goal is unfinished. What should it return?</li>
+</ol>
+<ul>
+<li>A. Silence, because the budget ended the session</li>
+<li>B. A partial result with the reason and outstanding work</li>
+<li>C. A request for a larger budget issued to the model</li>
+<li>D. The full tool log without interpretation</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p>Correct: B. Cycle limits are enforced by the code surrounding the model. A is incorrect because instructions can be ignored or trimmed. C is incorrect because a user's goal is not a control mechanism. D is incorrect because a description guides tool selection, not loop length.</p>
+</li>
+<li>
+<p>Correct: C. Observation interprets and records the outcome for reuse. A is incorrect because perception assembles the view before a decision. B is incorrect because reasoning chooses the next move. D is incorrect because repetition refers to starting another cycle.</p>
+</li>
+<li>
+<p>Correct: A. Budgets constrain consumption; stop conditions define legitimate completion. B reverses the two ideas. C is incorrect because both should be implemented in the system, not left as prose. D is incorrect because they govern the whole loop.</p>
+</li>
+<li>
+<p>Correct: B. Identical calls with identical results indicate no progress, which is the signature of a stuck loop. A is incorrect because waiting involves a legitimate pending condition and a resume handle. C is incorrect because the goal is not met. D is incorrect because more cycles would repeat the same result.</p>
+</li>
+<li>
+<p>Correct: B. A change indicator lets the loop compare cycles and detect repetition. A is incorrect because decoration carries no state information. C is incorrect because length does not establish novelty. D is incorrect because listing options does not describe what happened.</p>
+</li>
+<li>
+<p>Correct: A. Scoping state to the request keeps unrelated cases isolated. B is incorrect because state scope does not affect instruction length. C is incorrect because permissions remain necessary. D is incorrect because scoping cannot guarantee success.</p>
+</li>
+<li>
+<p>Correct: B. An honest partial result with a reason and open items allows a clean handoff. A is incorrect because silence hides the state of the work. C is incorrect because the model does not control its own budget. D is incorrect because an uninterpreted log is not a usable result.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 7.</em></p>
+  <nav><a href="06-question-design-study-strategy.html">&larr; Previous</a><span></span><a href="08-structured-tool-use.html">Next &rarr;</a></nav>
+</div>
+
+</body>
+</html>

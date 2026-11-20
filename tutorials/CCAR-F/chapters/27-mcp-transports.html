@@ -1,0 +1,139 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>27. STDIO and Streamable HTTP</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>27. STDIO and Streamable HTTP</h1>
+
+<p>The protocol says what messages mean; the transport decides how they reach the other side. Most deployments choose between two shapes: a local child process speaking over standard input and output, or a remote service speaking over HTTP with streaming responses. The message payloads are the same JSON-RPC structures in both cases, but the operational consequences are very different.</p>
+
+<h2>What a transport must guarantee</h2>
+
+<p>Three properties matter above all others. Framing must make message boundaries unambiguous, so a receiver never has to guess where one JSON document ends. Delivery must preserve request order where order carries meaning, and must pair each response with its request identifier. Lifecycle must define how a connection starts, how it is considered healthy, and how it ends.</p>
+
+<p>Neither transport makes the application reliable by itself. Timeouts, retries, and backpressure still belong to the client and server. A transport that hides a broken connection behind an open socket is worse than one that fails loudly, because the caller cannot apply a recovery policy to a failure it never sees.</p>
+
+<h2>STDIO: the local child process</h2>
+
+<p>In a STDIO deployment the client launches the server as a subprocess, writes request lines to its standard input, and reads response lines from its standard output. There is no port, no certificate, and no discovery step. The process inherits a working directory and an environment, which the client controls. This is the easiest shape to run locally and the easiest to get wrong.</p>
+
+<p>The first rule is that standard output belongs exclusively to the protocol. A debugging <code>print()</code>, a progress bar, a library warning sent to stdout — any of them corrupts the stream and produces a parse error on the next message. Send all human-readable logs to standard error, and configure the logging framework before importing modules that might print at import time. On Windows, set binary mode on the pipes so that newline translation cannot alter a payload.</p>
+
+<p>The second rule is flushing. A server that writes a response into a buffered stream and waits for more input can deadlock: the client waits for the response while the server waits for the buffer to fill. Flush after every complete message. Newline-delimited JSON is the usual framing here — one compact JSON document per line, with embedded newlines escaped inside strings rather than written literally.</p>
+
+<pre><code># Server loop over local pipes
+for raw_line in sys.stdin:
+    if not raw_line.strip():
+        continue
+    request = json.loads(raw_line)
+    response = dispatch(request)
+    sys.stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
+    sys.stdout.flush()          # required: never wait for a full buffer
+    if response_should_exit:
+        break
+if retry_count &gt; 2 and last_error is not None:
+    log_to_stderr("giving up after %d attempts", retry_count)</code></pre>
+
+<p>Process lifecycle is part of the design. Choose an explicit working directory, pass only the environment variables the server needs, and impose a startup deadline of a few seconds. If the child exits, the client should report the exit code and the last lines of standard error rather than retrying forever. A server that crashes on startup because a file is missing will crash again on the second attempt.</p>
+
+<div class="warn">Never launch a STDIO server from a directory or with credentials you would not hand to the code inside it. The child inherits the environment. A token intended for the client is visible to the server process, so pass a narrow, scoped credential instead.</div>
+
+<h2>Streamable HTTP: the remote service</h2>
+
+<p>A remote server exposes an HTTP endpoint, typically <code>/mcp</code>. Requests arrive as POST bodies containing a JSON-RPC message; responses come back either as a single JSON document or as an event stream. A separate GET request can hold a listening stream open so the server can push notifications. The client declares what it accepts with the <code>Accept</code> header, listing both <code>application/json</code> and <code>text/event-stream</code>.</p>
+
+<p>HTTP brings infrastructure considerations that a local process does not have. Terminate TLS at the edge or the application, apply a request body limit — 1 MB is generous for JSON-RPC control messages — and set a server-side deadline of roughly 30 seconds for ordinary calls. Long-running operations should return a progress identifier rather than holding a request open for minutes. Proxies and serverless platforms may impose their own idle timeouts, often 30 to 60 seconds, so send keepalive comments on streaming responses.</p>
+
+<table>
+<tr><th>Concern</th><th>STDIO</th><th>Streamable HTTP</th></tr>
+<tr><td>Typical latency</td><td>Sub-millisecond</td><td>20–200 ms plus network</td></tr>
+<tr><td>Authentication</td><td>Process boundary and OS permissions</td><td>Token, mTLS, or gateway policy</td></tr>
+<tr><td>Scale</td><td>One process per client session</td><td>Many sessions per service instance</td></tr>
+<tr><td>Updates</td><td>Restart the client's child process</td><td>Deploy the service once</td></tr>
+<tr><td>Debugging</td><td>Read stderr locally</td><td>Correlate logs and traces</td></tr>
+</table>
+
+<h2>Framing and message boundaries</h2>
+
+<p>Server-sent events use a simple but strict wire format. Each event is a sequence of fields such as <code>event: message</code> and <code>data: {...}</code>, terminated by a blank line. A multi-line JSON payload must be split into several <code>data:</code> fields, and the reassembled value is their concatenation with newline separators. Clients that parse only the first <code>data:</code> line will silently truncate large responses.</p>
+
+<pre><code>HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Mcp-Session-Id: sess_9f31c2
+
+: keepalive
+
+event: message
+id: evt_0042
+data: {"jsonrpc":"2.0","id":17,"result":{"content":[]}}
+
+event: message
+id: evt_0043
+data: {"jsonrpc":"2.0","method":"notifications/message",
+data: "params":{"level":"info","data":"index ready"}}
+
+</code></pre>
+
+<p>Every streamed message should carry an identifier so a reconnecting client can say "resume after <code>evt_0042</code>." Keep a bounded replay buffer — five minutes or a few thousand events — and return a clear error when the requested point has expired. Without identifiers, a dropped connection during a long operation forces the client to restart the work from the beginning.</p>
+
+<p>Backpressure is the other framing concern. A server that emits progress notifications faster than the client consumes them will accumulate memory until the process is killed. Emit at most one notification per 100 milliseconds for a long job, coalesce intermediate values, and stop generating updates when the socket's write buffer stays full. The same rule applies to STDIO: a chatty server can fill the client's pipe and stall both sides.</p>
+
+<h2>Session handling and resumability</h2>
+
+<p>Streamable HTTP may be stateless, answering each request independently, or stateful, returning a session identifier that the client echoes on later requests. Stateful sessions allow server-side subscriptions and notification streams; they also require affinity or shared storage when several service instances sit behind a load balancer. If a follow-up request lands on a different instance with no shared session store, the server will answer as if the client were new.</p>
+
+<p>Choose an explicit session policy. Give sessions a 30-minute idle expiry, rotate the identifier after authentication changes, and reject a session identifier that does not match the authenticated principal. Include the session identifier in logs so a single user journey can be traced across requests. When a session expires, the client should reinitialize rather than retry the failed request with a stale identifier.</p>
+
+<div class="tip">If you do not need server-initiated notifications, prefer stateless HTTP. It removes affinity requirements, simplifies scaling, and makes every request independently retryable. Add sessions only when subscriptions or push messages justify the operational cost.</div>
+
+<h2>Choosing and operating a transport</h2>
+
+<p>Use STDIO when the server runs on the same machine, needs local files or credentials, and serves one user at a time. Use HTTP when several clients share a server, when the server lives in another network, or when central deployment and observability matter. A hybrid is common in development: STDIO for local iteration, HTTP in staging and production, with the same handler code behind both adapters.</p>
+
+<p>Failure modes differ. STDIO deployments fail through exited processes, corrupted stdout, and buffering deadlocks. HTTP deployments fail through expired sessions, proxy timeouts, certificate errors, and body-size limits. Test each explicitly: kill the child process mid-request, inject a stray line into stdout, drop a streaming connection after three events, and send a 2 MB body. A transport you have never broken in testing will break in production.</p>
+
+<div class="exercise"><strong>Exercise 27.1 — Diagnose a transport failure</strong>
+<ol>
+<li>A client reports a JSON parse error immediately after the server prints a startup banner. Identify the offending stream and the fix.</li>
+<li>A long HTTP request is cut off at exactly 60 seconds with no error message. Name two likely infrastructure causes and one application-level mitigation.</li>
+<li>A reconnecting client replays the same progress event twice. Explain why streamed event identifiers matter and how the client should use them.</li>
+</ol>
+</div>
+
+<div class="exercise"><strong>Exercise 27.2 — Select a transport</strong>
+<ol>
+<li>A five-person team needs a server that reads files from each developer's checkout. Choose a transport and justify it in two sentences.</li>
+<li>The same server must later serve 200 users from a shared cluster. Describe what changes, including session storage and deployment.</li>
+<li>State one metric you would monitor in each deployment to detect transport trouble before users report it.</li>
+</ol>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why must a STDIO server keep standard output free of log messages?</li>
+<li>What does the <code>Accept</code> header communicate in a Streamable HTTP request?</li>
+<li>Why do streamed events need identifiers, and what is a bounded replay buffer for?</li>
+<li>Which infrastructure requirement appears with stateful HTTP sessions but not with stateless ones?</li>
+<li>Give one failure mode specific to STDIO and one specific to HTTP.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Both transports carry the same JSON-RPC messages; they differ in framing, lifecycle, and operations.</li>
+<li>STDIO is a local child process with newline-delimited JSON, stdout reserved for protocol, and logs on stderr.</li>
+<li>Streamable HTTP uses POST requests, optional SSE responses, and a separate listening stream for server messages.</li>
+<li>Flush every message, bound body sizes, and send keepalives on long-lived streams.</li>
+<li>Sessions require affinity or shared storage; stateless HTTP is simpler when push notifications are unnecessary.</li>
+<li>Choose by deployment shape, then test the transport's characteristic failures explicitly.</li>
+</ul>
+
+<nav><a href="26-mcp-prompts-clients.html">&larr; Previous</a><span></span><a href="28-mcp-production.html">Next: MCP in Production &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

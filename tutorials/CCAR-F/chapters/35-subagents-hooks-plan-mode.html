@@ -1,0 +1,124 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>35. Subagents, Hooks, and Plan Mode</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>35. Subagents, Hooks, and Plan Mode</h1>
+
+<h2>Why delegate to a subagent</h2>
+<p>A subagent is a separate model invocation with its own instruction set, tool set, and context window. The parent gives it a task and receives a result; the noisy intermediate work stays in the child's context. This is useful for two reasons. First, it protects the parent's context from hundreds of lines of search output. Second, it creates a natural authority boundary: a child granted only read tools cannot accidentally edit a file while investigating.</p>
+<p>Delegation is not free. Starting a subagent costs tokens, time, and a handoff that can lose nuance. Delegate when a task is self-contained and its output can be described in a sentence or two: locating every caller of a deprecated function, assessing whether a schema migration is reversible, checking a dependency's licence, or reviewing a diff for a specific risk. Do not delegate "help with the feature" — the child lacks the conversation history and will either guess or ask the parent to repeat everything.</p>
+<p>A useful test is the <em>stranger test</em>. If you would need to brief a competent stranger with twenty minutes of background before they could start, write that background into the task brief or keep the work local. Subagents excel as focused specialists, not as mind readers.</p>
+
+<h2>Configuring a subagent</h2>
+<p>Subagents are usually defined as markdown files with frontmatter in a dedicated directory. The fields describe identity, trigger, capability, and model choice.</p>
+
+<pre><code>---
+name: migration-reviewer
+description: Assess database migrations for reversibility and data loss.
+  Use when a task adds, edits, or reviews a migration file, or asks
+  whether a schema change can be rolled back safely.
+tools: Read, Grep, Glob, Bash(git diff)
+model: a-fast-model
+---
+
+You review migrations. You never apply them.
+
+For each migration, report:
+1. Whether a down path exists and what it restores.
+2. Any destructive operation and the rows it can affect.
+3. Whether a backfill can be batched safely.
+4. One concrete failure scenario with the relevant file:line.
+
+Return a short markdown table. End with SAFE, CONDITIONAL, or UNSAFE.
+If you cannot find the schema baseline, say so instead of guessing.
+</code></pre>
+
+<p>The <code>description</code> is a routing instruction. It should say when to delegate, not merely what the agent is. A description of "database helper" will be ignored or overused; "use when a migration file is added or a rollback question is asked" gives the parent a clear decision rule. The <code>tools</code> list is the real safety boundary — a reviewer without write tools cannot drift into fixing the problem it was asked to assess.</p>
+<p>Model choice is a cost and latency lever. Narrow, high-volume investigations can run on a faster model; tasks requiring subtle judgement may justify a stronger one. Choose the cheapest model that passes a small evaluation set of representative tasks, and revisit that choice when the task distribution changes.</p>
+
+<h2>Designing the handoff contract</h2>
+<p>The brief you give a subagent should contain four things: the goal, the evidence available, the output shape, and the stopping condition. "Investigate the login timeout" is a goal with no evidence or shape. A better brief names the log directory, the two relevant services, a ranked list of hypotheses with file and line references, and a limit such as "stop after fifteen minutes and report what you have."</p>
+<p>Require evidence in the result. A subagent that reports "the cache is probably stale" is less useful than one that reports "the cache key at <code>cache.py:88</code> omits the tenant identifier; three call sites pass different tenants." Evidence makes the parent's job verification rather than interpretive guessing. Ask for a confidence label and a list of open questions.</p>
+<div class="note"><strong>Context isolation is a feature.</strong> A subagent that has not read the entire conversation may miss a constraint, but it also cannot be anchored by an early wrong assumption. Include durable constraints in the brief — language, style rules, forbidden files — and let the child start clean.</div>
+<p>Some teams use a hierarchical pattern: a coordinator splits work among three specialists and merges their results. This works when the merge is mechanical, such as combining three independent audits into one checklist. It fails when the pieces must continuously reinterpret one another's output. If the subagents need to argue about a shared design, keep the decision in the parent context instead.</p>
+
+<h2>Hooks as deterministic enforcement</h2>
+<p>Hooks are commands that run at defined points in the session lifecycle. They are ordinary programs, so they do exactly what they are written to do. That makes them stronger than an instruction: a prompt can persuade, but a hook can refuse. Common events include <code>PreToolUse</code> and <code>PostToolUse</code>, <code>UserPromptSubmit</code>, <code>Stop</code>, <code>SessionStart</code>, <code>PreCompact</code>, <code>Notification</code>, and <code>SubagentStop</code>.</p>
+<p>A hook configuration names an event, a matcher such as a tool name, and a command. The command receives a JSON object on standard input containing fields like the session identifier, working directory, tool name, and tool input. Exit status carries the decision: zero allows the operation, while a non-zero status blocks it and feeds the reason back to the model. Some events also accept structured JSON output with fields such as <code>decision</code> or <code>permissionDecision</code>, allowing <code>allow</code>, <code>deny</code>, or <code>ask</code>.</p>
+
+<pre><code>{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/guard.py &gt;&gt; .claude/logs/guard.log 2&gt;&amp;1"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "python .claude/hooks/final_check.py" }
+        ]
+      }
+    ]
+  }
+}
+</code></pre>
+
+<p>Use <code>PreToolUse</code> to prevent an action: block shell commands containing a dangerous flag, deny writes to generated directories, or require confirmation before a network call. Use <code>PostToolUse</code> to react: run a formatter after an edit, append an audit record, or notify another system. Use <code>Stop</code> as a final gate that checks whether the session's completion criteria were met before it ends.</p>
+<div class="warn"><strong>Failure mode:</strong> a hook that blocks without explaining why. The model sees a rejection with no actionable reason and may retry the same operation several times. Always return a specific message — "writes to dist/ are generated; edit src/ instead" — and log rejections so a human can see whether the rule is too strict.</div>
+<p>Keep hooks fast and side-effect-aware. A hook that takes twenty seconds turns every tool call into a pause. A hook that writes secrets into a shared log creates a new security problem. Test the command directly with representative stdin JSON before wiring it into the configuration, and version it with the repository so its behaviour is reviewable.</p>
+
+<h2>Plan mode and deliberate iteration</h2>
+<p>Plan mode separates investigation from modification. In the planning phase the session reads files, searches, and asks questions, but does not change the repository. The output is a proposed sequence of actions. A human reviews that proposal, requests changes, and only then grants permission to execute. This is the right default for multi-file changes, ambiguous requirements, schema edits, and anything with a costly rollback.</p>
+<p>A good plan is specific enough to be wrong. It names the files to be touched, the commands to be run, the expected tests, the main risk, and the rollback path. "Refactor the service layer" cannot be meaningfully approved. "Split <code>services/billing.py</code> into pricing and invoicing modules, update the three imports in <code>api/routes.py</code>, add unit tests for the tax rounding branch, and keep the old module as a re-export for one release" can be.</p>
+<p>Iteration is where plan mode earns its keep. When the reviewer says "do not change the public interface," the plan is revised before any code is written, at a fraction of the cost of rewriting an implementation. Use a short loop: present plan, collect objections, revise, present again. Limit it to two or three rounds; if agreement never converges, the requirement is unresolved and needs a human decision rather than another draft.</p>
+<p>Skip plan mode for small, well-understood edits where the cost exceeds the benefit. A one-line typo fix does not need a document. The decision is proportional: the more files, the more irreversible the operation, and the more ambiguous the request, the stronger the case for planning first.</p>
+
+<h2>Putting the three together</h2>
+<p>These mechanisms compose naturally. A plan-mode session can delegate codebase surveys to read-only subagents, then use a hook to guarantee that no writes occur before approval. During execution, hooks enforce the boundaries the plan assumed — for example, blocking edits to generated files. After execution, a subagent can audit the diff against the approved plan and report deviations.</p>
+<table>
+<tr><th>Mechanism</th><th>Controls</th><th>Best at</th><th>Limit</th></tr>
+<tr><td>Subagent</td><td>Context and tools of a worker</td><td>Focused investigation</td><td>Needs an explicit brief</td></tr>
+<tr><td>Hook</td><td>Whether an action is allowed</td><td>Hard enforcement</td><td>No judgement; must be tested</td></tr>
+<tr><td>Plan mode</td><td>Timing of modification</td><td>Human review before change</td><td>Overhead on trivial tasks</td></tr>
+</table>
+
+<div class="exercise"><strong>Exercise 35.1 — Define a subagent with a handoff contract.</strong> Write a frontmatter definition and brief for a subagent that audits dependency licences. Restrict it to read tools. Require a table with package, licence, risk level, and evidence path, plus a stopping condition of at most forty packages. Explain why a write tool would weaken this design.</div>
+
+<div class="exercise"><strong>Exercise 35.2 — Design a hook and a plan gate.</strong> Specify a <code>PreToolUse</code> hook that denies writes to <code>dist/</code> and returns an explanatory message. Then draft a five-point plan for adding a field to an API response, including files, tests, risk, and rollback. Identify which parts of the plan the hook can enforce and which rely on review.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>What two problems does context isolation solve when delegating to a subagent?</li>
+<li>Name the four elements of a good subagent handoff contract.</li>
+<li>Why is a hook considered stronger enforcement than an instruction in a prompt?</li>
+<li>What should a plan include so that a reviewer can meaningfully approve it?</li>
+<li>When should a team skip plan mode entirely?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Subagents trade handoff overhead for isolated context and narrow tool authority.</li>
+<li>Routing descriptions, minimal tools, and evidence-based output contracts make delegation reliable.</li>
+<li>Hooks enforce deterministic rules at lifecycle events; always return a specific rejection reason.</li>
+<li>Plan mode delays modification until a human has reviewed a concrete, testable proposal.</li>
+<li>The three mechanisms compose: delegate research, enforce boundaries, and approve before execution.</li>
+</ul>
+
+<nav><a href="34-commands-and-skills.html">&larr; Previous</a><span></span><a href="36-sdk-and-cicd.html">Next: The Agent SDK and CI/CD &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

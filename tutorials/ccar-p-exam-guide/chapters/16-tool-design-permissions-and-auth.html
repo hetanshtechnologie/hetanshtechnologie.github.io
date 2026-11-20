@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 16 — Tool Portfolios, Permissions, and Secure Access</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 16 — Tool Portfolios, Permissions, and Secure Access</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Design a tool portfolio that gives an AI-enabled system useful capabilities without excessive authority.</li>
+    <li>Apply least-privilege, scoped credentials, and explicit authorization boundaries to tool use.</li>
+    <li>Distinguish tool selection guidance from enforced permission controls and approval gates.</li>
+    <li>Evaluate risks in tool schemas, inputs, outputs, and side effects, including ambiguity and misuse.</li>
+    <li>Plan auditing, revocation, and operational controls that keep tool-enabled workflows accountable.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Tools as capability boundaries</h3>
+  <p>Tools extend a model-backed system beyond text generation by allowing it to read data, search knowledge, transform content, create records, send messages, or trigger workflows. Each tool represents a capability boundary: what the system can observe and what it can change. Architectural quality depends less on the number of tools available and more on whether each tool is well defined, safely scoped, and appropriate to the tasks the system must perform. A rich toolset can increase usefulness, but it also expands the attack surface, operational complexity, and potential impact of mistakes.</p>
+  <p>A deliberate tool portfolio starts from user outcomes and risk. Read-only tools often carry lower risk than tools that mutate state, initiate external communication, or move money or sensitive data. Some actions are reversible and easy to audit; others are difficult to undo or may have legal and customer impact. Grouping tools by impact helps determine which can be broadly available, which require additional checks, and which should remain outside the system entirely. The goal is to provide enough capability for reliable task completion while keeping authority proportional to need.</p>
+  <p>Tool design should also consider clarity. A model selects and invokes tools based on descriptions, schemas, and context. Vague names, overlapping responsibilities, or poorly specified parameters increase the chance of incorrect calls. Good portfolio design therefore combines security discipline with interface quality: precise descriptions, narrow purposes, and unambiguous inputs reduce both misuse and accidental errors.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Prefer least privilege and narrow, purpose-specific tools. If a task only requires reading information, do not provide write or delete capabilities “just in case.”</p>
+  </div>
+
+  <h3>Least privilege, scoping, and credential management</h3>
+  <p>Least privilege means granting only the permissions necessary to perform an authorized task, for the shortest practical scope and duration. In tool-enabled systems, privilege is expressed through which tools are exposed, what operations they support, which resources they can access, and whose identity or credential they use. A tool that can query a single approved dataset is safer than one that can query every internal system. A credential limited to specific actions and records is safer than a broadly privileged account shared across workflows.</p>
+  <p>Scoping can occur at several levels. <strong>Tool scope</strong> limits available operations (for example, list and read versus create and update). <strong>Resource scope</strong> limits accessible objects (specific projects, tenants, repositories, or records). <strong>Time scope</strong> limits how long access remains valid. <strong>Context scope</strong> limits access to a particular session, task, or approval state. Combining these dimensions reduces blast radius: if an input is malformed, a model misinterprets intent, or untrusted content attempts manipulation, the system cannot exceed the permissions it was never granted.</p>
+  <p>Credential handling must be treated as a system concern, not a prompt concern. Secrets should not be embedded in instructions or exposed to untrusted outputs. The execution environment should manage authentication, token issuance, rotation, and revocation according to organizational policy. When tools act on behalf of a user, authorization should reflect that user’s permissions rather than an elevated service identity, unless a carefully controlled service account is explicitly required and audited.</p>
+
+  <table>
+    <tr>
+      <th>Control dimension</th>
+      <th>Example</th>
+      <th>Benefit</th>
+      <th>Residual risk</th>
+    </tr>
+    <tr>
+      <td>Operation scope</td>
+      <td>Read-only search tool, separate draft tool</td>
+      <td>Prevents unintended mutations</td>
+      <td>Authorized reads may still expose sensitive data</td>
+    </tr>
+    <tr>
+      <td>Resource scope</td>
+      <td>Access limited to one workspace or record set</td>
+      <td>Contains lateral exposure</td>
+      <td>Scope may be misconfigured</td>
+    </tr>
+    <tr>
+      <td>Identity scope</td>
+      <td>User-delegated permissions vs service identity</td>
+      <td>Aligns actions with accountability</td>
+      <td>Over-broad service roles if shortcuts taken</td>
+    </tr>
+    <tr>
+      <td>Time/situation scope</td>
+      <td>Short-lived token, access only during approved step</td>
+      <td>Reduces window for misuse</td>
+      <td>Operational overhead and renewal failures</td>
+    </tr>
+    <tr>
+      <td>Approval scope</td>
+      <td>Human confirmation before external send</td>
+      <td>Adds accountability for high impact</td>
+      <td>Reviewer fatigue or rubber-stamping</td>
+    </tr>
+  </table>
+
+  <h3>Designing tool interfaces and schemas</h3>
+  <p>Tool interfaces shape how reliably capabilities are used. A clear schema specifies required parameters, allowed values, formats, and defaults. It should make invalid states difficult to represent. For example, requiring an explicit record identifier is safer than accepting a free-form description that could match multiple records. Enumerated options reduce ambiguity compared with open-ended strings when the valid choices are known. Descriptions should explain purpose, constraints, and when not to use the tool, because selection errors often come from ambiguous intent.</p>
+  <p>Inputs and outputs should be validated at the boundary. The system should not assume that a proposed tool call is safe or well formed simply because it was generated in a plausible format. Validation can check types, ranges, authorization, idempotency expectations, and business rules before execution. Output handling matters as well: tool results may be large, sensitive, stale, or contain untrusted content. Returning only necessary fields, sanitizing or labeling untrusted data, and recording provenance help downstream reasoning remain safe and grounded.</p>
+  <p>Side effects deserve special attention. Tools that create, update, delete, publish, or notify should be designed for traceability and, where possible, reversibility. Idempotency keys or duplicate checks can prevent repeated execution from causing repeated harm. Dry-run or preview modes can let the system propose changes for review before commitment. These patterns shift risk from irreversible execution to inspectable intent.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Exposing a single powerful “do anything” tool with broad parameters. Wide interfaces are harder to secure, validate, and audit than narrow, purpose-specific tools.</p>
+  </div>
+
+  <h3>Authorization, approvals, and human accountability</h3>
+  <p>Not every tool invocation should be automatic. Authorization determines whether an action is permitted; approval determines whether a permitted action should proceed in a specific situation. High-impact actions—external communications, financial changes, access grants, destructive operations, or actions affecting regulated records—often require explicit confirmation by an authorized person. The system can prepare context, propose the action, and summarize expected effects, but the commit step remains accountable to human judgment or a separately enforced policy gate.</p>
+  <p>Approval design should be practical. Reviewers need clear, concise information: what will happen, to which resources, under which identity, and how to reverse it if possible. Presenting raw tool payloads without explanation can create approval fatigue and reduce effectiveness. Conversely, hiding critical details undermines accountability. Effective systems log both the proposed action and the approval decision so that outcomes can be reconstructed later.</p>
+  <p>Policy enforcement must remain outside the model’s discretion. If an action requires approval, the execution layer should block it until approval is recorded. If an action is forbidden, the tool should not be callable in that context. This separation ensures that persuasive text, ambiguous prompts, or injected instructions cannot substitute for authorization.</p>
+
+  <table>
+    <tr>
+      <th>Action type</th>
+      <th>Typical control</th>
+      <th>Rationale</th>
+      <th>Audit evidence</th>
+    </tr>
+    <tr>
+      <td>Read approved reference data</td>
+      <td>Automatic with scoped access</td>
+      <td>Low side-effect risk</td>
+      <td>Query, scope, timestamp, result summary</td>
+    </tr>
+    <tr>
+      <td>Create internal draft</td>
+      <td>Automatic or lightweight confirmation</td>
+      <td>Usually reversible</td>
+      <td>Draft content/version, actor, source context</td>
+    </tr>
+    <tr>
+      <td>Update customer-facing record</td>
+      <td>Pre-commit review or strict policy checks</td>
+      <td>Business/customer impact</td>
+      <td>Before/after diff, approver, justification</td>
+    </tr>
+    <tr>
+      <td>Send external message or payment</td>
+      <td>Explicit human approval and strong validation</td>
+      <td>Hard to reverse, high impact</td>
+      <td>Recipient, payload summary, approval, delivery status</td>
+    </tr>
+  </table>
+
+  <h3>Auditing, monitoring, and lifecycle controls</h3>
+  <p>Tool use must be observable. Auditing records who or what initiated an action, which tool was invoked, with what parameters (appropriately redacted), under which permissions, and what outcome occurred. These records support incident response, compliance, debugging, and continuous improvement. Without them, teams cannot distinguish model reasoning issues from permission defects, integration failures, or user misuse. Logging should balance accountability with privacy by avoiding unnecessary capture of secrets or sensitive payloads.</p>
+  <p>Monitoring can detect anomalous patterns: repeated failed calls, unusual volumes, access outside normal scope, spikes in high-risk actions, or attempts to invoke unavailable tools. Alerts and rate limits provide operational safeguards when behavior deviates from expectations. Lifecycle controls—provisioning, periodic access review, credential rotation, and revocation—ensure that permissions do not accumulate silently over time. When workflows, roles, or data sensitivity change, tool portfolios and scopes should be re-evaluated.</p>
+
+  <pre><code class="language-yaml">tool_policy:
+  available_tools:
+    - name: "knowledge_search"
+      mode: "read_only"
+      resource_scope: "approved_policy_index"
+      auto_execute: true
+    - name: "draft_ticket_update"
+      mode: "write_draft"
+      resource_scope: "current_case"
+      auto_execute: true
+    - name: "submit_ticket_update"
+      mode: "commit"
+      requires_approval: true
+      approver_role: "case_owner"
+  controls:
+    validate_inputs: true
+    redact_sensitive_logs: true
+    idempotency_check: true
+  audit:
+    capture: ["tool", "actor", "scope", "timestamp", "result_status", "approval_id"]</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> For each tool in a proposed system, write its purpose, side effects, required scope, and whether it should be auto-executed, previewed, or approval-gated. Remove any tool whose value does not justify its risk.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A support operations team wants an assistant that can help agents resolve customer cases faster. The proposed capabilities include searching internal knowledge articles, retrieving case details, drafting response notes, updating case status, and sending replies to customers. The environment contains sensitive personal information, and incorrect outbound messages could create customer harm and compliance exposure. Leadership expects efficiency gains but requires strong accountability for any action that affects customers or official records.</p>
+
+  <h3>Analysis</h3>
+  <p>The requested capabilities span a wide risk range. Searching approved articles and reading case details are valuable but must be scoped to authorized users and necessary records. Drafting notes is typically low risk and reversible. Updating case status and sending customer replies are side-effecting actions with different impact levels: a status update may affect internal workflow, while an outbound message directly affects the customer and is difficult to retract. A single broad permission model would fail proportionality and least-privilege principles.</p>
+  <p>The design must separate guidance from enforcement. Instructions can tell the assistant to be careful and confirm intent, but the system must enforce who can access which cases, which tools can mutate state, and which actions require explicit approval. Tool interfaces should be narrow and validated—for example, requiring a specific case identifier and allowed status values rather than free-form commands. Logging and review are necessary to support accountability and diagnose issues.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect defines a tiered tool portfolio. Read-only tools allow knowledge search and retrieval of only the fields required for the active case, using the agent’s delegated permissions. A drafting tool creates internal response drafts and suggested status changes without committing them. Committing a status change is allowed only through a validated tool with enumerated transitions and an audit record. Sending a customer reply requires an explicit confirmation step by the responsible agent, a preview of recipient and content, and policy checks for sensitive data handling.</p>
+  <p>All invocations are logged with redaction of sensitive values, and monitoring flags unusual patterns such as repeated failed access attempts or high volumes of outbound drafts. Credentials are short-lived and scoped to the session and case context. This design preserves efficiency for research and drafting while enforcing strong boundaries around access and irreversible actions, aligning capability with risk and accountability.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Granting broad or persistent permissions when tasks require only narrow, temporary access.</li>
+    <li>Combining read and high-impact write actions into one ambiguous tool interface.</li>
+    <li>Relying on instructions instead of enforced authorization and approval gates for sensitive actions.</li>
+    <li>Failing to validate tool inputs and outputs, including business rules and resource scope.</li>
+    <li>Logging too little to audit actions, or logging sensitive payloads without appropriate redaction.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Tool portfolios define capability boundaries and should be designed for usefulness, clarity, and proportional risk.</li>
+    <li>Least privilege requires scoping operations, resources, identities, and time, with credentials managed by the system.</li>
+    <li>Well-defined schemas, validation, and preview or idempotency patterns reduce errors and side-effect risks.</li>
+    <li>High-impact actions need enforced authorization, approvals, and clear audit evidence rather than prompt-only guidance.</li>
+    <li>Auditing, monitoring, and lifecycle reviews keep tool-enabled systems accountable as needs and risks evolve.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>Which design best reflects least privilege for a system that only needs to answer questions from approved documents?</p>
+      <p>A. Provide read, write, and delete tools for all internal systems<br>
+      B. Provide a read-only search tool scoped to the approved document index<br>
+      C. Embed administrator credentials in the prompt for flexibility<br>
+      D. Allow any tool call if the user sounds authorized</p>
+    </li>
+    <li>
+      <p>Why is a narrow tool schema preferable to a broad free-form command tool?</p>
+      <p>A. It eliminates the need for authentication<br>
+      B. It reduces ambiguity, supports validation, and limits unintended actions<br>
+      C. It guarantees perfect model reasoning<br>
+      D. It prevents all operational failures</p>
+    </li>
+    <li>
+      <p>What is the most reliable control for a customer-facing send action?</p>
+      <p>A. Instruct the model to be careful before sending<br>
+      B. Log the action only after delivery<br>
+      C. Enforce validation and an explicit approval gate before execution<br>
+      D. Increase the model’s reasoning depth</p>
+    </li>
+    <li>
+      <p>When should a tool act with user-delegated permissions rather than a broad service identity?</p>
+      <p>A. When actions must reflect the individual user’s authorized access and accountability<br>
+      B. When auditing is not required<br>
+      C. When the goal is to simplify by granting maximum access<br>
+      D. Only when no sensitive data exists anywhere in the organization</p>
+    </li>
+    <li>
+      <p>Which practice improves accountability for side-effecting tool calls?</p>
+      <p>A. Hiding parameters to keep logs small<br>
+      B. Recording actor, scope, parameters (with redaction), outcome, and approvals<br>
+      C. Allowing tools to run without timestamps<br>
+      D. Relying on user memory of what happened</p>
+    </li>
+    <li>
+      <p>A proposed tool can update any record in any system if given a natural-language instruction. What is the main architectural concern?</p>
+      <p>A. The tool may be too easy to monitor<br>
+      B. The interface is overly broad, increasing risk, ambiguity, and validation difficulty<br>
+      C. Narrow schemas always reduce usefulness to zero<br>
+      D. Read-only access would be less secure</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> A scoped read-only tool matches the stated need and applies least privilege. A and C grant excessive access, and D is not an enforceable control.</li>
+    <li><strong>Correct: B.</strong> Narrow schemas improve clarity and enforceable validation. A, C, and D overstate what interface design alone can achieve.</li>
+    <li><strong>Correct: C.</strong> Enforced validation and approval gates provide reliable control before irreversible impact. A is guidance only, B is too late, and D does not enforce permission.</li>
+    <li><strong>Correct: A.</strong> User-delegated permissions align access with the user’s entitlements and accountability. B, C, and D conflict with secure and governed design.</li>
+    <li><strong>Correct: B.</strong> Comprehensive, appropriately redacted audit records support traceability and investigation. A, C, and D weaken accountability.</li>
+    <li><strong>Correct: B.</strong> Broad, ambiguous interfaces create security and correctness risks and are hard to govern. A, C, and D are incorrect characterizations.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 16.</em></p>
+
+  <nav>
+    <a href="15-modular-instructions-and-disclosure.html">&larr; Previous</a>
+    <a href="17-retrieval-foundations.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

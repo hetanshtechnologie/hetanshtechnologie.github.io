@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 24 — Prompt Caching and Batch Processing</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 24</span>
+  <h1 id="chapter-24-prompt-caching-and-batch-processing">Chapter 24 — Prompt Caching and Batch Processing</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Describe what a prompt cache stores and why only a leading prefix can be reused.</li>
+<li>List the properties that make a prefix cacheable in practice.</li>
+<li>Compare single, layered, and rolling breakpoint layouts and choose between them.</li>
+<li>Explain how cache writes and cache reads appear in usage and price.</li>
+<li>Submit work through a message batches API and handle per-item results and errors.</li>
+<li>Decide whether a workload belongs on a realtime path or in a batch job.</li>
+<li>Recognize when caching and batching can be combined and when neither helps.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="what-a-prompt-cache-actually-stores">What a prompt cache actually stores</h3>
+<p>When a request arrives, the provider processes the prompt into an internal representation before generating anything. If a later request begins with exactly the same text, that work can be skipped and the stored representation reused. The cache does not remember the answer; it remembers the processed beginning of the request. Only a leading segment can be reused, because generation depends on everything that came before it.</p>
+<p>A <strong>breakpoint</strong> marks the end of a segment you want stored. The platform writes that prefix on the first request and reads it on later requests that match byte for byte. Entries live for a limited time, often only a few minutes, so repetition must happen while the entry is still available. Long prefixes are worthwhile; short ones may not clear a minimum length requirement, and the storage premium can outweigh the saving.</p>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning</th>
+<th>Practical consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Prefix</td>
+<td>Leading text up to a breakpoint</td>
+<td>Must be identical to be reused</td>
+</tr>
+<tr>
+<td>Breakpoint</td>
+<td>Marker placed at the end of a reusable segment</td>
+<td>Declared in the request, often on content blocks</td>
+</tr>
+<tr>
+<td>Cache write</td>
+<td>Storing or refreshing a prefix</td>
+<td>Small premium over the base input rate</td>
+</tr>
+<tr>
+<td>Cache read</td>
+<td>Reusing a stored prefix</td>
+<td>Much lower than the fresh input rate</td>
+</tr>
+<tr>
+<td>Time to live</td>
+<td>Window during which an entry remains valid</td>
+<td>Repetition must occur inside the window</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Exam note:</strong> Caching saves repeated <em>input</em> processing, not generation. A request with a short answer and a long shared document is the ideal shape; a request with a unique two-line prompt is not.</p>
+</blockquote>
+<h3 id="what-makes-a-prefix-cacheable">What makes a prefix cacheable</h3>
+<p>The leading text must be stable in the strictest sense: the same characters in the same order. A timestamp, a random request identifier, or a rotating greeting placed before the shared material changes the prefix and destroys the hit. Even a harmless-looking change such as reordering two sections produces a different prefix. Model identity matters too, since a cache built for one model cannot serve another.</p>
+<p>Reuse must also be frequent enough and fast enough. If each prefix is seen once an hour and entries expire after minutes, every request pays a write premium and no reads. If the shared text is only a few dozen tokens, the saved amount is too small to justify the marker. The best candidates are long policy documents, code repositories, instruction libraries, and example sets that are edited rarely and reused constantly.</p>
+<p>Variable content belongs after the last breakpoint. Conversation history is the classic problem: if it is placed before the stable material, the prefix changes on every turn. The usual fix is to put stable instructions and reference text first, then append history, then the newest user message. For a growing conversation, a rolling breakpoint can capture the stable part of the history as well.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Putting a request identifier or current date at the start of a system prompt and then wondering why the cache hit rate is zero. Volatile content belongs in the variable tail.</p>
+</blockquote>
+<h3 id="three-breakpoint-layouts">Three breakpoint layouts</h3>
+<p>A single breakpoint is the simplest layout: one stable prefix, then everything variable. It is easy to reason about and sufficient when the whole reusable section changes as a unit. Its weakness is granularity. If a small piece at the start of the prefix changes, the entire cached segment becomes invalid.</p>
+<p>Layered breakpoints split the stable material into nested segments. An outer breakpoint captures a short, very stable header; an inner breakpoint captures the header plus a larger document; a third may add a set of examples. Because later prefixes include earlier ones, a change deep in the document only invalidates the deeper entries, leaving the header cache intact. The cost is more markers to maintain and more cache writes when several layers change at once.</p>
+<p>A rolling layout is used for conversations. Breakpoints are placed at the end of a stable block of recent turns, and as the conversation grows, the marker moves forward. Previously cached history remains reusable while the newest turns stay in the variable tail. The pattern requires care: moving a breakpoint too often causes extra writes, and truncating history changes the prefix and invalidates the entry.</p>
+<table>
+<thead>
+<tr>
+<th>Layout</th>
+<th>Structure</th>
+<th>Use it when</th>
+<th>Main benefit</th>
+<th>Main risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Single</td>
+<td>One stable prefix, then variable input</td>
+<td>One document shared by all calls</td>
+<td>Simplest to implement and debug</td>
+<td>One small edit invalidates everything</td>
+</tr>
+<tr>
+<td>Layered</td>
+<td>Nested breakpoints over progressively longer prefixes</td>
+<td>Several blocks with different change frequencies</td>
+<td>Localizes invalidation to the changed layer</td>
+<td>More markers and more write events</td>
+</tr>
+<tr>
+<td>Rolling</td>
+<td>Breakpoint moves along growing conversation history</td>
+<td>Multi-turn assistants with a stable early segment</td>
+<td>Reuses history across turns</td>
+<td>Frequent movement can cause write churn</td>
+</tr>
+</tbody>
+</table>
+<h3 id="a-request-with-layered-breakpoints">A request with layered breakpoints</h3>
+<p>The example below places two markers in the system content and leaves the user message variable. The first segment holds a short instruction block that almost never changes. The second segment extends the prefix to include a reference manual that changes occasionally. A third layer for examples could be added in the same way if the examples form a long, stable block.</p>
+<pre><code class="language-json">{
+  &quot;model&quot;: &quot;balanced-snapshot-2026-09&quot;,
+  &quot;system&quot;: [
+    {
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;text&quot;: &quot;Answer only from the supplied manual. Cite the clause you rely on.&quot;,
+      &quot;cache_control&quot;: {&quot;type&quot;: &quot;ephemeral&quot;}
+    },
+    {
+      &quot;type&quot;: &quot;text&quot;,
+      &quot;text&quot;: &quot;&lt;&lt;the complete policy manual, byte-identical across calls&gt;&gt;&quot;,
+      &quot;cache_control&quot;: {&quot;type&quot;: &quot;ephemeral&quot;}
+    }
+  ],
+  &quot;messages&quot;: [
+    {
+      &quot;role&quot;: &quot;user&quot;,
+      &quot;content&quot;: &quot;Does the damaged-goods exception change the 30-day return limit?&quot;
+    }
+  ],
+  &quot;max_tokens&quot;: 400
+}
+</code></pre>
+<p>The marker placement is the whole design. If the user message were moved into the system array ahead of the manual, every request would create a new prefix. If a retrieval step inserted passages before the manual, the same thing would happen. Ordering rules should be encoded in one template function so that a future edit cannot quietly break caching.</p>
+<blockquote>
+<p><strong>Try it:</strong> Log the cache-read and cache-write token fields for twenty identical-prefix requests. The first should show a write with no reads; later ones within the entry's lifetime should show reads. If reads never appear, print the exact prefix bytes and compare them across calls.</p>
+</blockquote>
+<h3 id="cache-accounting-and-price">Cache accounting and price</h3>
+<p>Cache usage appears in the response's usage block. A write records tokens stored; a read records tokens served from storage. The first request in a series pays the write premium, and subsequent requests pay the much smaller read rate. Because input is often the largest token bucket on document-heavy workloads, a high hit rate can remove most of the input charges.</p>
+<p>The hit rate is the share of eligible prefix tokens that were read rather than written or fetched fresh. Track it per route and per prefix version, not just globally. A global average can look healthy while one important route has stopped matching, and the reason is usually a template edit, a model change, or a longer gap between calls than the entry's lifetime.</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Usage field</th>
+<th>Relative cost</th>
+<th>When it happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>First request with a new prefix</td>
+<td>Cache write</td>
+<td>Slightly above fresh input</td>
+<td>Entry created or refreshed</td>
+</tr>
+<tr>
+<td>Later matching request</td>
+<td>Cache read</td>
+<td>Far below fresh input</td>
+<td>Entry still within its lifetime</td>
+</tr>
+<tr>
+<td>Changed prefix</td>
+<td>Fresh input</td>
+<td>Base input rate</td>
+<td>Bytes differ at any earlier position</td>
+</tr>
+<tr>
+<td>Expired entry</td>
+<td>Cache write</td>
+<td>Slightly above fresh input</td>
+<td>Gap exceeded the lifetime</td>
+</tr>
+</tbody>
+</table>
+<h3 id="the-message-batches-api">The message batches API</h3>
+<p>A batch endpoint accepts a collection of independent requests in one submission and returns results later. Each item carries a caller-supplied identifier, which lets you map results back to source records even when they arrive out of order. The usual workflow is to build a file of request lines, upload it, start the batch, poll a status endpoint or accept a callback, and then download the output file. Per-item failures are reported alongside successes, so the client must separate the two and retry only what failed.</p>
+<pre><code class="language-json">{&quot;custom_id&quot;:&quot;doc-0001&quot;,&quot;params&quot;:{&quot;model&quot;:&quot;balanced-snapshot-2026-09&quot;,&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;Summarize record 1.&quot;}],&quot;max_tokens&quot;:200}}
+{&quot;custom_id&quot;:&quot;doc-0002&quot;,&quot;params&quot;:{&quot;model&quot;:&quot;balanced-snapshot-2026-09&quot;,&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;Summarize record 2.&quot;}],&quot;max_tokens&quot;:200}}
+</code></pre>
+<p>Batching changes the shape of the system. There is no interactive response to stream, results may take hours, and the job needs durable state so a worker restart does not duplicate work. Stable identifiers and idempotent writes are essential: if a submission is retried after a lost response, the same item must not produce two stored results or two charges. Repeated failures should be routed to a dead-letter path rather than consuming the queue forever.</p>
+<p>The reward is a lower unit price and better throughput, not speed. Processing can be delayed under load, so deadlines must be generous and monitored. A batch job also couples many items into one submission, which means a malformed request line can affect the whole file if validation happens too late. Validate each item before submission.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Running a batch workload inside an HTTP request handler to reuse code. That ties up request threads, hides failures, and loses the durability that asynchronous work needs.</p>
+</blockquote>
+<h3 id="realtime-or-batch">Realtime or batch</h3>
+<p>The decision is usually made by the consumer of the result, not by the size of the job. If a person or another service is waiting on each answer, the work belongs on the realtime path and batch is disqualified. If results are consumed later — a nightly digest, an archive backfill, an evaluation run — batch fits and usually costs less. Ambiguous cases can be split: return a quick acknowledgement for oversized inputs and complete the detailed work asynchronously.</p>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Realtime path</th>
+<th>Batch path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Consumer</td>
+<td>Person or dependent service waiting</td>
+<td>Scheduled job or later review</td>
+</tr>
+<tr>
+<td>Latency target</td>
+<td>Seconds</td>
+<td>Hours, with a monitored deadline</td>
+</tr>
+<tr>
+<td>Pricing</td>
+<td>Standard synchronous rates</td>
+<td>Usually discounted</td>
+</tr>
+<tr>
+<td>Streaming</td>
+<td>Available and often useful</td>
+<td>Not applicable</td>
+</tr>
+<tr>
+<td>Failure handling</td>
+<td>Retry the single call with backoff</td>
+<td>Per-item errors, dead-letter path, idempotency</td>
+</tr>
+<tr>
+<td>Caching</td>
+<td>Useful for a stable shared prefix</td>
+<td>Also useful; the two mechanisms compose</td>
+</tr>
+</tbody>
+</table>
+<p>Caching and batching solve different problems and can be applied together. A nightly job can reuse a cached manual prefix and pay batch rates for the same tokens. An interactive assistant can cache its instructions but cannot use batch. A workload of unique short prompts with no repeated prefix benefits from neither, which is a useful finding: the remedy is a smaller tier or shorter prompts, not a discount that never applies.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a scenario names a deadline, eliminate batch immediately. When it names an unchanged long prefix, caching is the matching lever. These two facts often determine the answer on their own.</p>
+</blockquote>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal.</strong> Measure a cache hit and compare a synchronous route with a batch route for the same work.</p>
+<p><strong>Steps.</strong></p>
+<ol>
+<li>Prepare a stable reference block of at least a few thousand tokens and a template that places it before a variable question.</li>
+<li>Send five requests in quick succession with the same block and different final questions, logging cache-write and cache-read tokens.</li>
+<li>Edit one character in the middle of the block and repeat, noting whether the cached entries are still read.</li>
+<li>Add a second breakpoint so that a short header and the longer block are cached separately, then edit only the longer block.</li>
+<li>Submit ten independent items through a batch endpoint with unique custom identifiers, poll until completion, and inspect both successes and deliberate failures.</li>
+</ol>
+<p><strong>Expected observation.</strong> The first request writes the prefix and later requests read it. A one-character edit breaks the deeper prefix, while the layered header survives if it was cached separately. Batch results arrive together rather than individually, carry the custom identifiers, and include per-item errors that can be retried independently.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A compliance team labels 40,000 archived messages each quarter for a weekly report, so nobody waits for an individual result. Every request begins with the same long rulebook and worked examples, then one unique message. The current design calls a capable tier synchronously and sends the rulebook fresh each time.</p>
+<p>The consumer is a scheduled report, so latency is flexible and batch pricing available. The rulebook and examples are byte-identical across all calls, making them a strong caching candidate. Output is one label, so long generation and reasoning are unnecessary.</p>
+<p>The redesigned request puts the rulebook and examples ahead of the message with layered breakpoints: one after a short scope statement, another after the full reference block. Revising examples then invalidates only the deeper prefix. A small run confirms cache reads on later calls.</p>
+<p>The same items go into a batch file with identifiers tied to archive keys. Results are written idempotently, failures go to a review queue with bounded retries, and a weekly sample is checked for drift. Because this no longer runs inside a request handler, an interrupted worker can restart safely.</p>
+<p>The final design keeps one synchronous route for the rare case where an investigator requests an immediate single review. That route reuses the same cached prefix but pays synchronous rates. Sharing the template function between the two routes guarantees that the prefix stays identical; only the submission mechanism differs.</p>
+<blockquote>
+<p><strong>Exam note:</strong> The reusable reasoning is to name the consumer first. A scheduled consumer unlocks batch; a stable long prefix unlocks caching; the two are independent and often appear together in a correct answer.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Placing timestamps or identifiers at the start of a cached prefix.</li>
+<li>Using a prefix so short that the saving never covers the write premium.</li>
+<li>Assuming cached entries last indefinitely and spacing reuse far beyond the lifetime.</li>
+<li>Expecting batch results immediately or streaming from a batch job.</li>
+<li>Omitting stable custom identifiers and losing the mapping to source records.</li>
+<li>Retrying an entire batch after a lost response without idempotent writes.</li>
+<li>Treating per-item failures as a reason to discard successful results.</li>
+<li>Assuming caching and batching are mutually exclusive.</li>
+<li>Using batch processing on a path where a user is waiting.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>A prompt cache stores a processed leading prefix, not the answer to the request.</li>
+<li>Cacheable prefixes are byte-identical, long enough to matter, reused inside the entry lifetime, and tied to one model.</li>
+<li>Single breakpoints are simplest, layered breakpoints localize invalidation, and rolling breakpoints reuse conversation history.</li>
+<li>Writes cost slightly more than fresh input; reads cost much less, so hit rate is the key metric.</li>
+<li>A batch API takes a file of independent items, returns results later, and reports failures per item.</li>
+<li>Realtime paths are chosen by a waiting consumer; batch paths suit scheduled or deferred work.</li>
+<li>Caching and batching are independent and compose when the workload has both a stable prefix and flexible timing.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>What does a prompt cache store?</li>
+</ol>
+<p>A. The final answer to a previous request</p>
+<p>B. A processed leading prefix that can be reused</p>
+<p>C. A copy of the model's weights on the client</p>
+<p>D. The output of every tool call in the conversation</p>
+<ol start="2">
+<li>Which change is most likely to destroy a cache hit?</li>
+</ol>
+<p>A. Adding a new question after the last breakpoint</p>
+<p>B. Increasing the maximum output limit</p>
+<p>C. Inserting a current timestamp at the start of the system prompt</p>
+<p>D. Running the request during a busy period</p>
+<ol start="3">
+<li>Why use layered breakpoints instead of one?</li>
+</ol>
+<p>A. To allow several models to share one cache entry</p>
+<p>B. To limit invalidation when only a deeper block changes</p>
+<p>C. To remove the need for a cache write</p>
+<p>D. To make batch processing unnecessary</p>
+<ol start="4">
+<li>A conversation grows by two turns each exchange. Which layout is designed to reuse the stable part of the history?</li>
+</ol>
+<p>A. Single breakpoint on the instruction only</p>
+<p>B. Rolling breakpoint moved along the history</p>
+<p>C. No breakpoint, since conversations cannot be cached</p>
+<p>D. A breakpoint on the newest user message</p>
+<ol start="5">
+<li>Which usage field indicates that a stored prefix was reused?</li>
+</ol>
+<p>A. Cache write tokens</p>
+<p>B. Fresh input tokens</p>
+<p>C. Cache read tokens</p>
+<p>D. Output tokens</p>
+<ol start="6">
+<li>Which request is the best candidate for a batch endpoint?</li>
+</ol>
+<p>A. A chat reply shown word by word to a user</p>
+<p>B. A nightly label run over 30,000 archived records</p>
+<p>C. A checkout validation with a two-second ceiling</p>
+<p>D. A live translation with a streaming response</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> The stored object is the processed leading text. A is wrong because answers are not reused. C is wrong because model weights are not cached in the client. D is wrong because tool results are ordinary content, not the cached prefix itself.</p>
+</li>
+<li>
+<p><strong>C.</strong> A timestamp at the front changes the prefix bytes on every call. A is wrong because the variable tail is expected to differ. B is wrong because the output limit is not part of the prefix. D is wrong because timing affects availability, not prefix identity.</p>
+</li>
+<li>
+<p><strong>B.</strong> Nested markers keep earlier segments valid when a deeper one changes. A is wrong because caches are model-specific. C is wrong because a new prefix still needs a write. D is wrong because batching addresses timing, not invalidation.</p>
+</li>
+<li>
+<p><strong>B.</strong> A rolling layout moves the marker forward as history grows. A is wrong because it ignores reusable history. C is wrong because parts of a conversation can be cached. D is wrong because the newest message is variable and should sit after the marker.</p>
+</li>
+<li>
+<p><strong>C.</strong> Cache reads report tokens served from storage. A reports storage events. B reports uncached input. D reports generated tokens.</p>
+</li>
+<li>
+<p><strong>B.</strong> A scheduled job over many independent records has no waiting consumer. A, C, and D all describe interactive paths where batch delays would violate the requirement.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 24.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="23-token-budgets.html">&larr; Previous</a><a href="25-repo-assistant.html">Next: Repository-Aware Coding with an Assistant &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

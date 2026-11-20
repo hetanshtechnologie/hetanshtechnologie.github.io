@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>23. MCP Fundamentals and Primitives</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>23. MCP Fundamentals and Primitives</h1>
+
+<p>Every application that wants to give a model access to external capabilities faces the same plumbing problem: how to describe an action, pass arguments, return results, and discover what is available. Without a shared convention, each application builds a private adapter for each integration. A standard protocol replaces that tangle with one connector shape. This chapter introduces that shape and the three primitives it exposes.</p>
+
+<h2>Why a Standard Protocol Exists</h2>
+
+<p>Consider ten agent applications and twenty useful systems. Without a common protocol, you may need two hundred adapters. With a common protocol, each application implements one client and each system implements one server — thirty pieces of work instead of two hundred. The benefit is not just fewer lines of code; it is a stable boundary that both sides can evolve independently.</p>
+
+<table>
+<thead><tr><th>Concern</th><th>Without a standard</th><th>With a standard</th></tr></thead>
+<tbody>
+<tr><td>Describing a capability</td><td>Application-specific docs</td><td>Structured description in the protocol</td></tr>
+<tr><td>Discovery</td><td>Hardcoded list in each app</td><td>Runtime listing and change notifications</td></tr>
+<tr><td>Transport</td><td>Custom per integration</td><td>Interchangeable transports</td></tr>
+<tr><td>Reuse</td><td>Rebuild for every host</td><td>One server, many clients</td></tr>
+</tbody>
+</table>
+
+<p>The protocol defines messages and lifecycle, not product behaviour. It says how a server advertises a tool and how a client invokes it; it does not say which tool the model should pick or whether the call is wise. That separation is deliberate: the same server can be used by a coding assistant, a support bot, or a batch pipeline, each with different policies.</p>
+
+<div class="note">A protocol is a vocabulary, not an architecture. It makes integrations portable; it does not make them safe, cheap, or well designed. Those remain your responsibilities.</div>
+
+<h2>The Client–Server Model</h2>
+
+<p>In this model, the <strong>host</strong> is the application the user interacts with — an IDE, a chat client, or your own service. The host contains a <strong>client</strong> that manages a connection to a <strong>server</strong>, a separate process or service that exposes capabilities. One host may run several clients, each connected to a different server, and each server may offer tools, resources, and prompts.</p>
+
+<p>The server is deliberately not the model. It does not decide when a capability should be used and usually does not see the conversation. It answers three kinds of questions: what do you offer, may I read this data, and please run this operation with these arguments. The host decides what to include in the model's context and enforces its own policies before a call is made.</p>
+
+<p>A connection follows a predictable sequence. The client establishes a transport, sends an initialization message with its supported version and capabilities, and receives the server's capabilities in return. It then lists the available primitives, maintains them for the session, and invokes them as needed. Either side may send notifications when its offerings change, so a long-running host can refresh its view without reconnecting.</p>
+
+<pre><code>1. transport opened (stdio process or HTTP session)
+2. client -&gt; server: initialize {protocol_version, client_caps}
+3. server -&gt; client: initialize_result {server_caps}
+4. client -&gt; server: tools/list, resources/list, prompts/list
+5. host exposes approved items to the model
+6. client -&gt; server: tools/call {name, arguments}
+7. server -&gt; client: result {content, isError, ...}</code></pre>
+
+<p>Servers can run locally as child processes — useful for filesystem or repository access — or remotely over HTTP — useful for shared enterprise services. The primitive model is the same in both cases, which is why the same server code can often be reused across deployments with only a transport change.</p>
+
+<h2>Tools, Resources, and Prompts</h2>
+
+<p>Three primitives cover most integration needs, and the distinction between them is about <em>who decides</em> to use them.</p>
+
+<ul>
+  <li><strong>Tools</strong> are model-controlled operations. The model proposes a call with arguments; the host may approve it; the server executes it. Use tools for actions and computations: querying an API, creating a record, running a calculation.</li>
+  <li><strong>Resources</strong> are application-controlled data. They have identifiers (typically URIs) and are read into context by the host or user, often because a person attached them or a rule selected them. Use resources for documents, schemas, logs, and reference data that should be inspectable rather than executed.</li>
+  <li><strong>Prompts</strong> are user-controlled templates. A person or host selects a prompt by name, supplies parameters, and receives a ready-made message or sequence of messages. Use prompts for repeatable workflows such as "review this pull request" or "summarise this meeting".</li>
+</ul>
+
+<table>
+<thead><tr><th>Primitive</th><th>Initiated by</th><th>Typical effect</th><th>Example</th></tr></thead>
+<tbody>
+<tr><td>Tool</td><td>Model, via host</td><td>Side effect or computed result</td><td><code>create_ticket</code></td></tr>
+<tr><td>Resource</td><td>Host or user</td><td>Read-only context injection</td><td><code>docs://handbook/security</code></td></tr>
+<tr><td>Prompt</td><td>User or host</td><td>Reusable instruction template</td><td><code>weekly_report</code></td></tr>
+</tbody>
+</table>
+
+<p>Choosing the right primitive has practical consequences. Exposing a static policy document as a tool invites the model to fetch it at arbitrary moments; exposing it as a resource lets the host include it when relevant. Putting a write operation in a resource is impossible by design — resources are read-oriented. If you find yourself describing a resource as "run this with parameters", you probably want a tool.</p>
+
+<h2>Discovery and Capability Exchange</h2>
+
+<p>Discovery is what makes a connection useful without hardcoding. During initialization, each side declares what it supports — for example, whether the server offers prompts or sends list-change notifications. The client then asks for lists of tools, resources, and prompts. Each item carries a name, a description, and enough metadata for the host to decide whether to expose it.</p>
+
+<p>Capability negotiation protects both sides. A client that does not understand a feature can still interoperate with a server that offers it, because the feature is declared rather than assumed. Version negotiation serves the same purpose across protocol revisions. Well-behaved clients cache discovery results and refresh them on notification, avoiding a full list call before every action.</p>
+
+<pre><code>server = Server("catalog", version="1.0")
+return {
+  "capabilities": {
+    "tools": {"listChanged": True},
+    "resources": {"subscribe": False},
+    "prompts": {"listChanged": False}
+  },
+  "instructions": "Read catalog://schema before writing records."
+}</code></pre>
+
+<p>Descriptions produced during discovery are part of the routing surface, exactly as in any other tool system. A server with thirty poorly described tools will be misrouted just as surely as an in-process catalog with the same problem. Keep descriptions short, specific, and stable, and change them with the same care you would change an API.</p>
+
+<div class="tip">Use the server's instruction field for facts the client cannot infer — required setup steps, authority limits, or which resource defines the data schema. Do not use it to tell the model which tool to prefer; that is the host's policy.</div>
+
+<h2>What the Protocol Does Not Decide</h2>
+
+<p>It is easier to design systems when you know which questions the standard will not answer. It does not decide authorization: the host must determine whether a user may invoke a tool, and the server must still validate its own authority. It does not decide trust: a third-party server is untrusted input, and its descriptions and results should be treated as data, not instructions.</p>
+
+<p>It does not decide model behaviour — tool selection, retry policy, and context budgeting live in the host. It does not define a universal error taxonomy beyond basic success or failure signalling, so each tool should carry its own structured error payload. It does not prescribe deployment, observability, or cost controls. Finally, it does not guarantee that a capability is safe: a tool can be perfectly described and still be a bad idea to expose.</p>
+
+<h2>Thinking in Primitives</h2>
+
+<p>When mapping a requirement, ask who should initiate. If the model should decide to act, build a tool. If the host or user should decide to include information, publish a resource. If a person should start a repeatable workflow, define a prompt. A read-only database query can be a tool when the model decides what to search for, or a resource when the host always attaches the same report. The same underlying operation can appear in both forms — the difference is control, not capability.</p>
+
+<div class="exercise"><strong>Exercise 23.1 — Classify the integration.</strong> You must connect four capabilities: a live weather lookup, the company style guide, a "draft release notes" workflow, and a list of open incidents that the host attaches to every on-call session. For each, choose tool, resource, or prompt, name who initiates it, and explain why the other two primitives are a worse fit. Identify one capability that could reasonably be modelled two ways.</div>
+
+<div class="exercise"><strong>Exercise 23.2 — Trace a discovery cycle.</strong> Write the sequence of messages from transport open to first tool call for a client connecting to a server that exposes two tools and one resource. Include version negotiation, list calls, the point at which the host applies policy, and what happens if the server later announces that its tool list changed. Explain why caching the list is both useful and risky.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+  <li>How does a shared protocol reduce the number of adapters needed between applications and integrations?</li>
+  <li>Describe the roles of host, client, and server, and state which one decides when a tool is used.</li>
+  <li>What distinguishes tools from resources from prompts in terms of who initiates them?</li>
+  <li>Why do capability negotiation and version exchange matter during discovery?</li>
+  <li>Name two decisions the protocol deliberately leaves to the application.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+  <li>A standard protocol turns an N-by-M adapter problem into one client and one server per side.</li>
+  <li>The host contains the client; the server exposes capabilities and does not see or control the conversation.</li>
+  <li>Tools are model-initiated actions, resources are host-initiated data, and prompts are user-initiated templates.</li>
+  <li>Initialization exchanges versions and capabilities, followed by listing and refreshable discovery.</li>
+  <li>Authorization, trust, selection, error policy, and deployment remain application responsibilities.</li>
+</ul>
+
+<nav><a href="22-tool-scoping.html">&larr; Previous</a><span></span><a href="24-mcp-server-python.html">Next: Building an MCP Server in Python &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

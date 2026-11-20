@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3. Tools as the Basis of Agency</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>3. Tools as the Basis of Agency</h1>
+
+<p>A language model on its own transforms text into text. It can reason, summarise, and propose, but it cannot inspect a live database, send a message, or change a file. Agency begins at the moment you give it something it can call. Tools are not an accessory to an agent; they are the mechanism that turns deliberation into effect. The design of those tools — their names, descriptions, schemas, and permissions — determines what the system can do far more than the wording of its prompt.</p>
+
+<h2>Why access to actions creates agency</h2>
+
+<p>Consider two systems with an identical model and system prompt. The first can only answer from its weights and the current conversation. The second can call <code>get_order_status</code>, <code>search_knowledge_base</code>, and <code>issue_refund</code>. The first is an advisor; the second can pursue a goal in the world. Nothing about the model changed. The difference is that the second system has an action space, and an action space plus a loop is what we mean by an agent.</p>
+
+<p>This is why tool design precedes loop design in this book. A loop with no actions merely rewrites its own thoughts; a loop with poorly specified actions makes confident mistakes at machine speed. Before you decide how many iterations to allow, you must know what an iteration can <em>do</em>. Tool access defines the boundary of possible behaviour, so it is the first safety decision you make.</p>
+
+<p>The practical consequence is that capability should be added incrementally. Start with read-only tools that let the system observe the environment. Verify that its reasoning is sound with those tools. Only then add narrow write tools, one at a time, with explicit authority checks. A team that begins with full write access learns about failures from production incidents; a team that begins with reads learns from traces.</p>
+
+<div class="note"><strong>Terminology used here.</strong> A "tool" is a callable operation exposed to the model with a declared interface. A "tool call" is one invocation of it. The "action space" is the set of tools available in a given step. These terms are used consistently throughout the book regardless of the transport or framework involved.</div>
+
+<h2>Anatomy of a tool contract</h2>
+
+<p>A tool contract has four parts: a name, a description, an input schema, and a result shape. The model sees all four when it decides whether and how to call the tool. The name should be short, verb-first, and unique within the catalog. The description states what the tool does and — importantly — when it should and should not be used. The schema declares parameter types, required fields, enums, and constraints. The result shape tells the model what it will get back, including how failures appear.</p>
+
+<pre><code>{
+  "name": "search_orders",
+  "description": "Find orders by customer email or order id. Use for lookup only. Do not use to modify or cancel orders.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "customer_email": { "type": "string", "format": "email" },
+      "order_id": { "type": "string", "pattern": "^ORD-[0-9]{6}$" },
+      "status": { "type": "string", "enum": ["pending", "shipped", "delivered", "returned"] },
+      "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 }
+    },
+    "required": ["customer_email"],
+    "additionalProperties": false
+  },
+  "returns": { "orders": ["Order"], "truncated": "boolean" }
+}</code></pre>
+
+<p>Notice the details that make the contract usable. The pattern on <code>order_id</code> prevents a malformed identifier from reaching the service. The enum on <code>status</code> turns a free-text guess into a validated choice. The bounded <code>limit</code> stops a runaway query. Setting <code>additionalProperties</code> to false rejects invented parameters. Each of these is small on its own; together they remove a large class of tool-call errors before any business logic runs.</p>
+
+<p>The result shape matters just as much. If a failed lookup returns an empty string, the model cannot distinguish "no orders" from "service unavailable." If it returns a structured object such as <code>{"status":"error","retryable":true,"reason":"timeout"}</code>, the loop can decide whether to retry, ask the user, or stop. Error contracts are part of the interface, not an afterthought.</p>
+
+<h2>Descriptions are routing instructions</h2>
+
+<p>Models select tools largely from the text they read. A description that says "search" competes with every other search tool; a description that says "look up historical invoice documents in the finance archive, excluding draft invoices" is far easier to route correctly. This is not prompt magic — it is disambiguation. If two tools overlap in purpose, the model must guess, and guessing produces wrong calls.</p>
+
+<p>A useful pattern is to write each description with three clauses: the operation, the appropriate situation, and an explicit exclusion. Compare "manages users" with "creates a new internal user account. Use only after identity verification is complete. Never use to change permissions — call <code>update_role</code> instead." The second version gives the model a decision rule and removes a dangerous overlap.</p>
+
+<div class="exercise"><strong>Exercise 3.1 — Repair a tool description.</strong> Rewrite this description so it routes reliably: "handles customers." The catalog also contains <code>update_customer_address</code>, <code>delete_customer</code>, and <code>get_customer_history</code>. Your rewrite must state the operation, name the situation in which it applies, and exclude at least two overlapping tools. Then list two malformed calls your improved schema would reject.</div>
+
+<h2>Read actions versus write actions</h2>
+
+<p>The most consequential property of a tool is whether it changes state. Read actions — searches, lookups, computations — are generally safe to repeat and safe to delegate. Write actions — sending email, changing records, spending money, deleting files — are not. They may be irreversible, externally visible, and subject to policy. Treating both categories the same is a common and expensive mistake.</p>
+
+<table>
+<tr><th>Property</th><th>Read tool</th><th>Write tool</th></tr>
+<tr><td>Repeatability</td><td>Idempotent in practice</td><td>May duplicate effects</td></tr>
+<tr><td>Reversibility</td><td>Not applicable</td><td>Often requires manual compensation</td></tr>
+<tr><td>Retry policy</td><td>Retry freely with backoff</td><td>Retry only with an idempotency key</td></tr>
+<tr><td>Approval need</td><td>Rare</td><td>Required above a threshold</td></tr>
+<tr><td>Default scope</td><td>Broad, filtered by query</td><td>Narrow, filtered by resource</td></tr>
+</table>
+
+<p>Idempotency is the key engineering lever on the write path. If a refund tool accepts a client-generated key and the server records it, a retried call with the same key produces one refund rather than three. Without that key, a timeout after the server committed the change leaves the model unsure whether to retry — and a retry can double the effect. Design write tools so the model can supply a stable key derived from the task, such as <code>refund-ORD-104827-1</code>.</p>
+
+<div class="warn"><strong>Failure mode:</strong> a write tool that reports a timeout even after the change was applied. The model sees failure and retries; the system performs the action twice. Solve this in the tool implementation with an idempotency key and a truthful result, not by instructing the model "be careful not to call twice."</div>
+
+<h2>Authority boundaries and least privilege</h2>
+
+<p>Authority boundaries live outside the model. The model can request an action; a policy layer decides whether the request is permitted. This separation matters because a prompt can be manipulated by untrusted content — a document the system reads might contain instructions that try to redirect it. If the tool layer enforces scope, the worst such manipulation can achieve is a denied call.</p>
+
+<p>Make boundaries concrete. A support agent may read any ticket but may issue refunds only up to 50 currency units, only for orders in its assigned region, and only when a verification flag is present. Encode these as parameters checked by the tool, not as sentences in the prompt. A check such as <code>amount &lt;= 50 &amp;&amp; region == agent.region &amp;&amp; verified == true</code> is deterministic and auditable; "only refund small amounts when appropriate" is neither.</p>
+
+<ol>
+<li>Define the resource a tool may touch — a table, a directory, a set of endpoints.</li>
+<li>Define the operation allowed on it — read, create, update, delete.</li>
+<li>Define quantitative limits — amount, row count, file size, call rate.</li>
+<li>Define who grants exceptions and how the grant is recorded.</li>
+<li>Log every denied call with the reason and the originating task identifier.</li>
+</ol>
+
+<p>A useful pattern is separate credentials for separate tools. The read tool uses a token with select-only permissions; the write tool uses a different token with narrowly scoped update rights. If one credential leaks or one tool is exploited, the blast radius is contained. This is defence in depth applied to agency: even a confused or coerced model cannot exceed the operating-system-level grant.</p>
+
+<div class="exercise"><strong>Exercise 3.2 — Draw an authority boundary.</strong> A travel assistant can search flights, read a user's itinerary, book a ticket, and cancel a booking. Write a table with one row per tool listing: resource, permitted operation, quantitative limit, and whether human approval is required. Then describe one way untrusted content in a travel review could try to abuse a tool and which boundary stops it.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why is tool design considered a prerequisite for loop design?</li>
+<li>Name the four parts of a tool contract and state the job of each.</li>
+<li>How should a search tool's description reduce confusion with a similar tool in the same catalog?</li>
+<li>Why is an idempotency key necessary on write tools but usually unnecessary on read tools?</li>
+<li>Where should authority limits be enforced, and why not in the system prompt?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Tool access is what turns a text transformer into an agent; the action space defines possible behaviour.</li>
+<li>A tool contract combines a name, a description, an input schema, and a result shape that includes failure information.</li>
+<li>Descriptions act as routing instructions; disambiguate by stating operation, situation, and exclusion.</li>
+<li>Read tools can be retried freely; write tools need idempotency keys, narrow scope, and often approval.</li>
+<li>Authority boundaries belong in a policy layer with separate credentials, not in natural-language instructions.</li>
+<li>Add capability incrementally: reads first, then narrow writes, verifying with traces at each stage.</li>
+</ul>
+
+<nav><a href="2-three-patterns.html">&larr; Chatbots, Workflows, and Agents</a><span></span><a href="4-perceive-reason-act.html">Next: The Observe–Decide–Act Loop &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

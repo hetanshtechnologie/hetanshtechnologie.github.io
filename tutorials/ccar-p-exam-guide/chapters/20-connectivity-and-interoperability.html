@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 20 — Connectivity and Interoperability Patterns</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 20 — Connectivity and Interoperability Patterns</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Explain how AI components connect with tools, data sources, services, and other agents through defined interfaces.</li>
+    <li>Compare interoperability patterns and protocols conceptually, focusing on contracts, discovery, and reliability.</li>
+    <li>Design request/response and event-oriented interactions that are observable, secure, and resilient.</li>
+    <li>Identify common integration failures caused by schema mismatch, versioning gaps, and unclear ownership.</li>
+    <li>Apply governance and lifecycle practices to evolving connected systems.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Connectivity as the fabric of AI-enabled systems</h3>
+  <p>Modern AI solutions rarely operate as isolated model calls. They connect to retrieval stores, business applications, workflow engines, identity systems, observability platforms, and sometimes other specialized AI components. Connectivity is the fabric that allows these parts to exchange information and coordinate actions. Interoperability is the property that makes those exchanges reliable across components built by different teams, using different technologies, or evolving on different schedules. Without clear contracts and operational discipline, connectivity becomes a source of brittleness rather than capability.</p>
+  <p>Architectural thinking shifts focus from “can we connect?” to “can we connect safely, predictably, and maintainably?” A connection that works in a prototype may fail under load, schema change, partial outage, or security review. Professional designs define how components discover capabilities, authenticate, exchange structured data, handle errors, and evolve over time. These concerns apply whether integrations use direct service calls, tool interfaces, messaging, or standardized interoperability protocols.</p>
+  <p>Because AI components can produce variable outputs, interoperability boundaries are especially important. Structured contracts, validation, and explicit state transitions reduce the risk that ambiguous model-generated content propagates into downstream systems. Connectivity design therefore complements instruction and guardrail design: the system should not rely on probabilistic behavior where deterministic contracts are required.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Favor explicit contracts, schema validation, and versioning for component interactions. Interoperability problems are often contract and lifecycle problems, not just network problems.</p>
+  </div>
+
+  <h3>Contracts, schemas, and capability discovery</h3>
+  <p>An interoperability contract specifies what a component offers and how others may use it. Contracts include input and output schemas, error semantics, authentication requirements, rate limits, and behavioral expectations such as idempotency or ordering. Clear contracts allow teams to integrate independently and detect incompatibilities early. Schemas—whether for tool arguments, API payloads, or messages—make expectations machine-checkable, reducing reliance on informal assumptions.</p>
+  <p><strong>Capability discovery</strong> is how a client learns what operations are available and how to invoke them. In some environments, capabilities are statically configured; in others, components advertise tools, resources, or endpoints dynamically. Discovery improves flexibility but requires trust and governance: clients must ensure that discovered capabilities come from authorized sources and conform to expected policies. Dynamic discovery without validation can expose systems to confusing or unsafe interfaces.</p>
+  <p>Versioning is essential because contracts evolve. Backward-compatible changes (such as adding optional fields) are easier to absorb than breaking changes (such as renaming required fields or altering semantics). Explicit version identifiers, deprecation periods, and compatibility testing help prevent silent failures. When multiple consumers depend on a capability, change management becomes a coordination task as much as a technical one.</p>
+
+  <table>
+    <tr>
+      <th>Contract element</th>
+      <th>Purpose</th>
+      <th>Risk if missing</th>
+      <th>Example control</th>
+    </tr>
+    <tr>
+      <td>Input/output schema</td>
+      <td>Define valid data shape and meaning</td>
+      <td>Parsing errors, misinterpretation</td>
+      <td>Schema validation at boundaries</td>
+    </tr>
+    <tr>
+      <td>Error semantics</td>
+      <td>Explain failure types and retryability</td>
+      <td>Unsafe retries or hidden failures</td>
+      <td>Typed errors, retry guidance</td>
+    </tr>
+    <tr>
+      <td>Auth requirements</td>
+      <td>Specify identity and permissions</td>
+      <td>Unauthorized access or brittle auth</td>
+      <td>Standardized tokens/scopes</td>
+    </tr>
+    <tr>
+      <td>Versioning policy</td>
+      <td>Manage change over time</td>
+      <td>Breaking consumer integrations</td>
+      <td>Versioned endpoints, deprecation windows</td>
+    </tr>
+    <tr>
+      <td>Operational limits</td>
+      <td>Set rate, size, timeout expectations</td>
+      <td>Overload and unpredictable latency</td>
+      <td>Quotas, backpressure, timeouts</td>
+    </tr>
+  </table>
+
+  <h3>Interaction patterns: synchronous, asynchronous, and event-driven</h3>
+  <p>Connectivity patterns shape responsiveness and resilience. <strong>Synchronous request/response</strong> interactions are straightforward: a caller waits for a result. They fit tasks that need immediate answers and bounded execution time, but they couple caller experience to downstream latency and availability. <strong>Asynchronous</strong> patterns decouple submission from completion, allowing long-running work, retries, and better load handling at the cost of more complex state tracking. <strong>Event-driven</strong> interactions propagate notifications or state changes to interested consumers, supporting loose coupling and reactive workflows but requiring careful design for ordering, duplication, and eventual consistency.</p>
+  <p>Choosing a pattern depends on user expectations and operational constraints. If a user needs an answer within seconds, synchronous calls with strict timeouts and fallbacks may be necessary. If processing can take minutes, asynchronous job tracking with status updates is more appropriate. For cross-system coordination where multiple consumers react to changes, events can reduce point-to-point dependencies. Many systems combine patterns: synchronous queries for retrieval, asynchronous jobs for heavy processing, and events for audit or downstream updates.</p>
+  <p>Reliability mechanisms must match the pattern. Timeouts, retries with backoff, circuit breakers, and idempotency protect against transient failures and overload. Retries are only safe when operations are idempotent or protected by deduplication keys; otherwise, repeated attempts can create duplicate records or unintended actions. Clear status models (pending, running, succeeded, failed, canceled) help both users and systems reason about progress.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Retrying non-idempotent side-effecting operations without safeguards. Transient errors can turn into duplicated actions or inconsistent state.</p>
+  </div>
+
+  <h3>Interoperability in multi-component and agentic workflows</h3>
+  <p>When multiple AI components or specialized services collaborate, interoperability includes not only data exchange but also coordination semantics. Components may pass tasks, context summaries, evidence references, or proposed actions. Clear handoff contracts—what each component expects, what it returns, and how confidence or uncertainty is expressed—reduce misinterpretation. Shared identifiers for requests, sessions, and tasks enable correlation across components, which is vital for tracing and debugging.</p>
+  <p>Standardized interaction approaches can simplify integration by providing common ways to expose tools, resources, or messages. Regardless of the specific mechanism, the architectural principles remain consistent: authenticate peers, validate inputs and outputs, constrain capabilities, and observe behavior. Interoperability should not imply implicit trust; each boundary is an opportunity to enforce policy and detect anomalies.</p>
+  <p>Loose coupling is valuable but not absolute. Components must agree on critical semantics such as authorization context, data classification, and error meaning. Overly implicit conventions—“this field usually means…”—create fragile systems that break as implementations evolve. Documented contracts and conformance tests help maintain alignment across independently developed components.</p>
+
+  <table>
+    <tr>
+      <th>Interoperability concern</th>
+      <th>Design question</th>
+      <th>Practical practice</th>
+    </tr>
+    <tr>
+      <td>Handoff clarity</td>
+      <td>What does each component need and produce?</td>
+      <td>Structured payloads with required fields</td>
+    </tr>
+    <tr>
+      <td>Correlation</td>
+      <td>Can we trace one request across components?</td>
+      <td>Propagate request/session identifiers</td>
+    </tr>
+    <tr>
+      <td>Trust boundary</td>
+      <td>Which inputs are untrusted or policy-limited?</td>
+      <td>Validate and label data at each boundary</td>
+    </tr>
+    <tr>
+      <td>Evolution</td>
+      <td>How will changes be introduced safely?</td>
+      <td>Versioning, compatibility tests, deprecation plans</td>
+    </tr>
+    <tr>
+      <td>Failure handling</td>
+      <td>What happens on timeout or partial success?</td>
+      <td>Explicit status, compensating actions, fallbacks</td>
+    </tr>
+  </table>
+
+  <h3>Operational resilience and lifecycle management</h3>
+  <p>Connected systems must be designed for partial failure. Dependencies may be slow, unavailable, or return unexpected data. Resilience patterns—timeouts, bounded retries, fallbacks, bulkheads, and graceful degradation—limit blast radius and preserve user trust. For AI workflows, degradation strategies might include answering with reduced scope, using cached non-transactional knowledge where appropriate, or escalating to human handling. The chosen strategy should reflect risk: never degrade in ways that fabricate authority or bypass safety controls.</p>
+  <p>Lifecycle management keeps integrations healthy over time. Monitor latency, error rates, schema validation failures, and contract drift. Maintain inventories of dependencies, owners, and versions. When providers deprecate features or change behavior, planned migration avoids emergency fixes. Security reviews should revisit authentication methods, scopes, and data exposure as capabilities expand. Treating connectivity as a living system concern reduces surprises as scale and complexity grow.</p>
+
+  <pre><code class="language-json">{
+  "integration_contract": {
+    "name": "case_lookup",
+    "version": "v2",
+    "auth": {"type": "delegated", "scopes": ["cases.read"]},
+    "request_schema": {"case_id": "string", "fields": ["status", "updated_at"]},
+    "response_schema": {"status": "string", "updated_at": "string"},
+    "errors": ["unauthorized", "not_found", "timeout", "rate_limited"],
+    "timeouts_ms": 2000,
+    "retry_policy": {"retryable_errors": ["timeout", "rate_limited"], "max_attempts": 2},
+    "idempotent": true
+  }
+}</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Map one end-to-end request across all connected components and note for each hop: contract, auth, timeout, failure behavior, and correlation identifier.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A team is building an assistant that coordinates across three capabilities: searching a knowledge index, retrieving customer case data from a business system, and creating follow-up tasks in a workflow tool. During pilot testing, users experience intermittent slow responses, occasional duplicate tasks, and confusing errors when the workflow tool changes a field name. Each integration was implemented independently with minimal shared conventions.</p>
+
+  <h3>Analysis</h3>
+  <p>The issues reflect interoperability and resilience gaps. Slow responses suggest missing or inconsistent timeout and fallback strategies, causing synchronous waits on downstream dependencies. Duplicate tasks indicate retries applied to a non-idempotent create operation without deduplication safeguards. Field-name breakage points to an unversioned or poorly managed contract and lack of schema validation at the boundary. The absence of shared conventions makes diagnosis harder because requests cannot be correlated cleanly across components.</p>
+  <p>Addressing these problems requires contract discipline and pattern-appropriate controls. Read operations can be retried cautiously with timeouts; create operations need idempotency keys or pre-checks. The workflow integration should have an explicit schema and versioning plan, with validation that fails clearly rather than propagating malformed data. A shared request identifier should flow through all hops to support tracing and incident analysis.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect defines integration contracts for each capability, including schemas, error types, timeout budgets, and auth scopes. The case lookup remains synchronous with a strict timeout and a fallback response that reports unavailable status without guessing. Task creation is changed to include an idempotency key derived from the request and task intent, preventing duplicates on retry. Schema validation is enforced at integration boundaries, and a versioned adapter isolates the assistant from upstream field changes until migration is complete.</p>
+  <p>End-to-end correlation identifiers are propagated to logs and traces, enabling the team to pinpoint latency sources and failure points. Monitoring tracks timeout rates, validation errors, and duplicate-prevention events. These changes improve reliability and maintainability by making connectivity explicit, resilient, and evolvable rather than ad hoc.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Integrating components without explicit schemas, error semantics, or versioning agreements.</li>
+    <li>Using synchronous calls for long or unreliable operations without timeouts and fallbacks.</li>
+    <li>Retrying side-effecting actions without idempotency or deduplication controls.</li>
+    <li>Assuming discovered or external capabilities are trustworthy without validation and policy checks.</li>
+    <li>Lacking correlation identifiers, which makes cross-component failures difficult to diagnose.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Connectivity and interoperability depend on explicit contracts, schemas, authentication, and lifecycle management.</li>
+    <li>Synchronous, asynchronous, and event-driven patterns offer different trade-offs in coupling, latency, and resilience.</li>
+    <li>Capability discovery and multi-component handoffs require validation, trust boundaries, and clear semantics.</li>
+    <li>Resilience controls such as timeouts, safe retries, idempotency, and fallbacks prevent local failures from cascading.</li>
+    <li>Versioning, monitoring, and correlation make evolving integrations observable and maintainable.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>What is the primary purpose of an interoperability contract?</p>
+      <p>A. To eliminate the need for authentication<br>
+      B. To define how components exchange data and behave, including schemas and error semantics<br>
+      C. To guarantee zero latency<br>
+      D. To replace monitoring</p>
+    </li>
+    <li>
+      <p>Why are idempotency controls important for task creation integrations?</p>
+      <p>A. They make responses more creative<br>
+      B. They prevent duplicate side effects when retries occur<br>
+      C. They remove the need for validation<br>
+      D. They only apply to read operations</p>
+    </li>
+    <li>
+      <p>Which pattern is most suitable for long-running processing when users do not need an immediate result?</p>
+      <p>A. Synchronous blocking call with no timeout<br>
+      B. Asynchronous job submission with status tracking<br>
+      C. Ignoring completion status<br>
+      D. Unlimited retries in the user interface thread</p>
+    </li>
+    <li>
+      <p>What risk arises from unversioned contract changes?</p>
+      <p>A. Automatic compatibility across all consumers<br>
+      B. Silent or sudden breakage when fields or semantics change<br>
+      C. Improved auditability by default<br>
+      D. Reduced need for testing</p>
+    </li>
+    <li>
+      <p>How do correlation identifiers help in connected AI systems?</p>
+      <p>A. They authorize tool access<br>
+      B. They allow requests to be traced across components for diagnosis<br>
+      C. They replace error handling<br>
+      D. They increase retrieval relevance</p>
+    </li>
+    <li>
+      <p>What is a safe degradation strategy when a non-critical dependency times out?</p>
+      <p>A. Fabricate a successful response<br>
+      B. Bypass all security checks to continue<br>
+      C. Return reduced-scope output or state unavailability according to defined policy<br>
+      D. Retry indefinitely without limits</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Contracts specify schemas, semantics, and expectations for reliable integration. A, C, and D are not guaranteed by contracts.</li>
+    <li><strong>Correct: B.</strong> Idempotency or deduplication prevents repeated side effects on retry. A and C are incorrect, and D reverses applicability.</li>
+    <li><strong>Correct: B.</strong> Asynchronous patterns fit long-running work and provide explicit status. A, C, and D harm reliability or user experience.</li>
+    <li><strong>Correct: B.</strong> Unmanaged changes can break consumers unexpectedly. A, C, and D are incorrect.</li>
+    <li><strong>Correct: B.</strong> Correlation identifiers enable end-to-end tracing. A, C, and D describe different concerns.</li>
+    <li><strong>Correct: C.</strong> Safe degradation communicates limits without inventing results or bypassing controls. A, B, and D introduce serious risks.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 20.</em></p>
+
+  <nav>
+    <a href="19-integration-path-decisions.html">&larr; Previous</a>
+    <a href="21-tracing-and-correlation.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

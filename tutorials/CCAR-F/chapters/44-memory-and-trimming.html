@@ -1,0 +1,104 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>44. Memory, Facts, and Trim Strategies</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>44. Memory, Facts, and Trim Strategies</h1>
+<p>When context runs short, the tempting fix is "summarise the conversation." Summaries are convenient and lossy in exactly the ways that hurt: they keep the gist and drop the identifier. This chapter explains why that happens, how to separate durable facts from disposable narrative, and how to choose among the three practical trim operations — filter, summarise, and reference.</p>
+
+<h2>Why summaries lose facts</h2>
+<p>A summary is a generative compression, not a lossless encoding. The model decides what is salient, and salience correlates with narrative importance rather than with machine relevance. In a long ticket, the fact that the customer was polite across six messages feels salient; the order number buried in message two does not. The summary keeps the tone and loses the identifier.</p>
+<p>Three specific failure patterns recur:</p>
+<ul>
+<li><strong>Identifier drift.</strong> Codes, amounts, dates, and proper names are the first details to be approximated or omitted. <code>INV-2026-00417</code> becomes "the April invoice."</li>
+<li><strong>Confidence flattening.</strong> A user-stated fact and a model guess both become "the customer said...", erasing their different reliability.</li>
+<li><strong>Decision amnesia.</strong> The summary describes what was discussed but not what was decided, so later turns reopen settled questions.</li>
+</ul>
+<p>The deeper issue is that a summary removes the evidence needed to verify itself. Once the raw turns are gone, no downstream component can check whether the summary is accurate. Treat summaries as a convenience for orientation, never as the sole record of truth.</p>
+<div class="warn">Never let a summary be the only place a critical value exists. If a value will be used by a tool, a validator, or an audit log, store it as a structured field before any trimming occurs.</div>
+
+<h2>Persistent fact blocks</h2>
+<p>The antidote is to extract facts into a dedicated, structured block that is preserved verbatim across trims. A fact block is a list of atomic records, each with a key, a value, a source, a timestamp, and a confidence. Atomic means one fact per record — do not bundle a name, date, and amount into a single sentence.</p>
+<p>At the start of each new context assembly, inject the fact block in full, then append the recent transcript. Because the block is small and stable, it survives summarisation of the surrounding conversation. A typical block for a support session might hold eight to fifteen records and cost only a few hundred tokens.</p>
+<pre><code>{
+  "facts": [
+    {"key": "order_id", "value": "ORD-77150", "source": "user",
+     "turn": 2, "confidence": 1.0, "pinned": true},
+    {"key": "delivery_date", "value": "2026-11-24", "source": "tool:orders",
+     "turn": 5, "confidence": 0.99, "pinned": true},
+    {"key": "refund_eligible", "value": "true", "source": "tool:policy",
+     "turn": 6, "confidence": 0.9, "pinned": false},
+    {"key": "preferred_channel", "value": "email", "source": "inferred",
+     "turn": 4, "confidence": 0.55, "pinned": false}
+  ],
+  "guard": "confidence &gt; 0.5 &amp;&amp; turn &lt; 20"
+}</code></pre>
+<p>The <code>pinned</code> flag distinguishes facts that must never be trimmed from those that may be dropped under pressure. In the example, an identifier and a tool-confirmed date are pinned; an inferred channel preference is not. When a conflict arises, higher confidence and more recent turn win, but a pinned user-stated value overrides an inferred one regardless of recency.</p>
+
+<h2>A memory tool</h2>
+<p>Structured facts work best when the model can read and write them explicitly. Give the assistant a small memory tool with four operations — <code>set</code>, <code>get</code>, <code>delete</code>, and <code>list</code> — and require every persistent value to pass through it. The tool enforces the schema, so the model cannot write a free-form note where a typed value belongs.</p>
+<table>
+<thead><tr><th>Operation</th><th>Arguments</th><th>Guard</th><th>Typical failure</th></tr></thead>
+<tbody>
+<tr><td>set</td><td>key, value, source, confidence</td><td>key in allowlist; value type checked</td><td>Model writes a guess as user-stated</td></tr>
+<tr><td>get</td><td>key</td><td>returns version and timestamp</td><td>Stale read after a correction</td></tr>
+<tr><td>delete</td><td>key, reason</td><td>pinned keys require approval</td><td>Orphaned dependent facts</td></tr>
+<tr><td>list</td><td>optional prefix</td><td>returns at most 20 records</td><td>Bloat if used without a limit</td></tr>
+</tbody>
+</table>
+<p>The <code>list</code> limit matters more than it appears. An unrestricted list call can dump the entire memory into the context and undo your budgeting work. Return the highest-value records first, ordered by pinned status and confidence, and cap the response. Likewise, every <code>set</code> should invalidate dependent facts: changing a delivery date invalidates a previously computed "days until delivery."</p>
+<div class="tip">Log memory writes as events, not overwrites. Keeping the last five values of a key lets you detect oscillation — a user correcting the same field three times often signals a misunderstanding, not three updates.</div>
+
+<h2>Tool-output bloat</h2>
+<p>Retrieval and tool calls are the main source of context growth. A single search tool that returns twenty full documents can add 40,000 tokens, most of which will never influence the answer. Worse, bulky outputs bury the few lines that do matter.</p>
+<p>Fix this at the tool boundary, not in the prompt. Design tools to return compact, structured results with three zones: a status line, a small set of top results with identifiers, and an optional pointer to full content. For example, a search tool might return the five best passages at 300 tokens each plus a result-set id, rather than twenty documents at 2,000 tokens each. If the model needs more, it calls a <code>fetch(result_id, offset)</code> tool deliberately.</p>
+<ol>
+<li>Return the minimum fields needed for the current decision.</li>
+<li>Include stable identifiers so content can be re-fetched or cited later.</li>
+<li>Truncate long fields at the tool layer and report the original length.</li>
+<li>Escalate the truncation to the user only if the missing part could change the answer.</li>
+</ol>
+<p>This pattern — a small default with an explicit expansion path — keeps average context low without sacrificing access. It also produces cleaner provenance, because every expanded item has an identifier that can be traced back to a source.</p>
+
+<h2>Filter, summarise, or reference</h2>
+<p>When trimming is unavoidable, you have three moves. The choice depends on whether the information might be needed again and whether exact wording matters.</p>
+<table>
+<thead><tr><th>Strategy</th><th>What it does</th><th>Use when</th><th>Risk</th></tr></thead>
+<tbody>
+<tr><td>Filter</td><td>Drops whole items by rule</td><td>Low-value, replaceable content such as raw logs</td><td>May discard a rare critical item</td></tr>
+<tr><td>Summarise</td><td>Compresses content into prose</td><td>Narrative context where gist suffices</td><td>Loses identifiers and confidence</td></tr>
+<tr><td>Reference</td><td>Replaces content with a pointer</td><td>Bulky but retrievable material</td><td>Broken pointer means silent loss</td></tr>
+</tbody>
+</table>
+<p>Prefer filtering first, because it is deterministic and auditable: "keep only the last eight turns" is a rule you can test. Use summarisation for narrative that no one will need verbatim, after extracting its facts into the fact block. Use references for anything large that lives elsewhere — a document id, a result-set handle, a URL — and make the pointer resolvable with a tool the model can actually call.</p>
+<p>A robust trim pipeline applies them in that order: extract facts, filter obvious noise, summarise the remainder that is safe to compress, and replace everything still too large with a reference. Each stage logs what it removed, so a quality regression can be traced to a specific trim decision.</p>
+<div class="exercise"><strong>Exercise 44.1 — Design a fact block.</strong> Choose a multi-turn workflow and list eight atomic facts it must preserve. For each, assign a source, a confidence value, and a pinned flag. Write the rule that resolves a conflict between a pinned fact and a newer inferred one, and describe one dependency that must be invalidated when a fact changes.</div>
+<div class="exercise"><strong>Exercise 44.2 — Choose a trim strategy.</strong> You must reduce a 30,000-token context by half. The content includes raw tool logs, a negotiation conversation, and three full contracts. Assign filter, summarise, or reference to each category, justify the choice, and specify the identifiers or pointers you would keep so no information becomes unrecoverable.</div>
+
+<h2>Treating memory as a product surface</h2>
+<p>Memory is not a hidden implementation detail; it shapes what the assistant can promise. If facts are pinned and sourced, the system can say "I have your order number and confirmed date." If content has been trimmed to references, it can say "I can pull the full contract again." If neither is true, honesty requires saying "I no longer have that detail." Designing the memory layer first, and the prompt second, lets you make those claims accurately — and gives the model a stable foundation that survives the inevitable pressure on context.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Name three ways a generated summary loses critical information and explain why each occurs.</li>
+<li>What fields belong in an atomic fact record, and why is <code>pinned</code> useful?</li>
+<li>How does a bounded memory tool prevent context bloat, and what guard should apply to <code>list</code>?</li>
+<li>Describe the three zones of a well-designed tool response and the purpose of a result-set id.</li>
+<li>In what order should a trim pipeline apply filter, summarise, and reference, and why?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Summaries preserve narrative gist but lose identifiers, confidence, and decisions.</li>
+<li>Extract atomic facts into a structured block with source, confidence, and pinned status.</li>
+<li>Expose memory through a guarded tool with set, get, delete, and bounded list operations.</li>
+<li>Compact tool outputs at the source and provide an explicit expansion path with stable ids.</li>
+<li>Trim deterministically: extract facts, filter noise, summarise safe narrative, reference the rest.</li>
+</ul>
+<nav><a href="43-context-window.html">&larr; Previous</a><span></span><a href="45-escalation-and-propagation.html">Next: Escalation and Error Propagation &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

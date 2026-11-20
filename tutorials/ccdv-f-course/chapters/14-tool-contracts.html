@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 14 — Tool Contracts, Errors, and Approval Patterns</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 14</span>
+  <h1 id="chapter-14-tool-contracts-errors-and-approval-patterns">Chapter 14 — Tool Contracts, Errors, and Approval Patterns</h1>
+<p>A tool that works during a happy-path demo can still fail badly in production. The difference is usually not the handler code; it is the quality of the contract around it. A contract tells the model what a tool accepts and returns, tells your code what it must enforce, and tells an operator how the tool behaves when something goes wrong. This chapter treats tool design as interface design, then adds the two topics that make interfaces safe in practice: structured failures and deliberate approval for consequential actions.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A tool definition is a promise to the model. If it is vague about inputs, outputs, or permissions, the model will fill the gaps with guesses, and your code will inherit the consequences.</p>
+</blockquote>
+<h2 id="learning-objectives">Learning objectives</h2>
+<p>By the end of this chapter you should be able to:</p>
+<ul>
+<li>Design a narrow tool contract with precise inputs, clear descriptions, and predictable outputs.</li>
+<li>Classify tool failures and return structured error results that help the model recover.</li>
+<li>Explain the difference between client-side and server-side tool execution.</li>
+<li>Choose an approval pattern appropriate to the risk of an action.</li>
+<li>Version a tool contract without breaking existing callers.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="what-makes-a-contract-dependable">What makes a contract dependable</h3>
+<p>A contract is more than an input schema. It includes the name, description, accepted arguments, shape and size of successful output, shape of errors, side effects, and authority under which the call runs. Every element should be small and explicit. Small surfaces are easier for a model to use correctly and easier for a reviewer to audit.</p>
+<p>Narrow inputs come first. Prefer a typed field over a string that encodes several meanings, use enumerations for a closed set, give numeric fields ranges, and ask for identifiers rather than display names. Every optional field is another decision the model must make, so make a field optional only when behavior truly differs. Descriptions should state purpose, appropriate use, inappropriate use, and limits. If two tools could both handle a request, their descriptions need a sharper boundary, not a longer feature list.</p>
+<p>Predictable outputs matter just as much. A successful result should have a stable shape, consistent key names, and no conversational wrapper. Return five named fields rather than a forty-column database row. Cap collections and say when a result was truncated, so the model does not assume it saw everything.</p>
+<table>
+<thead>
+<tr>
+<th>Element</th>
+<th>Weak version</th>
+<th>Dependable version</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Input field</td>
+<td><code>date</code> as free text</td>
+<td>ISO text with timezone noted</td>
+<td>Removes format guesses</td>
+</tr>
+<tr>
+<td>Value set</td>
+<td><code>status</code> as any string</td>
+<td>Enumeration of allowed values</td>
+<td>Prevents invented values</td>
+</tr>
+<tr>
+<td>Purpose</td>
+<td>"Handles tickets"</td>
+<td>"Retrieves one ticket; does not modify it"</td>
+<td>Separates neighbors</td>
+</tr>
+<tr>
+<td>Success output</td>
+<td>Raw service response</td>
+<td>Five named fields plus a timestamp</td>
+<td>Keeps context focused</td>
+</tr>
+<tr>
+<td>Failure output</td>
+<td>Exception text</td>
+<td>Structured error with code and hint</td>
+<td>Enables recovery</td>
+</tr>
+<tr>
+<td>Authority</td>
+<td>"Uses the service account"</td>
+<td>Named scope, read-only by default</td>
+<td>Supports least privilege</td>
+</tr>
+</tbody>
+</table>
+<p>Each weak version either pushes a decision onto the model or hides one from the operator. A dependable contract moves those decisions into the definition, where they can be reviewed and tested.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Returning a successful-looking result when nothing was found. An empty object with a success flag invites the model to claim that a record exists.</p>
+</blockquote>
+<h3 id="outputs-that-help-the-next-turn">Outputs that help the next turn</h3>
+<p>Tool output becomes model context, so output design is context design. A verbose result consumes tokens that could have held user text, and a messy result distracts the model from the question. Aim for the smallest result that fully answers what was asked.</p>
+<p>A useful result is typed, attributable, and bounded. The model should quote values without interpretation, say where they came from and how fresh they are, and never receive a backend response large enough to overflow the conversation. When a call collects several items, include a count and a flag saying whether more exist. Text from outside your system may contain sentences that look like instructions; label it as data and keep it visually separate from your own status fields.</p>
+<table>
+<thead>
+<tr>
+<th>Output choice</th>
+<th>Effect on the next turn</th>
+<th>Recommended when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Minimal object with named fields</td>
+<td>Easy to quote</td>
+<td>Most lookups</td>
+</tr>
+<tr>
+<td>Array capped at a stated size</td>
+<td>Predictable token use</td>
+<td>Search and listing</td>
+</tr>
+<tr>
+<td>Text passage labeled as data</td>
+<td>Preserves source wording</td>
+<td>Document retrieval</td>
+</tr>
+<tr>
+<td>Raw service payload</td>
+<td>High noise, possible sensitive fields</td>
+<td>Almost never</td>
+</tr>
+<tr>
+<td>Silent empty result</td>
+<td>Model may invent an answer</td>
+<td>Never</td>
+</tr>
+</tbody>
+</table>
+<p>In most designs the tool returns facts and the model composes the sentence. That keeps one voice in the answer and simplifies localization. The exception is a tool whose output is itself a document intended for direct display.</p>
+<h3 id="structured-tool-errors">Structured tool errors</h3>
+<p>Failures are part of the contract. When a call fails, the application should still send a result block tied to the call identifier. It should say what happened in plain language and, where appropriate, suggest a safe next step. The model can then explain the problem instead of continuing as though the operation succeeded.</p>
+<p>A structured error uses a small vocabulary: a stable code, a human-readable message, a flag saying whether retrying could help, and a hint that guides the model. A correlation identifier lets an operator find the log entry without exposing internals. Keep the message specific: "order identifier not recognized" beats "bad request".</p>
+<pre><code class="language-json">{
+  &quot;status&quot;: &quot;error&quot;,
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;RESOURCE_NOT_FOUND&quot;,
+    &quot;message&quot;: &quot;No order exists with the supplied identifier.&quot;,
+    &quot;retryable&quot;: false,
+    &quot;hint&quot;: &quot;Ask the user to confirm the identifier from their confirmation message.&quot;,
+    &quot;correlation_id&quot;: &quot;req-7c21&quot;
+  }
+}
+</code></pre>
+<p>The example avoids stack traces, hostnames, SQL fragments, and vague advice such as "try again". The hint is safe and actionable. Different failures deserve different treatment: validation errors need new input, timeouts can be retried a few times with backoff, and permission failures need different authority, never a retry.</p>
+<table>
+<thead>
+<tr>
+<th>Failure class</th>
+<th>Example</th>
+<th>Retryable</th>
+<th>Best response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Validation</td>
+<td>Missing required field</td>
+<td>No</td>
+<td>Ask for the missing value</td>
+</tr>
+<tr>
+<td>Not found</td>
+<td>Unknown identifier</td>
+<td>No</td>
+<td>Confirm the identifier</td>
+</tr>
+<tr>
+<td>Permission</td>
+<td>Caller lacks scope</td>
+<td>No</td>
+<td>Explain; do not escalate silently</td>
+</tr>
+<tr>
+<td>Transient dependency</td>
+<td>Service timeout</td>
+<td>Sometimes</td>
+<td>Bounded retry, then report outage</td>
+</tr>
+<tr>
+<td>Conflict</td>
+<td>Record changed since read</td>
+<td>After fresh read</td>
+<td>Re-read, then ask before overwriting</td>
+</tr>
+<tr>
+<td>Rate limit</td>
+<td>Too many calls</td>
+<td>Yes, with backoff</td>
+<td>Slow down and cap concurrency</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Exam note:</strong> For a flaky dependency, look for a timeout, a clear error result, bounded retries with backoff, and a graceful message. Unlimited retries and raw exceptions are almost always wrong.</p>
+</blockquote>
+<h3 id="where-the-code-runs">Where the code runs</h3>
+<p>With client-side execution, your application defines the tool and runs the handler in its own process. With platform-provided server-side execution, the platform declares and runs the operation and your application sees only the result. A connector service places the handler in another process you call over a transport. The location determines trust and observability: client-side handlers see your credentials and can log every step, while server-side tools reduce operational work but hide intermediate details.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Client-side custom</th>
+<th>Platform-provided</th>
+<th>Separate connector</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Who writes handler</td>
+<td>Your team</td>
+<td>Platform provider</td>
+<td>Service owner</td>
+</tr>
+<tr>
+<td>Where it runs</td>
+<td>Your process</td>
+<td>Platform environment</td>
+<td>Another host</td>
+</tr>
+<tr>
+<td>Private data</td>
+<td>Direct</td>
+<td>Limited</td>
+<td>Through service identity</td>
+</tr>
+<tr>
+<td>Visible log detail</td>
+<td>Full</td>
+<td>Summary only</td>
+<td>Depends on service</td>
+</tr>
+<tr>
+<td>Operational burden</td>
+<td>Highest</td>
+<td>Lowest</td>
+<td>Moderate</td>
+</tr>
+</tbody>
+</table>
+<p>Choosing a location is governance as much as engineering. If an auditor asks who approved a write, a platform summary may not suffice. If a private credential is required, a platform environment may be wrong. Conversely, a generic capability is cheaper to rent than to operate.</p>
+<blockquote>
+<p><strong>Security note:</strong> A tool is a privilege channel. Grant each tool the narrowest identity that lets it do its job, and keep read and write authority separate wherever possible.</p>
+</blockquote>
+<h3 id="approval-and-confirmation-patterns">Approval and confirmation patterns</h3>
+<p>Some actions are cheap to reverse; others are not. Sending a payment or publishing a public message deserves a deliberate checkpoint in the host application, not in the model's wording. Asking the model "are you sure?" produces a confident answer regardless of risk, because the model has no independent understanding of consequences.</p>
+<p>A common pattern is two-phase execution. A preview computes what would happen and returns a summary without side effects. The host shows the summary to a person or checks it against a policy rule. Only after approval does the host issue the commit call, carrying a token bound to those exact arguments. An idempotency key makes a repeated commit harmless.</p>
+<table>
+<thead>
+<tr>
+<th>Risk level</th>
+<th>Example action</th>
+<th>Suitable pattern</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>None</td>
+<td>Read a record</td>
+<td>Execute automatically with logging</td>
+</tr>
+<tr>
+<td>Low and reversible</td>
+<td>Save a draft</td>
+<td>Execute, log, allow quick undo</td>
+</tr>
+<tr>
+<td>Moderate</td>
+<td>Change a schedule</td>
+<td>Preview, then interface confirmation</td>
+</tr>
+<tr>
+<td>High or irreversible</td>
+<td>Issue a refund</td>
+<td>Preview, scoped approval, idempotency key, audit record</td>
+</tr>
+<tr>
+<td>Forbidden by policy</td>
+<td>Export all customer data</td>
+<td>Remove the tool entirely</td>
+</tr>
+</tbody>
+</table>
+<p>An approval flow has explicit states: proposed, awaiting approval, approved or declined, then executed or cancelled. Each transition is recorded with an actor, a timestamp, and the exact arguments. If the conversation continues while approval is pending, that state should be visible; a model that assumes the action happened will mislead the user. Tokens should expire and be bound to reviewed arguments. Where an action is always forbidden, remove the capability rather than gating it.</p>
+<h3 id="versioning-contracts">Versioning contracts</h3>
+<p>New fields are added, descriptions refined, and tools retired. Additive changes are usually safe: a new optional input or output field rarely breaks a careful consumer. Removing a field, renaming a tool, or changing a value's meaning is breaking and needs migration. Include a version marker in the tool name or input, advertise both versions during a transition, and log which version was used. Because the model reads descriptions at request time, a renamed field needs a description that states the mapping.</p>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>Compatibility</th>
+<th>Rollout approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add optional input</td>
+<td>Usually safe</td>
+<td>Add, describe, observe</td>
+</tr>
+<tr>
+<td>Add output field</td>
+<td>Usually safe</td>
+<td>Add with a stable key</td>
+</tr>
+<tr>
+<td>Rename input</td>
+<td>Breaking</td>
+<td>Accept both keys, then retire old</td>
+</tr>
+<tr>
+<td>Change meaning</td>
+<td>Breaking</td>
+<td>Introduce a new tool name</td>
+</tr>
+<tr>
+<td>Tighten validation</td>
+<td>Potentially breaking</td>
+<td>Measure rejected calls first</td>
+</tr>
+</tbody>
+</table>
+<p>Keep a small evaluation set that asserts which tool is selected and which arguments are produced, and rerun it after every schema or description edit. A change that looks harmless in review can shift selection toward a neighboring tool.</p>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal.</strong> Turn a loosely specified refund function into a dependable contract with an explicit error shape and an approval gate.</p>
+<p><strong>Steps.</strong></p>
+<ol>
+<li>Write an initial input named <code>details</code> described as "information about the refund", and note what the model must guess.</li>
+<li>Replace it with <code>order_id</code>, <code>amount_cents</code> with a positive range, and <code>reason</code> from a short enumeration.</li>
+<li>Define success output with four keys, including a <code>status</code> of <code>previewed</code> or <code>committed</code>.</li>
+<li>Add an error object with <code>code</code>, <code>message</code>, <code>retryable</code>, and <code>hint</code> covering not-found, permission, and conflict cases.</li>
+<li>Insert a preview phase that returns a summary and short-lived token; the commit accepts the token and an idempotency key.</li>
+</ol>
+<p><strong>Expected observation.</strong> Typed fields eliminate invented values. An over-limit amount produces a non-retryable validation error and the model asks for a corrected amount. An expired token produces a conflict error and no money moves. A trace shows no commit without a recorded preview and approval step.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p><strong>Problem.</strong> A facilities assistant reserves meeting rooms. Its tool accepts a free-text <code>request</code> and a <code>when</code> string, then calls a booking service with whatever it can parse. Reservations land in the wrong room, double bookings overwrite one another, and some dates are in the past. The booking credential can also delete reservations, although the assistant never needs that ability.</p>
+<p><strong>Reasoning.</strong> Each failure traces to a weak contract. Free text hides the distinction between room, date, and duration; a <code>when</code> string invites relative dates with no timezone; silent overwrites happen because conflicts are not expressed as errors. The team redesigns with typed fields: <code>room_code</code> from an enumeration, <code>start_utc</code> in a fixed format, <code>duration_minutes</code> with a range, and short <code>title</code>. Validation rejects past times and unsupported rooms before the service call. The service now returns either a reservation object or a structured <code>CONFLICT</code> error naming the overlap. A scoped credential allows creates and reads but not deletes.</p>
+<p><strong>Resolution.</strong> Because a reservation affects other people, a preview checks availability, returns a summary, and issues a token bound to those arguments. The host displays the summary and the commit requires the token plus an idempotency key, so two approvals of nearly the same request cannot overwrite one another. Wrong-room and past-date complaints disappear, conflicts become explainable errors, and an audit record links preview, approval, and commit through one identifier.</p>
+<blockquote>
+<p><strong>Exam note:</strong> For a risky but sometimes necessary action, look for preview, approval, and idempotent commit. For an action that is never allowed, remove the capability.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Accepting free-text strings where typed fields would remove ambiguity.</li>
+<li>Returning empty or success-shaped results for not-found conditions.</li>
+<li>Sending raw exceptions or internal paths back as tool results.</li>
+<li>Treating every failure as retryable, turning a permission error into a flood.</li>
+<li>Asking the model to confirm a risky action instead of gating it in the host.</li>
+<li>Reusing an approval token across different arguments or letting it live indefinitely.</li>
+<li>Running a write without an idempotency key, so a retry duplicates the effect.</li>
+<li>Renaming a field without a transition path for existing callers.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>A contract covers inputs, outputs, errors, side effects, and authority, not just a schema.</li>
+<li>Narrow inputs and explicit exclusions reduce guesses during selection.</li>
+<li>Predictable outputs are typed, attributable, bounded, and labeled when they contain untrusted text.</li>
+<li>Errors should be structured results with stable codes, plain messages, retryability, and safe hints.</li>
+<li>Execution location determines credential control and how much an operator can observe.</li>
+<li>Approval belongs in the host, with preview, scoped tokens, idempotency, and audit records.</li>
+<li>Additive changes are safe; renames and meaning changes need versions and a migration window.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>Which input design best supports reliable execution?</li>
+</ol>
+<p>A. One <code>details</code> string in natural language.</p>
+<p>B. Typed fields with enumerations, ranges, and stated formats.</p>
+<p>C. Several optional strings with no descriptions.</p>
+<p>D. A nested object left undefined in the schema.</p>
+<ol start="2">
+<li>A lookup finds no matching record. What should the tool return?</li>
+</ol>
+<p>A. An empty object with success status.</p>
+<p>B. Nothing at all.</p>
+<p>C. A structured not-found error with a hint to confirm the identifier.</p>
+<p>D. The closest record presented as exact.</p>
+<ol start="3">
+<li>Which failure should normally be non-retryable?</li>
+</ol>
+<p>A. A brief network timeout.</p>
+<p>B. A rate-limit response with a reset window.</p>
+<p>C. A permission error stating that the caller lacks scope.</p>
+<p>D. A temporary dependency outage.</p>
+<ol start="4">
+<li>What is the main difference between client-side and platform-provided tools?</li>
+</ol>
+<p>A. Client-side tools cannot use schemas.</p>
+<p>B. Client-side handlers run in your process with your credentials and full logs; server-side tools run in a platform environment with less visible detail.</p>
+<p>C. Only server-side tools can return errors.</p>
+<p>D. There is no practical difference.</p>
+<ol start="5">
+<li>Which approval design fits a high-value refund?</li>
+</ol>
+<p>A. A sentence in the system prompt asking the model to be careful.</p>
+<p>B. Preview, scoped approval, then commit with an idempotency key and audit record.</p>
+<p>C. A verbal confirmation with nothing recorded.</p>
+<p>D. Run the refund twice and compare results.</p>
+<ol start="6">
+<li>Which change is most likely backward compatible?</li>
+</ol>
+<p>A. Renaming a required input.</p>
+<p>B. Changing the meaning of a status value.</p>
+<p>C. Adding a new optional input field with a clear description.</p>
+<p>D. Removing a relied-upon output field.</p>
+<ol start="7">
+<li>How should text from external tickets be framed in a result?</li>
+</ol>
+<p>A. As trusted instructions that override the system prompt.</p>
+<p>B. As data labeled and separated from status fields.</p>
+<p>C. As a success message with no payload.</p>
+<p>D. As raw service logs.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> Typed fields remove ambiguity before execution. A compresses decisions into an unstructured value. C offers no guidance. D is not a usable schema.</p>
+</li>
+<li>
+<p><strong>C.</strong> An explicit error supports an honest response. A implies the record exists. B leaves a pending request unanswered. D misrepresents a different record.</p>
+</li>
+<li>
+<p><strong>C.</strong> More retries cannot change missing authority. A, B, and D are transient conditions where bounded retries with backoff can succeed.</p>
+</li>
+<li>
+<p><strong>B.</strong> Location determines credential control and observability. A is false because client-side tools use schemas. C is false because both kinds can report errors. D ignores a real distinction.</p>
+</li>
+<li>
+<p><strong>B.</strong> Preview, scoped approval, idempotency, and auditing cover correctness and traceability. A is guidance, not enforcement. C leaves no evidence or binding. D duplicates the side effect.</p>
+</li>
+<li>
+<p><strong>C.</strong> A described optional field does not disturb existing callers. A and B break semantics or names. D removes expected information.</p>
+</li>
+<li>
+<p><strong>B.</strong> External text may contain hostile instructions and must be treated as data. A invites injection. C discards content. D adds noise and sensitive detail.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 14.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="13-tool-use.html">&larr; Previous</a><a href="15-mcp.html">Next: MCP: Servers, Resources, Prompts, and Transports &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

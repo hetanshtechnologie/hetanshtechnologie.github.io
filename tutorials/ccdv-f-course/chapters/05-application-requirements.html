@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 5 — Application Anatomy, Requirements, and the System Life Cycle</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 5</span>
+  <h1 id="chapter-5-application-anatomy-requirements-and-the-system-life-cycle">Chapter 5 — Application Anatomy, Requirements, and the System Life Cycle</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Draw the boundaries between browser, backend, and external API in an AI feature.</li>
+<li>Convert business language into requirements that a test can prove or disprove.</li>
+<li>Separate functional behavior from non-functional qualities and name common constraints.</li>
+<li>State non-goals explicitly so scope does not expand unnoticed.</li>
+<li>Describe the life cycle from prototype through staged rollout and rollback.</li>
+<li>Trace a requirement forward to a prompt, a configuration, and a test.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="where-the-boundaries-sit">Where the boundaries sit</h3>
+<p>An AI feature is rarely one program. It spans a browser, a backend service, and external APIs, and the seams are where important decisions happen. The browser presents an interface but is a poor place for a secret or a rule, since anything shipped to a device can be inspected. The backend holds credentials, builds the model request, and decides what data leaves the system. The external API generates language but owns none of the application's rules.</p>
+<p>Drawing boundaries early prevents recurring mistakes. A browser calling the model directly exposes the key and leaves no place to enforce access control or redact data. Trusting browser input as a standing instruction lets an end user rewrite the assistant's behavior. Asking the model to enforce a permission hands a deterministic security decision to a probabilistic component. In a sound design the browser presents, the backend decides, and the model generates within those limits.</p>
+<table>
+<thead>
+<tr>
+<th>Boundary</th>
+<th>Owns</th>
+<th>Must not own</th>
+<th>Failure if confused</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Browser</td>
+<td>Rendering, input, local interaction</td>
+<td>API secrets, authorization, durable state</td>
+<td>Exposed key or bypassed permission</td>
+</tr>
+<tr>
+<td>Backend</td>
+<td>Credentials, access control, request assembly, state</td>
+<td>Visual presentation detail</td>
+<td>Brittle UI logic in the server</td>
+</tr>
+<tr>
+<td>Model API</td>
+<td>Language generation within supplied context</td>
+<td>Business rules, permissions, retention</td>
+<td>Invented policy or unsafe action</td>
+</tr>
+<tr>
+<td>Data store</td>
+<td>Records and retrieval</td>
+<td>Prompt wording, model choice</td>
+<td>Stale or inconsistent knowledge</td>
+</tr>
+</tbody>
+</table>
+<p>Authority stays on the server: the browser may ask, the backend decides, and the model may suggest but never act without backend approval. Each crossing is a chance to validate data, so a developer should be able to name the checks at every boundary and the behavior when they fail.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A key in browser code, or a permission enforced only by a prompt, signals a boundary error. Secrets and authorization belong on the backend.</p>
+</blockquote>
+<h3 id="from-business-language-to-testable-requirements">From business language to testable requirements</h3>
+<p>Projects often begin with a sentence that feels clear but cannot be tested. A stakeholder says the assistant should be fast, accurate, and inexpensive, hiding decisions about speed relative to what, accuracy on which questions, and cost at what volume. Until those are explicit, nobody can say whether the result meets the request.</p>
+<p>A requirement is testable when a reviewer can write a check that passes or fails without interpretation. The check names a target, a measurement method, and the conditions of measurement. For AI features the conditions matter unusually much because output varies between runs. A useful form is: given a fixed set of inputs and a pinned configuration, when each is submitted once, then a stated share of results satisfies a stated criterion. Both set and threshold must be fixed, or one can make results look good by choosing friendly examples.</p>
+<p>Requirements divide into two kinds. <strong>Functional</strong> ones describe what the system does for a given input; <strong>non-functional</strong> ones describe how fast, cheap, available, private, and correct that behavior is. Teams new to language features write long functional lists and treat quality as an afterthought. That is risky: nondeterminism makes correctness a measured property, and every call costs money. These qualities are constraints from the start.</p>
+<table>
+<thead>
+<tr>
+<th>Business language</th>
+<th>Type</th>
+<th>Measurable requirement</th>
+<th>Check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Answer customer questions"</td>
+<td>Functional</td>
+<td>Each input in the approved set returns a labeled answer or not-found marker</td>
+<td>Run the set, count labeled results</td>
+</tr>
+<tr>
+<td>"Be quick"</td>
+<td>Non-functional</td>
+<td>p95 time to first token under two seconds at twenty concurrent users</td>
+<td>Load test on a stated device profile</td>
+</tr>
+<tr>
+<td>"Stay within budget"</td>
+<td>Non-functional</td>
+<td>Average spend per resolved question at most one cent at forecast volume</td>
+<td>Billing export divided by resolutions</td>
+</tr>
+<tr>
+<td>"Never invent policy"</td>
+<td>Non-functional</td>
+<td>Every factual claim cites a retrieved passage; unsupported policy claims zero</td>
+<td>Citation audit on the fixed set</td>
+</tr>
+<tr>
+<td>"Protect private data"</td>
+<td>Non-functional</td>
+<td>No identity number appears in outgoing requests after redaction</td>
+<td>Scan captured payloads in a harness</td>
+</tr>
+<tr>
+<td>"Escalate hard cases"</td>
+<td>Functional</td>
+<td>Cases below a confidence threshold go to a human queue with the trace</td>
+<td>Inspect queue for threshold cases</td>
+</tr>
+</tbody>
+</table>
+<p>The matrix exposes unfinished decisions. If a row cannot be filled because nobody knows the device profile or forecast volume, that is a conversation to have before design. A provisional threshold is acceptable if written down and revisited after a baseline measurement; an adjective left as an adjective is not, because it can never fail a test.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating "the assistant should be accurate" as a functional requirement. Accuracy is a quality measured against a fixed set and threshold; without both it cannot reject a bad build.</p>
+</blockquote>
+<h3 id="constraints-and-non-goals">Constraints and non-goals</h3>
+<p>Constraints are limits the design must respect, whether or not anyone calls them requirements. Budget caps spend and forces choices about model, caching, and routing. Latency decides whether a call can be synchronous, whether output must stream, and how much context fits. Privacy rules decide what may be transmitted, stored, logged, or retained. These interact: a tight latency target may rule out a more accurate model, and a strict privacy rule may rule out a service that retains prompts. Ignoring one to satisfy another is incomplete.</p>
+<p>Write constraints as boundaries with owners. A monthly budget becomes a per-request ceiling and a forecast alert; a latency target becomes a percentile under a named load; a privacy rule becomes a redaction step and a retention period. An unowned constraint is a wish.</p>
+<p><strong>Non-goals</strong> are capabilities the team deliberately chooses not to build — the visible edge of scope, not failures. A support assistant may answer policy questions but not modify an account, work in one language but not all, or handle text chat but not voice. Stating exclusions prevents a reviewer from judging the system against a promise nobody made. A non-goal should be specific: "does not place orders" is clearer than "not full service."</p>
+<blockquote>
+<p><strong>Try it:</strong> For a feature you know, write three constraints with numeric limits and owners, then three specific non-goals. Notice how the exclusions make the design easier to defend.</p>
+</blockquote>
+<h3 id="the-life-cycle-from-prototype-to-production">The life cycle from prototype to production</h3>
+<p>An AI feature moves through stages, each producing an artifact the next needs. Thinking in artifacts turns the vague question "what should happen next?" into "which artifact is missing?" The stages are not a rigid ceremony, but skipping one leaves a gap that usually appears later as an outage or a surprise cost.</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Central question</th>
+<th>Artifact produced</th>
+<th>AI-specific concern</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Prototype</td>
+<td>Can the idea work?</td>
+<td>Thin end-to-end example</td>
+<td>Manual checks; no quality guarantee</td>
+</tr>
+<tr>
+<td>Requirements</td>
+<td>What must be true?</td>
+<td>Testable statements and non-goals</td>
+<td>Quality, cost, privacy explicit</td>
+</tr>
+<tr>
+<td>Design</td>
+<td>How will it work?</td>
+<td>Data flow, model choice, prompt plan, fallbacks</td>
+<td>Nondeterminism, state ownership</td>
+</tr>
+<tr>
+<td>Build</td>
+<td>What gets implemented?</td>
+<td>Code, prompts, schemas, configuration</td>
+<td>Prompts are behavior; version them</td>
+</tr>
+<tr>
+<td>Verify</td>
+<td>Does it meet the criteria?</td>
+<td>Evaluation, load, and cost reports</td>
+<td>Fixed sets, pinned versions, regressions</td>
+</tr>
+<tr>
+<td>Stage</td>
+<td>Can it be tried safely?</td>
+<td>Staging environment and rollout plan</td>
+<td>Lab data differs from live traffic</td>
+</tr>
+<tr>
+<td>Release</td>
+<td>How does it reach users?</td>
+<td>Flags, canary results, rollback plan</td>
+<td>Versions travel with traffic</td>
+</tr>
+<tr>
+<td>Operate</td>
+<td>Is it still correct?</td>
+<td>Dashboards, alerts, feedback, drift notes</td>
+<td>New inputs feed back to requirements</td>
+</tr>
+</tbody>
+</table>
+<p>A prototype answers feasibility. It may be rough and hard-code values, but it must not become production by accretion. Once proven, the team restates what it learned as requirements and designs deliberately. Treating the prototype prompt as the product, with no history or tests, is the most common failure.</p>
+<p>Verification is broader than unit testing. Deterministic helpers such as validation can be unit tested; model-dependent parts need a fixed evaluation set and a threshold from the requirements. Load tests check latency under concurrency, cost tests check spend, and security tests probe redaction and unsafe input. Results should be tagged with the prompt and model versions that produced them, since a quality change is meaningless without knowing what changed.</p>
+<p>Release should be gradual. Staging exercises the real request path with sanitized data so mistakes surface before users do. A feature flag exposes new behavior to a small share of traffic, and a canary checks whether acceptance metrics improve. Rollback must be rehearsed: if a new prompt or model performs worse, the team needs a tested way to restore the previous version. For a language feature that means reverting the prompt file and the model pin together, since either alone leaves an untested combination.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Promoting a prototype to full traffic because it worked in a demonstration with friendly inputs, no concurrency, and no edge cases. A demonstration proves feasibility, not readiness.</p>
+</blockquote>
+<p>Operating closes the loop. Dashboards track error rate, latency, tokens, and cost alongside validation failures, human handoffs, and feedback. New input patterns found in production are added to the evaluation set, and requirements are revisited when thresholds prove wrong. The life cycle is a cycle, not a line.</p>
+<h3 id="traceability-from-requirement-to-test">Traceability from requirement to test</h3>
+<p>Traceability means each requirement can be followed forward to the design choice, prompt, configuration, and test that satisfy it, and backward from a failing test to the requirement it protects. When a metric moves, it says which requirement is at risk; when a prompt is edited, it says which tests to rerun. Without it, a change is a guess with a hope attached.</p>
+<p>A compact record keeps the chain visible. Each requirement carries an identifier, a linked prompt template and version, the configuration it depends on, and the test that checks it. Stored with the code, the record lets a reviewer see why a prompt says what it says.</p>
+<pre><code class="language-json">{
+  &quot;requirement_id&quot;: &quot;R-014&quot;,
+  &quot;statement&quot;: &quot;Unsupported policy claims must be zero on the fixed question set.&quot;,
+  &quot;prompt_template&quot;: &quot;support_answer_v3&quot;,
+  &quot;model_pin&quot;: &quot;general-purpose-latest-2026-09&quot;,
+  &quot;depends_on&quot;: [&quot;retrieval.policy_index&quot;, &quot;output.citation_required&quot;],
+  &quot;verified_by&quot;: [&quot;eval.policy_claims&quot;, &quot;eval.citation_audit&quot;],
+  &quot;non_goals&quot;: [&quot;account_modification&quot;, &quot;voice_input&quot;]
+}
+</code></pre>
+<p>The record's value appears during change. If the model pin must move, the team can list every requirement tied to it and rerun those checks. If a test fails, the engineer can ask whether the system is wrong or the threshold is outdated. Traceability also supports staged release: a canary can watch metrics tied to sensitive requirements rather than an average that hides a localized regression.</p>
+<p>Keep the record small and current. A sprawling document nobody updates gives false confidence. A handful of links — requirement to prompt to test — in version control is enough for most teams.</p>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal:</strong> Turn a vague request into a boundary drawing, a requirements matrix, and a traceability record a teammate could review.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Write the request in one sentence using two adjectives such as "quick" and "helpful."</li>
+<li>Draw boxes for browser, backend, and model API. For each arrow, list what crosses it and which checks happen there. Mark where the key lives.</li>
+<li>Rewrite each adjective as a measurable requirement with a threshold, method, and conditions. Classify each as functional or non-functional.</li>
+<li>Add two constraints with an owner and two non-goals as specific exclusions.</li>
+<li>Choose one requirement and fill a traceability record with a prompt template, pinned model, and a test name.</li>
+</ol>
+<p><strong>Expected observation:</strong> The original sentence cannot be tested, while each rewrite can pass or fail. The drawing places the key in the backend and validates at each crossing. The record points to one reviewable slice of behavior rather than the whole system.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p><strong>The problem.</strong> A team is asked for "a quick assistant for our help center." Hidden constraints surface: answers must appear on a phone within two seconds, monthly spending is fixed, and the assistant must not state policy absent from the approved knowledge base. "Quick" is the only written specification.</p>
+<p><strong>Reasoning.</strong> The engineer starts with boundaries. The browser renders and collects input; the backend holds the key, checks entitlement, redacts identifiers, retrieves passages, and builds the request. The model only generates phrasing grounded in those passages, with no permission decision and no key exposure.</p>
+<p>The matrix follows. "Quick" becomes a p95 time-to-first-token target on a named phone profile at stated concurrency; "cheap" becomes a maximum average spend per resolved question. "No invented policy" becomes a rule that every factual claim cites a passage, with zero unsupported claims on a fixed set. Non-goals exclude account changes and languages outside the approved list.</p>
+<p>Constraints drive design. A single large call for every question would miss the latency target and burn the budget on simple questions. The team chooses a two-stage path: a small classifier flags routine questions, answered from the approved store with short phrasing; ambiguous cases reach the larger model with retrieved passages. Output streams so the first token arrives quickly, repeated questions are cached by normalized text and knowledge-base version, and non-urgent summarization moves to a queue.</p>
+<p>Traceability makes the plan durable. Each requirement gets an identifier linked to a prompt template, pinned model, and evaluation slice, with prompts and settings in version control. Verification runs the fixed set, a load test, a cost test, and a redaction test. Release uses staging with sanitized data, then a flag for a small share of traffic, with rollback restoring prompt and pin together. Dashboards tag observations with those versions.</p>
+<p><strong>Resolution.</strong> Complaints stop because the failing category was made visible and improved. The team no longer argues from favorite examples: each edit is compared with a baseline, and new question patterns are added to the evaluation set. The decisive move was surfacing hidden constraints early enough to design around them.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Calling the model API from browser code and exposing the key.</li>
+<li>Leaving a permission decision to the prompt instead of the backend.</li>
+<li>Treating adjectives as requirements without thresholds and measurement methods.</li>
+<li>Defining a quality target without a fixed set of inputs.</li>
+<li>Omitting non-goals and allowing scope to expand during review.</li>
+<li>Promoting a working prototype directly to full traffic.</li>
+<li>Rolling out a new prompt without a tested way to restore the prior version.</li>
+<li>Changing a model pin without knowing which requirements and tests depend on it.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>The browser presents, the backend decides, and the model generates within limits; authority stays server-side.</li>
+<li>A requirement is testable when it names a target, a method, and the conditions of measurement.</li>
+<li>Functional requirements describe behavior; non-functional ones describe qualities such as latency and cost.</li>
+<li>Budget, latency, and privacy constraints interact and need named owners.</li>
+<li>Non-goals mark the deliberate edge of scope and should be as specific as requirements.</li>
+<li>The life cycle runs from prototype through requirements, design, build, verification, staging, release, and operation.</li>
+<li>Staging, canary releases, and rehearsed rollback protect users from prompt and model changes.</li>
+<li>Traceability links requirements to prompts, configuration, and tests, making change safe.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>Where should an API key and an authorization decision live in an AI web feature?</li>
+</ol>
+<ul>
+<li>A. In the browser, so calls are faster.</li>
+<li>B. In the backend, which validates before calling the model.</li>
+<li>C. In the prompt, so the model can enforce it.</li>
+<li>D. In a hidden browser field users cannot see.</li>
+</ul>
+<ol start="2">
+<li>Which is a non-functional requirement?</li>
+</ol>
+<ul>
+<li>A. The system returns an intent label for each message.</li>
+<li>B. The system stores a record of each interaction.</li>
+<li>C. The system offers a human handoff control.</li>
+<li>D. p95 time to first token is under two seconds at twenty concurrent users.</li>
+</ul>
+<ol start="3">
+<li>What is the main purpose of stating non-goals?</li>
+</ol>
+<ul>
+<li>A. To list bugs that remain unfixed.</li>
+<li>B. To mark capabilities deliberately excluded from scope.</li>
+<li>C. To replace requirements with suggestions.</li>
+<li>D. To document the model's internal architecture.</li>
+</ul>
+<ol start="4">
+<li>A prototype answered a few sample questions correctly. What is the next step?</li>
+</ol>
+<ul>
+<li>A. Release it to all users immediately.</li>
+<li>B. Remove testing to preserve its speed.</li>
+<li>C. Restate what was learned as requirements and design deliberately.</li>
+<li>D. Increase the token cap to guarantee correctness.</li>
+</ul>
+<ol start="5">
+<li>Why should rollback restore the previous prompt and model version together?</li>
+</ol>
+<ul>
+<li>A. Because either alone can leave an untested combination.</li>
+<li>B. Because prompts do not affect behavior.</li>
+<li>C. Because model versions are immutable.</li>
+<li>D. Because rollback is only needed for browser changes.</li>
+</ul>
+<ol start="6">
+<li>What does traceability provide when a quality metric changes?</li>
+</ol>
+<ul>
+<li>A. A guarantee that no change occurred.</li>
+<li>B. A map from the affected requirement to the prompt, configuration, and test.</li>
+<li>C. A replacement for evaluation testing.</li>
+<li>D. A way to avoid version control.</li>
+</ul>
+<ol start="7">
+<li>Which constraint most directly argues for streaming output?</li>
+</ol>
+<ul>
+<li>A. A requirement that answers arrive quickly on a phone.</li>
+<li>B. A requirement to store every request.</li>
+<li>C. A requirement to use one language.</li>
+<li>D. A requirement to exclude account changes.</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> Secrets and authorization belong on the server, which validates before calling out. A and D expose the key to the device; C wrongly delegates a deterministic permission to a probabilistic component.</p>
+</li>
+<li>
+<p><strong>D.</strong> A latency percentile is a quality of behavior. A and C describe functions, and B describes storage behavior; all are functional.</p>
+</li>
+<li>
+<p><strong>B.</strong> Non-goals are explicit exclusions defining scope. A confuses them with defects, C weakens them into suggestions, and D mistakes them for internal documentation.</p>
+</li>
+<li>
+<p><strong>C.</strong> A prototype proves feasibility; its lessons should become requirements before deliberate design. A releases without evidence, B removes the safety net, and D assumes a larger cap solves quality.</p>
+</li>
+<li>
+<p><strong>A.</strong> Behavior depends on the prompt and model combination, so reverting one can yield an untested state. B is false because prompts shape behavior, C is irrelevant, and D wrongly limits rollback to the browser.</p>
+</li>
+<li>
+<p><strong>B.</strong> Traceability identifies the connected requirement, prompt, configuration, and test. A is false because changes do occur, C because traceability complements testing, and D because version control is essential.</p>
+</li>
+<li>
+<p><strong>A.</strong> Streaming delivers early tokens and serves a fast-perception requirement on a phone. B, C, and D concern storage, language scope, and exclusions, none of which imply streaming.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 5.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="04-requests-responses-state.html">&larr; Previous</a><a href="06-evaluations-first.html">Next: Evaluations First: Test Sets, Graders, and Baselines &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

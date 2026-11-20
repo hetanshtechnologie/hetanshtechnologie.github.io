@@ -1,0 +1,128 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>32. The CLAUDE.md Hierarchy</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>32. The CLAUDE.md Hierarchy</h1>
+
+<p>An instruction file is a durable way to tell the assistant how this organization, this repository, and this part of a repository expect work to be done. One file cannot serve all three purposes: a rule about secrets applies everywhere, a rule about the test runner applies to one project, and a rule about indentation may apply only to a legacy module. The hierarchy exists so each rule can live at the right scope.</p>
+
+<h2>Why instructions are layered</h2>
+
+<p>Put everything in one global file and it becomes unreadable, so people stop maintaining it. Put everything in the project root and every subproject inherits conventions that do not fit it. Layering solves both problems: broad rules are written once, and narrower files add or refine them where needed.</p>
+
+<p>The files are Markdown, but they are not documentation for people in the usual sense. They are instructions loaded into context. That distinction has consequences: text that is ambiguous to a model is a defect, and a 900-line file consumes context on every task. Short, imperative, verifiable statements work best.</p>
+
+<h2>The three levels</h2>
+
+<table>
+<tr><th>Level</th><th>Owner</th><th>Typical content</th><th>May be relaxed below?</th></tr>
+<tr><td>Organization or managed</td><td>Platform or security team</td><td>Forbidden commands, credential handling, audit requirements</td><td>No</td></tr>
+<tr><td>Project root</td><td>Repository maintainers</td><td>Build commands, architecture rules, language conventions</td><td>Yes, for specific directories</td></tr>
+<tr><td>Nested directory</td><td>Module owners</td><td>Local conventions, legacy exceptions, test locations</td><td>Only within that subtree</td></tr>
+</table>
+
+<p>The managed level is policy, not preference. It should contain the rules that must hold regardless of what a project team wants — for example, that credentials never appear in source files or that a particular class of command is forbidden. Project and directory files refine style and workflow; they do not grant exemptions from policy.</p>
+
+<div class="warn">Do not place secrets, personal tokens, or confidential contract terms in an instruction file. These files are read into context, shown in diffs, and often committed to shared repositories.</div>
+
+<h2>Load order and timing</h2>
+
+<p>Broad files load first. At session start, the client gathers managed instructions and the project root file, so the assistant begins with organization policy and repository-wide conventions. Nested files are discovered as work enters their territory: when a file under <code>legacy/</code> is read or edited, the instruction file in that directory becomes relevant and joins the context.</p>
+
+<p>This on-demand behavior is useful but easy to misuse. If a rule must apply to every file in a repository, put it in the project root file; a nested file may arrive too late for an early decision. Conversely, a rule that applies to only one module should not be repeated in the root file, where it would mislead work elsewhere.</p>
+
+<p>Files can reference other documents so that long detail lives outside the main file. Use references for material that is occasionally needed, such as a style guide or a migration procedure, and keep the top-level instructions short. A reasonable target is fewer than 200 lines in the root file, with each section stating a rule and the reason for it.</p>
+
+<div class="note">Instructions compete with code and conversation for context space. A concise rule that is always present is more reliable than a long essay that gets pushed out of the window when five source files are opened.</div>
+
+<h2>Conflict resolution</h2>
+
+<p>When two rules disagree, three principles settle it. First, a non-overridable policy rule wins over everything. Second, among remaining rules, the more specific scope wins: a directory rule refines a project rule for files in that subtree. Third, if two files at the same scope contradict each other, that is a maintenance bug, not a preference to be resolved by the model.</p>
+
+<table>
+<tr><th>Conflict</th><th>Winner</th><th>Why</th></tr>
+<tr><td>Managed forbids force push; project permits it</td><td>Managed</td><td>Policy is not negotiable downstream</td></tr>
+<tr><td>Project requires four spaces; module uses two</td><td>Module</td><td>Narrower scope applies to its subtree</td></tr>
+<tr><td>Two nested files give different test commands</td><td>Neither</td><td>Same scope; fix the files</td></tr>
+<tr><td>Root says "run all tests"; module names a subset</td><td>Module, plus root intent</td><td>Refine, do not discard the original goal</td></tr>
+</table>
+
+<p>The last row is the subtle one. Specific rules should narrow a general rule, not erase it. If the project says all tests must pass and a module says a fast subset is sufficient for local edits, the correct behavior is to run the subset during iteration and the full suite before merging. Write the relationship explicitly so it does not have to be inferred.</p>
+
+<h2>Precedence examples</h2>
+
+<p>Consider a repository with a managed policy, a project file, and a nested file for a legacy billing module. The three statements below do not really conflict because each applies at a different scope and to a different subject.</p>
+
+<pre><code># managed: org-wide, non-overridable
+- Never place credentials in source, logs, or &lt;tool_args&gt;.
+- Do not run force-push or wildcard delete commands.
+
+# project root: CLAUDE.md
+- Test command: npm test
+- Use four spaces in TypeScript.
+- Add a changelog entry for user-visible changes.
+
+# legacy/billing/CLAUDE.md
+- This directory uses two spaces until the rewrite completes.
+- Run jest legacy/billing --runInBand for fast checks.
+
+if path.startswith("legacy/billing/") &amp;&amp; task == "format":
+    use_two_spaces()          # narrower scope wins
+if task == "publish":
+    require_changelog_entry() # root rule still applies
+if command.startswith("git push --force"):
+    block()                   # policy wins everywhere</code></pre>
+
+<p>Now change one fact: suppose the project file says "use two spaces" and the module also says "use four spaces." Both are at the level of convention, and the module is narrower, so two spaces would apply everywhere except that module, where four spaces apply. That is legal but almost certainly unintended. A quick review of all instruction files at once catches this kind of inversion.</p>
+
+<div class="exercise"><strong>Exercise 32.1 — Resolve a conflict</strong>
+<ol>
+<li>A managed policy says "no network calls from build scripts." A project file says "download fixtures during tests." State the outcome and what the project should do instead.</li>
+<li>A root file requires type annotations; a directory file says annotations are optional there. Explain when that refinement is acceptable and when it is a bug.</li>
+<li>Two nested files in sibling directories specify different lint versions. What should the maintainers do?</li>
+</ol>
+</div>
+
+<h2>Writing files that survive review</h2>
+
+<p>Prefer statements that can be checked. "Use the project's formatter" is weaker than "run <code>npm run format</code> before committing." "Keep modules small" is weaker than "a source file should stay under 400 lines; split it if it grows beyond that." Include a short reason when a rule is surprising, because a rule with a reason is less likely to be deleted during cleanup.</p>
+
+<p>Keep structure predictable: a short overview, a section on commands, a section on conventions, and a section on forbidden actions. Avoid copying entire style guides. Reference them. Review the files quarterly, delete obsolete exceptions, and test the hierarchy with a simple probe: ask the assistant what rules apply to a file in a nested directory and check that it names the right ones.</p>
+
+<div class="exercise"><strong>Exercise 32.2 — Draft an instruction file</strong>
+<ol>
+<li>Write a project-root instruction file of at most ten bullets for a small Python service, including the test command and one forbidden action.</li>
+<li>Add a nested instruction file for a generated-code directory that states a single exception.</li>
+<li>Describe the probe you would run to confirm that both files load in the correct order.</li>
+</ol>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Name the three levels of the instruction hierarchy and the owner of each.</li>
+<li>Which instructions load at session start, and which are discovered later?</li>
+<li>What are the three principles for resolving conflicting rules?</li>
+<li>Why should a general rule be narrowed rather than erased by a specific one?</li>
+<li>What makes an instruction "checkable," and why does that matter?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Layered instruction files place organization policy, project conventions, and local exceptions at their proper scope.</li>
+<li>Managed policy is non-overridable; project and directory files refine workflow and style.</li>
+<li>Broad files load at startup; nested files become relevant as work enters their subtrees.</li>
+<li>Specific scope wins over general scope, but never over policy.</li>
+<li>Same-scope contradictions are maintenance bugs to fix, not choices for the model.</li>
+<li>Keep files short, imperative, checkable, and reviewed on a regular schedule.</li>
+</ul>
+
+<nav><a href="31-permission-modes.html">&larr; Previous</a><span></span><a href="33-claude-md-patterns.html">Next: Scoped Instructions and Team Patterns &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

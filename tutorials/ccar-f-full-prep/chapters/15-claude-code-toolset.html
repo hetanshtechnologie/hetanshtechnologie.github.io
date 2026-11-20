@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 15 — The Claude Code Toolset and Local Workflows</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f2f4f8;color:#1f2937;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(30,41,59,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#4f46e5;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#312e81;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#4b5563;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#6b7280}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9ca3af;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#312e81}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #6366f1;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#4338ca}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#3730a3}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #dbe2f0;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#312e81;color:#fff;font-weight:600}
+td{background:#fafbff}
+pre{background:#1e2233;color:#e8ecf8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#e8e9fb;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#3730a3}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#eef0ff;border-left:4px solid #6366f1;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#4338ca}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #dbe2f0;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#312e81;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #e6eaf5}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#4338ca;text-decoration:none;display:inline-block;margin-bottom:16px}
+.callout{background:#eef0ff;border-left:4px solid #6366f1;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#6b7280;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+
+<div class="chapter">
+  <a class="back" href="../">&larr; Back to the Full Prep Course</a>
+  <h1 id="chapter-15-the-claude-code-toolset-and-local-workflows">Chapter 15 — The Claude Code Toolset and Local Workflows</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Describe the common tools available in a repository coding assistant and the purpose each serves.</li>
+<li>Map local coding tools back to the same definition, error, and context principles used for API tools.</li>
+<li>Compare permission modes and understand the risk each one accepts.</li>
+<li>Distinguish planning from execution and know when to switch between them.</li>
+<li>Design a local workflow that is repeatable, reviewable, and bounded.</li>
+<li>Decide when a subagent inside a coding session improves the work and when it adds overhead.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="the-coding-session-as-a-tool-using-loop">The coding session as a tool-using loop</h3>
+<p>A repository coding assistant is not a chat window with file access bolted on. It is an agent operating in a loop: it reads the current state of the workspace, decides on a next action, calls a tool, observes the result, and continues. The repository is the environment, and the tools are the means by which the assistant perceives and changes that environment. Understanding this loop explains why tool design and workflow design matter as much here as in any other agentic system.</p>
+<p>The session also has state that is not stored in the model. Files on disk, the current branch, the set of changed files, and the output of commands are all part of the situation the assistant must track. A good local workflow makes that state legible, so that the assistant can orient itself after each step rather than relying on memory. This is the same principle as external memory in a longer agent run: the environment is the source of truth, and the conversation is a working view of it.</p>
+<blockquote>
+<p><strong>Exam note:</strong> Questions about a coding assistant often hinge on the same ideas as other tool questions. If a change is risky, look for a narrower tool, an explicit permission gate, or a verification step rather than a better worded prompt.</p>
+</blockquote>
+<h3 id="reading-searching-and-editing-files">Reading, searching, and editing files</h3>
+<p>The most frequently used tools are the ones that let the assistant see and change files. Reading a file returns its contents, often with line references so that later edits can be precise. Searching locates relevant files or passages without requiring the assistant to open everything, which protects the context budget. Editing applies a targeted change, such as replacing a specific block or inserting text at a located position, rather than rewriting an entire file blindly.</p>
+<p>These tools differ in risk. Reading and searching are observational and naturally safe, though their output can be large enough to crowd the context window. Editing is a side effect and deserves the same care as any mutating tool: a clear target, a bounded change, and a way to verify the result. A vague edit instruction can alter the wrong region, and a large edit can hide a mistake that a smaller, staged change would expose.</p>
+<p>The assistant's choice among these tools is driven by the definitions it sees. A search tool whose description states which file types it covers and how many matches it returns is easier to route correctly than one called simply "find." An edit tool whose schema requires an exact target and a replacement block makes malformed calls less likely. These are the same routing and schema principles from the tool layer, applied to a local setting.</p>
+<table>
+<thead>
+<tr>
+<th>Tool family</th>
+<th>Purpose</th>
+<th>Risk profile</th>
+<th>Good design habit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read file</td>
+<td>Inspect contents of a known file</td>
+<td>Low, but output can be large</td>
+<td>Bound the returned range</td>
+</tr>
+<tr>
+<td>Search</td>
+<td>Locate files or passages by pattern</td>
+<td>Low, with context cost</td>
+<td>Return limited, ranked matches</td>
+</tr>
+<tr>
+<td>Edit file</td>
+<td>Apply a targeted change</td>
+<td>Medium, side effect</td>
+<td>Require exact target and verify</td>
+</tr>
+<tr>
+<td>Run command</td>
+<td>Execute a process or script</td>
+<td>High, arbitrary effects</td>
+<td>Confirm and scope the command</td>
+</tr>
+<tr>
+<td>Manage task</td>
+<td>Track or hand off work</td>
+<td>Low to medium</td>
+<td>Keep records short and explicit</td>
+</tr>
+</tbody>
+</table>
+<h3 id="running-commands-and-managing-tasks">Running commands and managing tasks</h3>
+<p>A command tool lets the assistant run processes in the workspace: build scripts, test runners, package installers, version-control operations, and other utilities. This is the highest-leverage tool in the local set and the one with the widest potential impact. A command can read data, write files, contact a network service, or change system state. Because the effect is hard to predict from the command text alone, command execution is where permission modes and confirmation matter most.</p>
+<p>A task tool, by contrast, manages the work itself. It may record a list of steps, mark progress, or hand a scoped piece of work to another agent. It does not change the product directly, but it shapes what gets done next. Used well, it makes a long session navigable: the assistant can see what remains, avoid repeating completed steps, and hand off isolated work without losing the thread. Used poorly, it becomes a stale list that drifts away from the actual state of the repository.</p>
+<p>Both tools benefit from the same error discipline described earlier. A failed command should return a structured result with an exit status and relevant output, not a silent gap. A handed-off task should return an outcome that says whether it completed, what changed, and what remains. Treating these as ordinary tool results keeps them inside the loop, where the assistant can decide how to proceed.</p>
+<h3 id="mapping-local-tools-to-the-same-design-principles">Mapping local tools to the same design principles</h3>
+<p>It is tempting to treat local coding tools as a special category governed by different rules. They are not. The principle that a description is a routing instruction applies directly: the assistant must know when to search rather than read, and when to read rather than edit. The principle that schemas should be strict where mistakes are expensive applies directly: an edit that requires an exact target is safer than one that accepts a loose description. The principle that errors should be actionable applies directly: a test failure with a specific file and message is far more useful than a generic failure flag.</p>
+<p>Context principles apply as well. Command output can be enormous, and a tool that returns an entire log to the conversation will crowd out the reasoning it is meant to support. A well-designed local workflow filters or summarizes output before it re-enters the loop, keeping the relevant lines and discarding the rest. This is the raw-versus-distilled choice from the tool layer, now playing out in a terminal session.</p>
+<p>The main difference is proximity to the user. In a local coding session, a person is often watching, which allows confirmation to be interactive. That convenience should not be confused with safety. An interactive confirmation is only useful if the question clearly describes the action and its consequences. A prompt that asks whether to "continue" without naming the command transfers risk to a user who may not be paying close attention.</p>
+<h3 id="permission-modes-and-risk">Permission modes and risk</h3>
+<p>Permission modes express how much a coding assistant may do without asking. At one end, every action requires explicit approval, which maximizes control but interrupts flow constantly. At the other end, the assistant may read, edit, and run commands freely, which is fast but accepts the risk that a mistaken action is applied immediately. Intermediate modes typically allow reads automatically while requiring confirmation for edits or commands, or allow commands from an approved list while blocking others.</p>
+<p>The right mode depends on the cost of a wrong action and the quality of the verification available. When tests are comprehensive and version control makes changes easy to reverse, a more permissive mode may be reasonable. When the repository contains sensitive data or the commands can reach production systems, a stricter mode is appropriate. Permission should be treated as a setting tied to a task and an environment, not as a permanent preference.</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>What is allowed without asking</th>
+<th>Risk accepted</th>
+<th>Suitable context</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Strict</td>
+<td>Nothing, or reads only</td>
+<td>Very low, with frequent interruptions</td>
+<td>Sensitive or unfamiliar work</td>
+</tr>
+<tr>
+<td>Guided</td>
+<td>Reads and scoped edits</td>
+<td>Low to medium, edits still reviewable</td>
+<td>Routine feature work</td>
+</tr>
+<tr>
+<td>Delegated</td>
+<td>Edits and approved commands</td>
+<td>Medium, relies on guardrails</td>
+<td>Well-tested local changes</td>
+</tr>
+<tr>
+<td>Open</td>
+<td>Broad command execution</td>
+<td>High, mistakes apply immediately</td>
+<td>Isolated throwaway environments</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Common mistake:</strong> Choosing a permissive mode for convenience and then relying on the assistant to "be careful." Carefulness is not a control; permission scope and verification are.</p>
+</blockquote>
+<h3 id="planning-versus-execution">Planning versus execution</h3>
+<p>Many coding assistants support a separation between planning and execution. In planning mode, the assistant investigates the repository, proposes an approach, and lists the changes it intends to make, without applying them. In execution mode, it carries out the plan through tool calls. The value of the separation is that a wrong approach is cheaper to correct before any files change. A reviewer can read a short plan and spot a flawed assumption that would only become visible after a messy series of edits.</p>
+<p>Planning is most useful for tasks with several interacting changes, ambiguous requirements, or risk of touching unfamiliar code. It is less useful for small, well-understood edits where the overhead of a plan exceeds the benefit. The decision mirrors the broader principle of matching process weight to the cost of failure. A typo fix does not need a design review; a change to authentication logic does.</p>
+<p>A plan is not a contract that must be followed blindly. During execution, the assistant observes new information: a test reveals an assumption was wrong, or a file differs from what was expected. It should be able to revise the plan and say so. What matters is that the revision is visible, not that the original plan is preserved at all costs. A workflow that treats the plan as immutable encourages the assistant to force the repository to fit an outdated idea.</p>
+<h3 id="designing-a-repeatable-local-workflow">Designing a repeatable local workflow</h3>
+<p>A repeatable workflow turns a one-time success into a dependable process. It starts with orientation: confirm the current branch, look at changed files, and read the relevant instructions in the project. It then moves to a bounded investigation, using search and targeted reads to locate the code involved. Next comes a plan for non-trivial work, followed by small edits, each checked by a test or a targeted read. Finally, the assistant reviews the diff and reports what changed and what remains uncertain.</p>
+<p>The workflow should be written down in a form the assistant can consult, not carried in the conversation alone. Project guidance files and reusable instruction packages serve this purpose, and the following chapters develop them in detail. A short workflow sketch makes the expected sequence explicit and gives the assistant a way to reorient after an interruption.</p>
+<pre><code class="language-text">LOCAL WORKFLOW: implement a bounded change
+
+1. ORIENT
+   - confirm current branch and list changed files
+   - read project guidance and scoped rules for the area
+2. INVESTIGATE
+   - search for the relevant symbols and call sites
+   - read only the ranges needed to understand the change
+3. PLAN (skip only for trivial edits)
+   - state the files to touch and the intended behavior
+   - name the check that will verify the result
+4. EXECUTE
+   - apply one focused edit at a time
+   - run the targeted test after each edit
+   - if a test fails, return a structured result with file and message
+5. VERIFY
+   - review the complete diff for unintended changes
+   - confirm no unrelated files were modified
+6. REPORT
+   - summarize changes, checks run, and remaining uncertainty
+</code></pre>
+<p>The sketch also illustrates where controls sit. Step limits, allowed commands, and approval gates belong to the environment and the permission configuration, not to a sentence in the prompt. A workflow that says "be careful with commands" is guidance; a configured rule that blocks a category of commands is enforcement. Repeatability comes from the second kind.</p>
+<blockquote>
+<p><strong>Try it:</strong> After finishing a coding session, rewrite the sequence you followed as a compact checklist. If the steps are hard to name, the session probably depended on improvisation rather than a repeatable process.</p>
+</blockquote>
+<h3 id="when-to-use-a-subagent-inside-a-coding-session">When to use a subagent inside a coding session</h3>
+<p>A subagent is a scoped helper launched for a specific piece of work, with its own context and a defined brief. In a coding session it is useful when a task can be isolated: exploring an unfamiliar part of the codebase, reviewing a change from a different angle, or gathering information that would otherwise flood the main conversation. The main thread receives a distilled result, keeping its context clean for the decisions that require the full picture.</p>
+<p>Subagents are not free. Each one needs a brief, consumes its own resources, and may duplicate investigation that the main thread has already done. They are a poor fit for tightly coupled edits where two workers would step on one another, or for tasks where the brief cannot be stated clearly. If you cannot describe what the helper should produce in a few sentences, the task is probably not ready to be handed off.</p>
+<p>The handoff should specify the goal, the allowed tools, the scope of files or directories, and the exact shape of the expected result. It should also state what the helper must not do, such as committing changes or editing outside its scope. That boundary is the coding-session version of the isolation and authority separation discussed in the multi-agent chapter. A well-briefed helper returns a concise finding; a vague brief returns a wall of exploration that defeats the purpose.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A team asked an assistant to add input validation to a form used in a customer portal. The first attempt went badly: the assistant edited three files, ran a broad test command that produced a huge log, and introduced a change in an unrelated module because a search result looked similar. A reviewer had to unwind part of the work before trying again.</p>
+<p>The diagnosis identified three problems. The session began with execution instead of orientation, so the assistant never checked which files were already modified. The edit tool was used with a loose target, allowing an over-broad replacement. The command tool returned the full test log into the conversation, which consumed context and buried the single failing case.</p>
+<p>The team restructured the session. They set a guided permission mode so edits required confirmation, wrote a brief plan naming the two files that legitimately needed changes, and used targeted reads before each edit. They configured the test command to return only failures and a short summary. A subagent was launched with a narrow brief to review the modified files for unintended changes, with no permission to edit anything.</p>
+<p>The second attempt stayed within the planned scope, the failing check was visible immediately, and the review subagent returned a short finding about one unnecessary import. The change was not more sophisticated, but the workflow constrained where mistakes could occur and made each one visible early.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Treating a coding assistant as a chat feature rather than a tool-using agent with an observable loop.</li>
+<li>Letting command output flood the conversation instead of filtering it before it re-enters context.</li>
+<li>Choosing a permissive permission mode and relying on the assistant to be careful.</li>
+<li>Skipping planning for changes that touch several interacting files.</li>
+<li>Treating a plan as immutable when execution reveals new information.</li>
+<li>Launching a subagent with a vague brief or overlapping scope.</li>
+<li>Reporting a task as complete without reviewing the diff for unintended changes.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>A coding assistant operates in the same observe, decide, act loop as any other agent, with the repository as its environment.</li>
+<li>Reading, searching, editing, running commands, and managing tasks are tools with distinct purposes and risk profiles.</li>
+<li>Local tools follow the same description, schema, error, and context principles as API tools.</li>
+<li>Permission modes trade interruption for risk and should be chosen per task and environment.</li>
+<li>Planning separates cheap correction from expensive rework, and plans should be revisable.</li>
+<li>Repeatable workflows put orientation, bounded investigation, small edits, and verification in a visible sequence.</li>
+<li>Subagents help when work is isolatable and the brief is crisp; they add cost when tasks are coupled.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A test command returns thousands of lines into the conversation, and the assistant loses track of the actual failure. Which change best addresses the problem?</li>
+</ol>
+<ul>
+<li>A. Ask the assistant to read more carefully.</li>
+<li>B. Filter or summarize command output so only relevant failures re-enter the loop.</li>
+<li>C. Switch to a stricter permission mode.</li>
+<li>D. Remove the test command from the available tools.</li>
+</ul>
+<ol start="2">
+<li>Which tool is most appropriate for locating the definition of a symbol without opening every file?</li>
+</ol>
+<ul>
+<li>A. Read file.</li>
+<li>B. Search.</li>
+<li>C. Edit file.</li>
+<li>D. Manage task.</li>
+</ul>
+<ol start="3">
+<li>What is the main benefit of planning mode for a multi-file change?</li>
+</ol>
+<ul>
+<li>A. It removes the need to run tests.</li>
+<li>B. It lets a reviewer catch a wrong approach before files change.</li>
+<li>C. It guarantees the plan will be correct.</li>
+<li>D. It hides the changes from other tools.</li>
+</ul>
+<ol start="4">
+<li>A repository contains sensitive records and unfamiliar scripts. Which permission mode is most defensible?</li>
+</ol>
+<ul>
+<li>A. Open execution, for speed.</li>
+<li>B. Delegated execution, because tests exist.</li>
+<li>C. Strict approval, because the cost of a wrong action is high.</li>
+<li>D. No permissions at all, because the assistant cannot be trusted.</li>
+</ul>
+<ol start="5">
+<li>When is a subagent most useful in a coding session?</li>
+</ol>
+<ul>
+<li>A. When the task can be isolated and the expected result can be stated precisely.</li>
+<li>B. When two workers need to edit the same file at the same time.</li>
+<li>C. When the brief cannot be written clearly.</li>
+<li>D. When the goal is to avoid describing any constraints.</li>
+</ul>
+<ol start="6">
+<li>Which step best makes a local workflow repeatable?</li>
+</ol>
+<ul>
+<li>A. Relying on the assistant to remember the sequence each time.</li>
+<li>B. Writing the sequence down as a short checklist the assistant can consult.</li>
+<li>C. Using the longest possible prompts.</li>
+<li>D. Skipping verification to save steps.</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p>Correct: B. Bounding output keeps the relevant failure visible and protects context. A is wrong because attention is not a control. C is wrong because permission mode does not change output size. D is wrong because removing tests eliminates valuable feedback.</p>
+</li>
+<li>
+<p>Correct: B. Search is designed to locate passages without reading everything. A is wrong because reading requires knowing the file first. C is wrong because editing does not locate definitions. D is wrong because task management tracks work, not code.</p>
+</li>
+<li>
+<p>Correct: B. A plan exposes assumptions before changes are applied. A is wrong because tests are still needed. C is wrong because a plan can be flawed. D is wrong because hiding changes is not a benefit.</p>
+</li>
+<li>
+<p>Correct: C. High consequence and low familiarity justify strict approval. A is wrong because speed does not reduce risk. B is wrong because existing tests do not cover unfamiliar scripts. D is wrong because some permission is needed for useful work.</p>
+</li>
+<li>
+<p>Correct: A. Isolation and a precise brief are the conditions under which delegation pays off. B is wrong because overlapping edits cause conflicts. C and D are wrong because a vague brief produces unfocused exploration.</p>
+</li>
+<li>
+<p>Correct: B. An external checklist survives interruptions and makes the sequence consistent. A is wrong because model memory is unreliable across sessions. C is wrong because prompt length is not structure. D is wrong because verification is central to reliability.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 15.</em></p>
+  <nav><a href="14-mcp-architecture.html">&larr; Previous</a><span></span><a href="16-claude-md-configuration.html">Next &rarr;</a></nav>
+</div>
+
+</body>
+</html>

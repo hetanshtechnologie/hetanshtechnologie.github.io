@@ -1,0 +1,117 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>36. The Agent SDK and CI/CD</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>36. The Agent SDK and CI/CD</h1>
+
+<h2>Why move from a terminal to a program</h2>
+<p>Interactive sessions are ideal for exploration: you watch the model work, interrupt it, and change direction. Pipelines need the opposite. A continuous integration job must start from a clean state, apply the same controls every time, produce machine-readable output, and exit with a status that another tool can interpret. An agent SDK provides that interface. It lets code create a session, supply instructions, restrict capabilities, consume events as they arrive, and collect a structured result.</p>
+<p>The shift changes what you design. In a terminal you design prompts and permissions. In code you also design timeouts, retry policy, budgets, log sinks, and failure semantics. A model call that merely prints to a console is not a pipeline step; a step has an input contract, an output artifact, and a defined meaning for success and failure.</p>
+<p>Three use cases dominate. The first is automated review: inspect a pull request diff and report risks. The second is generation with verification: produce a file, run the project's checks, and keep the result only if checks pass. The third is maintenance: open an issue, investigate a repository, and draft a patch. All three benefit from the same discipline — narrow tools, bounded turns, captured evidence, and an explicit gate.</p>
+
+<h2>Session control</h2>
+<p>A session is the unit of work. Creating one usually involves choosing a working directory, an initial prompt or instruction set, an allowed tool list, a permission policy, and a turn limit. The turn limit is the most important safety knob after tools. Without it, a confused agent can loop indefinitely between a failure and a retry, consuming budget without progress.</p>
+
+<pre><code>from agent_sdk import Session, Permission
+
+session = Session(
+    cwd="/repo",
+    allowed_tools=["Read", "Grep", "Bash(pytest -q)"],
+    max_turns=12,
+    permission_mode=Permission.PLAN,
+)
+
+for event in session.stream("Fix the failing test in tests/test_pricing.py"):
+    if event.kind == "assistant":
+        log.write(event.text)
+    elif event.kind == "tool":
+        log.write(f"tool={event.name} ok={event.ok}")
+    elif event.kind == "result":
+        print(f"turns={event.turns} cost_usd={event.cost:.4f}")
+
+if session.result.is_error:
+    raise SystemExit(2)
+</code></pre>
+
+<p>Resume and continue operations matter for long-running work. A resumed session retains prior history, which is useful when a job is interrupted by a transient infrastructure failure. Starting fresh is better when the repository state has changed underneath the previous session; otherwise the model reasons about a world that no longer exists. A practical rule is to resume only when no files were modified between attempts.</p>
+<p>Permission callbacks let code decide dynamically. A typical policy allows all reads, allows write tools only for paths under a scratch directory, and requires a human token for anything touching deployment configuration. Encode the policy in one place and test it with a table of expected allow and deny decisions. Scattering permission checks across a pipeline makes the real policy impossible to audit.</p>
+<div class="note"><strong>Terminology note.</strong> Different SDKs name these controls differently — turns, steps, iterations; resume, continue, fork. The concepts are stable: bound the work, restrict the tools, record the state, and choose whether history survives a restart.</div>
+
+<h2>Consuming events and collecting results</h2>
+<p>Streaming events give you a progress trace and an early failure signal. A minimal event taxonomy is enough: assistant text, tool invocation, tool result, usage update, and terminal result. Persist each event with a timestamp and a session identifier. When a job fails at 2 a.m., the difference between a five-line error and a complete trace is the difference between a quick fix and a morning of guesswork.</p>
+<p>Treat the final result as a structured object, never as prose you scrape. Useful fields include a success flag, the number of turns, token and cost accounting, the list of files changed, and a stop reason such as "turn limit reached" or "tool denied." A distinction worth preserving is between <em>completed successfully</em>, <em>completed with unverified changes</em>, and <em>did not complete</em>. Collapsing those into one boolean hides the most interesting failures.</p>
+<p>Usage data feeds budget controls. Set a per-session ceiling and a per-day ceiling, and check both before starting new work. Log the model identifier and prompt version alongside cost so a spike can be attributed. Non-determinism means two runs of the same prompt can differ in length and price; a budget is a guardrail, not a prediction.</p>
+
+<h2>Integrating with a pipeline</h2>
+<p>A CI job should be reproducible and non-interactive. Check out a pinned commit, install dependencies from a lockfile, place credentials in environment variables rather than in prompts or files, and set an outer job timeout in addition to the agent's turn limit. The outer timeout protects against a hung process; the inner limit protects against a wandering plan.</p>
+
+<pre><code>name: agent-review
+on: [pull_request]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Agent review
+        env:
+          AGENT_API_KEY: ${{ secrets.AGENT_API_KEY }}
+        run: python tools/agent_gate.py &gt; agent-report.txt
+      - name: Publish report
+        if: always()
+        run: python tools/publish.py agent-report.txt
+</code></pre>
+
+<p>Run the agent in a constrained environment. A container with a read-only root filesystem, a writable scratch directory, and no unnecessary network egress turns a mistake into a contained failure. If the task genuinely needs network access, allow specific hosts rather than all outbound traffic. Secrets should be injected as short-lived environment variables and never echoed into logs by debugging code.</p>
+<p>Idempotency matters when jobs retry. Give each run a stable identifier derived from the repository, commit, and task name, and use it as a key for logs and artifacts. If the agent posts comments, check for an existing comment with that key and update it instead of adding a duplicate. A retried job that produces six identical comments erodes trust faster than it provides value.</p>
+
+<h2>Logging, gates, and verification</h2>
+<p>An agent's output is a proposal until an independent check passes. Separate the generation step from the verification step, and give verification tools that do not share the agent's instructions. If the agent wrote a Python module, the gate runs the real test suite and a linter. If it edited configuration, the gate parses the configuration and compares the resulting values with an expected set. The gate should be able to fail even when the agent is confident.</p>
+<p>Useful gates include a clean working-tree check for generation tasks, a diff size limit, a forbidden-path check, a test result, and a cost ceiling. Encode each as a command with its own exit status so the report names the failing gate. A single opaque "agent failed" status forces a human to reproduce the entire run.</p>
+<table>
+<tr><th>Gate</th><th>Checks</th><th>Typical failure cause</th></tr>
+<tr><td>Diff scope</td><td>No edits outside an allowed path list</td><td>Agent tidied unrelated files</td></tr>
+<tr><td>Test suite</td><td>Project tests pass after the change</td><td>Partial implementation</td></tr>
+<tr><td>Budget</td><td>Turns and cost below configured limits</td><td>Retry loop</td></tr>
+<tr><td>Artifact</td><td>Required report file exists and parses</td><td>Agent stopped early</td></tr>
+</table>
+<div class="tip"><strong>Practice:</strong> deliberately break one gate in a staging repository and confirm that the pipeline fails with a readable message. A gate that has never been observed failing is a hypothesis, not a control.</div>
+
+<h2>Failure modes and operational discipline</h2>
+<p>The most common pipeline failures are not model errors. They are stale credentials, a dependency version that changed between runs, a path that exists locally but not in the container, and a prompt that references a file added in a later commit. Pin versions, validate the workspace before the agent starts, and fail fast with a specific message when a prerequisite is missing.</p>
+<p>Non-determinism requires a statistical mindset. Run a proposed automation twenty times on a fixed set of tasks and record the pass rate. A 90 percent pass rate may be acceptable for a comment-only advisory, but not for a job that merges code. Match the reliability requirement to the consequence: the more irreversible the action, the higher the bar and the more human review you keep in the loop.</p>
+<p>Finally, keep an audit trail. Record the prompt version, model identifier, commit, session identifier, gate results, and final decision. This supports incident review and makes it possible to answer "why did the agent change this file?" weeks later. Automation without provenance is difficult to trust, and trust is what determines whether a team keeps using it.</p>
+
+<div class="exercise"><strong>Exercise 36.1 — Bound a review session.</strong> Write a session configuration for a pull-request reviewer that allows only read and search tools, caps work at ten turns, and enforces a cost ceiling. Describe what should happen when the ceiling is reached and how the report should differ from a successful run.</div>
+
+<div class="exercise"><strong>Exercise 36.2 — Design a verification gate.</strong> An agent is asked to add a validation function and its tests. Specify three independent gates, the command each runs, and the artifact each produces. Explain why the test suite should not be the only gate.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>What does a turn limit prevent that an outer job timeout does not?</li>
+<li>Why should final results be consumed as structured objects rather than parsed prose?</li>
+<li>When is resuming a session unsafe, and what is the reason?</li>
+<li>Name four useful verification gates for an automated code change.</li>
+<li>Why is a 90 percent pass rate acceptable for some automations but not others?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>An SDK turns interactive assistance into a repeatable pipeline step with inputs, artifacts, and exit codes.</li>
+<li>Bound sessions with tool allowlists, permission policy, turn limits, cost ceilings, and timeouts.</li>
+<li>Stream and persist events; treat the terminal result as structured data with distinct success states.</li>
+<li>Verify agent output with independent gates such as diff scope, tests, budget, and artifact checks.</li>
+<li>Pin environments, make retries idempotent, and keep an audit trail of prompt, model, commit, and decision.</li>
+</ul>
+
+<nav><a href="35-subagents-hooks-plan-mode.html">&larr; Previous</a><span></span><a href="37-clarity-and-constraints.html">Next: Clarity, Specificity, and Constraints &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

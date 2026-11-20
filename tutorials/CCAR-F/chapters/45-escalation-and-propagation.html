@@ -1,0 +1,110 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>45. Escalation and Error Propagation</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>45. Escalation and Error Propagation</h1>
+<p>Every agent will eventually meet a situation it cannot resolve: a tool is down, the request is ambiguous, or confidence is too low to act safely. What happens next is a design decision, not an accident. Escalation decides who takes over; error propagation decides what information travels with the failure. Get these wrong and you get the most expensive kind of bug — one that produces a confident, plausible, wrong answer instead of an error.</p>
+
+<h2>Escalation triggers</h2>
+<p>Escalation should be triggered by explicit conditions, not by a vague feeling that the model is struggling. Define triggers across four categories:</p>
+<ul>
+<li><strong>Capacity triggers.</strong> Turn count, tool-call count, or retry budget exhausted. These are deterministic and easy to test.</li>
+<li><strong>Confidence triggers.</strong> The top answer's score falls below a threshold, or the gap between the top two candidates is smaller than a margin such as 0.08.</li>
+<li><strong>Authority triggers.</strong> The requested action exceeds the agent's permission — refunds above a limit, deletion of records, or commitments to a customer.</li>
+<li><strong>Ambiguity triggers.</strong> Required slots remain unfilled, or two interpretations of the request lead to materially different actions.</li>
+</ul>
+<p>Assign each trigger an action: retry, ask the user, route to another agent, or hand to a human. A trigger with no assigned action is a TODO that will surface as a production incident. For example, "refund above 200 units" might route to a human with a pre-filled payload, while "search returned no results" might simply ask the user to rephrase. Both are escalations; they differ in destination and urgency.</p>
+<div class="tip">Prefer a small number of well-named triggers over a long list of special cases. Six triggers you can explain and test beat twenty conditions buried in a prompt that nobody can audit.</div>
+
+<h2>Handoff payloads</h2>
+<p>When control moves to a human or another agent, the receiving party needs enough context to continue without re-asking everything. A handoff payload is a structured bundle containing the original goal, the facts established so far, the actions already attempted, the reason for escalation, and the specific decision required.</p>
+<pre><code>{
+  "handoff_id": "H-9031",
+  "reason": "AUTHORITY_LIMIT",
+  "goal": "issue a refund for order ORD-77150",
+  "established_facts": {
+    "order_id": "ORD-77150",
+    "amount_units": 260,
+    "policy_cap_units": 200
+  },
+  "attempts": [
+    {"tool": "orders.lookup", "result": "ok"},
+    {"tool": "refunds.create", "result": "blocked_by_cap"}
+  ],
+  "question": "Approve a 260-unit exception refund?",
+  "suggested_action": "approve_once",
+  "guard": "amount_units &gt; policy_cap_units &amp;&amp; approval == null"
+}</code></pre>
+<p>Three qualities make a payload useful. It is <strong>self-contained</strong> — the receiver need not open the original transcript to understand the case. It is <strong>ordered</strong> — attempts appear in sequence so the receiver sees what has already failed. And it is <strong>actionable</strong> — it ends with a concrete question and, where appropriate, a suggested action. A payload that says "needs review" without a question forces the receiver to reconstruct the problem and defeats the purpose of escalation.</p>
+<p>Include the guard that fired. The guard string in the example makes the reason auditable: it shows the exact comparison that blocked the action. When a reviewer disputes an escalation, the guard tells you whether the rule or the data was wrong.</p>
+
+<h2>Local versus upstream error handling</h2>
+<p>Errors can be handled where they occur or passed up the call stack. The right choice depends on whether the local component has enough information to recover.</p>
+<table>
+<thead><tr><th>Situation</th><th>Handle locally</th><th>Propagate upstream</th><th>Rationale</th></tr></thead>
+<tbody>
+<tr><td>Tool returns a transient 429 rate limit</td><td>Yes — backoff and retry once</td><td>Only after retries fail</td><td>Local layer knows the retry budget</td></tr>
+<tr><td>Tool returns a schema violation</td><td>Yes — retry with corrected arguments</td><td>If repeated twice</td><td>Argument shape is local knowledge</td></tr>
+<tr><td>Required user slot is missing</td><td>Rarely</td><td>Yes — ask the user</td><td>Only the conversation layer can ask</td></tr>
+<tr><td>Action exceeds authority</td><td>No</td><td>Yes — escalate immediately</td><td>Local layer cannot grant permission</td></tr>
+<tr><td>Two tools disagree about a value</td><td>No</td><td>Yes — carry both with sources</td><td>Resolution needs cross-tool context</td></tr>
+</tbody>
+</table>
+<p>A useful heuristic: handle locally what the component can <em>verify</em> and <em>fix</em>; propagate what requires a decision the component is not entitled to make. Swallowing an error at the wrong layer is how silent bugs are born. If a tool wrapper catches an authentication failure and returns an empty list, the model sees "no results" and confidently tells the user the record does not exist. The truth — that the system could not check — never propagates.</p>
+<div class="warn">Never convert a failure into an empty success. An empty list, a null value, or a default score that is indistinguishable from a real result destroys the receiver's ability to detect the error. Carry an explicit status field such as <code>ok | empty | error</code> through every layer.</div>
+
+<h2>Propagation contracts</h2>
+<p>A propagation contract defines how errors and partial results move between components. It specifies the status vocabulary, which fields must be preserved, what may be transformed, and which layer owns the final user-facing message. Without a contract, each layer reinvents the error format and information is lost at every seam.</p>
+<ol>
+<li><strong>Define a status enum.</strong> Use <code>ok</code>, <code>partial</code>, <code>empty</code>, <code>error</code>, and <code>blocked</code>. Each has a defined meaning and a defined next step.</li>
+<li><strong>Preserve identity.</strong> Request ids, source ids, and timestamps survive every hop. Never replace them with a friendly phrase.</li>
+<li><strong>Accumulate, do not overwrite.</strong> If three sub-tasks fail, the parent result should list all three, not just the last one.</li>
+<li><strong>Separate internal detail from user text.</strong> The internal error carries codes and stack context; the user message is derived from it at the boundary, with technical detail removed.</li>
+<li><strong>Log at the point of detection.</strong> The first component that notices an anomaly records it, so the trail begins at the truth.</li>
+</ol>
+<p>Test propagation with fault injection: make one tool return a rate limit, another return malformed JSON, and a third return a slow timeout. Assert that the final output carries all three statuses with their identifiers. A system that passes this test can be debugged; one that collapses everything into "something went wrong" cannot.</p>
+
+<h2>Ambiguity and silent bugs</h2>
+<p>The most dangerous failures are not loud errors but ambiguities that the model resolves on its own. A user asks to "send it to the usual address." If two addresses are on file with equal recency, the model may pick one arbitrarily. The action succeeds, the tool returns <code>ok</code>, and nobody detects a problem until a package arrives in the wrong place.</p>
+<p>Silent bugs share a signature: the system had insufficient information, but produced a confident result anyway. Detect them by monitoring for conditions that should force a question. If the same entity appears with two conflicting values, if a pronoun has more than one plausible referent, or if a required field was inferred rather than stated, require disambiguation before acting.</p>
+<p>Add a cheap consistency probe for high-stakes actions. Before executing, ask a second pass: "List the assumptions this action depends on." If any assumption is not backed by a fact block entry or a tool result, treat it as unresolved. This costs one extra short call but catches the classic case where the model silently filled a gap with a plausible guess.</p>
+
+<h2>Disambiguation patterns</h2>
+<p>When ambiguity is detected, how you ask matters as much as asking at all. Four patterns work well:</p>
+<ol>
+<li><strong>Offered choices.</strong> "I have two addresses: home and office. Which one?" Fast for the user, easy to validate.</li>
+<li><strong>Contrastive restatement.</strong> "Do you mean the invoice from March, or the one we just discussed?" Useful when the candidates differ on one dimension.</li>
+<li><strong>Assumption plus confirmation.</strong> "I'll use the office address unless you say otherwise — confirm?" Efficient, but only acceptable for reversible actions.</li>
+<li><strong>Constrained repair.</strong> "The date must be a weekday in November; please give one." Best when the earlier value violated a rule.</li>
+</ol>
+<p>Match the pattern to reversibility. For irreversible or high-cost actions, never proceed on an assumption; require an explicit answer. For low-cost reversible actions, an assumption with a visible confirmation keeps the dialogue moving. Record which pattern was used so you can measure whether users actually answer the question — a disambiguation that users ignore is a design failure.</p>
+<div class="exercise"><strong>Exercise 45.1 — Build a trigger table.</strong> For a travel-booking agent, define six escalation triggers covering capacity, confidence, authority, and ambiguity. For each, specify the exact numeric or logical condition, the destination (retry, user, another agent, human), and the one field that must appear in the handoff payload. Identify which two triggers could produce silent bugs if ignored.</div>
+<div class="exercise"><strong>Exercise 45.2 — Test a propagation contract.</strong> Design a fault-injection test with three failing tools: one rate limit, one malformed response, and one timeout. Write the expected final result including status vocabulary and preserved identifiers. Then show a wrong implementation that converts one failure into an empty success and explain how your test catches it.</div>
+
+<p>Escalation rates are not a sign of weakness; they are a measurement instrument. A sudden rise in authority escalations may mean a policy changed without updating the agent. A rise in ambiguity escalations may mean a new user segment uses different vocabulary. A drop in escalations can be worse than a rise if it coincides with more complaints — that combination often means the model has started guessing instead of asking. Track escalation counts by trigger, review the payloads weekly, and treat each one as free feedback about where the design needs sharpening.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>List the four categories of escalation trigger and give one concrete condition for each.</li>
+<li>What three qualities make a handoff payload useful to the receiving party?</li>
+<li>Why must an error never be converted into an empty success? Give an example of the resulting silent bug.</li>
+<li>Describe a propagation contract and name two of its required elements.</li>
+<li>Which disambiguation pattern would you use for an irreversible action, and why?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Trigger escalation with explicit numeric, confidence, authority, and ambiguity conditions.</li>
+<li>Send self-contained, ordered, actionable handoff payloads that include the fired guard.</li>
+<li>Handle errors locally only when the component can verify and fix them; otherwise propagate.</li>
+<li>Enforce a propagation contract with a status vocabulary, preserved identifiers, and accumulated failures.</li>
+<li>Counter silent bugs with consistency probes and match disambiguation patterns to action reversibility.</li>
+</ul>
+<nav><a href="44-memory-and-trimming.html">&larr; Previous</a><span></span><a href="46-scratchpad-and-delegation.html">Next: Scratchpads and Delegated Discovery &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

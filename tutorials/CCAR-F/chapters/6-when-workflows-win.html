@@ -1,0 +1,122 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>6. When a Fixed Workflow Wins</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>6. When a Fixed Workflow Wins</h1>
+
+<p>Agency is a tool, not a virtue. When the path is known, encoding it directly is usually faster, cheaper, safer, and easier to prove correct. This chapter makes the case for the fixed workflow — not as a consolation prize for simple problems, but as the deliberate choice for the majority of high-volume production work. The decision to remove autonomy is a design achievement, not a failure of imagination.</p>
+
+<h2>The case for boring predictability</h2>
+
+<p>A workflow says: given this input, run stage A, then B, then branch on a defined condition. Every run follows the same graph. That predictability has practical value. Operations teams can draw the graph, capacity planners can estimate load, support staff can explain outcomes, and auditors can trace a decision to a rule. A loop that adapts intelligently but differently each time undermines all four activities.</p>
+
+<p>Predictability also simplifies failure handling. In a pipeline, a failure belongs to a stage and can be handled locally: retry the extractor, quarantine the document, or route to review. In an agent, a failure may be the result of an earlier choice three steps back. Diagnosis requires replaying the whole trace rather than inspecting one component. Teams often discover this only after an incident, when speed of understanding matters most.</p>
+
+<div class="note"><strong>Reframing the question.</strong> Instead of asking "could an agent do this?" ask "what would the agent do that the flow chart cannot express?" If the answer is nothing, the workflow is the better design. If the answer is a specific kind of judgement at one stage, keep the workflow and add bounded judgement only there.</div>
+
+<h2>Determinism as a feature</h2>
+
+<p>Determinism means the same input produces the same route and the same result, within the tolerance of any model stages you deliberately include. It is valuable when decisions must be explainable, when results are compared over time, and when a mistake must be reproducible for investigation. A system that behaves differently on identical inputs is hard to test and harder to certify.</p>
+
+<p>You can increase determinism without removing models. Fix the stage order, make branching depend on validated fields rather than free text, pin the prompt version, and use constrained output schemas. Then the only variability is the acceptable kind — phrasing or extraction confidence — while the decision path stays stable. Record the schema version and prompt version with each result so a change can be correlated with an outcome shift.</p>
+
+<pre><code>workflow_version: "invoice-flow-4.2"
+stages:
+  - id: extract
+    model: claude-sonnet-4-5
+    prompt_version: "invoice-extract-2.1"
+    output_schema: "invoice_fields_v3"
+    temperature: 0
+  - id: check_totals
+    implementation: arithmetic
+    tolerance: 0.01
+  - id: route
+    rules:
+      - when: "validation == ok &amp;&amp; vendor.approved"
+        then: post
+      - when: "validation == ok &amp;&amp; !vendor.approved"
+        then: review_queue
+      - when: "validation != ok"
+        then: retry_extract_once
+  - id: audit_log
+    implementation: deterministic
+    fields: [document_id, schema_version, prompt_version, route, timestamp]</code></pre>
+
+<p>Note the comparison in the routing rules uses validated booleans, not a model's prose. Setting temperature to zero reduces sampling variance in the extraction stage. The audit log stores versions so that a regression can be attributed to a prompt change rather than to the input population.</p>
+
+<h2>Latency and cost arithmetic</h2>
+
+<p>Workflows win on economics when volume is high and the path is short. Work the numbers rather than relying on intuition. Suppose a service processes 50,000 documents per day. A workflow uses two model calls of roughly 1,200 tokens each: 120 million tokens per day. An agent averaged seven calls of about 2,000 tokens: 700 million tokens per day. At an illustrative 3 units of currency per million tokens, that is 360 versus 2,100 per day — a difference of 1,740 per day, or roughly 635,000 per year.</p>
+
+<table>
+<tr><th>Measure</th><th>Fixed workflow</th><th>Agentic loop</th></tr>
+<tr><td>Model calls per item</td><td>2 (fixed)</td><td>7 (average, 3–12 range)</td></tr>
+<tr><td>Tokens per item</td><td>~2,400</td><td>~14,000</td></tr>
+<tr><td>Daily tokens at 50k items</td><td>120 million</td><td>700 million</td></tr>
+<tr><td>p95 latency</td><td>1.1 seconds</td><td>9.4 seconds</td></tr>
+<tr><td>Trace Review</td><td>Per-stage</td><td>Per-run</td></tr>
+</table>
+
+<p>Latency arithmetic is equally direct. If one model step averages 420 milliseconds and one tool call averages 180 milliseconds, a three-stage pipeline with two model calls lands near 1.2 seconds. A loop averaging seven model calls and five tools lands near 3.8 seconds before retries. If the service-level target is 1.5 seconds, the workflow fits and the loop does not — regardless of how much better its reasoning might be.</p>
+
+<div class="exercise"><strong>Exercise 6.1 — Run the numbers.</strong> A classification task handles 8,000 items per day. Option A is a workflow with one model call of 900 tokens. Option B is an agent averaging five calls of 1,600 tokens. Using an illustrative price of 2 currency units per million tokens, compute the daily and annual token cost of each option. Then state the break-even volume at which Option B's extra 3 percent accuracy would justify its cost, given that each misclassification costs 0.40 units.</div>
+
+<h2>Compliance and audit requirements</h2>
+
+<p>Regulated environments often require that a decision be attributable to a rule, a person, or a recorded approval. A workflow provides this naturally: the route came from rule 3, the rule was versioned, and the input fields are stored. An agent can be made auditable, but the audit must cover the sequence of choices as well as the outcome, and a model's rationale is not a reliable policy justification.</p>
+
+<p>Where a regulator asks "why was this claim rejected?", the answer "the system reasoned that way" is inadequate. An answer built from a workflow — "validation rule <code>abs(total - sum(line_items)) &lt; 0.01</code> failed on 2026-11-21 with a difference of 14.20" — is inspectable. This does not mean models are forbidden; it means the authoritative decision should rest on deterministic checks where policy demands it, with models used to prepare inputs or summarise evidence.</p>
+
+<div class="warn"><strong>Compliance trap:</strong> recording a model's explanation as the audit reason. Explanations can be plausible yet unrelated to the actual deciding factor. Store the inputs, the executed rules, the version identifiers, and the final outcome; treat any generated narrative as supplemental text, never as the authoritative record.</div>
+
+<h2>Testing pipelines versus testing loops</h2>
+
+<p>A pipeline is testable by composition. Each stage has a contract; feed it fixtures, assert the output, and combine stages into an integration test. Branch conditions can be covered systematically: one case per rule, one boundary case, one invalid-input case. A regression is localised because a failing assertion names a stage.</p>
+
+<p>A loop needs a different strategy. Because the path varies, you test families of scenarios and assert on outcomes plus invariants: the task terminated within budget, no forbidden tool was called, the write count did not exceed the limit, and the final state satisfies the goal. Replay recorded traces as regression tests. Sampling matters — a single happy path tells you little about a system whose behaviour depends on tool results.</p>
+
+<ul>
+<li>Pipeline tests: contract tests per stage, branch coverage, boundary fixtures, version pinning.</li>
+<li>Loop tests: scenario suites, budget invariants, adversarial tool outputs, trace replay.</li>
+<li>Both: goldens for output shape, checks for untrusted content handling, latency assertions.</li>
+</ul>
+
+<p>The testing asymmetry is a strong argument for keeping autonomy narrow. If a workflow solves 95 percent of cases and a small escalated branch handles the rest, you need deep tests for the workflow and a modest scenario suite for the branch. Making the whole system agentic multiplies the surface you must test.</p>
+
+<div class="exercise"><strong>Exercise 6.2 — Design a test plan.</strong> Describe a test plan for a fixed order-routing workflow with three model stages and four deterministic rules. List at least five fixtures with expected routes, two boundary values, and one test that checks version metadata appears in the audit log. Then explain which of these tests would need to change if one rule were made agentic.</div>
+
+<h2>The anti-pattern: unnecessary autonomy</h2>
+
+<p>The most common design error in this area is adding a loop to a problem whose decision graph is already known. It usually starts with a reasonable instinct — "the model can figure out the order" — and ends with variable latency, higher cost, and a system nobody can explain. The telltale signs are a prompt that lists the steps in order, a tool set where most calls always happen in the same sequence, and traces that show identical paths across hundreds of runs.</p>
+
+<p>If your prompt contains a numbered list of steps that must happen in order, that list belongs in code. If every run calls the same four tools in the same order, that order is a workflow waiting to be made explicit. If the only branch is "if the model is unsure, try again," replace it with a validation rule and a bounded retry. Autonomy should be introduced where the system must choose among genuinely different paths, not where it is executing a plan you already wrote.</p>
+
+<p>The remedy is not to abandon models. It is to place them where judgement is required and surround them with deterministic structure: validated inputs, constrained outputs, explicit rules, and recorded versions. That arrangement gives you the flexibility that models offer without paying for exploration you do not need.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why is a fixed path an advantage for operations and audit rather than a limitation?</li>
+<li>How can you increase determinism without removing model stages from a workflow?</li>
+<li>In the 50,000-documents example, what causes the large cost difference between the two designs?</li>
+<li>Why should a generated explanation not be the authoritative audit reason?</li>
+<li>Name two signs that a system is using autonomy where a workflow would suffice.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>When the path is known, a fixed workflow is usually faster, cheaper, and easier to reason about than a loop.</li>
+<li>Determinism comes from fixed stage order, validated branch fields, pinned prompt versions, and constrained schemas.</li>
+<li>Worked volumes show agentic loops can cost several times more and miss tight latency targets.</li>
+<li>Audit requirements favour recorded rules, inputs, and version identifiers over generated rationales.</li>
+<li>Workflows are tested by stage contracts and branch coverage; loops need scenario suites and budget invariants.</li>
+<li>Unnecessary autonomy reveals itself as fixed call sequences and ordered step lists inside prompts.</li>
+</ul>
+
+<nav><a href="5-loop-control.html">&larr; Stopping, Iterating, and Escalating</a><span></span><a href="7-architecture-selection.html">Next: Choosing an Architecture &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

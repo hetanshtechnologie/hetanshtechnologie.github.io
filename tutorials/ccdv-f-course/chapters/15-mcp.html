@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 15 — MCP: Servers, Resources, Prompts, and Transports</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 15</span>
+  <h1 id="chapter-15-mcp-servers-resources-prompts-and-transports">Chapter 15 — MCP: Servers, Resources, Prompts, and Transports</h1>
+<p>A custom tool solves one application's problem. An organization usually has a different problem: several assistants and host applications all need the same capability, and nobody wants to rebuild the integration for each one. A connector protocol addresses that repetition by defining how a host discovers and uses capabilities offered by a separate server. This chapter examines that architecture, the things a server can expose, the way a session begins and ends, the transports that carry messages, and the checks that make a reusable server trustworthy.</p>
+<blockquote>
+<p><strong>Exam note:</strong> The protocol standardizes discovery and message shape. It does not make a server safe or correct. Permissions, validation, and review of exposed content remain with the people deploying the host and the server.</p>
+</blockquote>
+<h2 id="learning-objectives">Learning objectives</h2>
+<p>By the end of this chapter you should be able to:</p>
+<ul>
+<li>Describe the client, server, and host roles in a connector-server architecture.</li>
+<li>Distinguish tools, resources, prompts, and transports and state what each is for.</li>
+<li>Trace a session, including initialization and capability negotiation.</li>
+<li>Compare local and remote transports and choose one for a given deployment.</li>
+<li>Configure, deploy, and test a small reusable connector server.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="why-a-connector-server-exists">Why a connector server exists</h3>
+<p>Imagine three host applications that all need to search the same internal knowledge base. Without a shared protocol, each needs its own adapter, credential handling, and assumptions about results. When the search service changes, three adapters need attention. A connector server turns that many-to-many problem into a two-sided interface: the service owner exposes capabilities once, and each compatible host learns them through discovery.</p>
+<p>The host contains a client. It opens a session, asks what capabilities the server offers, forwards tool calls from the model, reads resources when the application needs context, and enforces host policy. The server exposes operations and content, maps them to an underlying system, and returns results in the agreed format. Because the host does not hard-code every tool name, a server can add an operation without a host code change. That flexibility needs governance: a newly discovered capability may require review before the host allows it.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Assuming a registered server is automatically safe. Registration says how to reach it; it says nothing about permissions, handler quality, or returned content.</p>
+</blockquote>
+<h3 id="the-four-components">The four components</h3>
+<p>A connector server can expose tools, resources, prompts, and rely on a transport. Tools are callable operations the model may request. Resources are addressable context, usually identified by a URI and read by the application rather than chosen by the model. Prompts are reusable message templates a user or host can invoke. Transports define how messages travel.</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>What it is</th>
+<th>Who initiates</th>
+<th>Example</th>
+<th>Test focus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tool</td>
+<td>Named operation with input schema</td>
+<td>Model, through host</td>
+<td>Search an index</td>
+<td>Arguments, results, errors</td>
+</tr>
+<tr>
+<td>Resource</td>
+<td>Addressable read-only context</td>
+<td>Host application</td>
+<td>Policy document snapshot</td>
+<td>URI validation, freshness</td>
+</tr>
+<tr>
+<td>Prompt</td>
+<td>Reusable template with parameters</td>
+<td>User or host</td>
+<td>Review against a checklist</td>
+<td>Parameter handling</td>
+</tr>
+<tr>
+<td>Transport</td>
+<td>Channel for protocol messages</td>
+<td>Client and server</td>
+<td>Process pipes or HTTP</td>
+<td>Reliability, authentication</td>
+</tr>
+</tbody>
+</table>
+<p>The tools-versus-resources distinction deserves attention. Use a tool when something must happen: a query runs or a record changes. Use a resource when content must be read and attached to a request. A resource is not merely a read-only tool; it has an address, can be listed, and may support change notifications. Prompts are different again. A prompt is not executable business logic. If a capability needs a side effect, it belongs in a tool; if it supplies reusable background text, a resource usually fits better.</p>
+<blockquote>
+<p><strong>Try it:</strong> Classify a familiar capability. If it requires an effect, choose a tool. If it is content attached to requests, choose a resource. If it is repeatable wording with slots, choose a prompt.</p>
+</blockquote>
+<h3 id="lifecycle-and-capability-negotiation">Lifecycle and capability negotiation</h3>
+<p>Both sides begin with no assumptions beyond the protocol. The client opens the transport and sends initialization data containing its protocol version and capabilities; the server replies with its own version and capabilities. Only after that exchange is the connection ready. This is capability negotiation. Servers differ: one may offer tools and resources but no prompts, while another supports change notifications. The client reads the declaration and adapts, hiding unsupported features instead of failing later. A version mismatch should produce a clear error.</p>
+<p>After initialization, the client discovers available tools, resources, and prompts by listing them. It caches the lists and may refresh them when the server sends a list-changed notification. During use it calls tools, reads resources, or fetches templates. Shutdown closes the session and releases open handles.</p>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Main action</th>
+<th>What can go wrong</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Configure</td>
+<td>Read registration and environment</td>
+<td>Missing command or secret</td>
+</tr>
+<tr>
+<td>Start</td>
+<td>Launch process or connect to endpoint</td>
+<td>Crash, unreachable service</td>
+</tr>
+<tr>
+<td>Initialize</td>
+<td>Exchange version and capability sets</td>
+<td>Version mismatch</td>
+</tr>
+<tr>
+<td>Discover</td>
+<td>List tools, resources, prompts</td>
+<td>New capability appears unreviewed</td>
+</tr>
+<tr>
+<td>Invoke</td>
+<td>Call tools, read resources</td>
+<td>Bad arguments, timeout, denial</td>
+</tr>
+<tr>
+<td>Notify</td>
+<td>Receive list-changed messages</td>
+<td>Stale cached lists</td>
+</tr>
+<tr>
+<td>Shut down</td>
+<td>Close session</td>
+<td>Orphaned process or connection</td>
+</tr>
+</tbody>
+</table>
+<p>A host that skips discovery gives up a main advantage of the protocol. A host that accepts every discovered capability without policy checks gives up control of its attack surface.</p>
+<p>Consider a host that can render only tools and resources connecting to a server that also advertises prompts. Negotiation lets the host ignore the prompt capability and still use the other two. Without it, the host might try to fetch a template it cannot render and fail the whole session. The same exchange lets a server reject an outdated protocol version with a clear message instead of replying in a format the client cannot parse.</p>
+<h3 id="local-and-remote-transports">Local and remote transports</h3>
+<p>The protocol messages are the same regardless of how they travel. A local transport usually starts the server as a child process and exchanges messages through standard input and output. Setup is simple and data stays on the machine, but the server shares the host's machine and is awkward to share across hosts. A remote transport sends messages over HTTP to an endpoint. The server can be deployed independently, scaled, and reached by many hosts, but authentication, transport security, and network latency become concerns.</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Local process</th>
+<th>Remote HTTP</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Setup effort</td>
+<td>Low</td>
+<td>Moderate</td>
+</tr>
+<tr>
+<td>Data path</td>
+<td>Within one machine</td>
+<td>Across a network</td>
+</tr>
+<tr>
+<td>Authentication</td>
+<td>Process boundary</td>
+<td>Explicit tokens and identity</td>
+</tr>
+<tr>
+<td>Multiple hosts</td>
+<td>Awkward</td>
+<td>Natural</td>
+</tr>
+<tr>
+<td>Failure mode</td>
+<td>Process exit, closed pipe</td>
+<td>Timeouts, resets, auth failures</td>
+</tr>
+<tr>
+<td>Good default for</td>
+<td>Personal tooling, prototypes</td>
+<td>Shared production services</td>
+</tr>
+</tbody>
+</table>
+<p>Choice follows the requirement. One developer with a repository assistant should start local. A dozen applications needing one capability should use a remote server with a dedicated identity.</p>
+<blockquote>
+<p><strong>Exam note:</strong> Several hosts, a shared service, or independent deployment points to a remote transport. One workstation and minimal setup points to a local process transport.</p>
+</blockquote>
+<h3 id="building-and-deploying-a-reusable-server">Building and deploying a reusable server</h3>
+<p>Begin with a narrow scope. Decide which operations and content to expose rather than mirroring every backend function. Each tool needs a name, a description with boundaries, an input schema, and a handler that validates before acting. Each resource needs a stable URI pattern and a rule about its contents. Handlers should translate backend failures into structured results, cap result sizes, and resolve paths against approved roots. These are the contract principles from the previous chapter applied at a service boundary.</p>
+<p>Registration tells the host how to reach the server: a command and arguments locally, or an endpoint and authentication settings remotely. Secrets should be injected at runtime from a secret store, never written into a configuration file that might be committed.</p>
+<pre><code class="language-json">{
+  &quot;version&quot;: 1,
+  &quot;servers&quot;: {
+    &quot;policy-kb&quot;: {
+      &quot;transport&quot;: &quot;http&quot;,
+      &quot;endpoint&quot;: &quot;https://policy-kb.internal.invalid/rpc&quot;,
+      &quot;auth&quot;: {&quot;token_env&quot;: &quot;POLICY_KB_TOKEN&quot;},
+      &quot;capabilities&quot;: [&quot;tools&quot;, &quot;resources&quot;, &quot;prompts&quot;],
+      &quot;read_only&quot;: true,
+      &quot;resource_roots&quot;: [&quot;kb://policies/&quot;, &quot;kb://forms/&quot;],
+      &quot;max_result_items&quot;: 20
+    },
+    &quot;local-notes&quot;: {
+      &quot;transport&quot;: &quot;stdio&quot;,
+      &quot;command&quot;: &quot;python&quot;,
+      &quot;args&quot;: [&quot;-m&quot;, &quot;notes_connector&quot;],
+      &quot;env&quot;: {&quot;NOTES_ROOT&quot;: &quot;/srv/notes/approved&quot;},
+      &quot;capabilities&quot;: [&quot;tools&quot;, &quot;resources&quot;],
+      &quot;read_only&quot;: true
+    }
+  }
+}
+</code></pre>
+<p>The first entry is a shared read-only service with allowed resource roots and a token supplied through the environment. The second launches a local server with a fixed notes root, so file access is bounded even if a caller asks for an unexpected path. Deployment habits that pay off later include pinning the server version, logging the discovered capability list at startup, separating development from production, and giving the server its own narrowly scoped identity.</p>
+<h3 id="testing-a-server">Testing a server</h3>
+<p>A server has more layers to test than an in-process function. Handlers can be unit tested. Schemas and error shapes need contract tests. Discovery needs its own check, because a server can pass handler tests yet advertise the wrong list. End-to-end tests through a real host verify that both sides agree on message shape and that policy is enforced.</p>
+<table>
+<thead>
+<tr>
+<th>Test layer</th>
+<th>What it checks</th>
+<th>Typical failure caught</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Handler unit test</td>
+<td>Core logic with fixed inputs</td>
+<td>Wrong result, missing validation</td>
+</tr>
+<tr>
+<td>Contract test</td>
+<td>Schemas, errors, output shape</td>
+<td>Field renamed without versioning</td>
+</tr>
+<tr>
+<td>Discovery test</td>
+<td>Listed tools and resources</td>
+<td>Capability exposed by accident</td>
+</tr>
+<tr>
+<td>Transport test</td>
+<td>Connection, timeout, authentication</td>
+<td>Endpoint rejected or unreachable</td>
+</tr>
+<tr>
+<td>Permission test</td>
+<td>Allowed and denied identities</td>
+<td>Read outside approved root</td>
+</tr>
+<tr>
+<td>End-to-end test</td>
+<td>Full round through a host</td>
+<td>Format disagreement</td>
+</tr>
+</tbody>
+</table>
+<p>Failure injection is valuable: make the backend unavailable, return a malformed record, and send arguments that violate the schema. A good server returns useful errors and stays usable for other calls. Timeouts should be set on both sides so one slow dependency cannot hold a session open indefinitely.</p>
+<blockquote>
+<p><strong>Security note:</strong> Treat resource content and tool results as untrusted input to the host. Text returned by a server may contain instructions aimed at the assistant. Label it as data and keep host policy enforcement outside the server.</p>
+</blockquote>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal.</strong> Stand up a tiny connector server with one tool and one resource, register it locally, and verify discovery and invocation.</p>
+<p><strong>Steps.</strong></p>
+<ol>
+<li>Create a module exposing a <code>lookup_policy</code> tool with a <code>policy_id</code> from a short enumeration and a resource pattern <code>policy://{id}</code> returning the same text.</li>
+<li>Reject unknown identifiers with a structured not-found error containing a code, message, and hint.</li>
+<li>During initialization, advertise <code>tools</code> and <code>resources</code> but not <code>prompts</code>.</li>
+<li>Add a local process registration with an allowed root pointing at a scratch directory.</li>
+<li>Connect a client, list capabilities, call the tool, and read the resource.</li>
+<li>Remove <code>resources</code> from the advertised capabilities and repeat discovery.</li>
+</ol>
+<p><strong>Expected observation.</strong> Discovery shows exactly one tool and one resource. The tool returns a compact result and the resource returns the same text at its address. An unknown identifier produces a structured error rather than a crash. When the capability is removed, the host hides resource access instead of failing late. The initialization log shows versions and capability sets from both sides.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p><strong>Problem.</strong> A training organization wants an assistant that answers questions from an approved course catalogue. A support portal and an internal authoring tool both need the same search operation and reference documents. The catalogue changes weekly, and the team maintaining it does not want to change two integrations. An early proposal copies custom tools into each host.</p>
+<p><strong>Reasoning.</strong> Copying tools creates two implementations that drift. The requirement emphasizes several hosts, shared content, and independent maintenance, which is the pattern a connector server addresses. Search becomes a tool because it runs a query. Individual documents become resources with stable URIs because they are content the host attaches. A standard "summarize this course" template becomes a prompt because it is reusable wording with a parameter. The server uses a read-only identity scoped to the catalogue store, validates query length, caps results, and resolves URIs against an allowlist of prefixes.</p>
+<p><strong>Resolution.</strong> When documents are added, both hosts see them through the existing resource list. The server version is pinned in both hosts and the discovered list is logged, so a future new tool triggers review. A remote transport with a short-lived read-only token replaces the earlier local experiment. Tests cover discovery, URI validation, and a simulated catalogue outage. Duplication disappears because there is one implementation and one place to review changes.</p>
+<blockquote>
+<p><strong>Exam note:</strong> Reuse across hosts and independent ownership points to a connector server. One private helper still points to a custom tool.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Exposing a write-capable server where the requirement only calls for reading.</li>
+<li>Treating a resource as a tool, or a prompt as a side-effecting operation.</li>
+<li>Skipping capability negotiation and assuming all servers support the same features.</li>
+<li>Handing every discovered capability to the model without a host allowlist.</li>
+<li>Embedding service tokens in configuration files kept in source control.</li>
+<li>Leaving tool and resource lists uncached and unrefreshed.</li>
+<li>Testing handlers only, without checking discovery or the transport.</li>
+<li>Trusting server-returned text as instructions rather than labeling it as data.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>A connector server lets several hosts discover one implementation of a capability.</li>
+<li>The host contains the client, the server exposes capabilities, and the transport carries messages.</li>
+<li>Tools perform operations, resources provide addressable context, prompts are reusable templates, and transports define the channel.</li>
+<li>A session moves through configuration, startup, initialization, discovery, invocation, and shutdown.</li>
+<li>Capability negotiation tells the client which features exist so it can adapt gracefully.</li>
+<li>Local process transports minimize setup; remote HTTP transports support sharing and scaling.</li>
+<li>Registration should pin versions, inject secrets at runtime, and scope the server identity.</li>
+<li>Testing must cover handlers, contracts, discovery, transports, permissions, and full round trips.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>Which component fits a stable document the host attaches to a request?</li>
+</ol>
+<p>A. A tool</p>
+<p>B. A resource</p>
+<p>C. A transport</p>
+<p>D. Capability negotiation</p>
+<ol start="2">
+<li>What is the purpose of the initialization exchange?</li>
+</ol>
+<p>A. Execute the first tool call.</p>
+<p>B. Agree on protocol version and supported capabilities.</p>
+<p>C. Cache resource content permanently.</p>
+<p>D. Replace host-side policy checks.</p>
+<ol start="3">
+<li>A capability must be shared by several hosts and maintained by a separate team. Which design fits?</li>
+</ol>
+<p>A. A custom tool copied into each host.</p>
+<p>B. A connector server with a remote transport.</p>
+<p>C. A prompt template stored in one host.</p>
+<p>D. A local process launched separately by each user.</p>
+<ol start="4">
+<li>Which statement about transports is accurate?</li>
+</ol>
+<p>A. Protocol messages differ completely between local and remote.</p>
+<p>B. A local transport requires a token for every call.</p>
+<p>C. The message format is the same; the channel and operations differ.</p>
+<p>D. Remote transports cannot expose tools.</p>
+<ol start="5">
+<li>A server's discovery list suddenly includes an unreviewed operation. What should the host do?</li>
+</ol>
+<p>A. Use it immediately because discovery implies approval.</p>
+<p>B. Ignore all future discovery updates.</p>
+<p>C. Log the change and allow only capabilities on an approved list.</p>
+<p>D. Delete the registration permanently.</p>
+<ol start="6">
+<li>Which test layer catches a server advertising a prompt it does not implement?</li>
+</ol>
+<p>A. Handler unit test</p>
+<p>B. Contract test</p>
+<p>C. Discovery test</p>
+<p>D. Token rotation test</p>
+<ol start="7">
+<li>How should a configuration supply a remote endpoint credential?</li>
+</ol>
+<p>A. Paste the token into the configuration file.</p>
+<p>B. Reference an environment variable populated from a secret store at runtime.</p>
+<p>C. Put the token inside a prompt template.</p>
+<p>D. Ask the model to supply the token during a call.</p>
+<ol start="8">
+<li>A host can render tools and resources, while a server also advertises prompts. What should happen?</li>
+</ol>
+<p>A. Reject the entire server.</p>
+<p>B. Use the supported capabilities and hide prompts.</p>
+<p>C. Treat prompts as tools.</p>
+<p>D. Rewrite the server's code to remove prompts.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> Resources are addressable context for reading. A is an operation. C is the message channel. D is a handshake phase.</p>
+</li>
+<li>
+<p><strong>B.</strong> Initialization exchanges versions and capability sets. A happens after discovery. C is not part of the handshake. D is wrong because host policy stays with the host.</p>
+</li>
+<li>
+<p><strong>B.</strong> A shared remote server gives multiple hosts one implementation. A creates drift. C cannot execute the capability. D repeats setup per user.</p>
+</li>
+<li>
+<p><strong>C.</strong> The protocol defines messages independently of the channel. A is false because semantics carry over. B is false because local processes rely on the process boundary. D is false because any capability can use either transport.</p>
+</li>
+<li>
+<p><strong>C.</strong> Logging and allowlisting keep discovery useful while controlling the attack surface. A trusts unreviewed code. B gives up updates. D is an overreaction.</p>
+</li>
+<li>
+<p><strong>C.</strong> Discovery tests compare advertised capabilities with what the server implements. A checks logic in isolation. B checks shapes but not the advertised list. D concerns credential hygiene.</p>
+</li>
+<li>
+<p><strong>B.</strong> Runtime injection keeps secrets out of version-controlled files. A leaks secrets. C exposes them to the model and logs. D cannot treat the model as a credential source.</p>
+</li>
+<li>
+<p><strong>B.</strong> Negotiation allows graceful degradation: use what both sides support and hide the rest. A discards a usable server. C confuses a template with an operation. D is unnecessary and outside the host's control.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 15.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="14-tool-contracts.html">&larr; Previous</a><a href="16-choosing-extension.html">Next: Choosing an Extension: Skills, Built-Ins, and MCP &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

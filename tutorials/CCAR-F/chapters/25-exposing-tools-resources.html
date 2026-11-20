@@ -1,0 +1,153 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>25. Exposing Tools and Resources</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>25. Exposing Tools and Resources</h1>
+
+<p>A tool is a promise, and a resource is a place. When a server exposes a tool, it promises that a valid argument object will perform a defined unit of work and return a defined shape. When it exposes a resource, it offers addressable content that a client can fetch and cache. Models reason about tools; clients reason about resources. A well-designed surface makes that split obvious to both.</p>
+
+<h2>Two primitives, two contracts</h2>
+
+<p>The two primitives are deliberately asymmetric. A tool invocation is a request message with a payload and a response message with a result or an error. A resource read is a lookup by identifier, usually followed by content bytes plus metadata. This asymmetry is useful: it lets a client prefetch context without side effects, while keeping mutations behind an explicit call that can be approved, logged, and retried.</p>
+
+<table>
+<tr><th>Property</th><th>Tool</th><th>Resource</th></tr>
+<tr><td>Primary question</td><td>"What should happen?"</td><td>"What is at this address?"</td></tr>
+<tr><td>Invoked by</td><td>The model, through a call message</td><td>The client, through a read request</td></tr>
+<tr><td>Typical payload</td><td>JSON argument object</td><td>URI string, optional range or cursor</td></tr>
+<tr><td>Cacheable</td><td>Only when marked read-only</td><td>Yes, keyed by URI plus version</td></tr>
+<tr><td>Side effects</td><td>Possible and often the point</td><td>Should be none</td></tr>
+<tr><td>Failure surface</td><td>Tool error result with retry guidance</td><td>Not found, forbidden, unavailable</td></tr>
+</table>
+
+<p>Both primitives are contracts enforced at the server boundary. Validate before business logic runs: a malformed request that reaches your handler may be partially executed. Parse, validate, then dispatch. Adding a field to the schema is a public API change even when the field is optional.</p>
+
+<h2>Writing a tool contract the model can route</h2>
+
+<p>A tool declaration has three fields that do most of the routing work: a name, a description, and an input schema. Keep the name short, stable, and verb-led, such as <code>search_invoice</code>. Use lowercase with underscores and avoid abbreviations that only your team understands. A name containing a version number is a decision you will later have to honor.</p>
+
+<p>The description is a routing instruction for a model, not documentation for humans. Put the discriminating sentence first: what the tool does and when to choose it. Add one sentence about when <em>not</em> to choose it, especially when a sibling overlaps. "Gets a customer record by exact identifier; use <code>search_customer</code> for partial names" beats "Customer tool." Aim for 40 to 120 words.</p>
+
+<p>The input schema is a JSON Schema object. Constrain everything: <code>enum</code> for fixed choices, <code>minimum</code> and <code>maximum</code> for numbers, <code>maxLength</code> for strings, and <code>additionalProperties: false</code> so typos fail fast. Mark only genuinely required fields as required, and give every optional field a documented default. An implicit default is guessed differently by different models.</p>
+
+<pre><code>{
+  "name": "reserve_slot",
+  "description": "Reserves a 30-minute appointment slot. Use only
+  after availability has been checked with list_slots. Does not
+  send a confirmation email; that is a separate step.",
+  "inputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["calendar_id", "start_utc"],
+    "properties": {
+      "calendar_id": {"type": "string", "pattern": "^cal_[a-z0-9]{8}$"},
+      "start_utc":   {"type": "string", "format": "date-time"},
+      "duration_min": {"type": "integer", "enum": [15, 30, 45], "default": 30},
+      "note": {"type": "string", "maxLength": 280}
+    }
+  }
+}
+
+# Server-side guard: validate, then dispatch
+if payload.duration_min &lt; 15 or payload.duration_min &gt; 45:
+    raise InvalidArgument("duration_min must be one of 15, 30, 45")
+if payload.note and "&amp;" in payload.note:
+    payload.note = escape_ampersands(payload.note)</code></pre>
+
+<p>Four failure modes recur. Two nearly identical descriptions make the model flip between tools. An unbounded text field invites a 10,000-character argument. A schema with twenty optional parameters hides the three that matter. A result whose shape changes by success condition forces the caller to guess. Fix these in the declaration, not in prompt text.</p>
+
+<div class="exercise"><strong>Exercise 25.1 — Tighten a tool contract</strong>
+<ol>
+<li>Take a tool named <code>get_data</code> whose description is "Gets data from the system." Rewrite the description so the first sentence names the exact record type and lookup key, and the second sentence names the sibling tool to use for fuzzy searches.</li>
+<li>Add constraints to its argument object: a required identifier matching a prefix plus six digits, an optional <code>limit</code> capped at 100 with a default of 20, and rejection of unknown fields.</li>
+<li>Write two invalid example calls that your schema must reject, and state which validation rule catches each one.</li>
+</ol>
+</div>
+
+<h2>Keeping reads and actions apart</h2>
+
+<p>A read boundary is a promise that nothing changes. <code>list_slots</code> may query a database, but it must not create a reservation or send a notification. When reads and actions are blended, clients cache the uncacheable, retries duplicate side effects, and permission prompts lose meaning because every call might mutate something.</p>
+
+<table>
+<tr><th>Signal</th><th>Read operation</th><th>Action operation</th></tr>
+<tr><td>Verb</td><td>get, list, search, describe</td><td>create, update, delete, send</td></tr>
+<tr><td>Idempotence</td><td>Naturally repeatable</td><td>Needs an idempotency key</td></tr>
+<tr><td>Approval</td><td>Rarely required</td><td>Commonly required</td></tr>
+<tr><td>Retry policy</td><td>Safe automatic retry</td><td>Retry only with the same key</td></tr>
+<tr><td>Result</td><td>Content plus metadata</td><td>Status plus affected identifier</td></tr>
+</table>
+
+<p>For expensive or irreversible actions, split preview from commit. <code>preview_change</code> computes the diff and returns a token that expires in five minutes; <code>apply_change</code> accepts that token plus an idempotency key. Only the commit changes state. If you cannot split the operation, add a <code>dry_run</code> flag that defaults to <code>true</code> and document that it performs checks but no writes.</p>
+
+<div class="warn">Never let resource listing mutate state. A client may enumerate resources repeatedly for indexing or display. If reading a URI generates a report, consumes a queue item, or rotates a secret, the "read" is actually an action and must be moved behind an explicitly invoked tool.</div>
+
+<h2>Resource URI design</h2>
+
+<p>A resource URI is a stable handle, not a command. Use the structure <code>scheme://authority/path?query#fragment</code> and treat the scheme as a namespace you control. Files can appear as <code>file:///srv/reports/q3.csv</code>, domain objects as <code>issue://ENG-142</code>, and parameterized views as <code>metrics://cpu?window=5m&amp;step=30s</code>.</p>
+
+<p>Six rules keep URIs usable. Keep identifiers stable when storage moves. Never embed secrets or session tokens. Percent-encode spaces and reserved characters consistently. Use path segments for hierarchy and query parameters for filters. Use a fragment for a subsection, such as <code>repo://main/README.md#install</code>. Publish templates with named variables, for example <code>repo://{branch}/{path}</code>, so clients can build valid URIs without string concatenation.</p>
+
+<p>Three errors cause most integration pain. Identity churn occurs when a URI includes a timestamp, so the same document appears new on every read. Ambiguous authority occurs when two backends both use <code>db://</code> with different meanings. Unbounded results occur when a URI expands to a million rows; set a default page size and return a cursor.</p>
+
+<div class="note">A URI may be opaque to the client. If your storage layer is likely to change, expose an identifier such as <code>doc://8f14e45f</code> and keep the mapping server-side. Hierarchical URIs are easier to browse, but they couple clients to your directory layout.</div>
+
+<h2>Metadata that earns its space</h2>
+
+<p>Metadata communicates intent that an identifier cannot. For resources, useful fields include a title, a short description, a MIME type, a byte size, a last-modified timestamp, and annotations for audience and priority. A 4 KB <code>text/markdown</code> resource can render inline; a 2 GB <code>video/mp4</code> should be offered as a download link.</p>
+
+<p>For tools, hints such as read-only, destructive, idempotent, and open-world tell a client how much caution to apply. A destructive hint should trigger confirmation; a read-only hint may allow automatic retries. Change notifications let a server announce a new document instead of making the client poll every ten seconds.</p>
+
+<div class="tip">Hints are signals, not enforcement. A tool marked read-only still needs server-side checks that reject writes. If metadata contradicts behavior, clients will learn to distrust every other declaration you publish.</div>
+
+<h2>Versioning a public surface</h2>
+
+<p>Clients discover declarations at runtime, so a breaking change can fail a session that started minutes earlier. Additive changes are usually safe: a new tool, an optional argument with a default, a new resource scheme. Breaking changes include renaming a tool, narrowing a type, removing an enum member, or making an optional field required.</p>
+
+<table>
+<tr><th>Change</th><th>Compatible?</th><th>Safe technique</th></tr>
+<tr><td>Add optional argument</td><td>Yes</td><td>Default in schema and handler</td></tr>
+<tr><td>Widen a string to add a format</td><td>Yes</td><td>Keep old format accepted</td></tr>
+<tr><td>Remove an enum value</td><td>No</td><td>Deprecate, then ship as v2</td></tr>
+<tr><td>Rename a tool</td><td>No</td><td>Register both names for two releases</td></tr>
+<tr><td>Change resource scheme</td><td>No</td><td>Alias old URIs to new ones</td></tr>
+</table>
+
+<p>Run two versions side by side for two releases, return a deprecation notice in response metadata, and remove the old declaration only when telemetry shows no traffic. Negotiate capability at session start. Keep validation strict: reject unknown fields with <code>additionalProperties: false</code>, and relax to accept-and-ignore only when older clients send fields your handler no longer recognizes.</p>
+
+<div class="exercise"><strong>Exercise 25.2 — Plan a version migration</strong>
+<ol>
+<li>Your tool <code>find_order</code> currently accepts <code>order_id</code> as a string. You want to accept either an identifier or a customer email. Decide whether this is additive or breaking, and justify the choice.</li>
+<li>Describe a two-release migration that keeps existing clients working, including what the response metadata says and when the old declaration is removed.</li>
+<li>Write one sentence of guidance for a client developer that explains how to detect the deprecated form without parsing prose.</li>
+</ol>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why should a resource read never cause a state change, even when the computation is cheap?</li>
+<li>Which three fields of a tool declaration do most of the model's routing work, and what should the description's first sentence contain?</li>
+<li>Give two examples of URI identity churn and explain how to prevent each one.</li>
+<li>When should an action be split into preview and commit tools, and what should the commit step require?</li>
+<li>Classify "remove an enum value" and "add an optional argument with a default" as compatible or breaking, and state the technique for each.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Tools are verbs that perform work; resources are nouns that can be fetched and cached.</li>
+<li>A tool's name, description, and constrained input schema form the contract the model routes on.</li>
+<li>Keep reads free of side effects; put mutations behind explicit tools with confirmations and idempotency keys.</li>
+<li>Resource URIs should be stable, encoded, and parameterized through query strings or published templates.</li>
+<li>Metadata informs client behavior but must never replace server-side enforcement.</li>
+<li>Classify changes as additive or breaking, and dual-register declarations across a deprecation window.</li>
+</ul>
+
+<nav><a href="24-mcp-server-python.html">&larr; Previous</a><span></span><a href="26-mcp-prompts-clients.html">Next: MCP Prompts and Clients &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 12 — Layered Guardrails and Input Safety</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 12 — Layered Guardrails and Input Safety</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Explain why AI systems require layered safeguards rather than reliance on a single prompt or filter.</li>
+    <li>Identify common input, context, and output risks including prompt injection, data exposure, and unsafe actions.</li>
+    <li>Design controls across input handling, tool use, generation, and output screening proportional to risk.</li>
+    <li>Distinguish guidance given to a model from enforcement mechanisms that operate outside model discretion.</li>
+    <li>Apply safe response patterns such as refusal, redaction, escalation, and constrained alternatives.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Defense in depth for probabilistic systems</h3>
+  <p>AI-enabled systems operate with probabilistic behavior, open-ended inputs, and often untrusted content. No single control—whether a carefully written instruction, a content filter, or a permission setting—can address every risk. Defense in depth applies multiple, complementary safeguards so that if one layer fails or is bypassed, others reduce the likelihood or impact of harm. This approach is familiar in security engineering and is especially important when models interpret natural language that may contain ambiguity or adversarial instructions.</p>
+  <p>Layered guardrails work because different controls address different failure modes. Input validation can reject malformed or clearly disallowed requests. Context handling can separate trusted instructions from untrusted data. Tool permissions can limit what actions are possible. Output checks can detect policy violations, sensitive disclosures, or unsupported claims before delivery. Human review can provide accountability for high-impact decisions. Together, these layers create boundaries around behavior that instructions alone cannot guarantee.</p>
+  <p>Proportionality matters. Not every application requires the same intensity of controls. A low-risk internal drafting aid may rely on lightweight checks and clear usage guidance, while a system that accesses sensitive records or triggers external actions requires stronger isolation, authorization, and monitoring. Architects should map controls to the system’s risk profile, data sensitivity, and potential impact.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Prefer enforcement mechanisms (permissions, validation, isolation, approvals) over prompt wording when the question involves safety, security, or irreversible actions. Prompts guide; controls enforce.</p>
+  </div>
+
+  <h3>Understanding input and context risks</h3>
+  <p>Inputs to AI systems include not only direct user messages but also retrieved documents, tool results, file contents, and metadata. Any of these can carry untrusted or malicious content. A common risk is <strong>prompt injection</strong>, where untrusted content attempts to override instructions, exfiltrate data, or induce unauthorized actions. Injection can be direct (in the user request) or indirect (embedded in content the system processes). Because models treat text as context, distinguishing benign information from manipulative instructions is a design challenge.</p>
+  <p>Other input risks include data exposure requests, attempts to elicit restricted information, malformed inputs designed to confuse parsing, and context poisoning where irrelevant or misleading material influences outputs. Risks also arise from over-collection: including sensitive data in prompts or logs when it is not needed increases exposure. Safe input handling therefore involves validation, minimization, and clear separation of trusted system directives from untrusted content.</p>
+
+  <table>
+    <tr>
+      <th>Risk type</th>
+      <th>Example scenario</th>
+      <th>Potential impact</th>
+      <th>Primary controls</th>
+    </tr>
+    <tr>
+      <td>Direct injection</td>
+      <td>User asks system to ignore rules and reveal secrets</td>
+      <td>Policy bypass, data leakage</td>
+      <td>Instruction hierarchy, refusal, output filtering</td>
+    </tr>
+    <tr>
+      <td>Indirect injection</td>
+      <td>Retrieved document contains hidden instructions</td>
+      <td>Unauthorized tool use, manipulated output</td>
+      <td>Content isolation, least privilege, tool confirmations</td>
+    </tr>
+    <tr>
+      <td>Sensitive data exposure</td>
+      <td>Prompt or log includes unnecessary personal data</td>
+      <td>Privacy/compliance violation</td>
+      <td>Data minimization, redaction, access controls</td>
+    </tr>
+    <tr>
+      <td>Unsafe action request</td>
+      <td>Request to perform irreversible operation without approval</td>
+      <td>Operational or financial harm</td>
+      <td>Action gating, approvals, allowlists</td>
+    </tr>
+    <tr>
+      <td>Malformed or excessive input</td>
+      <td>Oversized or structured input breaks assumptions</td>
+      <td>Failures, degraded behavior, cost spikes</td>
+      <td>Validation, size limits, parsing safeguards</td>
+    </tr>
+  </table>
+
+  <h3>Guardrail layers across the system</h3>
+  <p>Effective guardrails are distributed across the request lifecycle. <strong>Input controls</strong> validate format, size, and source; classify intent; and remove or flag clearly disallowed content. <strong>Context controls</strong> structure prompts so that system instructions, developer policies, and untrusted content are distinguishable, and they limit what data is included. <strong>Capability controls</strong> restrict available tools, permissions, and data access to the minimum required, reducing the impact of misinterpretation. <strong>Generation controls</strong> shape behavior through instructions and constrained output formats but are treated as guidance rather than guarantees. <strong>Output controls</strong> screen responses for policy violations, sensitive data, unsupported claims, or unsafe recommendations before delivery. <strong>Operational controls</strong> include logging, monitoring, rate limits, and incident response.</p>
+  <p>These layers should be designed to fail safely. When a check cannot be completed or returns an uncertain result, the system should prefer restriction, escalation, or a safe fallback over proceeding as if all is well. For example, if provenance cannot be confirmed for a high-stakes answer, the system may decline to assert the claim and request verification. Safe failure behavior must be defined in advance, not improvised during incidents.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Assuming that a single “safety prompt” prevents injection or misuse. Adversarial or ambiguous inputs can still influence behavior; enforce limits with permissions, validation, and output checks.</p>
+  </div>
+
+  <h3>Separating guidance from enforcement</h3>
+  <p>A critical architectural distinction is between what the model is asked to do and what the system allows it to do. Instructions can request that the model refuse certain requests, avoid revealing data, or use tools carefully. These are valuable but not sufficient, because model compliance is not absolute. Enforcement mechanisms operate outside the model’s discretion: a tool not exposed cannot be called; a redaction filter can remove sensitive patterns; an approval gate can block an action regardless of the model’s output.</p>
+  <p>Designing with this distinction leads to more robust systems. If a model should not send external messages, do not provide a sending capability in that context—or require explicit approval before execution. If certain data must never appear in outputs, apply detection and redaction controls rather than relying solely on an instruction to omit it. If actions must be auditable, log them at the system boundary. This approach treats the model as a powerful but untrusted component within a controlled environment.</p>
+
+  <table>
+    <tr>
+      <th>Objective</th>
+      <th>Guidance (model-facing)</th>
+      <th>Enforcement (system-facing)</th>
+      <th>Why both matter</th>
+    </tr>
+    <tr>
+      <td>Prevent unauthorized actions</td>
+      <td>Instruct to avoid restricted operations</td>
+      <td>Allowlists, permissions, approval gates</td>
+      <td>Blocks action even if instruction is ignored</td>
+    </tr>
+    <tr>
+      <td>Protect sensitive data</td>
+      <td>Instruct not to disclose secrets</td>
+      <td>Minimization, redaction, access controls</td>
+      <td>Reduces exposure paths beyond text generation</td>
+    </tr>
+    <tr>
+      <td>Maintain policy compliance</td>
+      <td>Describe acceptable behavior</td>
+      <td>Output screening, rule checks, escalation</td>
+      <td>Catches violations before delivery</td>
+    </tr>
+    <tr>
+      <td>Ensure traceability</td>
+      <td>Request citations or explanations</td>
+      <td>Structured logging and provenance capture</td>
+      <td>Creates reliable records independent of output</td>
+    </tr>
+  </table>
+
+  <h3>Safe response patterns: refusal, redaction, and escalation</h3>
+  <p>When guardrails trigger, the system’s response should be safe, clear, and useful within limits. <strong>Refusal</strong> declines to fulfill a request that is disallowed or unsafe, ideally with a brief explanation and, when possible, a permissible alternative. <strong>Redaction</strong> removes or masks sensitive elements while preserving non-sensitive value. <strong>Constrained response</strong> answers a safe portion of a request while omitting or deferring the unsafe portion. <strong>Escalation</strong> routes the case to a human reviewer or a controlled process when automated handling is inappropriate.</p>
+  <p>These patterns should be consistent and predictable. Users and downstream systems benefit from knowing how the system behaves at boundaries. Internally, consistent patterns simplify monitoring: spikes in refusals or escalations can indicate emerging misuse, unclear instructions, or gaps in allowed functionality. The choice among patterns depends on risk and context; high-impact uncertainty generally favors escalation over speculative completion.</p>
+
+  <pre><code class="language-yaml">guardrail_pipeline:
+  input:
+    - validate_schema_and_size
+    - classify_request_risk
+    - detect_disallowed_content
+  context:
+    - separate_trusted_instructions_from_untrusted_data
+    - minimize_sensitive_fields
+  capabilities:
+    - enforce_tool_allowlist
+    - require_approval_for_irreversible_actions
+  output:
+    - screen_for_sensitive_data
+    - check_policy_and_format
+    - attach_provenance_when_available
+  on_trigger:
+    high_risk: "escalate_to_human_review"
+    disallowed: "refuse_with_safe_alternative"
+    sensitive_leak_detected: "redact_and_log_event"</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> For one workflow, list each action the system can take and classify it as reversible or irreversible. Require explicit approval or stricter controls for irreversible actions.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>An organization deploys an assistant that helps employees draft responses using internal knowledge articles and, in some cases, retrieve account-related information. The assistant can also propose updates to internal tickets. During testing, reviewers identify concerns: some knowledge articles contain outdated embedded notes written as instructions, users can phrase requests in ways that pressure the assistant to reveal more account detail than necessary, and proposed ticket updates are sometimes generated without sufficient confirmation. Leadership wants the assistant to remain helpful while reducing security, privacy, and operational risks.</p>
+
+  <h3>Analysis</h3>
+  <p>The scenario presents multiple layered risks. Embedded instructions in retrieved content create indirect injection exposure. Requests for excessive account detail raise data minimization and privacy concerns. Automatic or weakly controlled ticket updates create operational risk because changes may be incorrect or unauthorized. A single prompt instructing the assistant to “be careful” does not address these risks adequately; controls must be applied at input, context, capability, and output layers.</p>
+  <p>The impact varies by action. Drafting text is lower risk and reversible, while modifying tickets is higher impact. Data sensitivity requires that only necessary fields be retrieved and displayed. The system must also handle untrusted retrieved content without treating it as authoritative instruction. These conditions call for least-privilege tool access, separation of instructions from retrieved data, output screening, and approval gates for state-changing actions.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect implements a layered design. Retrieved articles are treated as untrusted reference content and passed in a clearly delimited context separate from system instructions. Account retrieval is limited to fields required for the specific task, with redaction rules applied before inclusion in prompts and outputs. The assistant may draft ticket updates but cannot apply them directly; submission requires explicit user confirmation and, for certain categories, supervisory approval. Output screening checks for sensitive data patterns and policy violations before display.</p>
+  <p>Monitoring captures guardrail triggers, blocked actions, and escalation rates to detect misuse or design gaps. The assistant’s responses follow consistent patterns: refuse disallowed requests, explain data limitations, and offer safe alternatives such as requesting necessary details or proceeding with a draft for review. This combination preserves usefulness for low-risk drafting while enforcing strong boundaries around sensitive data and irreversible actions.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Relying on prompt instructions alone to prevent injection, data leakage, or unauthorized actions.</li>
+    <li>Treating retrieved or third-party content as trusted instructions rather than untrusted data.</li>
+    <li>Granting broad tool permissions when tasks require only limited, reversible capabilities.</li>
+    <li>Failing to define safe failure behavior, leading to permissive responses when checks are uncertain.</li>
+    <li>Omitting monitoring of guardrail triggers, which hides emerging risks and control gaps.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Layered guardrails provide defense in depth for probabilistic systems exposed to untrusted inputs and complex contexts.</li>
+    <li>Input, context, capability, output, and operational controls address different risks and should be combined proportionally.</li>
+    <li>Prompt injection and data exposure risks require separation of trusted instructions from untrusted content and strict minimization.</li>
+    <li>Guidance influences model behavior, but enforcement mechanisms—permissions, validation, approvals, and screening—provide reliable boundaries.</li>
+    <li>Consistent refusal, redaction, constrained responses, and escalation support safe and predictable behavior at system limits.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>Why is defense in depth important for AI-enabled systems?</p>
+      <p>A. Because a single prompt guarantees safe behavior<br>
+      B. Because multiple complementary controls reduce risk when one layer fails<br>
+      C. Because output screening eliminates the need for permissions<br>
+      D. Because only input validation matters</p>
+    </li>
+    <li>
+      <p>Which situation best illustrates indirect prompt injection?</p>
+      <p>A. A user submits a malformed JSON payload<br>
+      B. A retrieved document contains instructions that attempt to override system behavior<br>
+      C. A model produces a long response<br>
+      D. A request exceeds latency targets</p>
+    </li>
+    <li>
+      <p>What is the most reliable way to prevent an unauthorized irreversible action?</p>
+      <p>A. Ask the model politely not to perform it<br>
+      B. Remove the capability or require an enforced approval gate<br>
+      C. Increase response verbosity<br>
+      D. Rely solely on post-delivery monitoring</p>
+    </li>
+    <li>
+      <p>How should retrieved external content generally be treated in a guarded design?</p>
+      <p>A. As trusted system instructions<br>
+      B. As untrusted data separated from core directives<br>
+      C. As exempt from policy checks<br>
+      D. As a replacement for access controls</p>
+    </li>
+    <li>
+      <p>When a sensitive-data check is uncertain in a high-risk context, what is the safest default?</p>
+      <p>A. Deliver the response and review later<br>
+      B. Ignore the uncertainty to avoid friction<br>
+      C. Redact, restrict, or escalate according to defined policy<br>
+      D. Ask the model to self-certify safety</p>
+    </li>
+    <li>
+      <p>Which pairing correctly distinguishes guidance from enforcement?</p>
+      <p>A. Instruction to cite sources vs. structured logging of provenance<br>
+      B. Tool allowlist vs. polite request<br>
+      C. Redaction filter vs. user preference<br>
+      D. Approval gate vs. longer prompt</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Layered controls provide resilience when individual safeguards fail or are bypassed. A, C, and D over-rely on single mechanisms.</li>
+    <li><strong>Correct: B.</strong> Indirect injection occurs when untrusted content processed by the system contains manipulative instructions. A is a validation issue, C is unrelated, and D is a performance concern.</li>
+    <li><strong>Correct: B.</strong> Enforced capability limits or approval gates prevent actions regardless of model output. A is guidance only, C is irrelevant, and D detects issues too late to prevent the action.</li>
+    <li><strong>Correct: B.</strong> Retrieved content should be treated as untrusted data and isolated from trusted instructions. A, C, and D create security and control risks.</li>
+    <li><strong>Correct: C.</strong> Safe failure favors restriction or escalation when risk is high and checks are uncertain. A and B expose unnecessary risk, and D relies on non-enforced assurance.</li>
+    <li><strong>Correct: A.</strong> Asking for citations is guidance, while logging provenance is an enforcement/recording mechanism. The other pairings misattribute enforcement or confuse unrelated concepts.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 12.</em></p>
+
+  <nav>
+    <a href="11-reasoning-controls-and-response-quality.html">&larr; Previous</a>
+    <a href="13-context-budgets-and-isolation.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

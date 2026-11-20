@@ -1,0 +1,147 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>31. Permission Modes</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>31. Permission Modes</h1>
+
+<p>Permission modes answer a narrow question: which actions may the assistant take without asking? They are not a measure of trust in the model, and they are not a substitute for review. They are a control surface for irreversibility. A useful policy lets cheap, reversible work flow freely while placing a deliberate pause in front of actions that are expensive, hard to undo, or visible outside your machine.</p>
+
+<h2>Why approval levels exist</h2>
+
+<p>Consider two actions: opening a file and force-pushing a branch. Both are tool calls. The first has no lasting effect; the second can erase commits for everyone on the team. Treating them identically is the core mistake in permission design. Approval levels express the difference in a form the client can enforce before the call runs.</p>
+
+<p>The second reason is human attention. If every file edit produces a dialog, people start approving without reading, and the control becomes decoration. A good policy is selective enough that each prompt still deserves attention. Aim for a handful of meaningful approvals per session rather than dozens of reflexive ones.</p>
+
+<table>
+<tr><th>Factor</th><th>Low concern</th><th>High concern</th></tr>
+<tr><td>Reversibility</td><td>Easy to undo locally</td><td>Permanent or shared effect</td></tr>
+<tr><td>Blast radius</td><td>One file in the workspace</td><td>Repository, cloud, or other people</td></tr>
+<tr><td>Observability</td><td>Visible in the diff</td><td>Hidden in logs or external state</td></tr>
+<tr><td>Cost</td><td>Near zero</td><td>Billed API or compute usage</td></tr>
+</table>
+
+<h2>A ladder of approval levels</h2>
+
+<p>Most environments offer a small set of levels that can be arranged from cautious to permissive. Think of them as a ladder, and choose the lowest rung that still lets the work progress.</p>
+
+<ol>
+<li><strong>Plan only.</strong> The assistant investigates and proposes steps but changes nothing. Best for unfamiliar codebases or high-stakes refactors.</li>
+<li><strong>Review each action.</strong> Reading is free; edits and commands pause for approval. This is the sensible default for interactive work.</li>
+<li><strong>Accept edits in scope.</strong> File changes inside the project proceed automatically; shell commands and external calls still require a decision.</li>
+<li><strong>Broad automation.</strong> Most actions run without prompting, inside a sandbox with restricted network and credential access.</li>
+<li><strong>Unrestricted.</strong> No approvals and no sandbox. Appropriate only in a disposable environment with nothing valuable to lose.</li>
+</ol>
+
+<p>Level three is often the sweet spot for an experienced developer. Edits are visible in version control and can be reverted, so automatic acceptance saves time. Commands that compile, install, or transmit remain gated. Level four belongs in a container that can be thrown away; without that boundary, a single mistaken command can affect the host.</p>
+
+<div class="note">A permission mode controls the assistant's tools, not your operating system. File ownership, database grants, and cloud IAM still apply. Keep those underlying controls narrow so that a permissive mode cannot become a full compromise.</div>
+
+<h2>Risk profile of common actions</h2>
+
+<p>Classify actions by consequence rather than by syntax. <code>rm -rf ./build</code> and <code>rm -rf ~</code> look similar but differ enormously in scope. Likewise, a database query and a migration both involve SQL, but only one changes production state.</p>
+
+<table>
+<tr><th>Action</th><th>Suggested handling</th><th>Reason</th></tr>
+<tr><td>Read a source file</td><td>Allow</td><td>No side effects</td></tr>
+<tr><td>Edit a tracked source file</td><td>Allow in scoped mode</td><td>Revertible through git</td></tr>
+<tr><td>Run unit tests or lint</td><td>Allow</td><td>Local and bounded</td></tr>
+<tr><td>Install an unfamiliar package</td><td>Ask every time</td><td>Executes third-party code</td></tr>
+<tr><td>Delete outside the workspace</td><td>Deny</td><td>Beyond review via diff</td></tr>
+<tr><td>Push, deploy, or migrate</td><td>Ask every time</td><td>Shared and hard to reverse</td></tr>
+</table>
+
+<p>Pay special attention to commands that download and execute code in one step, to scripts that read environment variables, and to anything that writes outside the project directory. A request to "clean up temporary files" is a classic route to a destructive command because the scope sounds harmless while the actual path is not.</p>
+
+<h2>Team policy and guardrails</h2>
+
+<p>Personal preference and organizational policy are different things. A developer may choose to accept edits automatically; the organization must still be able to forbid certain commands. Encode the non-negotiable rules centrally, in settings that apply to every session, and keep them short enough to understand. Deny rules should win over allow rules, and an unmatched action should default to asking rather than running.</p>
+
+<pre><code>{
+  "permissions": {
+    "allow": [
+      "Read(src/**)",
+      "Edit(src/**)",
+      "Bash(npm test)",
+      "Bash(npm run lint)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(curl * | sh)",
+      "Edit(.env*)"
+    ],
+    "ask": ["WebFetch", "mcp__deploy__*"]
+  }
+}
+
+# Effective decision, expressed as a rule order
+if matches(action, deny_rules):
+    decision = "block"                 # deny always wins
+elif matches(action, ask_rules) or not matches(action, allow_rules):
+    decision = "prompt"
+elif risk_score(action) &gt;= 8:
+    decision = "prompt"
+else:
+    decision = "run"</code></pre>
+
+<div class="tip">Write rules with explicit paths and named commands. A wildcard that allows every shell command also allows every command you meant to deny, and a broad edit rule can overwrite your own policy files.</div>
+
+<p>Guardrails work best in layers. Permission rules decide what may run. A sandbox limits what a permitted process can reach, such as denying network access or hiding home-directory credentials. Hooks can add checks at lifecycle points, for example scanning a command before execution. Version control provides the last layer: a clean branch and a reviewed diff make recovery possible when the earlier layers fail.</p>
+
+<h2>Automation and CI trade-offs</h2>
+
+<p>Automated sessions cannot answer a prompt, so a configuration that works interactively may hang in a pipeline. The usual response is to pre-approve a narrow set of commands and run the job in a disposable container with a short-lived token. The container is the important part: automation with broad permissions and no isolation concentrates risk in a place where nobody is watching in real time.</p>
+
+<p>Prefer deterministic automation. Give the job a specific prompt, a fixed working directory, a pinned dependency set, and a machine-checkable success condition. Log every tool call with its arguments and decision so a failed run can be reconstructed. If the agent needs an action outside the allowlist, fail the job with a clear message instead of silently skipping the step.</p>
+
+<div class="exercise"><strong>Exercise 31.1 — Design a CI permission policy</strong>
+<ol>
+<li>A pipeline asks an assistant to update documentation and run tests. List the three actions you would pre-approve.</li>
+<li>Name two actions that should cause the job to fail rather than run without approval, and explain why.</li>
+<li>Describe the isolation you would add so a mistaken command cannot affect the CI runner's host.</li>
+</ol>
+</div>
+
+<h2>Failure modes and recovery</h2>
+
+<p>Over-restrictive policies produce approval fatigue: people click through prompts without reading them, which is functionally equivalent to no policy. If that happens, remove prompts for reversible local actions and keep them for genuinely consequential ones. Under-restrictive policies produce incidents: an unreviewed command deletes a directory, pushes a commit, or exposes a token. When that happens, treat the policy as defective, not the operator as careless.</p>
+
+<p>Inconsistent policies across a team are a quieter problem. If one developer runs unrestricted and another reviews every edit, code review becomes the only shared control. Align the defaults, document the exceptions, and review the rule set whenever a new tool or MCP server is introduced. After any incident, add the smallest rule that would have prevented it and test that the rule does not block ordinary work.</p>
+
+<div class="exercise"><strong>Exercise 31.2 — Repair an approval policy</strong>
+<ol>
+<li>A developer reports forty approval prompts in a two-hour session. Diagnose the likely cause and propose a change that preserves safety.</li>
+<li>An automated job deleted generated files outside the workspace. Which layer failed, and which two controls would you add?</li>
+<li>Write the sentence you would add to team documentation to explain when a broad automation mode is acceptable.</li>
+</ol>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why should permission policy be based on reversibility and blast radius rather than on confidence in the model?</li>
+<li>Name two levels of the approval ladder and a task suited to each.</li>
+<li>Why must deny rules take precedence over allow rules?</li>
+<li>What does a sandbox add that a permission rule does not?</li>
+<li>How does approval fatigue undermine a restrictive policy?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Permission modes govern actions, not intelligence; classify work by irreversibility and scope.</li>
+<li>The approval ladder ranges from plan-only to unrestricted, with scoped edit acceptance as a practical middle.</li>
+<li>Reads and local checks can run freely; installs, deletions, pushes, and migrations deserve prompts or denials.</li>
+<li>Central policy should override local preference, with deny rules winning and unknown actions asking.</li>
+<li>Automation needs narrow allowlists, disposable environments, and short-lived credentials.</li>
+<li>Watch for approval fatigue and incidents; both are signals to redesign the policy.</li>
+</ul>
+
+<nav><a href="30-claude-code-tools-context.html">&larr; Previous</a><span></span><a href="32-claude-md-hierarchy.html">Next: The CLAUDE.md Hierarchy &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

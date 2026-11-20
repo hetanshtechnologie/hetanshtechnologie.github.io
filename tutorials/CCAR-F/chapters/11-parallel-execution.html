@@ -1,0 +1,129 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>11. Fan-Out, Fan-In, and Synchronization</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>11. Fan-Out, Fan-In, and Synchronization</h1>
+
+<p>Fan-out/fan-in is the most tempting pattern in agent design: split work among many workers, then gather the answers. Used well, it turns forty minutes into three; used carelessly, it yields contradictory results, duplicate writes, and a collector that starts too early. This chapter covers the plumbing that makes parallel execution predictable — partitioning, aggregation, race control, partial-failure policy, and the synchronization barrier between the two halves.</p>
+
+<h2>Anatomy of a fan-out/fan-in run</h2>
+
+<p>Three roles are involved. The <strong>dispatcher</strong> partitions the input into disjoint slices and creates one task per slice. <strong>Workers</strong> execute the same instruction against their own slice and return a structured result. The <strong>collector</strong> waits at a barrier, validates what arrived, and reduces the results into a single answer. Keeping these roles distinct matters: a worker that decides when aggregation begins, or a collector that silently repairs a worker's malformed output, makes the system impossible to reason about.</p>
+
+<p>Partitioning should be deterministic. If there are 97 documents and a target slice size of 10, compute <code>ceil(97 / 10) = 10</code> shards, nine of 10 items and one of 7. Use a stable key — document ID, line range, or a hash bucket — so a retry asks for the same slice rather than a different one. Random partitioning breaks idempotency: a retried worker may receive different items and write under a different result key, leaving duplicates behind. Pass a slice descriptor with every task: <code>shard_index</code>, <code>item_ids</code>, <code>attempt</code>, and <code>input_digest</code>.</p>
+
+<table>
+<tr><th>Role</th><th>Responsibility</th><th>Must not do</th></tr>
+<tr><td>Dispatcher</td><td>Partition, assign IDs, enforce worker cap</td><td>Interpret worker results</td></tr>
+<tr><td>Worker</td><td>Process one slice, emit typed result and errors</td><td>Write directly to the final artifact</td></tr>
+<tr><td>Collector</td><td>Validate, deduplicate, reduce, report gaps</td><td>Start before the barrier releases</td></tr>
+</table>
+
+<h2>Aggregation: four ways to reduce results</h2>
+
+<p>The collector's reduction strategy must match the question. Four common strategies cover most cases:</p>
+
+<ul>
+<li><strong>Concatenate</strong> — appropriate when the answer is a list, such as all flagged lines. Preserve shard order for reproducibility.</li>
+<li><strong>Vote</strong> — appropriate for classification, where each shard returns a label. Require a quorum such as at least 3 of 5 workers agreeing, and record the margin.</li>
+<li><strong>Weighted reduce</strong> — appropriate when workers report conflicting values with confidence scores. Weight by confidence but cap the weight of any single shard, for example at 25%.</li>
+<li><strong>Structured merge</strong> — appropriate when each shard owns different fields of a shared record. Merge by key and reject collisions instead of choosing a winner arbitrarily.</li>
+</ul>
+
+<p>Every strategy needs a tie-break rule decided in advance. If two shards claim the same record with different values and neither has higher confidence, the collector should emit a <code>conflict</code> item into the output rather than pick one. Silent winner selection is how a clean-looking report ends up contradicting its own sources. Aggregation should also produce a coverage summary — items submitted, items accepted, items rejected, items missing — so the caller can tell the difference between "all clear" and "nothing was checked."</p>
+
+<div class="tip"><strong>Report both the answer and its provenance.</strong> A result such as <code>{ "flagged": 14, "shards": 10, "coverage": "97/97", "conflicts": 2 }</code> is far more useful than a bare <code>14</code>. It lets a reviewer decide whether to trust the number without rerunning the whole job.</div>
+
+<h2>Race conditions and shared state</h2>
+
+<p>Race conditions appear when workers touch a shared resource: a results file, a database table, a rate-limited API, or a common scratchpad. The safest design is to give workers <em>no shared writable state</em>. Each writes to its own key, such as <code>result:{run_id}:shard:{index}:attempt:{n}</code>, and only the collector assembles the final object. When shared writes are unavoidable, use three defences:</p>
+
+<ol>
+<li><strong>Idempotency keys.</strong> Derive the key from the item and its digest, for example <code>ticket:4471:sha256:9ab2</code>. A repeated write updates the same record rather than creating a second one.</li>
+<li><strong>Compare-and-swap.</strong> Include a version number; a write succeeds only if the stored version still matches the version the worker read. Otherwise the worker rereads and retries.</li>
+<li><strong>Ownership scopes.</strong> Assign each shard a distinct namespace or partition, so <code>shard:03</code> physically cannot write <code>shard:07</code>'s keys.</li>
+</ol>
+
+<p>Rate limits are a different kind of contention. Ten workers calling one external API simultaneously can turn a service's 60-request-per-minute limit into a burst of failures. Use a token bucket or a semaphore in the dispatcher, and record throttling as a distinct error class — a 429 response is retryable with backoff, while a 400 response is not. Parallelism should not be used to discover an API's limits at the worst possible moment.</p>
+
+<h2>Partial failure: decide the policy before you run</h2>
+
+<p>At moderate scale, partial failure is the norm rather than the exception. With 12 workers at 90% individual success, the probability that every worker succeeds is about 0.28. A design that assumes universal success will fail most runs. Choose one of three policies explicitly:</p>
+
+<table>
+<tr><th>Policy</th><th>Rule</th><th>Use when</th><th>Risk</th></tr>
+<tr><td>All must pass</td><td>Any shard failure fails the run</td><td>Compliance, exact billing, legal review</td><td>High retry cost, low completion rate</td></tr>
+<tr><td>Quorum</td><td>At least N of M shards, and minimum coverage</td><td>Classification, voting, survey work</td><td>May hide systematic bias in missing shards</td></tr>
+<tr><td>Best effort</td><td>Accept successes, list gaps, mark partial</td><td>Exploratory analysis, drafts</td><td>Incomplete results mistaken for complete ones</td></tr>
+</table>
+
+<p>Give each worker a retry budget — commonly two additional attempts with exponential backoff and jitter for transient faults — and classify failures before retrying. Retry a timeout or a throttling response; do not retry a malformed input or a permissions error, because repeating the same cause wastes budget. A results envelope should record <code>attempts</code>, <code>last_error_class</code>, and <code>terminal_reason</code>, so the collector can distinguish "gave up" from "still running."</p>
+
+<pre><code>run:
+  shards: 12
+  retry_budget: 2
+  backoff_ms: [500, 1500]
+  on_failure:
+    transient: retry_with_jitter
+    validation: quarantine_and_report
+    auth: abort_run
+  barrier:
+    quorum_shards: 11
+    min_coverage: 0.95
+    timeout_seconds: 180
+  guard: if ( ok_shards &gt;= 11 &amp;&amp; coverage &gt;= 0.95 ) -&gt; aggregate()
+         else -&gt; mark_partial( include_gap_list: true )</code></pre>
+
+<h2>Synchronization barriers and stragglers</h2>
+
+<p>A barrier is the rule that decides when fan-in may begin. The naive rule — wait for every worker forever — fails when one worker is stuck on a slow tool call. A practical barrier closes on the earliest of three conditions: all shards complete, a quorum plus minimum coverage is reached, or a timeout expires. Each condition must be recorded in the run log, because the meaning of the aggregated answer depends on which one fired.</p>
+
+<p>Stragglers are workers that finish after the barrier closes. Decide their fate up front. Options are: discard them and note their IDs; admit them into a second, additive merge if the output supports it; or hold the final artifact as provisional until a deadline. Discarding is simplest but must be honest — the coverage figure should exclude straggler items rather than claim they were checked. Cancellation of stuck workers matters too: a worker that continues writing after the run ends can corrupt a later run that reuses the same keys. Propagate a cancellation token and verify that workers acknowledge it.</p>
+
+<div class="warn"><strong>Barrier anti-pattern: premature aggregation.</strong> If the collector starts when the first shard finishes, the result depends on scheduling order, not on data. This produces different answers on identical inputs — the hardest kind of bug to reproduce. Always make the barrier explicit and observable.</div>
+
+<h2>Sizing the run: latency, cost, and coordination</h2>
+
+<p>Parallelism changes the cost shape. For N items, shard size S, and W workers, <code>W = ceil(N / S)</code>. Wall time is approximately the longest worker plus aggregation, while token cost is the sum of all workers plus the merge. If 240 items take 5 seconds each to process and a merge takes 12 seconds, then with 24 shards of 10 items the ideal wall time is about 50 + 12 = 62 seconds, compared with 1,200 seconds for a single sequential pass. The same run at 2,000 tokens per shard and 8,000 for the merge costs 56,000 tokens. Doubling the worker count halves the ideal latency but doubles worker tokens and increases the chance of at least one failure.</p>
+
+<p>Coordination overhead also grows. With 24 shards, a dispatcher sending a task, a worker acknowledging, a worker returning, and a collector acknowledging produces roughly 96 messages. At 100 tokens per message that is 9,600 tokens of envelope traffic, plus queueing delay. This is why very fine sharding eventually becomes slower: a shard of one item spends more time on messaging than on work. A useful lower bound is about 20 to 50 items per shard for cheap operations, or one substantial document per shard for expensive ones.</p>
+
+<div class="exercise"><strong>Exercise 11.1 — Design a sharded classification run</strong>
+<p>You must label 1,180 customer messages as <code>billing</code>, <code>technical</code>, or <code>other</code>, with a worker cap of 16 and a target of at most 80 messages per shard. Determine the shard count and sizes, choose an aggregation strategy and quorum rule, and specify what the collector reports when two shards time out.</p>
+<p>Hint: compute <code>ceil(1180 / 80)</code> first, then decide what the collector reports for uncovered messages.</p>
+</div>
+
+<div class="exercise"><strong>Exercise 11.2 — Fix a broken parallel design</strong>
+<p>A team runs eight workers that each append findings to the same JSON file. Results sometimes disappear, and the summary is different on identical inputs. Name at least three distinct causes consistent with these symptoms and give a concrete fix for each.</p>
+<p>Hint: think about write keys, barrier timing, retry slice identity, and duplicate-key conflict rules.</p>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why must partitioning be deterministic when workers may be retried?</li>
+<li>Which aggregation strategy fits a task where each shard owns different fields of one record?</li>
+<li>How does compare-and-swap prevent a lost update in shared state?</li>
+<li>What three conditions can close a synchronization barrier?</li>
+<li>Why does very fine sharding eventually increase rather than decrease total cost?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Keep dispatcher, worker, and collector roles separate and give each shard a deterministic identity.</li>
+<li>Match the reduction strategy to the question, and always emit coverage and provenance with the answer.</li>
+<li>Prefer private worker keys; when shared writes are unavoidable, use idempotency keys and version checks.</li>
+<li>Declare all-must-pass, quorum, or best-effort policy before execution, with bounded retries by error class.</li>
+<li>Close barriers explicitly on completion, quorum, or timeout, and account for stragglers honestly.</li>
+<li>Size shards so that useful work dominates messaging overhead.</li>
+</ul>
+
+<nav><a href="10-sequential-pipelines.html">&larr; Previous</a><span></span><a href="12-adaptive-planning.html">Next: Adaptive Planning and Ambiguity &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

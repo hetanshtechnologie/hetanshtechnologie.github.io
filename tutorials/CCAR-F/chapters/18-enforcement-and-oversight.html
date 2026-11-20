@@ -1,0 +1,138 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>18. Enforcement Layers, Hooks, and Human Oversight</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>18. Enforcement Layers, Hooks, and Human Oversight</h1>
+
+<p>"Never do X" written in a prompt is a preference, not a prohibition. It may be honoured on ninety-nine runs and ignored on the hundredth, and the hundredth may be the one that matters. This chapter is about turning preferences into guarantees: where to place deterministic checks, how to attach them to an agent's lifecycle, when to stop and ask a person, and what the extra machinery costs.</p>
+
+<h2>Why Instructions Wear Out on Risky Paths</h2>
+
+<p>A prompt is one input among many competing for the model's attention. As a conversation lengthens, early instructions sit farther from the current decision; a long tool transcript can crowd out the safety rule stated at the top. Even without crowding, the model is asked to balance objectives — be helpful, be fast, complete the task — and a rule expressed in natural language has no absolute priority over them.</p>
+
+<p>The failure rate is low per step but compounds. If a constraint is violated with probability 0.01 on any given action, a forty-step run has roughly a one-in-three chance of seeing at least one violation. That is acceptable for a formatting preference and unacceptable for a destructive operation. Risky paths require enforcement whose probability of failure is closer to zero and does not degrade with conversation length.</p>
+
+<p>There is also an asymmetry of cost. A missed formatting rule costs a rewrite; an unauthorised deletion costs recovery time, trust, and possibly data. Engineering effort should follow that asymmetry rather than be spread evenly across all rules. Classify each rule by the consequence of breaking it, then decide which enforcement layer it belongs in.</p>
+
+<div class="warn">Do not treat a system prompt, a role description, or a repeated warning as a control. They shape behaviour; they do not constrain it. If the rule must never be broken, something outside the model must check it.</div>
+
+<h2>Programmatic Validation as a Gate</h2>
+
+<p>The strongest enforcement layer is ordinary software: a function that inspects a proposed action and returns allow or deny. It does not matter whether the proposal came from a careful model or a confused one; the check applies equally. Three kinds of validation are worth separating.</p>
+
+<ul>
+  <li><strong>Structural validation</strong> confirms the call matches its declared shape: required fields present, types correct, enums within the allowed set, strings within length limits.</li>
+  <li><strong>Policy validation</strong> applies business rules: the target account belongs to the current tenant, the amount is under the caller's approval limit, the path stays inside the working directory.</li>
+  <li><strong>Outcome validation</strong> inspects the result before it is trusted: the returned row count matches the request, the diff touches only expected files, the computed total reconciles with the source.</li>
+</ul>
+
+<pre><code>def gate(action, ctx):
+    if not schema_ok(action, ctx.tool_schema):
+        return Decision(False, "schema_mismatch")
+    if action.tool == "refund":
+        if action.args["amount_usd"] &gt; ctx.approval_limit:
+            return Decision(False, "limit_exceeded", needs_human=True)
+        if action.args["account_id"] not in ctx.tenant_accounts:
+            return Decision(False, "cross_tenant", fatal=True)
+    if action.tool == "write_file" and ".." in action.args["path"]:
+        return Decision(False, "path_traversal", fatal=True)
+    return Decision(True, "ok")</code></pre>
+
+<p>Place the gate before execution, not after it. Post-hoc detection of a destructive action is an incident report, not a control. Where a check cannot be done beforehand — for example, verifying that a database update affected exactly one row — make the tool itself return the affected count and validate that count in the same turn.</p>
+
+<div class="tip">A deny decision should be a useful observation, not a dead end. Return a short machine-readable reason such as <code>limit_exceeded</code> plus the remediation path. The agent can then ask for approval instead of retrying the same forbidden call.</div>
+
+<h2>Lifecycle Hooks and Where They Fire</h2>
+
+<p>Hooks are registration points that run code at defined moments in an agent's lifecycle. They are the mechanism that makes enforcement automatic rather than dependent on the agent remembering to invoke it. The exact names vary between runtimes, but four positions appear almost everywhere.</p>
+
+<table>
+<thead><tr><th>Position</th><th>Fires when</th><th>Typical use</th></tr></thead>
+<tbody>
+<tr><td>Before tool call</td><td>After the model proposes a call, before execution</td><td>Schema and policy gates, audit logging, permission check</td></tr>
+<tr><td>After tool call</td><td>Once the tool returns</td><td>Outcome validation, result redaction, metric capture</td></tr>
+<tr><td>On step boundary</td><td>Between reasoning iterations</td><td>Budget checks, progress detection, context trimming</td></tr>
+<tr><td>On stop or error</td><td>Run terminates or throws</td><td>Checkpoint write, notification, cleanup, final audit entry</td></tr>
+</tbody>
+</table>
+
+<p>A hook configuration usually pairs an event with a matcher and a command. The matcher narrows which events trigger the hook; the command does the work. A practical set might validate every shell invocation, append every write to an audit log, and block any command containing a destructive pattern unless an approval token is present.</p>
+
+<pre><code>hooks:
+  PreToolUse:
+    - matcher: "shell|write_file"
+      command: "python policy_gate.py --stdin"
+      timeout_ms: 2000
+      on_deny: "block_and_explain"
+  PostToolUse:
+    - matcher: "shell"
+      command: "python redact_outputs.py --stdin"
+  Stop:
+    - command: "python checkpoint.py --write-final"</code></pre>
+
+<p>Keep hooks small and deterministic. A hook that calls a slow model to judge a command adds latency to every step and reintroduces the uncertainty the gate was meant to remove. If a hook must make a nuanced decision, have it produce evidence for a human reviewer rather than deciding on its own.</p>
+
+<h2>Interruption Points in a Workflow</h2>
+
+<p>Even with perfect gates, some decisions should not be made by a machine at all. An interruption point is a planned pause where the run stops, persists its state, and waits for external input. Unlike an error-triggered stop, it is expected: the design assumes the pause will happen on the normal path.</p>
+
+<p>Good interruption points sit at boundaries of irreversibility or high cost. Before sending a message to a customer, before committing a transaction, before publishing generated content, and after a cumulative spend threshold are all sensible places. The pause should carry a resume token so that work already completed is not repeated when the run continues.</p>
+
+<p>Interruption also solves a subtler problem: the agent's own confidence is not a reliable signal for escalation. A model can be confidently wrong. External triggers — amount, recipient, data sensitivity, operation type — are observable and auditable, so they make better interruption criteria than asking the agent "are you sure?".</p>
+
+<h2>Review Workflows and Approval Queues</h2>
+
+<p>Human oversight only works if the reviewer receives enough context to decide quickly. An approval request should bundle the proposed action, the policy rule that triggered review, the evidence the agent gathered, the predicted consequence, and the cost of rejecting. A reviewer seeing only "agent requests permission to run a command" will either click through reflexively or block everything.</p>
+
+<p>Use risk tiers to keep queues manageable. Tier one actions — reads, drafts, calculations — proceed automatically with logging. Tier two actions — writes to shared resources, moderate spend — require a single approval. Tier three actions — irreversible writes, external communications, large transfers — require two approvers and a recorded reason. Sampling can cover tier one: review a random five percent to detect policy drift without slowing the pipeline.</p>
+
+<p>Every decision, including approvals, belongs in an append-only audit log with a timestamp, actor, action hash, and outcome. Besides satisfying compliance needs, this log is the raw material for improving the system: it shows which rules fire often, which reviewers override the agent, and where automation is safe to expand.</p>
+
+<h2>The Cost of Multi-Agent Systems</h2>
+
+<p>Oversight has a price, and multi-agent designs multiply it. If one agent uses 8,000 tokens per task, four cooperating agents may consume 40,000 or more because each needs its own context, handoff summaries, and recovery attempts. Coordination adds another tax: messages must be serialised, interpreted, and reconciled, and every handoff is a chance to lose a constraint.</p>
+
+<table>
+<thead><tr><th>Situation</th><th>Prefer</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>One clear objective, short trajectory</td><td>Single agent</td><td>Lower token and failure cost</td></tr>
+<tr><td>Independent subtasks, parallelisable</td><td>Fan-out workers</td><td>Latency gain offsets overhead</td></tr>
+<tr><td>Conflicting incentives, e.g. draft vs audit</td><td>Separate roles</td><td>Isolation prevents self-approval</td></tr>
+<tr><td>Deeply uncertain task</td><td>Human plus agent</td><td>Judgement cheaper than more automation</td></tr>
+</tbody>
+</table>
+
+<p>Failure modes also compound: a misrouted message in a four-agent chain can propagate through three subsequent decisions before anyone notices. The remedy is the same as for tool errors — validate every handoff against a schema and keep an outer watchdog that can stop the whole run. Add agents only when the benefit (parallelism, isolation, specialised context) exceeds this overhead.</p>
+
+<div class="exercise"><strong>Exercise 18.1 — Place the controls.</strong> A travel-expense agent can read receipts, fill a reimbursement form, and submit it to payroll. Rules: receipts must belong to the employee; amounts over 500 require a manager; submissions are irreversible. For each rule, state whether a prompt, a pre-tool gate, an outcome check, or a human interruption is the appropriate layer. Sketch the <code>Decision</code> object returned by the gate for a cross-employee receipt and explain what the agent should do next.</div>
+
+<div class="exercise"><strong>Exercise 18.2 — Design a review queue.</strong> Define three risk tiers for a content-publishing agent, listing two example actions per tier. Specify what evidence travels with a tier-three approval request, who approves it, what the audit log records, and the timeout behaviour if no reviewer responds within four hours. Explain why sampling tier-one actions is useful even though they are automatically approved.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+  <li>Why does a rule stated in a prompt become less reliable as a conversation lengthens?</li>
+  <li>Distinguish structural, policy, and outcome validation, and give one example of each.</li>
+  <li>Which lifecycle position is right for a permission check, and why is that position preferable to checking after execution?</li>
+  <li>What makes a human interruption point effective, and why are external triggers better than self-reported confidence?</li>
+  <li>Name two costs that multi-agent designs add to an oversight strategy.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+  <li>Prompt rules are preferences with nonzero violation rates; risky paths need deterministic enforcement outside the model.</li>
+  <li>Use pre-execution gates for structural, policy, and outcome checks, returning machine-readable deny reasons.</li>
+  <li>Attach checks to lifecycle positions — before tools, after tools, at step boundaries, and on stop or error.</li>
+  <li>Plan interruption points at irreversible or expensive boundaries, with resume tokens and evidence-rich review requests.</li>
+  <li>Oversight must be priced: add agents only when isolation or parallelism outweighs token, coordination, and failure costs.</li>
+</ul>
+
+<nav><a href="17-errors-and-recovery.html">&larr; Previous</a><span></span><a href="19-tool-selection.html">Next: How Models Select Tools &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

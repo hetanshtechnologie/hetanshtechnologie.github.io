@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 19 — Choosing Integration Paths and Knowledge Access Modes</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 19 — Choosing Integration Paths and Knowledge Access Modes</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Compare common ways an AI system can access knowledge: embedded prompts, retrieval, tools/APIs, and hybrid approaches.</li>
+    <li>Evaluate integration choices based on freshness, provenance, latency, cost, control, and risk.</li>
+    <li>Determine when to use static context, on-demand lookup, or action-oriented integrations.</li>
+    <li>Design integration boundaries that preserve security, authorization, and data governance.</li>
+    <li>Recognize trade-offs and failure modes in knowledge access architectures.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Knowledge access as an architectural decision</h3>
+  <p>An AI-enabled system is only as useful as the information it can reliably access at the right time. “Knowledge integration” is not a single feature but a set of architectural choices about where information lives, how it is retrieved or acted upon, and what guarantees the system can make about accuracy, freshness, and authorization. Some knowledge is stable and small enough to include directly in instructions. Other knowledge changes frequently, is too large to fit in context, or must be accessed according to user-specific permissions. Choosing the wrong access mode can lead to stale answers, unnecessary cost, security exposure, or fragile user experiences.</p>
+  <p>Integration decisions should be driven by requirements rather than by novelty. Key questions include: How often does the information change? How large is it? Who is allowed to see it? Must responses cite sources? What latency and cost are acceptable? Is the system only explaining information, or must it take actions in external systems? Answers to these questions narrow the viable options and clarify trade-offs. Often the best solution is hybrid: stable guidance embedded locally, dynamic facts retrieved on demand, and transactional operations handled through controlled tools.</p>
+  <p>Integration choices also affect operability. Systems that depend on live sources inherit availability and performance characteristics of those sources. Systems that depend on indexed copies inherit ingestion and freshness pipelines. Architects must account for failure behavior, observability, and fallback strategies as part of the integration design, not as afterthoughts.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Match the access mode to the knowledge characteristics. Stable, universal guidance fits prompt/context; large or changing knowledge fits retrieval or lookup; actions and authoritative transactions fit tools/APIs with controls.</p>
+  </div>
+
+  <h3>Common access modes and their trade-offs</h3>
+  <p><strong>Embedded/static context</strong> places knowledge directly in prompts, configuration, or packaged resources. It offers low retrieval latency and predictable availability but is limited by context size and becomes stale unless updated deliberately. It is best for stable policies, definitions, tone rules, or small reference sets that apply broadly. <strong>Retrieval-based access</strong> searches an indexed corpus at query time, enabling grounding in large and evolving knowledge bases. It supports provenance and scalability but depends on ingestion quality, index freshness, and retrieval accuracy.</p>
+  <p><strong>Tool/API lookup</strong> fetches authoritative data directly from source systems at request time. This is valuable for user-specific records, rapidly changing state, or transactional truth (such as current status or inventory). It can provide strong freshness and authorization alignment but adds runtime dependencies, latency, and integration complexity. <strong>Action integrations</strong> go beyond reading: they create or modify state. These require strict validation, permissions, and often approvals because errors have operational impact.</p>
+
+  <table>
+    <tr>
+      <th>Access mode</th>
+      <th>Strengths</th>
+      <th>Limitations</th>
+      <th>Typical use</th>
+    </tr>
+    <tr>
+      <td>Embedded/static</td>
+      <td>Simple, fast, predictable</td>
+      <td>Limited size, can become stale</td>
+      <td>Core rules, stable definitions, templates</td>
+    </tr>
+    <tr>
+      <td>Retrieval over index</td>
+      <td>Scales to large corpora, supports citations</td>
+      <td>Needs ingestion/freshness/relevance quality</td>
+      <td>Policies, manuals, knowledge bases</td>
+    </tr>
+    <tr>
+      <td>Live API/tool lookup</td>
+      <td>Authoritative, current, user-scoped data</td>
+      <td>Runtime dependency, latency, auth complexity</td>
+      <td>Account state, tickets, current records</td>
+    </tr>
+    <tr>
+      <td>Action integration</td>
+      <td>Enables workflow completion</td>
+      <td>Side effects, higher risk and governance needs</td>
+      <td>Create/update records, notifications, transactions</td>
+    </tr>
+    <tr>
+      <td>Hybrid</td>
+      <td>Combines strengths by need</td>
+      <td>More design and operational complexity</td>
+      <td>Most real-world enterprise assistants</td>
+    </tr>
+  </table>
+
+  <h3>Freshness, provenance, and authority</h3>
+  <p>Different access modes provide different guarantees. <strong>Freshness</strong> describes how current information is relative to the source of truth. Live lookups can be very fresh but depend on source availability; indexed retrieval is as fresh as the last successful update. <strong>Provenance</strong> describes the ability to trace an answer back to its source, version, and time. Retrieval systems often support provenance naturally when chunks retain metadata; embedded knowledge may require manual versioning discipline. <strong>Authority</strong> concerns whether the source is appropriate for the claim being made—a draft note and an approved policy document may both be relevant but not equally authoritative.</p>
+  <p>Designs should make these properties explicit. If a system answers from an index that refreshes hourly, users and downstream processes should not assume real-time accuracy. If a response combines stable guidance with live account data, the system should distinguish sources when that distinction matters. For high-impact decisions, architects may require authoritative source checks or human confirmation rather than relying on potentially stale summaries.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Using a periodically refreshed knowledge index as the source of truth for rapidly changing or transactional data. For current state, prefer authoritative live lookup with proper controls.</p>
+  </div>
+
+  <h3>Security, authorization, and data boundaries</h3>
+  <p>Integration paths must respect who is allowed to access what. Retrieval indexes that aggregate content across tenants or permission domains require careful access-control design, such as filtering by identity and scope at query time. Direct API lookups can leverage existing authorization models but must use correct delegated or service credentials and avoid over-broad access. Embedded context should never include secrets or data that should not be broadly available within the system’s operating scope.</p>
+  <p>Data minimization applies across modes. Retrieve or request only the fields needed for the task, and avoid copying sensitive data into long-lived prompts, logs, or caches without justification. Cross-boundary integrations—between regions, organizations, or trust zones—may introduce compliance and residency constraints. Architects should document data flows and ensure that integration choices align with governance requirements as well as functional goals.</p>
+  <p>Failure handling is part of secure and reliable integration. If a live source is unavailable, should the system fall back to cached/indexed data, respond with limited guidance, or escalate? Fallbacks must be explicit because they change freshness and confidence guarantees. Silent fallback from authoritative live data to stale content can mislead users in consequential scenarios.</p>
+
+  <table>
+    <tr>
+      <th>Requirement</th>
+      <th>Design question</th>
+      <th>Implication</th>
+    </tr>
+    <tr>
+      <td>User-specific access</td>
+      <td>Can the system enforce per-user or per-tenant permissions?</td>
+      <td>Favor delegated lookups or strict retrieval filtering</td>
+    </tr>
+    <tr>
+      <td>High freshness</td>
+      <td>How quickly must changes be reflected?</td>
+      <td>Consider live APIs or rapid incremental updates</td>
+    </tr>
+    <tr>
+      <td>Auditability</td>
+      <td>Must answers cite source and version?</td>
+      <td>Preserve provenance metadata and access logs</td>
+    </tr>
+    <tr>
+      <td>Low latency</td>
+      <td>Can the system afford runtime dependencies?</td>
+      <td>Use embedded or pre-indexed content where valid</td>
+    </tr>
+    <tr>
+      <td>Side effects</td>
+      <td>Does the task change external state?</td>
+      <td>Use controlled action tools with validation/approvals</td>
+    </tr>
+  </table>
+
+  <h3>Designing hybrid integration patterns</h3>
+  <p>Hybrid designs are common because real tasks combine different knowledge needs. A support assistant may use embedded instructions for behavior, retrieval for product documentation, and live lookup for the current case status. The architectural challenge is orchestration: determining which mode to use for which subtask, how to merge results, and how to communicate confidence and source. Clear routing rules—based on question type, required freshness, and authorization context—reduce inconsistency.</p>
+  <p>Interfaces between modes should be explicit. Retrieved passages can provide explanatory context, while live tool results provide authoritative state; the response should not treat them as interchangeable. When sources conflict, precedence rules should favor the more authoritative or current source for the specific claim, and the system may need to surface the conflict rather than guessing. Evaluation should test integrated behavior, not only each component in isolation, because failures often occur at boundaries.</p>
+
+  <pre><code class="language-yaml">knowledge_access:
+  static_context:
+    use_for: ["behavior_rules", "stable_definitions"]
+  retrieval:
+    use_for: ["policy_and_how_to_content"]
+    requires: ["provenance", "version_metadata"]
+  live_lookup:
+    use_for: ["current_case_status", "user_specific_records"]
+    auth: "delegated_user_scope"
+  precedence:
+    transactional_state: "live_lookup"
+    explanatory_guidance: "retrieval_or_static"
+  fallback:
+    live_lookup_unavailable: "report_unavailable_status_do_not_guess"</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Classify each information need in a workflow as stable, periodically changing, or real-time/transactional. Use that classification to choose the default access mode for each.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A company is designing an employee assistant that answers questions about HR policies and also helps employees check the status of their personal requests. Policy documents change occasionally and must be cited. Request status changes throughout the day and is specific to each employee. Early prototypes place policy excerpts and recent request snapshots into a single indexed store refreshed every few hours, using the same retrieval path for all questions.</p>
+
+  <h3>Analysis</h3>
+  <p>The prototype mixes knowledge types with incompatible requirements. Policy content benefits from retrieval with provenance and versioning, and a periodic refresh may be acceptable if updates are managed. Personal request status, however, is real-time, user-specific, and authoritative in a source system; serving it from a delayed snapshot risks incorrect answers and may create authorization concerns if the index is not perfectly scoped. Using one path for all questions obscures these differences and makes failures likely.</p>
+  <p>A better design separates access modes by need. Policies should be retrieved from a governed index with citations and update timestamps. Request status should be obtained through a live, user-delegated lookup at query time, returning only necessary fields. The assistant must route questions appropriately, avoid guessing when live status is unavailable, and clearly distinguish explanatory policy guidance from transactional state.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect implements a hybrid pattern. Static instructions define behavior and safety boundaries. A retrieval component searches the approved policy corpus and returns passages with source and version metadata. A scoped tool fetches the employee’s current request status on demand, enforcing identity-based authorization. For questions that involve both—such as “what does the policy say and where is my request now?”—the system retrieves policy guidance and performs a live status lookup, then presents each with appropriate source framing.</p>
+  <p>If the status service is unavailable, the assistant explains that current status cannot be confirmed and offers policy-related guidance that does not depend on live state. Monitoring tracks retrieval relevance, lookup latency, authorization failures, and fallback rates. This separation improves correctness, freshness, and trust by aligning each access mode with the properties of the information it provides.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Treating all knowledge as identical and forcing it through a single access mechanism.</li>
+    <li>Using stale indexed snapshots for transactional or rapidly changing user-specific data.</li>
+    <li>Ignoring provenance and authority, leading to answers that cannot be traced or justified.</li>
+    <li>Weakening authorization boundaries when aggregating data for retrieval convenience.</li>
+    <li>Defining no safe fallback behavior when a required live source is unavailable.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Knowledge access mode should be chosen based on freshness, size, authority, authorization, latency, and risk.</li>
+    <li>Embedded context, retrieval, live lookups, and action integrations offer distinct strengths and limitations.</li>
+    <li>Freshness, provenance, and authority must be explicit, especially when multiple sources are combined.</li>
+    <li>Security and data minimization require correct scoping, credential use, and governed data flows across integrations.</li>
+    <li>Hybrid patterns are effective when routing, precedence, and fallback behaviors are clearly defined and evaluated.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>Which access mode is generally best for stable, universal behavior rules used in every request?</p>
+      <p>A. Live transactional API lookup on every turn<br>
+      B. Embedded/static context managed and versioned appropriately<br>
+      C. Periodic reindexing of user-specific records only<br>
+      D. An action tool with write permissions</p>
+    </li>
+    <li>
+      <p>When is live tool/API lookup usually preferred over indexed retrieval?</p>
+      <p>A. For large static manuals that rarely change<br>
+      B. For current, authoritative, user-specific transactional state<br>
+      C. For tone and formatting guidance<br>
+      D. When no authorization is needed for any data</p>
+    </li>
+    <li>
+      <p>What does provenance enable in a knowledge-integrated system?</p>
+      <p>A. Unlimited context size<br>
+      B. Tracing information to source, version, and time for trust and auditability<br>
+      C. Automatic correctness of generated text<br>
+      D. Removal of all latency costs</p>
+    </li>
+    <li>
+      <p>Why is silent fallback from live data to a stale index risky?</p>
+      <p>A. It always improves performance with no downside<br>
+      B. It can present outdated information as if it were current<br>
+      C. It guarantees better authorization<br>
+      D. It eliminates the need for monitoring</p>
+    </li>
+    <li>
+      <p>Which design principle best applies when combining retrieved guidance and live status data?</p>
+      <p>A. Treat all sources as equally authoritative for every claim<br>
+      B. Define precedence and present sources according to freshness and authority<br>
+      C. Remove metadata to simplify responses<br>
+      D. Cache live transactional results indefinitely</p>
+    </li>
+    <li>
+      <p>A system needs to help users submit expense reports. Which integration element is most critical?</p>
+      <p>A. Read-only embedded policy text only<br>
+      B. Controlled action integration with validation, authorization, and auditability<br>
+      C. Larger chunk overlap in the policy index<br>
+      D. Disabling all confirmations to reduce friction</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Stable universal rules fit embedded context when kept current and manageable. A and C are mismatched, and D is irrelevant and risky.</li>
+    <li><strong>Correct: B.</strong> Live lookup suits current, authoritative, user-scoped state. A fits retrieval or static context, C fits embedded guidance, and D is not a valid condition.</li>
+    <li><strong>Correct: B.</strong> Provenance supports traceability and trust. A, C, and D are false benefits.</li>
+    <li><strong>Correct: B.</strong> Undisclosed fallback can mislead users about currency and correctness. A, C, and D are incorrect.</li>
+    <li><strong>Correct: B.</strong> Combined-source responses require precedence and clear source handling. A, C, and D create correctness and governance risks.</li>
+    <li><strong>Correct: B.</strong> Submitting reports is a side-effecting action requiring controlled integration and accountability. A is insufficient, C is unrelated, and D removes needed safeguards.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 19.</em></p>
+
+  <nav>
+    <a href="18-search-reranking-and-quality.html">&larr; Previous</a>
+    <a href="20-connectivity-and-interoperability.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

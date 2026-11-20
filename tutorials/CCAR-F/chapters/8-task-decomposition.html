@@ -1,0 +1,105 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>8. Breaking Goals Into Subtasks</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>8. Breaking Goals Into Subtasks</h1>
+
+<p>A goal such as "prepare the quarterly compliance report" is too large to execute in one step and too vague to delegate safely. Decomposition is the act of turning it into units that can be assigned, tested, and recombined. This is not clerical breakdown work; it is a design decision that determines what can run in parallel, where failures are contained, and how you know the job is finished.</p>
+
+<h2>Decomposition is a design activity</h2>
+
+<p>Teams often treat decomposition as something the model does at runtime — hand it a goal and let it make a plan. That works only for small, familiar tasks. For production work, the structure of the plan is a system property and should be designed, reviewed, and versioned. A good decomposition makes dependencies visible, gives each unit a testable output, and limits the damage when one unit fails.</p>
+
+<p>Consider the report goal again. A naive plan says: gather data, analyse it, write the report. A designed plan names five units with contracts: collect source tables by date range, validate completeness, compute metrics with fixed formulas, draft narrative from validated metrics, and review against a checklist. Now you can see that collection and validation are sequential, that all three metric computations can run in parallel, and that the narrative must not begin before validation succeeds. Those facts were invisible in the original sentence.</p>
+
+<div class="note"><strong>Design vs. runtime planning.</strong> A designed decomposition defines the space of allowed plans; a runtime planner chooses within it. Confusing the two produces systems that invent steps you never intended to authorise — such as sending an email during a task that was supposed to produce a draft.</div>
+
+<h2>Granularity: finding the right unit</h2>
+
+<p>If subtasks are too large, failures are hard to localise and retries redo too much work. If they are too small, coordination overhead dominates and the context window fills with handoff messages. A useful heuristic is the <strong>two-output rule</strong>: a unit should produce one primary artefact and at most one status signal, and it should be describable in two sentences. If you need a paragraph to explain a unit, split it. If two units always run together and share all their inputs, merge them.</p>
+
+<table>
+<tr><th>Signal</th><th>Too coarse</th><th>About right</th><th>Too fine</th></tr>
+<tr><td>Description length</td><td>Needs a paragraph</td><td>Two sentences</td><td>One clause, ambiguous</td></tr>
+<tr><td>Failure impact</td><td>Restarts whole job</td><td>Restarts one unit</td><td>Constant retries</td></tr>
+<tr><td>Outputs</td><td>Several unrelated artefacts</td><td>One artefact + status</td><td>Fragment of a sentence</td></tr>
+<tr><td>Overhead share</td><td>Low but risky</td><td>Under 20 percent</td><td>Over 40 percent</td></tr>
+</table>
+
+<p>Estimate overhead with a simple calculation. If each handoff consumes 400 tokens of context and 80 milliseconds of coordination, a plan with twenty units spends 8,000 tokens and 1.6 seconds on management alone. For a task whose actual work is 3,000 tokens, that is unacceptable. Twelve units with 4,800 tokens of overhead might still be too many; four units with 1,600 tokens is reasonable.</p>
+
+<p>Granularity also interacts with the context window. Each unit's output must be small enough to pass to the next unit without crowding out the goal. Prefer passing a reference to a stored artefact plus a short summary over embedding the full artefact. A unit that produces 6,000 tokens of raw text and hands all of it forward will degrade the reasoning of every downstream unit.</p>
+
+<div class="exercise"><strong>Exercise 8.1 — Tune granularity.</strong> A task extracts 200 contracts, compares each to a policy, and produces a summary table. Three candidate decompositions are: (a) one unit, (b) one unit per contract, (c) one batch-extract unit, one batch-compare unit, one summary unit. Estimate token overhead assuming 500 tokens per handoff and 400 tokens per contract of raw text. Choose a design and justify it on failure containment and context size.</div>
+
+<h2>Acceptance criteria for each subtask</h2>
+
+<p>A subtask without acceptance criteria cannot be evaluated. Write criteria that are observable in the output, not in the process. "Understand the customer's request" is not observable; "produce a JSON object with intent, urgency, and two supporting quotes from the message" is. Good criteria specify the artefact, its schema or format, a quality threshold, and what happens when the threshold is missed.</p>
+
+<p>Use three tiers of criteria. <strong>Structural</strong> checks are deterministic: required fields present, values in range, file exists. <strong>Semantic</strong> checks assess meaning: the summary mentions the three required topics, the translation preserves negation, the classification matches one of the allowed labels. <strong>Policy</strong> checks enforce boundaries: no write tools used, no data from a restricted region included, escalation triggered above a threshold.</p>
+
+<pre><code>subtask:
+  id: compare_contract_to_policy
+  inputs: [contract_text, policy_version]
+  output_artifact: "comparison_ORD-104827.json"
+  acceptance:
+    structural:
+      - "schema == comparison_v2"
+      - "clause_count &gt;= 1"
+    semantic:
+      - "each flagged clause cites a policy section id"
+      - "unmatched clauses labelled 'needs_review', not 'compliant'"
+    policy:
+      - "no external network tool called"
+      - "raw contract not copied into summary field"
+  on_failure: retry_once_then_escalate</code></pre>
+
+<p>Note the semantic criterion about unmatched clauses. Without it, a unit under uncertainty will default to "compliant," which looks complete and is dangerous. Acceptance criteria should name the safe failure label explicitly. Similarly, the policy criterion about the summary field prevents sensitive text from leaking into a compact artefact that gets passed downstream.</p>
+
+<div class="tip">Write acceptance criteria before implementing the unit. If you cannot state how you would verify the output, the unit is not ready to be delegated — to a model or to a person.</div>
+
+<h2>Dependency mapping and ordering</h2>
+
+<p>List the inputs and outputs of every unit, then draw arrows from producer to consumer. The resulting graph tells you three things: which units can run in parallel, which form a critical path, and where a failure will propagate. A unit whose output feeds four others is a high-value target for extra validation; a unit at the end of a long chain should be started as early as dependencies allow.</p>
+
+<p>Represent dependencies in a small table with four columns: unit, requires, produces, and blocking failure. The last column matters — it declares whether a failure in this unit stops everything downstream or whether work can continue with a degraded input. For a compliance report, missing source data blocks all metrics; a failed narrative draft can be retried without touching the metrics.</p>
+
+<p>Watch for hidden dependencies. Two units may appear independent because neither passes data directly, yet both read the same mutable record. If one writes it, they are ordered whether or not the graph says so. Make shared state explicit and either serialise access or give each unit an isolated copy. This is the source of many "it worked in testing" failures when parallelism is introduced.</p>
+
+<h2>A worked decomposition and its failure modes</h2>
+
+<p>Take the goal "onboard a new supplier." A workable decomposition has six units: verify identity documents, check sanctions list, create the supplier record, configure payment terms, notify the procurement team, and write an audit entry. Identity verification and sanctions checking can run in parallel and both feed record creation. Notification and audit can follow creation. Payment terms require a human decision if the amount exceeds a threshold.</p>
+
+<p>Failure modes follow the structure. If sanctions checking times out, creating the record must not proceed — that is a blocking failure, and the dependency graph should enforce it rather than relying on the model's caution. If notification fails after the record exists, the job can be marked partially complete and the notification retried independently. If the audit write fails, the supplier must not be considered onboarded, because the absence of a record is itself a compliance problem.</p>
+
+<div class="warn"><strong>Common mistake:</strong> treating the final notification as proof of completion. The interesting state is the supplier record plus the audit entry. A sent email is a side effect, not a success condition. Define completion from durable state, and use notifications only as communication.</div>
+
+<div class="exercise"><strong>Exercise 8.2 — Map dependencies.</strong> Decompose "close a monthly expense report" into five to seven units. For each, list requires, produces, and acceptance criteria of all three tiers. Draw the dependency relationships in text, identify the critical path, and mark two units that can run in parallel. State one hidden dependency involving shared state and how you would remove it.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why is decomposition treated as a design activity rather than something a model invents at runtime?</li>
+<li>What are the costs of subtasks that are too coarse and subtasks that are too fine?</li>
+<li>Name the three tiers of acceptance criteria and give one example of each.</li>
+<li>How does a dependency graph reveal parallel work and high-risk units?</li>
+<li>Why must completion be defined from durable state rather than from a notification side effect?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Decomposition defines the structure of work: contracts, dependencies, failure containment, and completion.</li>
+<li>The two-output rule and a token-overhead estimate help find a workable unit size.</li>
+<li>Acceptance criteria should be structural, semantic, and policy-oriented, with explicit safe-failure labels.</li>
+<li>Dependency graphs expose parallel units, critical paths, propagation risk, and hidden shared-state couplings.</li>
+<li>Blocking failures must stop downstream work through the graph, not through model caution.</li>
+<li>Completion comes from durable state; side effects such as notifications are not proof of success.</li>
+</ul>
+
+<nav><a href="7-architecture-selection.html">&larr; Choosing an Architecture</a><span></span><a href="9-decomposition-patterns.html">Next: Hierarchical, Sequential, and Parallel Decomposition &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

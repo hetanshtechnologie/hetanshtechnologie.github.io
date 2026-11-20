@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 14 — Caching and Reuse for Performance and Efficiency</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 14 — Caching and Reuse for Performance and Efficiency</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Explain how caching and reuse reduce latency and cost in model-backed and retrieval-backed systems.</li>
+    <li>Identify what can be cached safely, including prompts, context segments, retrieval results, and computed outputs.</li>
+    <li>Design for cache effectiveness through stability, key design, and predictable request structure.</li>
+    <li>Evaluate cache economics, hit rates, invalidation needs, and correctness risks.</li>
+    <li>Apply batching and reuse strategies appropriately while avoiding stale or unsafe results.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Why reuse matters in AI system performance</h3>
+  <p>Many AI workloads contain repetition. Systems often reuse the same instructions, policy text, tool descriptions, reference documents, or query patterns across requests. Users may ask similar questions, workflows may process similar records, and evaluation pipelines may rerun comparable cases. Without reuse, each request pays the full cost of transmitting, processing, or recomputing identical information. Caching and reuse strategies capture value from this repetition by storing and reapplying results or prepared context when conditions allow.</p>
+  <p>The benefits are typically lower latency, reduced resource consumption, and improved throughput. For interactive applications, shaving repeated processing can make responses feel more immediate. For high-volume workloads, reuse can significantly reduce operating cost. However, reuse is not free: caches require management, storage, invalidation logic, and safeguards against serving incorrect or outdated results. Architects must treat caching as a correctness-sensitive optimization, not merely a performance trick.</p>
+  <p>Reuse applies at multiple layers. Prompt or prefix reuse can reduce repeated processing of stable instructions. Retrieval caching can avoid repeated lookups for identical queries. Result caching can return previously computed outputs for identical inputs. Embedding or preprocessing reuse can avoid recomputing representations for unchanged content. The right layer depends on where repetition occurs and what freshness and correctness guarantees are required.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Caching improves efficiency only when reused content is stable and still valid. Always consider invalidation, freshness, and correctness before caching outputs or knowledge.</p>
+  </div>
+
+  <h3>Types of caching and reuse</h3>
+  <p>Different cache targets offer different trade-offs. <strong>Instruction/prefix reuse</strong> focuses on stable portions of prompts—system policies, tool schemas, or long reference blocks that appear across many requests. Structuring requests so that stable content is consistent and positioned predictably can improve reuse effectiveness. <strong>Retrieval caching</strong> stores results for queries or query embeddings when underlying sources have not changed materially. <strong>Response caching</strong> stores final or intermediate outputs for identical inputs and contexts, which is effective for deterministic or frequently repeated requests but risky for personalized or time-sensitive cases.</p>
+  <p><strong>Artifact reuse</strong> includes precomputed embeddings, parsed documents, summaries, or validated transformations. These are often high-value because preprocessing can be expensive. <strong>Batch processing</strong> is a related efficiency strategy: grouping similar non-urgent tasks can improve throughput and reduce overhead compared with handling each item independently. Batching trades immediacy for efficiency and is most suitable when latency requirements permit.</p>
+
+  <table>
+    <tr>
+      <th>Reuse type</th>
+      <th>What is reused</th>
+      <th>Best for</th>
+      <th>Main risk</th>
+    </tr>
+    <tr>
+      <td>Instruction/prefix reuse</td>
+      <td>Stable prompt segments and policies</td>
+      <td>High-volume requests with shared context</td>
+      <td>Low hit rate if prompts vary unnecessarily</td>
+    </tr>
+    <tr>
+      <td>Retrieval caching</td>
+      <td>Query results or ranked documents</td>
+      <td>Repeated questions over stable sources</td>
+      <td>Stale results when sources change</td>
+    </tr>
+    <tr>
+      <td>Response caching</td>
+      <td>Final or intermediate outputs</td>
+      <td>Identical, non-personalized, repeatable requests</td>
+      <td>Incorrect reuse for changed context or permissions</td>
+    </tr>
+    <tr>
+      <td>Preprocessing reuse</td>
+      <td>Embeddings, chunks, parsed artifacts</td>
+      <td>Stable corpora and repeated pipelines</td>
+      <td>Drift when source content updates</td>
+    </tr>
+    <tr>
+      <td>Batch processing</td>
+      <td>Grouped execution of similar tasks</td>
+      <td>Non-urgent, high-volume workloads</td>
+      <td>Increased turnaround time per item</td>
+    </tr>
+  </table>
+
+  <h3>Designing for cache effectiveness</h3>
+  <p>Cache effectiveness depends on stability and predictability. Small, unnecessary variations in requests—such as reordering equivalent content, changing timestamps, or injecting unique identifiers into otherwise identical prefixes—can prevent reuse. To improve hit rates, architects can separate stable and variable parts of prompts, keep shared instructions consistent, and place variable user-specific content where it does not disrupt reusable segments. Similarly, normalizing queries or inputs can increase the chance of matching prior work.</p>
+  <p>Cache keys must reflect all factors that affect correctness. If an output depends on user permissions, data version, locale, or configuration, those factors belong in the key or in the decision not to cache. A key that is too coarse risks serving inappropriate results; a key that is too fine reduces hit rates. Designing keys is therefore a balance between efficiency and correctness, guided by an understanding of what makes two requests truly equivalent.</p>
+  <p>Measurement is essential. Hit rate, latency savings, cost reduction, and error or staleness incidents indicate whether a cache is valuable. A cache with low hit rate may add complexity without benefit. A cache with high hit rate but frequent invalid results is harmful. Observability should make cache behavior visible, including when entries are created, used, bypassed, and invalidated.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Caching responses without including permission, freshness, or context variables in equivalence checks. This can leak data or return outdated answers.</p>
+  </div>
+
+  <h3>Invalidation, freshness, and correctness</h3>
+  <p>Invalidation determines when cached content can no longer be trusted. Time-based expiration is simple but may be too coarse for rapidly changing sources or too aggressive for stable ones. Event-based invalidation—triggered by content updates, policy changes, or configuration revisions—can be more precise but requires reliable change signals. In some cases, caches should be bypassed entirely for high-risk or highly dynamic requests. The correct strategy depends on how often underlying data changes and the cost of serving stale information.</p>
+  <p>Freshness requirements vary by domain. A glossary definition may remain valid for long periods, while inventory status, policy guidance, or incident data may change quickly. Architects should classify cached artifacts by freshness sensitivity and apply appropriate policies. Correctness also depends on scope: a cached retrieval result may be valid for one user population but not another if access controls differ. Safety and authorization constraints must be enforced at retrieval or delivery time even when cached artifacts are used.</p>
+  <p>Debugging cache behavior requires traceability. When a response is wrong, teams need to know whether it came from fresh computation or a cached artifact, which version of instructions or sources was used, and why the cache was considered valid. Without this visibility, caches become opaque sources of intermittent errors that are difficult to reproduce and fix.</p>
+
+  <table>
+    <tr>
+      <th>Concern</th>
+      <th>Question to ask</th>
+      <th>Example control</th>
+      <th>Outcome if ignored</th>
+    </tr>
+    <tr>
+      <td>Freshness</td>
+      <td>How quickly can source truth change?</td>
+      <td>TTL or event-based invalidation</td>
+      <td>Stale or misleading outputs</td>
+    </tr>
+    <tr>
+      <td>Correctness scope</td>
+      <td>What variables make requests non-equivalent?</td>
+      <td>Composite cache keys, bypass rules</td>
+      <td>Incorrect reuse across contexts</td>
+    </tr>
+    <tr>
+      <td>Authorization</td>
+      <td>Can all users see the same cached content?</td>
+      <td>Permission-aware caching or post-checks</td>
+      <td>Data leakage</td>
+    </tr>
+    <tr>
+      <td>Effectiveness</td>
+      <td>Is the hit rate worth the complexity?</td>
+      <td>Measure hits, savings, and misses</td>
+      <td>Unnecessary system complexity</td>
+    </tr>
+    <tr>
+      <td>Debuggability</td>
+      <td>Can we tell when cache was used?</td>
+      <td>Trace attributes and cache metadata</td>
+      <td>Hard-to-diagnose incidents</td>
+    </tr>
+  </table>
+
+  <h3>Batching and reuse trade-offs</h3>
+  <p>Batching groups multiple similar operations to reduce per-item overhead. In evaluation, embedding generation, offline analysis, or scheduled content processing, batching can improve efficiency and simplify resource planning. The trade-off is latency: individual items wait until a batch runs or completes. Batching is therefore suited to asynchronous or non-urgent workloads where throughput and cost matter more than immediate response. For interactive user experiences, selective batching or micro-batching may be appropriate, but only within acceptable time budgets.</p>
+  <p>Reuse and batching decisions should be guided by workload characteristics. High repetition, stable inputs, and relaxed immediacy favor aggressive reuse. Highly dynamic, personalized, or high-risk outputs favor conservative caching with strict validation or no caching at all. A mixed strategy is common: reuse stable instructions and preprocessing broadly, cache retrieval selectively, and avoid caching final responses except for narrowly defined cases.</p>
+
+  <pre><code class="language-yaml">reuse_strategy:
+  prompt_prefix:
+    cache: true
+    stable_segments: ["system_policy", "tool_schema", "output_format"]
+  retrieval:
+    cache: conditional
+    key_factors: ["normalized_query", "source_version", "access_scope"]
+    ttl_minutes: 30
+  final_response:
+    cache: limited
+    allow_when: ["identical_input", "non_personalized", "low_freshness_risk"]
+  batch_jobs:
+    enabled_for: ["offline_eval", "embedding_backfill", "nightly_summaries"]
+    max_delay_minutes: 60
+  observability:
+    record: ["cache_hit", "cache_miss", "cache_bypass_reason", "artifact_version"]</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Identify one stable prompt segment and one repeated preprocessing step in your system. Estimate potential savings from reuse, then list the conditions that must trigger invalidation.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A knowledge assistant serves employees across multiple departments. Many questions repeat common policy topics, and each request currently includes a long, identical instruction block and performs fresh retrieval over a largely stable document set. Response times are acceptable but operating costs are rising with usage. A proposal suggests caching full responses for all repeated questions to reduce cost quickly.</p>
+
+  <h3>Analysis</h3>
+  <p>The workload shows clear repetition in instructions and some repetition in queries, making reuse promising. However, caching full responses for all repeated questions is risky. Answers may depend on department-specific access rights, document updates, or user context. A response that is correct for one audience or at one time may be incorrect or inappropriate for another. The opportunity lies in safer layers of reuse: stable instruction prefixes, preprocessing artifacts for unchanged documents, and selective retrieval caching with version and access awareness.</p>
+  <p>Batching is not suitable for the interactive question-answering path but may help background tasks such as indexing updates or offline evaluation. The design must balance savings with correctness by defining equivalence criteria, invalidation triggers, and observability for cache behavior.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect implements a layered reuse strategy. Stable system instructions and schemas are structured for prefix reuse across requests. Document parsing and embeddings are reused until source versions change. Retrieval results are cached for normalized queries with keys that include source version and access scope, and short expirations are applied to sensitive topics. Full response caching is limited to a small set of generic, non-personalized questions with verified freshness. Offline indexing and evaluation jobs are batched during scheduled windows.</p>
+  <p>Metrics track hit rates, latency reduction, cost per request, and incidents of stale or inappropriate reuse. The team discovers that instruction and preprocessing reuse deliver most of the benefit with low risk, while broad response caching provides limited additional value. This evidence-based approach achieves efficiency gains without compromising correctness or access control.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Introducing unnecessary prompt variability that prevents effective reuse of stable segments.</li>
+    <li>Caching outputs without accounting for permissions, personalization, or source freshness.</li>
+    <li>Ignoring invalidation requirements, leading to stale or misleading responses.</li>
+    <li>Assuming high hit rates without measuring actual cache effectiveness and savings.</li>
+    <li>Using batching for latency-sensitive interactions where delayed responses harm user experience.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Caching and reuse reduce latency and cost by avoiding repeated processing of stable instructions, data, and computations.</li>
+    <li>Multiple reuse layers—prefix, retrieval, preprocessing, response, and batching—offer different benefits and risks.</li>
+    <li>Effective caching requires stable request structure, correctness-aware keys, and measurement of hit rates and savings.</li>
+    <li>Invalidation, freshness, and authorization controls are essential to prevent stale or unsafe reuse.</li>
+    <li>Batching improves efficiency for non-urgent workloads but trades immediacy for throughput.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>What most directly improves the effectiveness of instruction or prefix reuse?</p>
+      <p>A. Adding unique timestamps to every prompt<br>
+      B. Keeping stable segments consistent and separating variable content<br>
+      C. Randomizing prompt order for diversity<br>
+      D. Disabling observability to reduce overhead</p>
+    </li>
+    <li>
+      <p>When is caching full responses most risky?</p>
+      <p>A. When responses are generic, non-personalized, and based on stable information<br>
+      B. When responses depend on user permissions, personalization, or rapidly changing data<br>
+      C. When inputs are identical and low risk<br>
+      D. When cache hit rates are measured</p>
+    </li>
+    <li>
+      <p>What should a cache key include to preserve correctness?</p>
+      <p>A. Only the request text length<br>
+      B. All factors that make results non-equivalent, such as version or access scope<br>
+      C. A random identifier for each request<br>
+      D. Only the timestamp of cache creation</p>
+    </li>
+    <li>
+      <p>Why is observability important for cached systems?</p>
+      <p>A. It guarantees cache hits<br>
+      B. It helps determine when cache was used and whether reuse is correct and effective<br>
+      C. It replaces the need for invalidation<br>
+      D. It prevents all stale responses automatically</p>
+    </li>
+    <li>
+      <p>Which workload is best suited to batching?</p>
+      <p>A. Interactive requests requiring immediate responses<br>
+      B. Offline or scheduled tasks where some delay is acceptable<br>
+      C. High-risk actions needing real-time approval<br>
+      D. Personalized responses with strict freshness needs</p>
+    </li>
+    <li>
+      <p>A cache shows high hit rate but increasing user complaints about outdated answers. What is the most likely issue?</p>
+      <p>A. Excessive prompt stability<br>
+      B. Inadequate invalidation or freshness controls<br>
+      C. Too much observability<br>
+      D. Overuse of batching for indexing</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Consistent stable segments enable reuse, while separating variable content prevents unnecessary cache misses. A and C reduce reuse, and D harms diagnosis.</li>
+    <li><strong>Correct: B.</strong> Responses that vary by permission, personalization, or freshness are unsafe to reuse broadly. A and C describe lower-risk cases, and D is unrelated to risk.</li>
+    <li><strong>Correct: B.</strong> Keys must capture all correctness-relevant variables. A, C, and D omit essential factors or undermine reuse.</li>
+    <li><strong>Correct: B.</strong> Observability provides visibility into cache behavior, effectiveness, and correctness. A, C, and D overstate its guarantees.</li>
+    <li><strong>Correct: B.</strong> Batching suits non-urgent workloads where efficiency outweighs immediacy. A, C, and D require timeliness or individualized handling.</li>
+    <li><strong>Correct: B.</strong> Frequent outdated results indicate stale cache entries or weak invalidation. A, C, and D do not directly explain the symptom.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 14.</em></p>
+
+  <nav>
+    <a href="13-context-budgets-and-isolation.html">&larr; Previous</a>
+    <a href="15-modular-instructions-and-disclosure.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

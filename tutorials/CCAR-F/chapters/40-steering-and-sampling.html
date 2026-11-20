@@ -1,0 +1,96 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>40. Steering Output and Sampling Controls</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>40. Steering Output and Sampling Controls</h1>
+
+<h2>Steering before sampling</h2>
+<p>Most output problems are instruction problems, not parameter problems. If a response contains the wrong fields, wanders into unrelated topics, or ignores a required caveat, changing a sampling setting is unlikely to help. Start by specifying the target: length, structure, vocabulary, ordering, and how to handle missing information. Sampling controls then shape the variation that remains.</p>
+<p>Effective output guidance is concrete. "Be brief" is weak; "at most 180 words, no preamble, three bullets followed by one risk line" is strong. "Use JSON" is incomplete; name the fields, their types, the allowed values, and what to emit when a value is unknown. The same principle applies to style: if the audience is a support agent, say what a support agent needs — a short explanation, a recommended action, and an escalation trigger — rather than asking for a "friendly tone."</p>
+<p>Also define refusal and escalation behaviour. A model facing an incomplete request will otherwise fill the gap with a guess. A line such as "if the log file is absent, respond with exactly <code>NEEDS_INPUT: log_file</code> and stop" turns an ambiguous failure into a detectable state. This is more valuable in automation than a polite apology, because downstream code can branch on it.</p>
+
+<h2>Temperature</h2>
+<p>Temperature controls how strongly the model favours its highest-probability continuations. Lower values concentrate choices on the most likely tokens; higher values flatten the distribution and allow less common choices. Names and exact ranges vary across APIs, but a common scale runs from 0 to around 1 or 2 in some systems. Treat the numbers as relative within one API, not as universal constants.</p>
+<p>For extraction, classification, and code generation against a specification, low values such as 0 to 0.2 are usually appropriate. You want the model to follow the pattern, not improvise. For drafting, naming, or exploring alternatives, moderate values around 0.5 to 0.8 can produce more varied output. Very high settings tend to produce incoherent text on longer tasks rather than useful creativity.</p>
+<p>A temperature of zero is often described as deterministic. In practice it means greedy selection: at each step the most likely token is chosen. Because context changes with every token, and because upstream systems may differ slightly between runs, identical requests can still produce different outputs. Use zero to reduce variance, not to eliminate it. Where exact reproducibility matters, cache the result and reuse it instead of regenerating.</p>
+<div class="note"><strong>Exam mindset:</strong> if a question contrasts a vague instruction with a parameter tweak, the instruction is usually the better first fix. Parameters shape a distribution; they cannot supply missing requirements.</div>
+
+<h2>Top-p and top-k</h2>
+<p>Top-p, also called nucleus sampling, keeps only the smallest set of tokens whose combined probability reaches a threshold, then samples from that set. A value of 0.9 means the model considers the likely core of the distribution and discards the long tail. Top-k keeps a fixed number of candidates, for example the forty most likely tokens, regardless of their probabilities. Both reduce randomness, but they do so differently: top-p adapts to how peaked the distribution is, while top-k does not.</p>
+<table>
+<tr><th>Control</th><th>What it limits</th><th>Typical use</th><th>Risk when misconfigured</th></tr>
+<tr><td>Temperature</td><td>Sharpness of the token distribution</td><td>First knob for variability</td><td>Too low: rigid, repetitive text</td></tr>
+<tr><td>Top-p</td><td>Probability tail</td><td>Trimming unlikely tokens</td><td>Too low: narrow, formulaic output</td></tr>
+<tr><td>Top-k</td><td>Number of candidates</td><td>Hard cap on choices</td><td>Too small in flat distributions: poor word choices</td></tr>
+<tr><td>Max output tokens</td><td>Length of the response</td><td>Cost and truncation control</td><td>Too low: cut-off JSON or missing conclusion</td></tr>
+</table>
+<p>Most systems let you set temperature and top-p together, and some also expose top-k. Avoid changing all three at once. Choose one primary control, leave the others at their defaults, and measure. If you reduce temperature and top-p simultaneously and quality drops, you will not know which change caused it. A common starting point for factual work is low temperature with top-p near 0.9; for open-ended drafting, a moderate temperature with the same top-p is a reasonable baseline.</p>
+
+<h2>Determinism and reproducibility</h2>
+<p>Teams often ask for "deterministic" model output. It helps to separate three claims. <strong>Repeatability</strong> means repeated calls under the same conditions usually agree. <strong>Reproducibility</strong> means you can reconstruct a past result by recording the inputs and settings. <strong>Exact equality</strong> means byte-for-byte identity, which is the strongest and least realistic claim. Sampling controls mainly help with the first; engineering practice delivers the second.</p>
+<p>To achieve practical reproducibility, record the model identifier and version, the full prompt, the parameter values, the tool results that entered context, and any seed the API supports. Pin dependencies and model versions in configuration. Store the rendered prompt rather than only its template, so later template edits do not change what a historical run actually received. When a result matters — an approval decision, a generated report attached to a release — persist the output itself.</p>
+<p>Some APIs offer a seed parameter. Where supported, a fixed seed can make a sequence of random choices more stable, but it does not override changes in the model or in upstream context. Do not rely on a seed as a correctness control. Use validation instead: parse the output, check required fields, and retry a bounded number of times if it fails.</p>
+
+<pre><code>task: support-summary
+model: pinned-model-version
+temperature: 0.2
+top_p: 0.9
+max_output_tokens: 400
+seed: 20261121
+stop_sequences: ["\n\nEND"]
+retry:
+  on: invalid_schema_or_error
+  max_attempts: 2
+verifier: python tools/validate_summary.py &amp;&amp; echo ACCEPT
+fallback: if confidence &lt; 0.7 then emit NEEDS_INPUT
+</code></pre>
+
+<p>The configuration shows the layering. Output guidance lives in the prompt; sampling controls limit variation; a verifier decides whether the response is usable; a retry policy handles transient failures; and a fallback handles uncertainty. No single setting is expected to do all of that work.</p>
+
+<h2>Interactions and failure modes</h2>
+<p>Settings interact with prompts and with each other. A high temperature combined with a weak output specification produces drift. A low temperature combined with contradictory rules produces the same wrong answer every time, which can be harder to notice than varied mistakes. A very low token limit can truncate a JSON object, turning a correct answer into invalid output. A tight top-p can prevent the model from choosing the one uncommon word that your domain requires.</p>
+<ul>
+<li><strong>Repetition:</strong> temperature too low on a long generative task; raise it slightly or diversify the prompt.</li>
+<li><strong>Inconsistent format:</strong> specification too vague; add a template before adjusting sampling.</li>
+<li><strong>Truncated answers:</strong> token limit too low or no stop condition; raise the limit and define an ending marker.</li>
+<li><strong>Odd vocabulary:</strong> top-p or top-k too restrictive; widen the candidate set.</li>
+<li><strong>False confidence:</strong> no escalation rule; add an explicit unknown state and validate it.</li>
+</ul>
+<p>Another interaction is with evaluation. If you compare two prompts while sampling randomly, differences of a few percentage points may be noise. Use enough trials to see a stable pattern, lower variance for the comparison, or both. Conversely, if a prompt must work across many kinds of input, testing only at temperature zero can hide brittleness that appears under normal settings.</p>
+
+<h2>Choosing settings by task</h2>
+<p>Classify the task first, then choose the starting configuration. Extraction, routing, and schema filling want low variance and strong output structure. Summarisation wants moderate structure with enough freedom to phrase things naturally. Brainstorming wants wider exploration, usually with human selection afterward. Code changes want low variance and, more importantly, mechanical verification with tests and linters.</p>
+<p>Write the choice down in a configuration file next to the prompt, with a one-sentence reason. "Temperature 0.2 because the output feeds a parser; top-p left at default" will still make sense six months later. A bare number in a dashboard will not. Revisit the setting when the failure pattern changes, not on a schedule.</p>
+
+<div class="exercise"><strong>Exercise 40.1 — Diagnose a configuration.</strong> A JSON extraction endpoint returns valid JSON eight times out of ten; the other responses end mid-object. The team proposes raising the temperature from 0.2 to 0.7. Explain why this is unlikely to help, identify two more probable causes, and specify a fix involving output limits and validation.</div>
+
+<div class="exercise"><strong>Exercise 40.2 — Select settings for two tasks.</strong> Choose starting values for temperature, top-p, and a stop condition for (a) classifying invoices by currency and (b) drafting alternative subject lines for a newsletter. Justify each choice in terms of variance, cost, and how a human will use the output.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why should output guidance be fixed before sampling parameters are tuned?</li>
+<li>How do top-p and top-k differ in what they limit?</li>
+<li>What does a temperature of zero reduce, and what does it not guarantee?</li>
+<li>List three items you should record to reproduce an earlier model result.</li>
+<li>Why might a very restrictive top-p value harm a domain-specific task?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Specify length, structure, fields, and fallback behaviour in the prompt before tuning sampling.</li>
+<li>Temperature changes sharpness; top-p trims a probability tail; top-k caps candidate count.</li>
+<li>Use low variance for extraction and code, moderate variance for drafting and exploration.</li>
+<li>Repeatability, reproducibility, and exact equality are different goals requiring different measures.</li>
+<li>Combine settings with validation, bounded retries, pinned versions, and recorded configurations.</li>
+</ul>
+
+<nav><a href="39-examples-and-reasoning.html">&larr; Previous</a><span></span><a href="41-multi-turn-design.html">Next: Multi-Turn Interactions and State &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

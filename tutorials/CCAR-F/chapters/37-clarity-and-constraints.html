@@ -1,0 +1,115 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>37. Clarity, Specificity, and Constraints</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>37. Clarity, Specificity, and Constraints</h1>
+
+<h2>The measurable cost of ambiguity</h2>
+<p>Ambiguity is often treated as a stylistic flaw. It is better understood as a source of rework. Consider the instruction "summarize the report briefly." Four decisions are unspecified: which parts of the report matter, how brief is brief, what format the summary should take, and who the reader is. A model must guess all four. If one guess is wrong, a human revises the request; the second attempt may fix the length but change the format, producing another round trip.</p>
+<p>You can measure this yourself with a small experiment. Take twelve real tasks from your backlog and write each one twice: once as you would normally phrase it, and once with a goal, inputs, constraints, output format, and a completion check. Run three trials of each version. Count how many revisions are needed before the output is usable. Teams commonly find that the specified version reduces three to five revision rounds to one or two, and — more importantly — makes failures consistent enough to diagnose.</p>
+<table>
+<tr><th>Unspecified element</th><th>Typical guess</th><th>Likely correction</th></tr>
+<tr><td>Audience</td><td>Generic technical reader</td><td>"This is for executives; drop the implementation detail."</td></tr>
+<tr><td>Length</td><td>A few paragraphs</td><td>"Make it five lines."</td></tr>
+<tr><td>Format</td><td>Prose</td><td>"Use a table with three columns."</td></tr>
+<tr><td>Scope</td><td>Whole document</td><td>"Only the sections after the findings heading."</td></tr>
+</table>
+<p>Notice that none of these corrections requires more intelligence from the model. They require information that was already in the requester's head but never crossed the boundary into the prompt. Clarity is an act of transfer, not an act of persuasion.</p>
+
+<h2>Decomposing an instruction</h2>
+<p>A reliable prompt has six parts, not six paragraphs. They can be written as sections, bullets, or tagged blocks; the structure matters more than the notation. The parts are the <strong>goal</strong>, the <strong>context</strong>, the <strong>inputs</strong>, the <strong>constraints</strong>, the <strong>output specification</strong>, and the <strong>completion check</strong>.</p>
+<ul>
+<li><strong>Goal</strong> — one sentence describing the change in the world. "Produce a migration plan" is a goal; "think about migrations" is not.</li>
+<li><strong>Context</strong> — facts the model cannot infer: the reader, the deadline, the system's history, the reason this matters now.</li>
+<li><strong>Inputs</strong> — exactly which files, data, or prior messages are in scope, and which are explicitly out of scope.</li>
+<li><strong>Constraints</strong> — rules that must hold, separated into hard requirements and preferences.</li>
+<li><strong>Output specification</strong> — structure, length, field names, ordering, and vocabulary.</li>
+<li><strong>Completion check</strong> — an observable condition or command that decides whether the task is done.</li>
+</ul>
+<p>Here is the same request written at two levels of specificity. The second version is longer by about sixty words and saves several rounds of correction:</p>
+
+<pre><code>WEAK: Make the nightly report better.
+
+SPECIFIED:
+Goal: Turn the nightly report into a decision-ready summary.
+Input: rows from reports/nightly.csv. Ignore rows where status == "skipped".
+Constraint: Do not modify the CSV. Keep the existing column order.
+Output: a markdown table with exactly four columns:
+        region | count | p95_ms | trend
+Done: a reader can name the worst region in under 10 seconds, and
+      `python tools/check_report.py &amp;&amp; echo PASS` succeeds.
+
+Rule for flags: mark trend as UP when p95_ms &gt; 500 and the
+previous value was lower; otherwise mark it FLAT or DOWN.
+Never emit a value of &lt;unknown&gt;; write "no data" instead.
+</code></pre>
+
+<p>The escaped characters in that example reflect a practical concern: when a prompt contains shell operators or literal angle brackets, it must survive being stored in HTML, JSON, or a configuration file. Losing an <code>&amp;&amp;</code> or a <code>&gt;</code> silently changes the meaning of the completion check. Validate rendered prompts the same way you would validate any other configuration text.</p>
+
+<h2>Designing constraints that hold</h2>
+<p>Not all constraints are equal. A hard constraint is a condition that makes the result unacceptable if violated: "no new runtime dependencies," "do not touch generated files," "all amounts in cents." A preference is a direction that may be traded against a stronger goal: "prefer the existing helper," "keep functions short." Label them differently. When everything is phrased as "must," the model cannot tell which rules it may compromise when two of them collide.</p>
+<table>
+<tr><th>Constraint form</th><th>Example</th><th>Strength</th><th>Failure mode</th></tr>
+<tr><td>Hard prohibition</td><td>Never write to <code>dist/</code></td><td>Strong, narrow</td><td>Blocks legitimate work if over-broad</td></tr>
+<tr><td>Allowed set</td><td>Use only <code>cents</code> or <code>millis</code></td><td>Strong, testable</td><td>Needs maintenance as options grow</td></tr>
+<tr><td>Positive instruction</td><td>Read the schema before writing SQL</td><td>Moderate</td><td>Hard to verify automatically</td></tr>
+<tr><td>Preference</td><td>Prefer existing utilities</td><td>Weak by design</td><td>Treated as mandatory by mistake</td></tr>
+<tr><td>Source of truth</td><td>Follow <code>docs/money.md</code></td><td>Strong if document is current</td><td>Stale referenced document</td></tr>
+</table>
+<p>Prefer definitions over denials where possible. "Write amounts as integers in cents" gives the model a constructive rule; "do not use floating point for money" leaves the alternative unspecified. Keep the prohibition as well if the risk is high, but lead with the replacement behaviour. Between five and nine constraints is a useful working range for a single task; beyond that, group them by phase or move stable rules into instruction files.</p>
+<p>State the priority explicitly when conflicts are foreseeable. A line such as "if a test would require changing a generated file, stop and report instead" resolves a collision before it happens. Without it, the model faces a genuine dilemma: satisfy the test or respect the boundary. Either choice can look like a mistake to the reviewer.</p>
+<div class="note"><strong>Copy the rule, not just the link.</strong> A source-of-truth reference is efficient only when the referenced document is authoritative and available. If a policy lives in a private wiki the model cannot read, include the few sentences that govern this task directly in the prompt.</div>
+
+<h2>Making completion measurable</h2>
+<p>"Done" should be observable by someone who did not write the prompt. Compare the two versions below:</p>
+<ul>
+<li>Weak: "The code should be clean and the tests should look reasonable."</li>
+<li>Strong: "All files pass <code>ruff check</code>; <code>pytest -q</code> reports zero failures; no diff touches <code>src/generated/</code>; the response lists changed files and the command output for each check."</li>
+</ul>
+<p>The strong version does not require a human to interpret taste. It also separates product correctness from presentation: a task may produce correct code with a poor report, and those deserve different feedback. Where no command can verify the result, use a structural test instead — "each finding includes a file path, a line number, and one sentence of evidence" — which a reviewer can check in seconds.</p>
+<p>Be careful with criteria that invite gaming. A rule such as "the response must be under 200 words" can be satisfied by deleting necessary caveats. Pair limits with content requirements: "under 200 words, and every risk must retain its evidence reference." Similarly, "all tests pass" is weak if the agent may skip or rewrite tests; add "without modifying files under <code>tests/</code> unless the request explicitly allows it."</p>
+
+<h2>A diagnostic loop for failed outputs</h2>
+<p>When an output is wrong, resist rewriting the whole prompt. Identify which layer failed and repair only that layer. This keeps prompts stable and makes improvements cumulative.</p>
+<table>
+<tr><th>Symptom</th><th>Most likely layer</th><th>Repair</th></tr>
+<tr><td>Correct analysis, wrong shape</td><td>Output specification</td><td>Add field names and an example row</td></tr>
+<tr><td>Confident but wrong facts</td><td>Inputs or context</td><td>Provide the source file or restrict the scope</td></tr>
+<tr><td>Rule violated</td><td>Constraint design</td><td>Make it hard, positive, and visible near the goal</td></tr>
+<tr><td>Stopped too early</td><td>Completion check</td><td>Name the artifact and the verifying command</td></tr>
+<tr><td>Wandering into unrelated work</td><td>Scope</td><td>Add an explicit out-of-scope list</td></tr>
+</table>
+<p>Run two or three trials after each repair. A single success proves very little with a stochastic system; a single failure after four previous successes tells you more. Keep a short changelog of prompt revisions and their observed effect, especially for prompts used in automation. That record becomes the baseline for deciding whether a model upgrade or a prompt change is the right response to a regression.</p>
+
+<div class="exercise"><strong>Exercise 37.1 — Specify a vague request.</strong> Rewrite "check the API for problems and tell me what to fix" using all six parts of the instruction model. Include at least one hard constraint, one preference, a three-column output table, and a completion check that does not rely on subjective judgement.</div>
+
+<div class="exercise"><strong>Exercise 37.2 — Diagnose three failures.</strong> A prompt asks for a security review of a pull request. Run one produced a table with invented line numbers; run two produced a thorough essay instead of a table; run three included a proposed rewrite despite a no-edit rule. For each run, name the failed layer and write the smallest prompt change that addresses it.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why is ambiguity best described as a source of rework rather than a style issue?</li>
+<li>Name the six parts of a well-decomposed instruction.</li>
+<li>Why should hard constraints and preferences be labelled differently?</li>
+<li>What is wrong with a completion check based only on word count or "clean code"?</li>
+<li>How would you repair a failure where the analysis is correct but the format is wrong?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Unspecified audience, scope, length, and format force the model to guess and the human to correct.</li>
+<li>Write goals, context, inputs, constraints, output specifications, and completion checks explicitly.</li>
+<li>Use hard constraints sparingly, define positive alternatives, and resolve foreseeable collisions.</li>
+<li>Make "done" observable through commands or structural checks that do not depend on taste.</li>
+<li>Diagnose failed outputs by layer and repair the smallest cause, then verify across several trials.</li>
+</ul>
+
+<nav><a href="36-sdk-and-cicd.html">&larr; Previous</a><span></span><a href="38-system-prompts-and-structure.html">Next: System Prompts and Prompt Structure &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

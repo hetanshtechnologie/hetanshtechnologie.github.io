@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 4 — Requests, Responses, and Conversation State</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 4</span>
+  <h1 id="chapter-4-requests-responses-and-conversation-state">Chapter 4 — Requests, Responses, and Conversation State</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Break a model API call into its transport, payload, and conversation layers.</li>
+<li>Assemble a valid message list using the correct roles, turns, and content blocks.</li>
+<li>Explain why JSON is the interchange format and what a client SDK abstracts away.</li>
+<li>Trace a first request from code to response and interpret the returned metadata.</li>
+<li>State where conversation state lives and why the service keeps none of it.</li>
+<li>Place standing instructions and end-user text at the right level of authority.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="a-single-call-has-three-layers">A single call has three layers</h3>
+<p>An application asking a model a question triggers three things at once. At the <strong>transport layer</strong>, an HTTP request travels to a versioned endpoint with credentials attached. At the <strong>payload layer</strong>, a structured document describes what the model should read and how it should behave. At the <strong>conversation layer</strong>, an ordered list of messages carries the exchange itself. Keeping these layers separate makes bugs easy to localize: a failure can live in any one of them.</p>
+<p>Generation calls use <code>POST</code>, because producing a reply is an action that creates a new billable result rather than a repeatable lookup. The request carries an <code>Authorization</code> header with an API key and a <code>Content-Type</code> header declaring JSON. A missing header or outdated endpoint version produces an error before the model is involved, so no prompt edit can fix it. The endpoint is versioned deliberately: a service can add capabilities under a new version without breaking clients that still depend on the old contract, which is why a candidate should check which version a question refers to before assuming a feature exists.</p>
+<p>The payload names the model, supplies the messages, and sets controls such as the maximum generated tokens. Each field is a decision affecting cost and behavior, and a developer should be able to justify every one they send. Two calls with identical messages but different token caps or sampling values can produce noticeably different answers, so configuration belongs in the same version-controlled record as the prompt when a team wants reproducible results.</p>
+<p>The conversation layer is where meaning lives. The model receives a script of previous lines plus the current one and writes the next line. Students often underestimate this part, focusing on the newest question while ignoring the history that gives it context.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A failure before any output — a rejected key, malformed body, or unsupported endpoint — is in the transport or payload layer, not the prompt. Diagnose the envelope first.</p>
+</blockquote>
+<h3 id="roles-turns-and-content-blocks">Roles, turns, and content blocks</h3>
+<p>A conversation is an array of message objects, each with a <code>role</code> and <code>content</code>. The array is read from first to last, and the model produces the next message. One exchange is a <strong>turn</strong>; a longer conversation repeats the pattern, appending each piece to the end. Roles tell the model which statements are standing rules, which are user input, and which are its own earlier words, and that distinction affects how much weight each receives.</p>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Supplied by</th>
+<th>Carries</th>
+<th>Placement rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>System</td>
+<td>The application</td>
+<td>Durable rules, tone, scope, output format</td>
+<td>First; applies to the whole exchange</td>
+</tr>
+<tr>
+<td>Developer or instruction tier</td>
+<td>The application</td>
+<td>Higher-priority operational guidance</td>
+<td>Above user content, where supported</td>
+</tr>
+<tr>
+<td>User</td>
+<td>The person or upstream process</td>
+<td>Current question, task, or supplied data</td>
+<td>After instructions; untrusted input</td>
+</tr>
+<tr>
+<td>Assistant</td>
+<td>The model, replayed by the client</td>
+<td>Earlier answers and tool requests</td>
+<td>Appended in order to preserve context</td>
+</tr>
+<tr>
+<td>Tool result</td>
+<td>The application after running a function</td>
+<td>Value returned by a tool call</td>
+<td>Follows the assistant message requesting it</td>
+</tr>
+</tbody>
+</table>
+<p>Two consequences follow. Role accuracy matters: user text relabelled as a system instruction gains unearned authority and invites manipulation. Also, every message is resent each turn, so the array grows; long histories cost more and eventually approach the context limit. Practical systems trim, summarize, or retrieve relevant slices instead of replaying every word.</p>
+<p>Content can be a plain string or a list of typed blocks. A text block holds words, an image block carries visual input, and tool-related blocks represent function requests or results. The block structure allows later chapters to mix formats without changing the message model. A user message containing an image and a question would hold two blocks in one array, and an assistant message that requests a tool would hold a tool-use block. When content is a bare string, the SDK usually wraps it in a text block, so the forms are equivalent in simple cases. Because blocks are ordered, an engineer should preserve their sequence when transforming messages; reordering blocks can change which text the model treats as the current question.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Labelling user text as a system message because it seems important. That promotes untrusted input into a standing rule.</p>
+</blockquote>
+<h3 id="json-as-the-shared-language">JSON as the shared language</h3>
+<p>Request and response bodies use JSON because it is neutral and structured. A JavaScript application sees an object, Python sees a dictionary, and other languages map it to their own types. Unlike a plain-text prompt, JSON expresses nested structures, arrays, numbers, and booleans, which a list of typed content blocks requires. It is also schema-checkable, so a team can validate real requests and responses against a formal shape.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Purpose</th>
+<th>Consequence if wrong</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>model</code></td>
+<td>String</td>
+<td>Selects the engine and version</td>
+<td>Unexpected quality, cost, or availability</td>
+</tr>
+<tr>
+<td><code>messages</code></td>
+<td>Array</td>
+<td>Supplies the ordered conversation</td>
+<td>Missing context or validation error</td>
+</tr>
+<tr>
+<td><code>max_tokens</code></td>
+<td>Integer</td>
+<td>Caps generated output length</td>
+<td>Truncation or unnecessary expense</td>
+</tr>
+<tr>
+<td><code>temperature</code></td>
+<td>Number</td>
+<td>Adjusts randomness of token choice</td>
+<td>Output too rigid or too variable</td>
+</tr>
+<tr>
+<td><code>system</code></td>
+<td>String or blocks</td>
+<td>Sets instructions outside the message list</td>
+<td>Rules ignored or mixed with user content</td>
+</tr>
+</tbody>
+</table>
+<p>Names and types are part of the contract. A string where an integer belongs, a missing array, or an unknown field may be rejected. Because JSON is text on the wire, a request can be saved and replayed — useful for reproducing bugs — so sensitive data should be redacted before payloads are logged. Contracts also evolve: a provider may add an optional field without breaking existing callers, but renaming a required field is a breaking change. Treating the payload as a versioned interface, rather than an ad hoc bag of keys, makes upgrades predictable and lets a team validate requests before they are sent.</p>
+<blockquote>
+<p><strong>Try it:</strong> Save a working request as a file and change one field at a time — model, token cap, then a message's role. Seeing which edits alter behavior and which merely error builds intuition quickly.</p>
+</blockquote>
+<h3 id="client-sdks-are-thin-wrappers">Client SDKs are thin wrappers</h3>
+<p>An SDK is a library standing between the application and raw HTTP. It builds the URL, attaches the header, serializes objects to JSON, parses the response into language-native objects, and raises typed exceptions. For streaming it also assembles the event sequence. It does not change what the service does; it removes repetitive work.</p>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Raw HTTP call</th>
+<th>Client SDK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Authentication</td>
+<td>Caller builds the header</td>
+<td>Credential loaded from configuration</td>
+</tr>
+<tr>
+<td>Serialization</td>
+<td>Caller writes JSON text</td>
+<td>Objects converted internally</td>
+</tr>
+<tr>
+<td>Response</td>
+<td>Caller parses text and checks fields</td>
+<td>Typed object with named attributes</td>
+</tr>
+<tr>
+<td>Errors</td>
+<td>Caller inspects status codes</td>
+<td>Exception classes per error family</td>
+</tr>
+</tbody>
+</table>
+<p>Knowing the wrapper matters even if raw HTTP is never written. When a bug refers to a field or stop reason, the developer should know whether it belongs to the service contract or a local convenience. SDKs can lag behind API features, so inspect the actual request leaving the client rather than trusting defaults. Typed exceptions are especially useful: they let the application distinguish an authentication failure, which needs a corrected key, from a transient server error, which may be retried, without parsing error strings by hand. A wrapper that hides this distinction would turn a clear operational signal into guesswork.</p>
+<h3 id="a-first-request-end-to-end">A first request, end to end</h3>
+<p>A minimal classifier makes the flow concrete: one instruction, one user message, and a token cap. The credential lives in a header, not the body.</p>
+<pre><code class="language-json">{
+  &quot;model&quot;: &quot;general-purpose-latest&quot;,
+  &quot;max_tokens&quot;: 128,
+  &quot;messages&quot;: [
+    {
+      &quot;role&quot;: &quot;system&quot;,
+      &quot;content&quot;: &quot;Classify each message as billing, technical, or other. Reply with one short label only.&quot;
+    },
+    {
+      &quot;role&quot;: &quot;user&quot;,
+      &quot;content&quot;: &quot;My invoice shows a charge I do not recognize.&quot;
+    }
+  ]
+}
+</code></pre>
+<p>A response has the mirror structure:</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;msg_01A&quot;,
+  &quot;type&quot;: &quot;message&quot;,
+  &quot;role&quot;: &quot;assistant&quot;,
+  &quot;model&quot;: &quot;general-purpose-latest&quot;,
+  &quot;stop_reason&quot;: &quot;end_turn&quot;,
+  &quot;content&quot;: [{ &quot;type&quot;: &quot;text&quot;, &quot;text&quot;: &quot;billing&quot; }],
+  &quot;usage&quot;: { &quot;input_tokens&quot;: 42, &quot;output_tokens&quot;: 3 }
+}
+</code></pre>
+<p>Content is an array of blocks; here one text block holds the label. The identifier correlates the result with logs. <code>stop_reason</code> explains why generation ended, and usage reports token counts. Normal completion means the answer is whole; a token-cap stop means output may be cut off, so half a label must be treated as failure, not guessed at. Ignoring metadata is flying blind: usage feeds cost dashboards, the stop reason decides trustworthiness, and the model field confirms which version answered. A response that reports the assistant role is also a reminder that the application must append this message to its history if the conversation is to continue — the service will not do it.</p>
+<h3 id="conversation-state-belongs-to-the-application">Conversation state belongs to the application</h3>
+<p>The service is stateless: it retains nothing between calls. It does not store the message list or carry context forward. A second turn that refers to the first must resend earlier messages plus the new one, so "continue the conversation" always means "resend the history and append." This one idea explains most context-loss bugs.</p>
+<p>The application therefore owns state. A script may keep the array in a variable; a web application stores it in a session record, cache, or database keyed by a conversation identifier. The application decides what to include, trim, and discard, which lets it enforce privacy rules and cap costs. A careless client that drops history produces an assistant that seems forgetful even though the model did exactly as told.</p>
+<p>Placement follows the same ownership. Standing rules — purpose, tone, boundaries, output format — go in the system instruction supplied by the application. The current question and user data go in a user message. An instruction tier, where available, carries guidance that is important but not part of user input. Mixing levels promotes untrusted text into a rule and lets a long input bury standing guidance. Keep the levels distinct and treat user content as data, not command.</p>
+<blockquote>
+<p><strong>Exam note:</strong> If an assistant "forgot" two turns ago, the likely cause is that the client failed to resend them. State lives in application code.</p>
+</blockquote>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal:</strong> Build a two-turn conversation by hand so the stateless model becomes visible.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Write a request with a system instruction, a user message asking for a short definition, and a token cap of one hundred. Send it and save the response.</li>
+<li>Extract the assistant's reply, then build a new array with the original instruction, original user message, that reply as an assistant message, and a second user message asking for an example.</li>
+<li>Send the new array and save the answer.</li>
+<li>Now send only the second user message and compare the two answers.</li>
+<li>Compare input token counts from both calls.</li>
+</ol>
+<p><strong>Expected observation:</strong> The answer from step three refers correctly to the earlier definition; the answer from step four lacks context, showing the service remembered nothing. Input tokens are higher when history is included, proving every prior message is paid for again.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p><strong>The problem.</strong> A support assistant answers questions about an account. It handles the first question well but gives confused replies to a follow-up like "what about the other one?" A developer blames the model and proposes switching to a larger one.</p>
+<p><strong>Reasoning.</strong> The engineer inspects the outgoing request and finds each call contains only the newest user message. The earlier question and answer were never resent. The assistant is not confused; it was given a follow-up with no antecedent. Changing models would spend more on the same broken request.</p>
+<p>The fix has three parts. The client keeps a per-conversation array and appends both user and assistant messages after each exchange. A cap limits how many past turns are resent, so a long conversation cannot exceed the context budget; when reached, an older turn is summarized into a short note. The standing instruction stays a system message at the head of every request and is never built from user text.</p>
+<p>Role placement is reviewed too. Account data fetched by the backend is placed in the user message as delimited reference material, while the system instruction says to answer only from that material. Data in a record is not a rule. Sensitive fields are removed before the request is built.</p>
+<p><strong>Resolution.</strong> Follow-ups resolve correctly because the prior exchange is present. Input tokens rise, as expected, but stay within the cap thanks to summarization. A regression case for a two-turn follow-up is added so the bug is caught automatically. The decisive move was reading the request before blaming the model.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Sending only the newest message and expecting recall of earlier turns.</li>
+<li>Putting user text into a system instruction, giving it unearned authority.</li>
+<li>Omitting the token cap, then treating a truncated reply as complete.</li>
+<li>Ignoring stop reasons and usage when a result looks odd.</li>
+<li>Letting a conversation array grow until it exceeds the context budget.</li>
+<li>Assuming an SDK changes the contract rather than wrapping it.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>A call has three layers: HTTP transport, JSON payload, and ordered conversation.</li>
+<li>Generation uses <code>POST</code>; credentials travel in headers, not the body.</li>
+<li>Each message has a role and content; roles determine authority and must be labeled correctly.</li>
+<li>Content may be a string or typed blocks such as text and images.</li>
+<li>JSON is language-neutral, structured, and validatable, suiting nested message lists.</li>
+<li>An SDK handles headers, serialization, parsing, and errors without altering the contract.</li>
+<li>Responses carry content, an identifier, a stop reason, and token usage worth inspecting.</li>
+<li>The API is stateless; the application owns history and decides what to resend.</li>
+<li>Standing rules belong at the system level; user text stays untrusted at the user level.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>Why is a generation call normally sent with <code>POST</code> rather than <code>GET</code>?</li>
+</ol>
+<ul>
+<li>A. Because <code>GET</code> cannot carry a JSON body.</li>
+<li>B. Because generation creates a new billable result and is not a repeatable lookup.</li>
+<li>C. Because <code>POST</code> responses are always streamed.</li>
+<li>D. Because <code>GET</code> cannot use an authorization header.</li>
+</ul>
+<ol start="2">
+<li>A follow-up question loses its context. What is the most likely cause?</li>
+</ol>
+<ul>
+<li>A. The model forgot the earlier turn on its own.</li>
+<li>B. The system instruction was too short.</li>
+<li>C. The client did not resend the earlier messages.</li>
+<li>D. The user message contained a question mark.</li>
+</ul>
+<ol start="3">
+<li>Which placement handles a rule that should apply to every turn?</li>
+</ol>
+<ul>
+<li>A. Append it to the last user message.</li>
+<li>B. Put it in a system-level instruction.</li>
+<li>C. Encode it in the model name.</li>
+<li>D. Send it only on the first call.</li>
+</ul>
+<ol start="4">
+<li>What does a stop reason indicating the token cap was reached tell the caller?</li>
+</ol>
+<ul>
+<li>A. The answer is guaranteed correct.</li>
+<li>B. The model refused the question.</li>
+<li>C. The output may be truncated and should not be parsed hopefully.</li>
+<li>D. The request was never sent.</li>
+</ul>
+<ol start="5">
+<li>What does a client SDK primarily provide?</li>
+</ol>
+<ul>
+<li>A. A new model with different capabilities.</li>
+<li>B. A wrapper handling headers, serialization, parsing, and common errors.</li>
+<li>C. A guarantee that outputs are identical every call.</li>
+<li>D. A replacement for the conversation history.</li>
+</ul>
+<ol start="6">
+<li>Which statement about conversation state is correct?</li>
+</ol>
+<ul>
+<li>A. The service stores it between calls for the whole session.</li>
+<li>B. The SDK stores it on the server automatically.</li>
+<li>C. The application must keep and resend it on each turn.</li>
+<li>D. It is derived from the API key.</li>
+</ul>
+<ol start="7">
+<li>Why should user data not be placed in a system instruction?</li>
+</ol>
+<ul>
+<li>A. System instructions cannot contain text.</li>
+<li>B. It gives untrusted input standing authority and weakens guardrails.</li>
+<li>C. The data would be too long.</li>
+<li>D. The service rejects all system instructions.</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> Generating a reply creates a billable result, which <code>POST</code> expresses. A is wrong because <code>GET</code> bodies are possible but inappropriate. C is wrong because streaming is method-independent. D is wrong because headers work with any method.</p>
+</li>
+<li>
+<p><strong>C.</strong> The service is stateless, so context exists only if resent. A wrongly attributes memory to the model; B and D are irrelevant.</p>
+</li>
+<li>
+<p><strong>B.</strong> Standing rules belong at the system level. A mixes rules with untrusted input; C is meaningless; D leaves later turns without the rule.</p>
+</li>
+<li>
+<p><strong>C.</strong> A token-cap stop means output may be cut off. A is unsafe, B confuses truncation with refusal, and D is impossible because a stop reason comes from a processed request.</p>
+</li>
+<li>
+<p><strong>B.</strong> SDKs wrap HTTP mechanics without changing the contract. A is false because the SDK does not create models, C because outputs vary, and D because the client owns history.</p>
+</li>
+<li>
+<p><strong>C.</strong> The application keeps and resends the array. A and B assume nonexistent server memory; D is unrelated.</p>
+</li>
+<li>
+<p><strong>B.</strong> User data promoted to a rule gains unearned authority and undermines safety. A is false because instructions contain text, C is a practical concern rather than the core reason, and D is false because instructions are supported.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 4.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="03-developer-platform.html">&larr; Previous</a><a href="05-application-requirements.html">Next: Application Anatomy, Requirements, and the System Life Cycle &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

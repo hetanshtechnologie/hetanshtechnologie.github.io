@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 25 — Repository-Aware Coding with an Assistant</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 25</span>
+  <h1 id="chapter-25-repository-aware-coding-with-an-assistant">Chapter 25 — Repository-Aware Coding with an Assistant</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Name the layers that make an assistant repository-aware and identify which layer caused a failure.</li>
+<li>Describe what the tool can read, what it can change, and where its view of the project ends.</li>
+<li>Start a session from a clean baseline with an explicit scope and a verifiable definition of done.</li>
+<li>Write an instruction file containing commands, boundaries, and conventions a reviewer can check.</li>
+<li>Match the working strategy to the size of the change, from a local fix to a broad migration.</li>
+<li>Use version control, pull requests, and review when producing and when evaluating changes.</li>
+<li>Run a narrowing debug loop that turns a vague failure into a specific cause.</li>
+<li>Explain how one model family appears across the API, libraries, agents, and the repository assistant.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="repository-awareness-is-a-system-property">Repository awareness is a system property</h3>
+<p>A model in a chat window knows nothing about the checkout on your disk. It cannot see the helper already written two directories away or the command that runs your tests. A repository assistant fills that gap with a loop. A context builder selects files, instructions, search results, and command output for the current window. The model proposes an action. A permission gate decides whether it runs, pauses for a person, or is refused. A tool carries it out, and the result returns to the window. Session state preserves the plan and the edits so later turns have continuity.</p>
+<p>Each layer can produce a bad outcome, and the correction differs by layer. Sensible code that clashes with local conventions points to missing context. Correctly read context used for the wrong purpose points to reasoning. An edit in the wrong file points to tool targeting. Unexpected writes point to a loose gate.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Question it answers</th>
+<th>Failure when weak</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Context selection</td>
+<td>What should the model read?</td>
+<td>Existing helpers are reinvented; conventions ignored</td>
+</tr>
+<tr>
+<td>Reasoning</td>
+<td>What action should come next?</td>
+<td>Relevant information used toward the wrong goal</td>
+</tr>
+<tr>
+<td>Tool execution</td>
+<td>How does the action happen?</td>
+<td>Correct plan applied to the wrong path</td>
+</tr>
+<tr>
+<td>Permission gate</td>
+<td>May this action run?</td>
+<td>Unreviewed writes or side effects</td>
+</tr>
+<tr>
+<td>Session state</td>
+<td>What happened earlier?</td>
+<td>Repeated work and contradictory edits</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Exam note:</strong> Code that compiles but ignores an established project pattern is usually a context or instruction problem. Changing the model does not supply the missing file.</p>
+</blockquote>
+<h3 id="the-view-is-assembled-not-automatic">The view is assembled, not automatic</h3>
+<p>Nothing is visible to the assistant merely because it is tracked in git. Material enters the window when a tool fetches it: a named file, a listing, a search result, version-control status, an instruction file, or the output of a command that has run. Connected services can add issue text or schema details, each bringing its own trust boundary.</p>
+<p>The window is finite, so selection is a trade-off. Too many search hits can crowd out the instruction file; a large log can hide the failing line. Naming only one file may produce a locally correct edit that breaks an unseen caller. Ask the assistant which files it consulted before it edits, and state which areas matter.</p>
+<p>Reading and changing are separate capabilities. Navigation tools do not alter anything; writes and commands can. A command that runs tests is harmless, while a script that migrates data or publishes a package is not, yet both pass through the same permission system. Broad command access is effectively broad write access to everything the current account can reach.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Assuming the assistant has read a file because the file exists in the repository.</p>
+</blockquote>
+<h3 id="start-from-a-reviewable-baseline">Start from a reviewable baseline</h3>
+<p>Begin with a clean working tree. Mixed personal and assistant edits make undo operations dangerous. Commit or stash your work, then create a branch dedicated to the task so the resulting diff has one obvious purpose. Commit a known-good state after each verified step; resetting to a checkpoint is cleaner than repairing a long trail of overlapping edits.</p>
+<p>State the scope in the opening message. Name the target area, the actions that are out of bounds, and the evidence that will count as completion. A request such as "change only the billing service; leave generated clients untouched; add one unit test; report the commands you ran" gives the model usable constraints and the reviewer a checklist.</p>
+<pre><code class="language-bash">git status --short
+git switch -c assistant/billing-guard
+make check
+</code></pre>
+<p>Instruction files turn one-off reminders into durable policy. Keep them short and write commands and paths rather than aspirations. "Write clean code" cannot be checked; "run <code>make check</code> before reporting completion" can.</p>
+<pre><code class="language-text"># Working agreement for this repository
+
+## Verify
+- Install with `pip install -e .[dev]`.
+- `make check` runs formatter, linter, and unit tests; it must pass before handoff.
+
+## Do not edit by hand
+- `src/api/schema_pb2.py` and everything under `build/` are generated.
+- `poetry.lock` changes only through the package manager.
+
+## House rules
+- New public functions need a docstring and a unit test.
+- Stay inside the module named in the request; ask before widening scope.
+
+## Handoff
+- List files changed, commands run, and anything deliberately left alone.
+</code></pre>
+<p>An instruction file is guidance, not enforcement. Pair a forbidden path with a hook that refuses writes there if the boundary truly matters.</p>
+<blockquote>
+<p><strong>Try it:</strong> Change the verification command in a scratch project to one that does not exist, then ask which command the assistant plans to run. Correct the line and repeat.</p>
+</blockquote>
+<h3 id="match-the-process-to-the-size-of-the-change">Match the process to the size of the change</h3>
+<p>The cost of a plan, a test harness, or a staged rollout should scale with the blast radius. A small edit deserves a small diff that can be read at a glance, with one concern per commit. Revert opportunistic reformatting before review, since unrelated edits hide regressions.</p>
+<p>A broad migration deserves a different shape. Inventory affected surfaces, define the behaviour that must stay identical, and introduce a seam such as an adapter that lets old and new implementations coexist. Convert one narrow slice, run the full suite, commit, and repeat. A flag separates deploying code from enabling the new path, making rollback a configuration change. Each assistant request should stay small enough that you can predict the diff before it appears.</p>
+<table>
+<thead>
+<tr>
+<th>Size</th>
+<th>Example</th>
+<th>Working approach</th>
+<th>Main risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cosmetic</td>
+<td>Rename a local variable</td>
+<td>Direct edit in one file</td>
+<td>Noise in the commit</td>
+</tr>
+<tr>
+<td>Small behavioural</td>
+<td>Guard a null case</td>
+<td>Edit plus a focused test</td>
+<td>Side effect outside the function</td>
+</tr>
+<tr>
+<td>Medium</td>
+<td>Replace a helper used by several modules</td>
+<td>List callers, add characterization tests, update together</td>
+<td>A caller never searched for</td>
+</tr>
+<tr>
+<td>Large migration</td>
+<td>Swap a persistence library</td>
+<td>Adapter seam, staged conversion, verification each stage</td>
+<td>Unreviewable diff and mixed semantics</td>
+</tr>
+<tr>
+<td>Cross-cutting</td>
+<td>Add a header to every endpoint</td>
+<td>Enforce in middleware; prove coverage with tests</td>
+<td>Inconsistent application</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Exam note:</strong> When a question contrasts one enormous generated patch with staged conversion plus tests at each stage, choose the staged approach. Reviewability is part of correctness.</p>
+</blockquote>
+<h3 id="pull-requests-and-two-way-review">Pull requests and two-way review</h3>
+<p>Version control supplies the memory and the safety net. The assistant can read history to understand odd-looking code, use the diff to see its own footprint, and keep experiments on separate branches. Commit messages should explain <em>why</em>; a pull request is where intent, evidence, and risk meet.</p>
+<p>When the assistant drafts a description, treat it as a skeleton. Ask for purpose, files touched, commands executed with results, known limitations, and deliberate non-changes. Then verify each claim against the diff and a fresh test run. "All tests pass" is worthless if no test ran; naming the command and its exit status is evidence.</p>
+<p>The assistant is also useful as a reviewer of work produced by someone else, or by itself in an earlier pass. Ask for findings tied to locations and reasons. "Review this diff" invites vague reassurance; "check every caller of <code>calculate_discount</code> for the new return type and list the files inspected" produces something actionable. A review is a set of checked claims, not a tone of confidence.</p>
+<table>
+<thead>
+<tr>
+<th>Review activity</th>
+<th>Productive instruction</th>
+<th>Your decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Requirement coverage</td>
+<td>Map each requirement to the change satisfying it</td>
+<td>Was the requirement understood?</td>
+</tr>
+<tr>
+<td>Interface check</td>
+<td>List call sites and verify each</td>
+<td>Is the interface change acceptable?</td>
+</tr>
+<tr>
+<td>Error handling</td>
+<td>Trace failure paths in the new code</td>
+<td>Which failures matter in production?</td>
+</tr>
+<tr>
+<td>Test adequacy</td>
+<td>Identify newly untested branches</td>
+<td>Do assertions match desired behaviour?</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating an assistant's "looks good" as approval, or letting the pass that wrote the code be the only pass that judges it.</p>
+</blockquote>
+<h3 id="a-narrowing-debug-loop">A narrowing debug loop</h3>
+<p>Asking for another attempt without new information usually reproduces the same error. Reproduce the failure exactly first: command, input, complete error text. "Tests fail" gives nothing to investigate; "the checkout test raises a type error in the discount helper after the refactor but passes on the base commit" identifies a layer and a boundary.</p>
+<p>Next inspect the diff and remove out-of-scope changes. Assistants sometimes add cleanups, and those extras are frequent sources of regressions. Re-run the check after reverting them. Then isolate the layer: was the plan wrong, the edit wrong, the environment wrong, or the test wrong? Shrink the window deliberately by handing over one file and one failing case. If the fix works in isolation, the original problem was scope; if it still fails, the code needs attention. Change one thing and rerun the identical check.</p>
+<p>Set a limit on blind attempts. After two unchanged retries, gather new evidence: a smaller reproduction, a fresh search, or the exact failing output. The assistant is most useful when you feed it observations it did not have before.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Stacking repairs on a change already known to be wrong. Reset to the last verified checkpoint and reissue a smaller request.</p>
+</blockquote>
+<h3 id="one-model-different-surfaces">One model, different surfaces</h3>
+<p>The same model family can be reached through an API, client libraries, an agent SDK, the repository assistant, and connectors. The concepts transfer: a finite window, instructions at different authority levels, typed tool contracts, output that needs validation, and cost that grows with tokens and steps. Authority does not transfer. An API application executes every side effect; a repository assistant can change your working tree under permission rules; an agent loop may call tools on its own.</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Who executes tools</th>
+<th>Standing instructions live in</th>
+<th>Inspect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Model API</td>
+<td>Your application</td>
+<td>Request system or developer fields</td>
+<td>Captured request and response</td>
+</tr>
+<tr>
+<td>Client library</td>
+<td>Application through wrappers</td>
+<td>Same fields, set by SDK code</td>
+<td>Serialized outbound request</td>
+</tr>
+<tr>
+<td>Agent SDK</td>
+<td>A runtime loop you register</td>
+<td>Prompt, tool definitions, harness</td>
+<td>Trace and tool results</td>
+</tr>
+<tr>
+<td>Repository assistant</td>
+<td>Assistant runtime, gated</td>
+<td>Project instructions, rules, skills</td>
+<td>Diff and session transcript</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Exam note:</strong> Cross-surface questions test transfer of principles. Identify changes in authority, context size, or validation needs before worrying about which product implements the feature.</p>
+</blockquote>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal:</strong> obtain a small, reviewable change from an assistant in an unfamiliar repository, then diagnose a failure with a narrowing loop.</p>
+<ol>
+<li>Create a project with a <code>calc.py</code> module, one unit test, and a working agreement naming the test command and marking <code>generated/</code> read-only.</li>
+<li>Commit, create a branch, and ask for a zero-divisor guard in one function plus one test. Include scope and definition of done.</li>
+<li>Ask which files were read and which command was run; compare with the working agreement.</li>
+<li>Break the expected value in the test and ask for a diagnosis. Require the exact command and error before any edit.</li>
+<li>Inspect the diff, revert edits outside the requested files, and rerun the named command.</li>
+</ol>
+<p><strong>Expected observation:</strong> changes stay in <code>calc.py</code> and its test, and the debug turn cites a concrete error. If a generated file is touched, the rule was suggested but not enforced; add a blocking check and repeat.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A team needs to replace a home-grown date parser with a maintained library across roughly forty call sites. The first request produces a patch touching sixty files, reformats a dozen, and misses two callers that a search pattern overlooked. Tests pass locally because neither caller is covered.</p>
+<p>The engineer resets and restarts with an inventory request that produces no edits. Two callers live in a legacy module the team has agreed not to touch yet. A thin adapter exposed under the old function name is introduced, delegating internally to the new library. Callers are converted in three batches, each with its own test run and commit; the legacy module keeps the adapter behind a flag.</p>
+<p>When a batch fails, the engineer supplies the exact failing case and asks whether plan, edit, or test is at fault. The assertion was written against the old error message, so the test is updated deliberately rather than distorting the code to satisfy it. The result is more pull requests, but each is small enough to explain, and the flag enables gradual exposure.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Starting in a dirty tree and untangling personal and assistant edits during review.</li>
+<li>Writing instruction files full of advice that cannot be verified.</li>
+<li>Assuming a file is known merely because it is tracked in git.</li>
+<li>Requesting one giant migration patch instead of staged conversion with checkpoints.</li>
+<li>Treating a confident review summary as independent evidence of correctness.</li>
+<li>Retrying a failure without adding a reproduction or narrowing the scope.</li>
+<li>Allowing write and command tools in an exploration session where reads would suffice.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Repository awareness comes from context selection, reasoning, tools, gates, and session state together.</li>
+<li>The assistant sees material fetched into its window, not everything stored in the project.</li>
+<li>A clean branch, explicit scope, and checkable definition of done make changes easier to judge.</li>
+<li>Choose process size by blast radius; staged conversion with seams and flags supports large migrations.</li>
+<li>Version control provides checkpoints, and pull requests verify intent and evidence.</li>
+<li>Debugging works as a narrowing loop with exact reproductions and one change at a time.</li>
+<li>Model concepts transfer across surfaces, but tool authority differs sharply.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>An assistant produces compiling code that reimplements an existing helper. What is the most likely cause?</li>
+</ol>
+<ul>
+<li>A. The maximum token setting is too low.</li>
+<li>B. The relevant file was never selected into its context.</li>
+<li>C. The permission mode was too restrictive.</li>
+<li>D. The project uses the wrong programming language.</li>
+</ul>
+<ol start="2">
+<li>Which statement best describes a useful project instruction file?</li>
+</ol>
+<ul>
+<li>A. It lists aspirations such as clarity and elegance.</li>
+<li>B. It stays private so no one else can see the conventions.</li>
+<li>C. It states exact commands, forbidden paths, and a definition of done.</li>
+<li>D. It replaces tests and code review.</li>
+</ul>
+<ol start="3">
+<li>A change must update dozens of callers. Which approach best supports safe review?</li>
+</ol>
+<ul>
+<li>A. Generate one very large patch so everything changes at once.</li>
+<li>B. Edit only callers covered by tests and ignore the rest.</li>
+<li>C. Add a compatibility seam, convert in small batches, verify each batch.</li>
+<li>D. Rename the function so everything fails to compile, then fix all errors.</li>
+</ul>
+<ol start="4">
+<li>What should happen first when a test fails after an assistant edit?</li>
+</ol>
+<ul>
+<li>A. Ask the assistant to try again with different wording.</li>
+<li>B. Record the command and error, then inspect the diff for out-of-scope changes.</li>
+<li>C. Switch the whole project to a larger model.</li>
+<li>D. Delete the failing test.</li>
+</ul>
+<ol start="5">
+<li>When the assistant drafts a pull request description, what is the appropriate response?</li>
+</ol>
+<ul>
+<li>A. Publish it unchanged.</li>
+<li>B. Remove all mention of tests.</li>
+<li>C. Verify each claim against the diff and a fresh test run.</li>
+<li>D. Ask a second assistant to approve the first one's text.</li>
+</ul>
+<ol start="6">
+<li>Which capability differs most between an API call and a repository assistant?</li>
+</ol>
+<ul>
+<li>A. The need to supply instructions.</li>
+<li>B. The size of the context window.</li>
+<li>C. Who may execute tools that modify local files.</li>
+<li>D. The existence of tool contracts.</li>
+</ul>
+<ol start="7">
+<li>An instruction says "never edit <code>generated/</code>," but the assistant edits a file there. What is the strongest correction?</li>
+</ol>
+<ul>
+<li>A. Add a blocking rule that refuses writes to that directory.</li>
+<li>B. Repeat the sentence twice in the instruction file.</li>
+<li>C. Ask the assistant to promise to remember.</li>
+<li>D. Rename the directory without protecting the new path.</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> A duplicate helper means the existing one was not in the window. <strong>A</strong> affects output length, not selection. <strong>C</strong> would prevent edits rather than cause duplication. <strong>D</strong> is unrelated to the symptom.</p>
+</li>
+<li>
+<p><strong>C.</strong> Checkable commands and boundaries serve both model and reviewer. <strong>A</strong> cannot be verified. <strong>B</strong> mistakes conventions for secrets. <strong>D</strong> overstates the role of documentation.</p>
+</li>
+<li>
+<p><strong>C.</strong> A seam and batches keep diffs reviewable and catch missed callers early. <strong>A</strong> is unreviewable. <strong>B</strong> knowingly leaves broken callers. <strong>D</strong> trades one large patch for one large compile failure.</p>
+</li>
+<li>
+<p><strong>B.</strong> Reproduction and diff inspection identify the layer before editing. <strong>A</strong> adds no information. <strong>C</strong> changes tools rather than diagnosis. <strong>D</strong> hides the failure.</p>
+</li>
+<li>
+<p><strong>C.</strong> Descriptions are claims requiring evidence. <strong>A</strong> trusts unverified text. <strong>B</strong> removes the most useful part. <strong>D</strong> adds another opinion instead of facts.</p>
+</li>
+<li>
+<p><strong>C.</strong> An API application owns execution; the assistant can change the working tree under gates. <strong>A</strong>, <strong>B</strong>, and <strong>D</strong> are shared concerns across both surfaces.</p>
+</li>
+<li>
+<p><strong>A.</strong> Enforcement removes reliance on interpretation. <strong>B</strong> is still guidance. <strong>C</strong> creates no durable guarantee. <strong>D</strong> changes the path but not the policy.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 25.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="24-caching-batches.html">&larr; Previous</a><a href="26-configuration.html">Next: Configuration, Skills, Plugins, Permissions, and CI &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

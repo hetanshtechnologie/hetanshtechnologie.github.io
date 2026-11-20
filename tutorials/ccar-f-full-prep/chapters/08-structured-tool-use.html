@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 8 — Structured Tool Use and Output Boundaries</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f2f4f8;color:#1f2937;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(30,41,59,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#4f46e5;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#312e81;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#4b5563;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#6b7280}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9ca3af;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#312e81}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #6366f1;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#4338ca}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#3730a3}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #dbe2f0;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#312e81;color:#fff;font-weight:600}
+td{background:#fafbff}
+pre{background:#1e2233;color:#e8ecf8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#e8e9fb;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#3730a3}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#eef0ff;border-left:4px solid #6366f1;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#4338ca}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #dbe2f0;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#312e81;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #e6eaf5}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#4338ca;text-decoration:none;display:inline-block;margin-bottom:16px}
+.callout{background:#eef0ff;border-left:4px solid #6366f1;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#6b7280;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+
+<div class="chapter">
+  <a class="back" href="../">&larr; Back to the Full Prep Course</a>
+  <h1 id="chapter-8-structured-tool-use-and-output-boundaries">Chapter 8 — Structured Tool Use and Output Boundaries</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain why tools need machine-readable input and result contracts.</li>
+<li>Identify the fields that make a tool result useful to the next loop decision.</li>
+<li>Bound the amount of tool output that re-enters the working context.</li>
+<li>Decide when a raw result and when a distilled view is appropriate.</li>
+<li>Recognize the side effects of context bloat on accuracy, cost, and traceability.</li>
+<li>Design a result filter that preserves provenance while reducing volume.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="why-tools-need-machine-readable-contracts">Why tools need machine-readable contracts</h3>
+<p>A tool is a capability the assistant can invoke, but the model cannot inspect a system the way an engineer can. It sees a description and a contract. The description says when to use the capability; the contract says what arguments it accepts and what it will return. If either is vague, the model has to guess, and a guess at an interface boundary becomes an invalid call or a misinterpreted result.</p>
+<p>Machine-readable contracts solve three problems at once. They give the model a precise target for its arguments, so field names and types are not invented. They give the runtime a basis for validation, so a malformed call can be rejected before it reaches a backend system. And they give the loop a predictable result shape, so the observation stage can extract status and provenance without parsing prose. A tool whose result is an unstructured paragraph may be readable by a person, but it is fragile inside an automated loop.</p>
+<p>A contract is also a form of governance. By declaring which fields are required and which values are permitted, the designer limits the space of possible calls. An enum for a "decision" argument is stronger than a free-text instruction to "return one of the usual options." Constraints such as date ranges, maximum page sizes, and allowed identifiers are not incidental details; they are the boundaries within which the tool is safe to use.</p>
+<p>Consider a lookup capability described only as "find relevant documents." The model must guess whether relevance means topic, date, or source, whether one result or many are returned, and whether a miss counts as an error. A typed contract removes those guesses by declaring a query string, an optional time window, and a maximum count, then returning an object with an explicit status. The same call made by two different components then means the same thing, which makes traces comparable and tests repeatable. Contracts also enable composition: one tool's result can become another tool's input only when both sides agree on field names and types.</p>
+<h3 id="structuring-inputs">Structuring inputs</h3>
+<p>Input design starts with the question of what the tool genuinely needs. Every required field adds a burden to the model and an opportunity for error, so fields should be necessary, clearly named, and typed. Plain language descriptions help, but the type system does the enforcing. A date field should carry a date-like format rather than a note saying "use a date." A count should have a numeric type and an upper bound rather than a request for "a sensible number."</p>
+<table>
+<thead>
+<tr>
+<th>Input element</th>
+<th>Purpose</th>
+<th>Weak version</th>
+<th>Stronger version</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Field name</td>
+<td>Tells the model what to supply</td>
+<td><code>info</code></td>
+<td><code>policy_area</code></td>
+</tr>
+<tr>
+<td>Type</td>
+<td>Constrains the value shape</td>
+<td>Free text</td>
+<td>Enumerated string or integer</td>
+</tr>
+<tr>
+<td>Requiredness</td>
+<td>States what must be present</td>
+<td>All fields optional</td>
+<td>Required query, optional filters</td>
+</tr>
+<tr>
+<td>Constraints</td>
+<td>Prevents unsafe calls</td>
+<td>No bounds</td>
+<td>Maximum result count, valid date window</td>
+</tr>
+<tr>
+<td>Description</td>
+<td>Explains intent and examples</td>
+<td>"Search term"</td>
+<td>"Area of the policy library to search"</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-text">tool: search_policy
+purpose: Find current clauses in the policy library for a named topic.
+input:
+  topic: string, required, one of [refund, cancellation, documentation, billing]
+  effective_after: date, optional, defaults to start of current policy year
+  limit: integer, optional, 1..10, defaults to 5
+result:
+  status: ok | no_match | retryable_error | terminal_error
+  items: array of {clause_id, text, effective_date, source_id}
+  total_matches: integer
+  truncated: boolean
+</code></pre>
+<p>Notice that the contract says what a miss means. Without the <code>no_match</code> status, the model might treat an empty list as a system failure and retry indefinitely. With it, an empty list becomes a decision point: the loop can broaden the query or ask a reviewer.</p>
+<p>Descriptions are routing instructions as much as documentation. If two tools both search something, the model chooses between them by reading their descriptions. Ambiguous wording leads to the wrong tool being called with reasonable-looking arguments. Names should also be distinct enough that a reviewer can tell the capabilities apart in a trace.</p>
+<p>Validation belongs at the boundary. When a call arrives, the runtime checks it against the contract and returns a specific error if a field is missing or out of range. That error should be written for the model: it should name the field and suggest a correction. A generic failure message forces the loop to guess again, which wastes cycles and may trigger repeated invalid calls.</p>
+<h3 id="structuring-results">Structuring results</h3>
+<p>A result is not merely data; it is the next decision's evidence. A useful result contract separates status from payload. Status distinguishes a successful lookup from a retryable problem such as a temporary timeout and a terminal problem such as a forbidden record. Payload carries the substantive content, and provenance records where it came from and when it was current. Without these distinctions, the model may treat an error message as a fact or cite a retired document as current.</p>
+<p>Results should also say whether they are complete. A search that returns a capped set of matches must indicate that more exist; otherwise the loop may conclude that it has seen everything. Likewise, a result that has been shortened for context should carry a truncation flag so the model can decide whether to request a narrower query. Silence about limits is a common source of confident but incomplete conclusions.</p>
+<p>Partial success needs its own vocabulary. A batch operation may update several records and fail on another; reporting only "failure" hides completed work and invites a retry that duplicates it. A result should say which items succeeded, which did not, and whether a safe retry is possible. This is the same idempotency concern that appears at the act stage of the loop, viewed from the result side.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A result field that names a clear next action, such as "no matches in the current index; try the archive," is often more valuable than extra payload. It turns a dead end into a decision.</p>
+</blockquote>
+<h3 id="bounding-what-re-enters-the-context">Bounding what re-enters the context</h3>
+<p>The working context is a single finite area shared by instructions, history, documents, tool results, and the response under construction. Tool output is often the largest and fastest-growing part of that area. A single broad search can return more text than the entire rest of the session. When that output is placed verbatim into the next perception, it crowds out the goal, pushes early instructions out of view, and makes the model's task harder.</p>
+<p>Bounding can happen at two points. The tool itself can limit its output by returning only the highest-ranked matches, a fixed number of fields, and a count of what was omitted. This is the most efficient point because the excess never enters the session. The observe stage can then apply a second filter, removing duplicates, dropping low-value passages, and compressing what remains into a short structure with sources attached. Good designs do both, because a tool written by another team may not be as disciplined as your own loop.</p>
+<p>The risk is not only running out of room. Large volumes of text dilute attention. Relevant clauses sit among irrelevant ones, and the model may weight the most recent or most verbose passage rather than the most authoritative. Cost and latency rise with every extra token, and traces become harder for a reviewer to read. Traceability suffers because the loop's reasoning is spread across material that no human wants to inspect.</p>
+<p>The two bounding points serve different purposes. Tool-side limits reduce cost for every caller and keep backend responses predictable. Observe-side filters adapt to the current goal: a passage that is vital for one question is noise for another. A filter that is too aggressive can discard the one clause that decides the case, so it should preserve counts and offer a narrower follow-up rather than silently dropping evidence. Testing a filter means checking both what it keeps and what it removes.</p>
+<h3 id="raw-results-versus-distilled-views">Raw results versus distilled views</h3>
+<p>Distillation means reducing a result to the portion that supports the next decision while retaining enough detail to verify it. It is not the same as paraphrasing away evidence. A distilled view should keep identifiers, dates, and status flags even when it drops prose. The question is not whether the raw data is valuable in some abstract sense, but whether this loop at this moment needs it in the working area.</p>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Raw result</th>
+<th>Distilled view</th>
+<th>When to choose each</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fidelity</td>
+<td>Complete original content</td>
+<td>Selected fields with sources</td>
+<td>Raw for audit or deep reading; distilled for loop decisions</td>
+</tr>
+<tr>
+<td>Context cost</td>
+<td>High and unpredictable</td>
+<td>Bounded and predictable</td>
+<td>Distilled when the budget is tight</td>
+</tr>
+<tr>
+<td>Reasoning quality</td>
+<td>Relevant facts may be buried</td>
+<td>Relevant facts are foregrounded</td>
+<td>Distilled for most next-step choices</td>
+</tr>
+<tr>
+<td>Verification</td>
+<td>Possible but laborious</td>
+<td>Fast through retained identifiers</td>
+<td>Distilled for review; raw when source text is disputed</td>
+</tr>
+<tr>
+<td>Risk</td>
+<td>Duplicates and stale items slip in</td>
+<td>Filter must avoid dropping key evidence</td>
+<td>Raw when the filter is untrusted; distilled when it is tested</td>
+</tr>
+<tr>
+<td>Traceability</td>
+<td>Strong if identifiers exist</td>
+<td>Strong only if identifiers are preserved</td>
+<td>Both require provenance</td>
+</tr>
+</tbody>
+</table>
+<p>A useful rule is to return raw data to the caller outside the loop and distilled data inside it. If a downstream system needs the full record, hand it off separately with a reference. The model needs a compact decision surface, not the entire archive. When the distilled view omits something important, the truncation flag and the count tell the loop that a narrower follow-up is available.</p>
+<blockquote>
+<p><strong>Exam note:</strong> Be skeptical of an option that proposes fixing verbose output by enlarging the working context. More capacity postpones the problem; a bounded result contract removes it.</p>
+</blockquote>
+<h3 id="a-result-filter">A result filter</h3>
+<p>The <code>text</code> block below sketches a filter that runs in the observe stage. It keeps the contract fields intact, ranks content, removes duplicates, and caps the payload.</p>
+<pre><code class="language-text">filter_result(raw, query, budget, previous_fingerprint):
+    compact = {
+        status: raw.status,
+        source: raw.source,
+        fetched_at: raw.fetched_at,
+        total_matches: raw.total_matches
+    }
+
+    if raw.status != &quot;ok&quot;:
+        compact.next_action = suggested_recovery(raw.error)
+        return compact
+
+    candidates = rank(raw.items, by=[relevance(query), current_status, authority])
+    seen = empty_set()
+    kept = empty_list()
+
+    for item in candidates:
+        key = normalize(item.source_id, item.version)
+        if key in seen:
+            continue
+        if item.effective_date is expired:
+            continue
+        kept.append(shorten(item, fields=[&quot;title&quot;, &quot;clause&quot;, &quot;source_id&quot;, &quot;date&quot;]))
+        seen.add(key)
+        if cost(kept) &gt;= budget:
+            break
+
+    compact.items = kept
+    compact.returned = length(kept)
+    compact.truncated = length(kept) &lt; raw.total_matches
+    compact.changed = fingerprint(kept) != previous_fingerprint
+    return compact
+</code></pre>
+<p>Every field in the compact object has a job. Status and source support verification; counts and truncation flags support honest reasoning about coverage; the changed flag supports stuck detection in the loop. The filter does not decide what the answer is. It decides what evidence the model gets to consider.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Summarizing away identifiers and dates to save space. A short passage without provenance is harder to verify than a longer one with it, and it invites unsupported citations.</p>
+</blockquote>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A compliance assistant helps reviewers answer questions about travel refunds using an internal policy library. A reviewer asks whether documentation is required for a partly used ticket. The assistant calls a search tool with a broad query and receives a result containing hundreds of passages: several copies of the same clause from different folders, older versions with superseded wording, a few passages about hotel bookings, and the two current clauses that actually answer the question.</p>
+<p>If the raw result is inserted into the working view, three things happen. The current clauses are surrounded by noise, so the model may quote an outdated version. The transcript grows enough that the goal statement and the permission rules drift toward the edge of the working area. Because the result includes a generic success status with no indication that duplicates were removed, the loop believes it has seen the complete library and repeats the same broad search on the next cycle when it fails to find a clean answer.</p>
+<p>The designed path is different. The tool returns status, source collection, a total match count, and a capped set of ranked passages. The observe stage then applies the filter: it drops retired versions, collapses duplicates by source identifier and version, removes passages outside the travel policy area, and keeps the two current clauses with their identifiers and effective dates. The compact result states that three hundred matches were found, four were retained, and the view is truncated.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Raw result entering context</th>
+<th>Distilled view entering context</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Size</td>
+<td>Hundreds of passages</td>
+<td>Four short clauses plus metadata</td>
+</tr>
+<tr>
+<td>Condition</td>
+<td>Mixed current, retired, duplicated</td>
+<td>Current, deduplicated, in-scope</td>
+</tr>
+<tr>
+<td>Provenance</td>
+<td>Buried in varied formats</td>
+<td>Source identifier and date per clause</td>
+</tr>
+<tr>
+<td>Next decision</td>
+<td>Repeat broad search</td>
+<td>Draft answer with citations, or narrow query</td>
+</tr>
+<tr>
+<td>Reviewer effort</td>
+<td>Read the whole transcript</td>
+<td>Check four cited clauses</td>
+</tr>
+</tbody>
+</table>
+<p>With the distilled view, the loop reasons that the current clauses are sufficient, drafts an answer that names the documentation requirement, and cites both sources. It also notes that a broader set was available, so the reviewer knows the answer is based on a filtered subset. The reviewer can request the full result separately if the clause wording is disputed.</p>
+<p>The loop also gains a progress signal from the filter's changed flag. If a narrower query returns the same clauses on the following cycle, the loop records that no new information was obtained and hands off rather than searching again. Bounding the result makes repetition visible. Nothing about the underlying policy changed; only the boundary around tool output changed the quality of the decision.</p>
+<blockquote>
+<p><strong>Try it:</strong> Take a verbose tool result from a project you know and list the fields needed for the next decision. Keep status, provenance, coverage, and the top-ranked content. Everything else is a candidate for the filter.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Exposing tools with free-form inputs and relying on the model to behave consistently.</li>
+<li>Returning prose-only results that the loop must parse heuristically.</li>
+<li>Treating a truncated result as if it were the complete set.</li>
+<li>Summarizing evidence without preserving source identifiers or dates.</li>
+<li>Placing entire tool outputs into the working context because the data might be useful later.</li>
+<li>Assuming that a larger context improves accuracy rather than diluting attention.</li>
+<li>Forgetting to distinguish retryable failures from terminal ones in the result contract.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Machine-readable contracts make tool calls validatable and tool results predictable.</li>
+<li>Inputs should be typed, constrained, and described with routing intent.</li>
+<li>Results should separate status, payload, provenance, completeness, and recovery hints.</li>
+<li>Tool output can be bounded at the tool boundary and again in the observe stage.</li>
+<li>Distilled views suit in-loop decisions; raw data suits audits and separate handoffs.</li>
+<li>Context bloat reduces accuracy, raises cost, and weakens traceability.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>What is the main reason to give a tool a typed input schema?</li>
+</ol>
+<ul>
+<li>A. It makes the tool description longer.</li>
+<li>B. It constrains calls so the model supplies valid, safe arguments.</li>
+<li>C. It removes the need to test the tool.</li>
+<li>D. It guarantees the model will choose that tool.</li>
+</ul>
+<ol start="2">
+<li>Which set of fields best supports a tool result used by a loop?</li>
+</ol>
+<ul>
+<li>A. A paragraph, a title, and a timestamp</li>
+<li>B. Status, payload, provenance, and a truncation flag</li>
+<li>C. A colour, an owner, and a priority label</li>
+<li>D. Only the raw text returned by the backend</li>
+</ul>
+<ol start="3">
+<li>A search returns a capped number of matches out of a much larger set. What must the result state?</li>
+</ol>
+<ul>
+<li>A. That the tool succeeded, without qualification</li>
+<li>B. That the result is complete</li>
+<li>C. That more matches exist and the view is truncated</li>
+<li>D. That the model should stop searching</li>
+</ul>
+<ol start="4">
+<li>Where is the most efficient point to prevent excessive tool output from entering a session?</li>
+</ol>
+<ul>
+<li>A. In the tool's own output design, before it enters context</li>
+<li>B. In the final answer only</li>
+<li>C. In the model's mood at the time of the call</li>
+<li>D. In the user's permission set</li>
+</ul>
+<ol start="5">
+<li>Which distilled-view choice best preserves traceability?</li>
+</ol>
+<ul>
+<li>A. Removing all metadata to shorten the passage</li>
+<li>B. Keeping source identifiers and effective dates</li>
+<li>C. Replacing citations with a general summary</li>
+<li>D. Keeping only the first match found</li>
+</ul>
+<ol start="6">
+<li>What is a likely consequence of inserting a very large raw result into the working context?</li>
+</ol>
+<ul>
+<li>A. Instructions and goals receive less effective attention.</li>
+<li>B. The model automatically ignores all earlier history.</li>
+<li>C. Tool contracts become unnecessary.</li>
+<li>D. The loop gains a reliable progress signal.</li>
+</ul>
+<ol start="7">
+<li>When is returning the raw data most appropriate?</li>
+</ol>
+<ul>
+<li>A. When an audit or separate downstream consumer needs full fidelity</li>
+<li>B. When the context budget is nearly exhausted</li>
+<li>C. When the loop needs a quick next-step decision</li>
+<li>D. When the result contains duplicates and retired versions</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p>Correct: B. A schema constrains the shape and values of arguments so calls can be validated. A is incorrect because length is not a goal. C is incorrect because testing remains necessary. D is incorrect because a schema does not force tool selection.</p>
+</li>
+<li>
+<p>Correct: B. Status, payload, provenance, and completeness information give the loop evidence it can act on and verify. A is incorrect because a paragraph is hard to parse reliably. C is incorrect because those fields do not describe the result. D is incorrect because raw text alone lacks structure.</p>
+</li>
+<li>
+<p>Correct: C. Honest reporting of coverage prevents the loop from treating a subset as the whole. A is incorrect because an unqualified success claim hides the limit. B is incorrect because it is false. D is incorrect because the loop may need a narrower follow-up rather than stopping.</p>
+</li>
+<li>
+<p>Correct: A. Limiting output at the source avoids putting excess text into the session at all. B is incorrect because damage to reasoning happens before the final answer. C is incorrect because mood is not a control. D is incorrect because permissions govern authority, not volume.</p>
+</li>
+<li>
+<p>Correct: B. Identifiers and dates let a reviewer verify the distilled claim against its source. A is incorrect because removing metadata destroys traceability. C is incorrect because general summaries cannot be checked. D is incorrect because the first match may be irrelevant.</p>
+</li>
+<li>
+<p>Correct: A. Large results crowd the working area and dilute attention to instructions and goals. B is incorrect because earlier history is not automatically ignored. C is incorrect because contracts remain essential. D is incorrect because volume alone provides no progress signal.</p>
+</li>
+<li>
+<p>Correct: A. Full fidelity matters when an audit or downstream system needs the original content. B is incorrect because raw data worsens a tight budget. C is incorrect because loops benefit from distilled views. D is incorrect because duplicates and stale items argue for filtering.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 8.</em></p>
+  <nav><a href="07-orchestration-loop.html">&larr; Previous</a><span></span><a href="09-multi-agent-coordination.html">Next &rarr;</a></nav>
+</div>
+
+</body>
+</html>

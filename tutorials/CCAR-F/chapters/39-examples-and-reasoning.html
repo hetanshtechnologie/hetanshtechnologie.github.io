@@ -1,0 +1,100 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>39. Examples and Visible Reasoning</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>39. Examples and Visible Reasoning</h1>
+
+<h2>Why examples change behaviour</h2>
+<p>A rule describes a category; an example shows a member of it. When you write "classify severity as low, medium, or high," the model must infer the boundary between adjacent labels from the words alone. When you follow the rule with three classified cases, the boundaries become observable. Examples also anchor format: a single well-formed output row does more to shape punctuation, field order, and level of detail than a paragraph describing them.</p>
+<p>This is why few-shot prompting remains useful even in systems that follow instructions well. It is not a trick to make the model smarter. It is a way of transferring tacit knowledge that is hard to state: what counts as a "material" risk, how terse a summary should be, whether an escalation includes a suggested fix. Those judgements are easier to demonstrate than to define.</p>
+<p>Examples are not free. Each one consumes context and attention, and a poorly chosen example can be more damaging than none. A single atypical case can teach the model that the exception is the norm. Treat examples as part of the specification and subject them to the same review as rules.</p>
+
+<h2>Designing a few-shot set</h2>
+<p>Start with three to five examples for a classification or extraction task. Fewer than three leaves boundary behaviour underspecified; more than five often adds little and crowds out the actual input. Use real cases from the task, not idealised ones. If production inputs contain truncated logs and mixed languages, at least one example should contain them.</p>
+<p>Cover four kinds of case: a clear positive, a clear negative, a boundary case near the decision threshold, and a case where the correct answer is "unknown" or "escalate." Balance labels so the model does not infer a prior from the example set. If four of five examples are labelled high severity, a borderline case will drift toward high even when the rule says otherwise.</p>
+<p>Order matters at the margins. In many tasks the most recent examples carry more influence, so place the most instructive boundary case last. Keep the structure identical across examples — same field names, same ordering, same phrasing — so the only thing that varies is the answer. Varying the format while teaching a classification task forces the model to learn two things at once.</p>
+
+<pre><code>Example 1
+input:  checkout returns 502 for 3 of 1200 requests
+output: {"severity": "medium", "evidence": "error rate &lt; 1%"}
+
+Example 2
+input:  all checkout requests fail after deploy 4b2
+output: {"severity": "high", "evidence": "complete failure"}
+
+Example 3
+input:  one customer reports slow checkout; no metrics attached
+output: {"severity": "unknown", "evidence": "no aggregate data"}
+
+Rule: mark severity high only when failure is complete or
+      p95 latency &gt; 2000ms &amp;&amp; affected_users &gt; 100.
+</code></pre>
+
+<p>Notice that the rule comes after the examples and resolves the boundary cases. That ordering is a deliberate choice: examples show the shape of the answer, while the rule provides the general principle that covers unseen inputs. If examples and rules disagree, the model receives conflicting evidence. Check them together after any edit.</p>
+<div class="tip"><strong>Quick evaluation:</strong> hold out five real cases that are not in the example set. Run the prompt ten times on each. If accuracy varies by more than about twenty percent across runs, the boundary is probably defined by an example rather than by the rule — clarify the rule before adding more examples.</div>
+
+<h2>Chain-of-thought prompting</h2>
+<p>Asking a model to work through a problem in steps before answering can improve tasks that require several dependent decisions: diagnosing a failure from multiple signals, calculating a result from several fields, or checking a design against a list of constraints. The benefit is that intermediate conclusions become part of the context for the next step, reducing the chance that the model jumps to an answer before considering a necessary condition.</p>
+<p>The technique is most valuable when the task has a verifiable answer and a short final output. It is less useful for simple classification, where the extra text adds cost without changing the decision. It is also a poor substitute for tools. For arithmetic over large numbers, a calculator call is more reliable than a long verbal derivation.</p>
+<p>Be careful when requesting visible reasoning. A request to "show your full chain of thought" may produce a plausible narrative that does not reflect the model's actual computation, and it can leak lengthy internal detail into logs or user-facing output. Ask instead for a brief, structured rationale: the checks performed, the evidence used, and the decisive factor. That gives a reviewer something to audit without turning every response into an essay.</p>
+<pre><code>Respond in two parts.
+1. CHECKS: a list of at most four checks you performed, each with
+   the evidence value used (for example, p95=2400ms).
+2. VERDICT: one of PASS, FAIL, or ESCALATE, followed by one sentence.
+
+Do not include private deliberation or speculative narrative.
+If a required value is missing, write ESCALATE and name the value.
+</code></pre>
+
+<h2>Extended thinking and when it pays</h2>
+<p>Some interfaces offer an extended thinking mode: the model is given a larger budget of internal computation before it responds. This differs from asking for visible steps. The additional work happens in the model's reasoning process, and the answer can remain short. It is useful for problems where the model must hold several constraints in mind simultaneously — for example, choosing a deployment plan that satisfies cost, residency, and latency rules at once.</p>
+<p>The budget is a resource with diminishing returns. Raise it when errors show that the model stopped before checking a later constraint, or when a task genuinely requires multi-step search. Leave it low for extraction, rewriting, and classification, where extra deliberation mainly increases latency and cost. A practical method is to run twenty representative tasks at two budget levels and compare accuracy against the extra time and token cost. Keep the lower setting unless the improvement is large enough to matter for the use case.</p>
+<p>Extended thinking does not repair missing context. If the relevant file was never provided, more deliberation produces a more elaborate guess. It also does not guarantee correctness: a model can reason at length from a wrong premise. Pair it with evidence requirements and deterministic verification, especially when the output drives an automated action.</p>
+
+<h2>Choosing a technique</h2>
+<table>
+<tr><th>Technique</th><th>Adds</th><th>Use when</th><th>Avoid when</th></tr>
+<tr><td>One example</td><td>Format anchor</td><td>Output shape is unusual</td><td>Labels or boundaries are ambiguous</td></tr>
+<tr><td>Three to five examples</td><td>Boundary knowledge</td><td>Classification or extraction</td><td>Examples are atypical or stale</td></tr>
+<tr><td>Brief structured rationale</td><td>Auditable checks</td><td>A reviewer must trust the decision</td><td>Output is user-facing and should be short</td></tr>
+<tr><td>Extended thinking</td><td>More internal computation</td><td>Many interacting constraints</td><td>Simple, high-volume tasks</td></tr>
+<tr><td>Tool calculation</td><td>Exact results</td><td>Arithmetic, search, schema comparison</td><td>Never — prefer tools where possible</td></tr>
+</table>
+<p>Failure modes are predictable. Overfitting to examples produces a model that handles the demonstrated cases beautifully and fails on everything slightly different. Verbose reasoning produces walls of text that reviewers stop reading. An oversized thinking budget makes an interactive assistant feel sluggish. All three are configuration mistakes, and all three are fixed by measuring rather than by intuition.</p>
+
+<h2>Testing examples and reasoning prompts</h2>
+<p>Build a small evaluation set before tuning. Twenty inputs is enough to reveal gross problems: five clear cases, five boundary cases, five messy real-world cases, and five adversarial or missing-data cases. Record expected properties, not just exact strings — the correct severity and the presence of an evidence reference, for example. Run the prompt five times on each input and record the pass rate and the variance.</p>
+<p>Change one variable at a time. Adding an example, reordering examples, and increasing the thinking budget are three separate experiments. If you change all three between measurements, you will not know which one helped. Keep the winning configuration under version control with the evaluation results attached, so a later model upgrade can be judged against a real baseline.</p>
+
+<div class="exercise"><strong>Exercise 39.1 — Build a balanced few-shot set.</strong> Design five examples for classifying support tickets into urgent, normal, and unknown. Include one boundary case and one missing-information case. Write the governing rule and explain how the set avoids teaching a false label prior.</div>
+
+<div class="exercise"><strong>Exercise 39.2 — Compare reasoning configurations.</strong> Choose a task with four interacting constraints. Describe how you would compare a short-rationale prompt with extended thinking across twenty cases. Name two metrics besides accuracy and one reason the more expensive option might still lose.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>What does an example communicate that a rule alone often does not?</li>
+<li>Why should a few-shot set include a case whose correct answer is "unknown"?</li>
+<li>When is chain-of-thought prompting least useful, and why?</li>
+<li>What can extended thinking not fix?</li>
+<li>Why should examples and rules be checked together after an edit?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Examples transfer tacit knowledge about boundaries, tone, and format more reliably than abstract rules alone.</li>
+<li>Use three to five varied, real cases with balanced labels and a boundary case; keep their structure identical.</li>
+<li>Prefer brief structured rationales over long visible reasoning, and prefer tools for exact computation.</li>
+<li>Extended thinking helps with interacting constraints but costs latency and cannot repair missing context.</li>
+<li>Evaluate on a held-out set, change one variable at a time, and version the winning configuration.</li>
+</ul>
+
+<nav><a href="38-system-prompts-and-structure.html">&larr; Previous</a><span></span><a href="40-steering-and-sampling.html">Next: Steering Output and Sampling Controls &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

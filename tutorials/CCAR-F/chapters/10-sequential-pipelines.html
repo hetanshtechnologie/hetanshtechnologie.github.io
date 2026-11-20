@@ -1,0 +1,108 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>10. Sequential Pipelines</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>10. Sequential Pipelines</h1>
+
+<p>A sequential pipeline is the agentic equivalent of an assembly line: each stage accepts a specific input, performs one job, and emits an output the next stage can trust. The hard part is not the stage prompts but the boundaries between them — what happens when a stage produces a plausible but wrong result, and how the run recovers when the failure appears three stages later. This chapter treats a pipeline as contracts, gates, checkpoints, and compensation rules, not a list of prompts.</p>
+
+<h2>Order is a design constraint, not a convenience</h2>
+
+<p>Stages must be ordered when a real dependency exists: a customer record has to be resolved before an entitlement can be checked, a number has to be extracted before it can be verified, a draft has to be approved before it can be sent. If no such dependency exists, sequencing the work is a choice with a cost. A chain of six stages each taking 8 seconds runs in at least 48 seconds of model time; the same six operations with no dependencies could run in roughly 8 seconds across six workers. Sequence also forces all intermediate context through a single line, which means an early misunderstanding is carried forward and amplified.</p>
+
+<p>Sequence becomes the right answer when the work is <em>cumulative</em> — each stage adds a property that later stages need — or when the environment requires a particular order, such as a human approval before publication. A useful discipline is to write the dependency explicitly beside each stage: "stage 4 needs <code>verified_amounts</code> from stage 3; it does not need the raw document." If you cannot state the dependency in one line, the stage boundary is probably in the wrong place.</p>
+
+<h2>Stage contracts: input, output, and gate</h2>
+
+<p>Every stage should have three declared parts. The <strong>input contract</strong> names the fields the stage requires and their types. The <strong>output contract</strong> names what it promises to produce. The <strong>gate</strong> is a deterministic check that runs on the output before the next stage begins. A gate is not a prompt asking the model to "be careful"; it is code that rejects a value with a clear error when a required field is missing, a count is wrong, or a reference cannot be resolved.</p>
+
+<pre><code>stage:
+  name: verify_amounts
+  input:  { extracted: array&lt;Field&gt;, currency: string }
+  output: { verified: array&lt;VerifiedField&gt;, conflicts: array }
+  gate:
+    - each verified.amount is numeric
+    - each verified has source_line &gt; 0
+    - conflicts == [] OR escalate( "unresolved_amount" )
+  on_reject: retry_stage( max: 2 ) else route( "human_review" )
+  checkpoint_key: run:{run_id}:stage:verify:{input_digest}</code></pre>
+
+<p>Notice that the gate has an explicit escape route. A pipeline that only knows how to retry will loop forever on a structurally valid but semantically impossible input — for example, a currency code the system does not support. Routing to human review after two bounded retries is cheaper and safer than a fifteenth attempt with a slightly different temperature. The rejection payload should contain the stage name, the failed rule, the offending value, and the attempt number, so the repair step has something concrete to work with.</p>
+
+<div class="tip"><strong>Keep stage outputs small and complete.</strong> A stage that emits a 12,000-token narrative forces the next stage to rediscover the three fields it actually needs. Prefer a compact structured result plus references to full artifacts. A useful limit is roughly 500 to 2,000 tokens of structured output per stage, with larger material stored behind an identifier.</div>
+
+<h2>Error propagation and blast radius</h2>
+
+<p>Errors in a chain are not independent. A wrong extraction in stage 1 becomes a wrong verification in stage 2, a confident but flawed draft in stage 3, and a published error in stage 4. This is the pipeline's blast radius: once a value is downstream, later stages usually lack the original evidence needed to challenge it. The probability of a clean run also falls quickly. With five stages at 0.98 reliability each, the chance of no failure is about 0.904; with eight stages at 0.97 it is roughly 0.784. Longer chains need more gates, not more hope.</p>
+
+<p>Three techniques reduce propagation. <strong>Reference forwarding</strong> attaches the source location to every derived value, so a later stage can inspect the origin without rereading everything. <strong>Cross-checks</strong> recompute one invariant independently — totals must sum, counts must match, citations must point to real lines — and treat a mismatch as a stage failure rather than a warning. <strong>Confidence tagging</strong> marks each field as <code>confirmed</code>, <code>inferred</code>, or <code>unknown</code>, allowing a final gate to block publication when critical fields are merely inferred. Never let a summary erase these tags; a confident-sounding summary is how uncertainty disappears.</p>
+
+<div class="warn"><strong>Failure mode — silent defaulting.</strong> A stage that replaces a missing value with <code>0</code> or <code>"N/A"</code> can pass every structural gate. The next stage then reasons from a fabricated fact. Require an explicit sentinel such as <code>unavailable</code> and a rule stating which downstream decisions are allowed when that sentinel appears.</div>
+
+<h2>Compensation: undoing work after a later failure</h2>
+
+<p>Some stage effects cannot simply be rolled back. If stage 5 reserves inventory and stage 7 fails validation, the reservation still exists. Compensation is the practice of executing a deliberate inverse action for each completed stage that had an external effect. Think of it as a list of undo operations accumulated as the pipeline advances: publish &rarr; retract draft, reserve &rarr; release reservation, notify &rarr; send correction. On failure, the compensations run in reverse order, and each one gets its own retry budget.</p>
+
+<ol>
+<li>Record the compensation action <em>when the forward action succeeds</em>, not when the failure occurs.</li>
+<li>Store the external identifier returned by the forward action; a compensation without it cannot target the right object.</li>
+<li>Run compensations in last-in-first-out order, so dependencies are unwound safely.</li>
+<li>Make each compensation idempotent and record its own completion; a retry after a partial compensation must be harmless.</li>
+<li>If a compensation fails permanently, escalate with the list of uncompensated effects — never declare the run clean.</li>
+</ol>
+
+<p>Not every stage needs compensation. Pure transformations that only write to the pipeline's own storage can be discarded by invalidating their checkpoint. The test is simple: did the outside world observe it? If yes, you need an inverse action and a record of it.</p>
+
+<h2>Checkpoints and resumability</h2>
+
+<p>A checkpoint is the validated state of the pipeline at a stage boundary. Store at least the run ID, stage name, input digest, output artifact reference, gate result, and a list of side effects with their IDs. Keying the checkpoint by input digest prevents a stale result from being reused after upstream data changes. On restart, the runner compares the current input digest with the checkpoint's digest; a match allows resume, a mismatch invalidates that checkpoint and everything after it.</p>
+
+<p>Decide what "resume" means for each stage. For a pure stage, resume means skip it and load its output. For a stage with side effects, resume means verify the external effect first — using an idempotency key — then skip or repair. Keep a small ledger of transitions: <code>stage:started</code>, <code>stage:gated</code>, <code>stage:side_effect</code>, <code>stage:compensated</code>. This ledger turns a post-mortem question from "what happened?" into a query. It also makes retries observable: a stage that has failed four times should be visible before it consumes a fifth attempt.</p>
+
+<div class="note"><strong>Two clocks matter.</strong> Stage latency determines runtime; checkpoint frequency determines how much work a crash costs. If a stage takes 30 seconds, checkpointing after every stage is cheap. If a single stage streams for 20 minutes, checkpoint its partial output every minute or two so a crash does not erase the entire effort.</div>
+
+<h2>When to break the chain</h2>
+
+<p>Pipelines are not sacred. Split a stage when it mixes two different failure policies — a permissive generation step and a strict validation step should not share a retry budget. Merge stages when the handoff loses more information than the separation preserves; passing a simplified summary into the next stage often destroys details the next stage needs. Parallelise <em>inside</em> a stage when it processes a collection, keeping the overall chain intact while reducing the slowest stage's duration from, say, 60 seconds to 8 seconds across eight shards.</p>
+
+<p>A practical review check is to list the pipeline's stages with three numbers each: expected tokens, expected latency, and probability of needing repair. Stages with high token cost and high repair probability are candidates for earlier gates. Stages with low value and high latency are candidates for removal. A seven-stage pipeline where stage 3 adds 1,200 tokens of prose that nobody reads is not rigour; it is latency with a prompt attached.</p>
+
+<div class="exercise"><strong>Exercise 10.1 — Define a stage contract</strong>
+<p>You are building a three-stage pipeline: <code>extract</code> reads an invoice, <code>validate</code> checks totals, <code>archive</code> writes a record to an external system. For each stage, write the input fields, output fields, one deterministic gate, and a rejection action. Then state which stages need compensation and what the inverse action would be.</p>
+<p>Hint: each gate should reject a specific malformed value; only the externally visible stage needs an inverse action.</p>
+</div>
+
+<div class="exercise"><strong>Exercise 10.2 — Design recovery for a late failure</strong>
+<p>A six-stage pipeline fails in stage 6 after stage 4 wrote an external record and stage 5 produced a valid draft. Describe the sequence of actions on failure, including what you check before compensating, what you persist, and when you would retry the whole run instead of resuming. Include one example of a stale-checkpoint hazard.</p>
+<p>Hint: check the external effect with its idempotency key before compensating, and compare digests before resuming.</p>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why should a gate be implemented as code rather than as an instruction inside the stage prompt?</li>
+<li>What three pieces of information should a rejection payload contain?</li>
+<li>Explain how reference forwarding reduces error propagation in a chain.</li>
+<li>In what order are compensations executed, and why?</li>
+<li>What does an input digest in a checkpoint protect against?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Use a pipeline when dependencies are real and cumulative; otherwise consider parallel work.</li>
+<li>Define an input contract, an output contract, and a deterministic gate for every stage.</li>
+<li>Bound retries and route persistent failures to review rather than looping indefinitely.</li>
+<li>Reduce blast radius with source references, invariants, and explicit uncertainty tags.</li>
+<li>Record compensations at the moment of side effect, then unwind them in reverse order on failure.</li>
+<li>Checkpoint by input digest so recovery can resume safely and detect stale results.</li>
+</ul>
+
+<nav><a href="9-decomposition-patterns.html">&larr; Previous</a><span></span><a href="11-parallel-execution.html">Next: Fan-Out, Fan-In, and Synchronization &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

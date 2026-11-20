@@ -1,0 +1,137 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>15. Agent Messages and Handoff Protocols</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>15. Agent Messages and Handoff Protocols</h1>
+
+<p>Multi-agent systems fail at their seams. A worker finishes a perfect analysis, writes the result as a friendly paragraph, and the next agent interprets a key phrase differently. An orchestrator assumes a result is final while the worker considered it provisional. A retried message arrives twice and triggers two publications. These are protocol problems, not reasoning problems. This chapter defines message envelopes, handoff payloads, validation rules, and delivery safeguards that make the seams boring — which is exactly what you want from them.</p>
+
+<h2>Why typed messages beat natural-language notes</h2>
+
+<p>Natural language is excellent for explaining and terrible for coordinating. It omits metadata, tolerates ambiguity, and changes shape under pressure. A typed message separates <em>control information</em> — who sent it, for which run, in response to what, with which schema version — from the <em>body</em> that carries the actual content. The receiving component can route, deduplicate, and validate the control fields without asking a model to interpret them.</p>
+
+<p>Consistency also enables automation. If every result has <code>status</code> and <code>confidence</code> fields, a collector can implement a quorum rule in code. If those concepts exist only as words inside prose, the collector needs another model call to extract them, which adds cost and another chance of error. A good rule is: anything that changes a control decision must be a field, not a phrase.</p>
+
+<h2>The message envelope</h2>
+
+<p>A practical envelope carries eleven fields. Some are technical identifiers; others are semantic labels that help the receiver decide what to do.</p>
+
+<ul>
+<li><code>message_id</code> — globally unique, used for deduplication.</li>
+<li><code>run_id</code> and <code>task_id</code> — the execution and the specific assignment.</li>
+<li><code>from</code> and <code>to</code> — logical roles or agent instances.</li>
+<li><code>type</code> — such as <code>task</code>, <code>result</code>, <code>error</code>, <code>ack</code>, <code>nack</code>, or <code>escalation</code>.</li>
+<li><code>reply_to</code> — the message being answered, forming a trace.</li>
+<li><code>sequence</code> — a monotonically increasing number per sender, for ordering.</li>
+<li><code>created_at</code> and <code>expires_at</code> — freshness and time-to-live.</li>
+<li><code>schema_version</code> — how to parse the body.</li>
+<li><code>body</code> — the typed payload.</li>
+<li><code>refs</code> — artifact identifiers with digests, not inlined blobs.</li>
+<li><code>status</code> — <code>provisional</code>, <code>final</code>, or <code>partial</code>.</li>
+</ul>
+
+<pre><code>message:
+  message_id: msg-7f21a
+  run_id: run-8f3c
+  task_id: audit-auth-03
+  from: worker:audit-03
+  to: orchestrator
+  type: result
+  reply_to: msg-7f019
+  sequence: 4
+  created_at: 2026-04-12T09:31:22Z
+  expires_at: 2026-04-12T10:31:22Z
+  schema_version: 2
+  status: final
+  body: { findings: 3, highest_severity: "high", confidence: 0.82 }
+  refs: [ "sha256:4a10bd9e:findings.json" ]
+  guard: if ( sequence &lt;= last_seen &amp;&amp; expires_at &gt; now ) -&gt; drop_duplicate()</code></pre>
+
+<p>A body should be small. Ten workers returning 1,500-token bodies produce 15,000 tokens in the collector's context; putting full reports in messages rather than artifact references makes that number grow without bound. The envelope plus a reference lets the collector decide which reports deserve a full read. Keep messages under roughly 1,000 tokens unless the task genuinely requires an inlined payload, and store larger material behind a digest-addressed reference.</p>
+
+<h2>Handoff payloads: what the next agent actually needs</h2>
+
+<p>A handoff is a message whose purpose is continuity: agent B must continue work that agent A began. A useful handoff has six parts. <strong>Goal</strong> restates the objective in B's own scope. <strong>Completed work</strong> lists what is done with artifact references. <strong>Decisions</strong> records choices made and their reasons. <strong>Open risks</strong> names what is unresolved, including assumptions from the register. <strong>Next action</strong> states a single recommended step and its acceptance criterion. <strong>Context digest</strong> summarises the background B would otherwise reconstruct — relevant constraints, known failures, and the current plan version.</p>
+
+<pre><code>handoff:
+  from: researcher
+  to: writer
+  goal: "Draft the migration section using verified figures only."
+  completed: [ { artifact: "sha256:9c41:figures.json", status: final } ]
+  decisions: [ "Exclude Q1 data: source version mismatch (A-07)." ]
+  open_risks: [ "Approval token for pricing table not yet issued." ]
+  next_action: { step: "draft_section", acceptance: "5 claims, each with an artifact ref" }
+  context_digest: "plan v4; currency set = EUR, USD, GBP; reviewer dislikes absolute claims"</code></pre>
+
+<div class="tip"><strong>Write handoffs for a reader with amnesia.</strong> Assume the next agent has never seen the conversation. If a fact is needed to make the next decision, include it or reference it. Phrases like "as discussed" and "the usual approach" are defects in a handoff, not shorthand.</div>
+
+<p>Handoffs should also state what B must <em>not</em> redo. A writer that re-verifies every figure because the handoff did not mark them final wastes budget and may introduce new errors. Marking completed work with a status and a digest makes "do not redo" explicit and checkable. Equally, mark anything <code>partial</code> so B knows where verification stopped.</p>
+
+<h2>Continuity without shipping the whole history</h2>
+
+<p>Continuity does not require copying the entire transcript. In fact, copying it usually degrades performance: the relevant material is buried among obsolete attempts and abandoned plans. Use progressive disclosure instead. The handoff includes a compact digest plus references; the receiving agent can fetch a specific artifact if the digest is insufficient. Each reference should include a digest so the receiver can confirm it is reading the version the sender saw.</p>
+
+<p>Keep a decision log as a first-class artifact. It records choices with IDs, reasons, and the alternatives rejected. When a later agent asks "why did we exclude that source?", the answer comes from the log rather than from speculation. A decision log also prevents contradiction: two workers can check whether a decision already exists before proposing its opposite. In long runs, the log doubles as the basis for a final summary, because it contains the reasoning that a result list omits.</p>
+
+<div class="warn"><strong>Stale context is worse than missing context.</strong> A missing fact produces an explicit question; a stale fact produces a confident wrong action. Attach an <code>as_of</code> timestamp to each external fact and revalidate facts whose source has a newer digest before using them for irreversible steps.</div>
+
+<h2>Validation at the boundary</h2>
+
+<p>Every message crossing an agent boundary should pass through a validator before it is acted upon. Validation has four layers. <strong>Envelope validation</strong> checks required fields, identifier formats, and expiry. <strong>Schema validation</strong> checks the body against the declared schema version — required keys, types, ranges, and enumeration values. <strong>Reference validation</strong> checks that cited artifacts exist and their digests match. <strong>Policy validation</strong> checks that the requested action is within the receiver's authority, such as a publish request carrying an approval token.</p>
+
+<p>The validator's response is explicit: accept with <code>ack</code>, reject with <code>nack</code> naming the failed rule, or quarantine with <code>needs_review</code> when the message is suspicious but might be legitimate. A <code>nack</code> should include the message ID, the failing field, the expected form, and whether a retry is meaningful. Sending a malformed result back for repair is useful; sending an authorization failure back for repair is not. Define size limits as well — a message over 1,000 tokens or an artifact list over 20 references should be rejected rather than silently truncated, because truncation can remove the very field that made the message valid.</p>
+
+<h2>Delivery failure modes and safeguards</h2>
+
+<p>Four delivery problems recur in distributed agent systems. <strong>Lost messages</strong> are handled with acknowledgements and a retry timer: if no <code>ack</code> arrives within a deadline, resend with the same <code>message_id</code>. <strong>Duplicate delivery</strong> is handled by recording seen IDs and by making side effects idempotent; the receiver must not publish twice just because a retry occurred. <strong>Out-of-order arrival</strong> is handled with sender sequence numbers — a receiver buffers or rejects a message whose sequence is lower than the last one processed, unless the message type explicitly allows reordering. <strong>Stale messages</strong> are handled with <code>expires_at</code> and with a run-generation check: a result from run generation 2 must not be accepted by generation 3.</p>
+
+<pre><code>receive:
+  steps:
+    - check seen(message_id): if true -&gt; ack_without_processing
+    - check expires_at &gt; now: if false -&gt; reject_stale
+    - check sequence &gt; last_sequence: if false -&gt; buffer_or_reject
+    - validate_envelope -&gt; validate_schema -&gt; validate_refs -&gt; validate_policy
+    - process_once -&gt; record_last_sequence -&gt; emit_ack
+  on_validation_failure: nack( include_rule: true, retryable: by_class )</code></pre>
+
+<p>Note the ordering: deduplication happens before processing, so a duplicate is acknowledged without re-executing its effects. Sequence checks happen before validation, so an old message cannot roll back the receiver's state. These small ordering decisions are where protocol design earns its keep. Log every transition with message ID and rule name; when a run goes wrong, a message trace is usually faster to read than any model's account of what it believed it did.</p>
+
+<div class="exercise"><strong>Exercise 15.1 — Design a message for escalation</strong>
+<p>A subagent cannot complete a task because a required source is behind a login. Write an envelope for the escalation message to the orchestrator, including identifiers, type, status, references, and expiry. State which two fields prevent the orchestrator from acting on a stale retry of the same escalation.</p>
+<p>Hint: <code>message_id</code> handles duplicates; <code>run_id</code> and <code>expires_at</code> handle old retries.</p>
+</div>
+
+<div class="exercise"><strong>Exercise 15.2 — Repair a handoff</strong>
+<p>A researcher sends this handoff to a writer: "Here are the numbers. Use the good ones and finish the section like we discussed." Identify at least four missing elements from the six-part handoff, then rewrite it in two or three sentences with explicit statuses and a reference.</p>
+<p>Hint: replace every "like we discussed" with a reference, a status, or a decision ID.</p>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why must anything that changes a control decision be a field rather than a phrase?</li>
+<li>Name three fields of a message envelope that support deduplication or ordering.</li>
+<li>What are the six parts of a useful handoff payload?</li>
+<li>What four layers of validation should a receiver apply to an incoming message?</li>
+<li>Why is deduplication performed before processing rather than after?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Typed envelopes separate routing metadata from content and enable code-level control.</li>
+<li>Keep message bodies compact and place large material behind digest-addressed references.</li>
+<li>Handoffs must state goal, completed work, decisions, risks, next action, and context digest.</li>
+<li>Validate envelope, schema, references, and policy at every agent boundary.</li>
+<li>Use IDs, sequence numbers, expiry, and run generations against loss, duplication, reordering, and staleness.</li>
+<li>Log message transitions so a failed run can be reconstructed from a trace.</li>
+</ul>
+
+<nav><a href="14-agent-topologies.html">&larr; Previous</a><span></span><a href="16-state-and-continuity.html">Next: State, Memory, and Session Continuity &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

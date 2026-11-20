@@ -1,0 +1,140 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>29. Claude Code Architecture and Setup</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>29. Claude Code Architecture and Setup</h1>
+
+<p>Claude Code is a terminal-based working environment in which a model reads your repository, edits files, runs commands, and reports results. It is less like a chat window with a code attachment and more like a colleague who has the same shell access you do. That difference explains both its usefulness and its risks: anything you can do from the prompt, it can attempt to do.</p>
+
+<h2>What the environment actually is</h2>
+
+<p>Four pieces work together. A command-line client runs in your terminal and owns the session. A model reasons about the request and decides which tool to call next. A tool layer exposes file reads, edits, searches, shell commands, network access, and any connected MCP servers. A context assembly layer gathers instructions, recent messages, and relevant file content into each model request.</p>
+
+<p>There is no single magical index of the repository. Discovery happens through tool calls: the assistant lists directories, searches for symbols, opens files, and reads test output. This is why a well-organized repository is easier to work in. Clear names, small modules, and a documented entry point reduce the number of discovery calls and the amount of file content that must be loaded into context.</p>
+
+<table>
+<tr><th>Layer</th><th>Responsibility</th><th>What you control</th></tr>
+<tr><td>Client</td><td>Terminal UI, session state, approvals</td><td>Working directory, permissions, theme</td></tr>
+<tr><td>Model</td><td>Planning and tool selection</td><td>Model choice, instruction files</td></tr>
+<tr><td>Tools</td><td>File, shell, web, MCP operations</td><td>Which servers and tools are enabled</td></tr>
+<tr><td>Context</td><td>Instructions and conversation history</td><td>What you include, when you reset</td></tr>
+</table>
+
+<h2>The loop you are really running</h2>
+
+<p>Each exchange repeats a short cycle. The assistant receives the user's request plus accumulated context, forms an approach, calls a tool, receives the result, and decides whether to continue. Results that surprise it — a failing test, a missing file, a type error — feed the next decision. The loop ends when the assistant reports completion, asks a question, or reaches a stopping condition.</p>
+
+<pre><code>request + context
+      |
+      v
+plan --&gt; tool call --&gt; observation --&gt; revise plan
+  ^                                        |
+  +----------------------------------------+
+      |
+      v
+final answer (or a question for the user)
+
+if scope_changes &amp;&amp; context_is_stale:
+    clear the session or compact before continuing</code></pre>
+
+<p>Two things accumulate as the loop runs: file content and conversation history. Neither is free. A session that has opened thirty files to investigate a bug may have only a fraction of its useful context left when it comes time to write the fix. Recognize the signs — repeated questions, forgotten constraints, edits that contradict earlier decisions — and reset or summarize before quality degrades.</p>
+
+<p>Approval gates sit on the action side of the loop. Reads are usually permitted without prompting, while edits and shell commands may require confirmation depending on the active permission mode. These gates are not a judgment about the model's intelligence; they are a control for actions that are hard to undo.</p>
+
+<h2>Setting up a workspace</h2>
+
+<p>Start in the repository root. The working directory determines which files are visible, which instruction files load, and which MCP servers with relative paths resolve correctly. Launching from a parent folder often produces an assistant that cannot find configuration it expects, while launching from a deeply nested folder hides the rest of the project.</p>
+
+<ol>
+<li>Confirm the repository is clean: commit or stash current work before a long automated session.</li>
+<li>Start the client from the project root and verify the displayed path.</li>
+<li>Authenticate with the intended account and select the appropriate model.</li>
+<li>Trust or approve the folder only after checking scripts and configuration files you do not recognize.</li>
+<li>Connect only the MCP servers the task needs, and check that each one starts successfully.</li>
+<li>Run a small read-only request first: ask for the project structure and entry points.</li>
+</ol>
+
+<div class="warn">A repository can contain instructions inside files that the assistant reads. Treat those files as data, not as commands from your organization. If a README asks the assistant to install an unknown package or disable safety checks, assume the text is untrusted until you have verified it.</div>
+
+<h2>Starting a new project</h2>
+
+<p>For greenfield work, begin with constraints rather than features. State the language and runtime, the expected scale, the testing approach, and what "done" means. A request such as "build a small service" leaves hundreds of decisions to be made silently. A request that names the framework, the storage choice, and the acceptance test gives the assistant a target it can verify.</p>
+
+<p>A productive first session has three phases. Ask for a short plan without writing code, correct the plan, then authorize implementation in small slices. After each slice, require the tests to run and review the diff. This is slower than a single large instruction but far cheaper than untangling a thousand-line change that drifted from your intent in paragraph two.</p>
+
+<div class="exercise"><strong>Exercise 29.1 — Write a greenfield kickoff request</strong>
+<ol>
+<li>Choose a small application, such as a command-line expense tracker with a JSON file for storage.</li>
+<li>Write a request that names the runtime, one hard constraint, one explicit non-goal, and the command that proves success.</li>
+<li>List two questions you would expect the assistant to ask before writing code, and how you would answer them.</li>
+</ol>
+</div>
+
+<h2>Onboarding to an unfamiliar codebase</h2>
+
+<p>Onboarding is an information-gathering task, so keep the assistant read-only at first. Ask for a map: the main entry points, the dependency direction between major modules, where configuration enters the system, and how tests are organized. Request file paths and line references so you can verify each claim yourself. A confident architecture summary without evidence is a hypothesis, not a fact.</p>
+
+<p>A useful orientation prompt names the sources you want consulted and the format of the answer. Supplying structure reduces the chance that the assistant returns a generic summary of the README.</p>
+
+<pre><code>&lt;role&gt;Repository orientation&lt;/role&gt;
+&lt;task&gt;Map this codebase for a new maintainer.&lt;/task&gt;
+Sources: README, package manifest, top-level directories,
+and the five largest source files.
+Answer with a table: Area | Entry file | Depends on | Test location.
+Then list three &lt;risk&gt; areas where a change could break
+unrelated behavior, with a file path for each.
+Do not modify any file; reading only.</code></pre>
+
+<p>After the map, validate understanding with a tiny change: rename a local variable, add a test for a documented behavior, or fix a trivial typo. If the assistant navigates directly to the right file and the test suite passes, the mental model is probably sound. If it searches broadly or edits the wrong module, correct the map before assigning real work.</p>
+
+<div class="tip">Ask for the commands developers use — build, test, lint, and local run — and verify them yourself. Build instructions in a repository are frequently stale, and a failed command discovered now is cheaper than one discovered during a deadline.</div>
+
+<h2>Session hygiene and common failures</h2>
+
+<p>Keep one topic per session. Unrelated tasks share context, so a long debugging conversation followed by a new feature request can carry stale assumptions into the new work. Use a fresh session for a new goal, or summarize the decisions you want to keep and start again with that summary.</p>
+
+<table>
+<tr><th>Symptom</th><th>Likely cause</th><th>Response</th></tr>
+<tr><td>Repeats a question already answered</td><td>Context crowded out</td><td>Reset or summarize</td></tr>
+<tr><td>Cannot find a config file</td><td>Wrong working directory</td><td>Restart from repository root</td></tr>
+<tr><td>Edits the wrong module</td><td>Weak mental model</td><td>Request a verified file map</td></tr>
+<tr><td>Shell command denied repeatedly</td><td>Permission mode too strict</td><td>Adjust policy for the task</td></tr>
+</table>
+
+<div class="exercise"><strong>Exercise 29.2 — Recover a drifting session</strong>
+<ol>
+<li>A session has been debugging for two hours and now contradicts a constraint you set at the start. Explain why continuing in the same session is risky.</li>
+<li>Write a three-sentence handoff summary that preserves the goal, the decisions made, and the remaining work.</li>
+<li>State what you would verify in the repository before letting the assistant edit files again.</li>
+</ol>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Name the four layers of the environment and the responsibility of each.</li>
+<li>Why does a well-organized repository reduce the cost of a session?</li>
+<li>Which working directory should you start from, and what goes wrong when you do not?</li>
+<li>What should a repository-orientation request include so its claims can be verified?</li>
+<li>Give two symptoms of context drift and the appropriate response to each.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>The environment combines a terminal client, a model, a tool layer, and context assembly.</li>
+<li>Discovery happens through file and search tool calls, not a single automatic index.</li>
+<li>Start from the repository root, with a clean working tree and only the MCP servers you need.</li>
+<li>For new projects, agree on a plan before authorizing implementation in small, tested slices.</li>
+<li>Onboard with read-only orientation requests that demand paths, evidence, and a tiny validation change.</li>
+<li>Keep one topic per session and reset when context drift appears.</li>
+</ul>
+
+<nav><a href="28-mcp-production.html">&larr; Previous</a><span></span><a href="30-claude-code-tools-context.html">Next: The Tool System and Context Management &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 25 — Cross-Layer Patterns and Architectural Antipatterns</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f2f4f8;color:#1f2937;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(30,41,59,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#4f46e5;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#312e81;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#4b5563;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#6b7280}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9ca3af;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#312e81}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #6366f1;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#4338ca}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#3730a3}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #dbe2f0;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#312e81;color:#fff;font-weight:600}
+td{background:#fafbff}
+pre{background:#1e2233;color:#e8ecf8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#e8e9fb;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#3730a3}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#eef0ff;border-left:4px solid #6366f1;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#4338ca}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #dbe2f0;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#312e81;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #e6eaf5}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#4338ca;text-decoration:none;display:inline-block;margin-bottom:16px}
+.callout{background:#eef0ff;border-left:4px solid #6366f1;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#6b7280;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+
+<div class="chapter">
+  <a class="back" href="../">&larr; Back to the Full Prep Course</a>
+  <h1 id="chapter-25-cross-layer-patterns-and-architectural-antipatterns">Chapter 25 — Cross-Layer Patterns and Architectural Antipatterns</h1>
+<p>A diagram of five tidy layers is a useful study device, but systems fail in the seams: where a tool result becomes a context entry, where a workflow rule turns into a line in a prompt, where a model suggestion becomes an irreversible action. This chapter is about those joints, the habits that keep them healthy, and the recurring shapes of designs that feel wrong before you can say why.</p>
+<p>The exam tests this judgment. A question describes a system that mostly works and asks what to change. Every option may name a real technique. The deciding factor is which seam is leaking, and which fix acts at the source rather than at a downstream symptom.</p>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Trace a single request across the agentic, tool, workflow, prompt, and context layers, naming which layer owns each decision.</li>
+<li>Recognize three patterns that recur at every layer: bounding the loop, validating at boundaries, and keeping a human in the loop for risky actions.</li>
+<li>Identify the common antipatterns from their observable symptoms rather than from their labels.</li>
+<li>Apply a short triage routine when an architecture feels wrong but the cause is unclear.</li>
+<li>Use a review-board checklist to test a design against every layer before it ships.</li>
+<li>Defend a repair by explaining why it acts at the source of a problem instead of at a downstream symptom.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="the-five-layers-as-a-request-path">The five layers as a request path</h3>
+<p>Picture the layers as a relay, not a stack. A request arrives through a workflow trigger, is reframed by a prompt, enriched from context, dispatched through tools, and acted on by an agentic loop that can hand work back to an earlier layer. Each tool result re-enters context, each entry influences the next prompt, and each prompt can change what the workflow does next.</p>
+<p>That view explains why a defect in one layer shows up in another. A vague tool description lives in the tool layer, yet its consequence is repeated wrong calls in the agentic layer and a window full of failed results in the context layer. A rule duplicated between configuration and prompt produces a contradiction that surfaces only during an agentic decision. Repairing the earliest layer beats cleaning up later damage.</p>
+<table>
+<thead>
+<tr>
+<th>Handoff</th>
+<th>What crosses the seam</th>
+<th>Decision owner</th>
+<th>Failure when neglected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Workflow to prompt</td>
+<td>Trigger and variables</td>
+<td>Workflow author</td>
+<td>Generic instructions for the wrong case</td>
+</tr>
+<tr>
+<td>Prompt to context</td>
+<td>Query, source scope, budget</td>
+<td>Context owner</td>
+<td>Whole documents loaded unfiltered</td>
+</tr>
+<tr>
+<td>Context to agentic</td>
+<td>Selected facts and history</td>
+<td>Loop controller</td>
+<td>Confident actions on stale facts</td>
+</tr>
+<tr>
+<td>Agentic to tool</td>
+<td>Structured call and authority</td>
+<td>Tool designer</td>
+<td>A suggestion becomes an unapproved side effect</td>
+</tr>
+<tr>
+<td>Tool to context</td>
+<td>Result and status</td>
+<td>Result filter</td>
+<td>Raw output displaces reasoning</td>
+</tr>
+<tr>
+<td>Agentic to workflow</td>
+<td>Completion signal and outcome</td>
+<td>Workflow author</td>
+<td>A pipeline waits for a missing message</td>
+</tr>
+</tbody>
+</table>
+<p>Reliability, governance, and cost are not rows in the table; they are properties of the whole relay. A step budget is agentic, a retry limit is part of a tool contract, a model choice is workflow configuration, a short instruction is prompt design, and trimming retrieved material is context work. Questions asking which single layer owns reliability are probing whether you see that cross-layer concerns need coordinated answers.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When an option proposes a fix, ask where the defect originates and where the fix acts. If the fix acts one seam downstream, look for a better answer.</p>
+</blockquote>
+<h3 id="pattern-one-bound-the-loop">Pattern one: bound the loop</h3>
+<p>Every autonomous loop needs a budget with teeth. The agentic layer should know the maximum steps, tool calls, and spend, plus the condition that counts as success. A stop condition written only as prose is a hope, not a bound; it belongs in orchestration code that actually halts the loop.</p>
+<p>The same instinct applies elsewhere. A tool that can retry forever needs a retry budget, a workflow that spawns subagents needs a spawn cap, a prompt asking for an elaborate answer needs an output expectation, and a context window needs a token allowance set before retrieval. In each case the pattern is the same: decide the limit first, measure during the work, and make exceeding it produce a visible outcome rather than silent continuation.</p>
+<p>Bounds are also diagnostic. A halt at the step ceiling is evidence that the design gave the agent no reachable path to done. Raising the ceiling makes the confusion more expensive; reading the halt as a signal prompts inspection of the stop condition, tool descriptions, and context quality.</p>
+<h3 id="pattern-two-validate-at-boundaries">Pattern two: validate at boundaries</h3>
+<p>Each arrow in the relay table is a trust boundary. Data crossing it should be checked, not assumed. Tool results are untrusted even when the tool is trusted, because the data may originate outside your system. Retrieved documents are untrusted as instructions, and session history is untrusted as current fact. Even a structured model output should be validated before a downstream step consumes it.</p>
+<p>Matching the check to the handoff matters more than blanket paranoia. A search result summarized for a reader needs a source label. A field that selects an approval path needs an enum and a required-value check. An argument that becomes a shell command needs strict typing and a restricted vocabulary. A prompt quoting an external document needs instruction text separated from quoted source text.</p>
+<p>Ask at review time: if this value were wrong, how far would it travel before anyone noticed? A bad value that dies at the next check is an inconvenience; one that reaches an external write is an incident. The number of seams a value crosses without inspection is a rough measure of risk.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating a valid-looking response as evidence that every upstream boundary was checked. Fluency is not validation.</p>
+</blockquote>
+<h3 id="pattern-three-keep-a-human-in-the-loop-for-risky-actions">Pattern three: keep a human in the loop for risky actions</h3>
+<p>Autonomy should be proportional to reversibility. Sending a message, deleting records, or publishing a document deserves a gate; reading, summarizing, and drafting usually do not.</p>
+<p>A gate is not a prompt line asking the model to confirm. A real gate is enforced outside the model: the tool refuses to execute without an approval token, and the workflow records who approved what. A model can describe an approval that never happened as fluently as a real one, so governance in prose exists only while the prose is believed.</p>
+<table>
+<thead>
+<tr>
+<th>Action class</th>
+<th>Reversibility</th>
+<th>Suitable control</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Read, search, summarize</td>
+<td>High</td>
+<td>No gate; log for provenance</td>
+</tr>
+<tr>
+<td>Draft content for review</td>
+<td>High</td>
+<td>No gate; require a named reviewer at the end</td>
+</tr>
+<tr>
+<td>Update an internal record</td>
+<td>Moderate</td>
+<td>Schema check plus post-change audit entry</td>
+</tr>
+<tr>
+<td>Send external communication</td>
+<td>Low</td>
+<td>Explicit approval token and a preview of the exact payload</td>
+</tr>
+<tr>
+<td>Delete or publish irreversibly</td>
+<td>Very low</td>
+<td>Two-person confirmation and a recorded rationale</td>
+</tr>
+</tbody>
+</table>
+<p>The table is a starting point. A read against a sensitive store may deserve a gate because the harm is disclosure, not mutation. Ask what damage becomes possible when the action goes wrong.</p>
+<h3 id="the-antipattern-catalogue">The antipattern catalogue</h3>
+<p>Antipatterns are easier to spot by symptom than by name. A reviewer hears "the assistant sometimes skips approval," not "we have prompt-as-policy." The table connects the label to observable behavior.</p>
+<table>
+<thead>
+<tr>
+<th>Antipattern</th>
+<th>Observable symptom</th>
+<th>Where it starts</th>
+<th>Minimal repair</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unbounded loop</td>
+<td>Repeated calls with no ceiling; no final report</td>
+<td>Agentic layer</td>
+<td>Add step, spend, and call budgets plus a stop condition</td>
+</tr>
+<tr>
+<td>Tool sprawl</td>
+<td>Overlapping tools; the wrong one is often selected</td>
+<td>Tool layer</td>
+<td>Prune the catalog and sharpen descriptions</td>
+</tr>
+<tr>
+<td>Duplicated instructions</td>
+<td>One rule in configuration, a skill, and a prompt; copies disagree</td>
+<td>Workflow and prompt layers</td>
+<td>Keep one source of truth and reference it</td>
+</tr>
+<tr>
+<td>Prompt-as-policy</td>
+<td>Authorization only in prose; the agent bypasses it</td>
+<td>Prompt and tool layers</td>
+<td>Enforce permission in code and at the tool boundary</td>
+</tr>
+<tr>
+<td>Context dumping</td>
+<td>Whole documents loaded "just in case"; slow, vague answers</td>
+<td>Context layer</td>
+<td>Retrieve bounded snippets with provenance and a budget</td>
+</tr>
+<tr>
+<td>Silent error propagation</td>
+<td>A failed step is invisible; later steps use stale data</td>
+<td>Tool and context layers</td>
+<td>Return typed errors with a next action and log them</td>
+</tr>
+<tr>
+<td>Over-privileged access</td>
+<td>One credential covers every tool and environment</td>
+<td>Tool and workflow layers</td>
+<td>Scope credentials per tool and call; apply least privilege</td>
+</tr>
+</tbody>
+</table>
+<p>Tool sprawl and duplicated instructions both look like "too much stuff," but the repairs differ. Sprawl is a routing problem: the model cannot tell which tool fits, so the catalog needs fewer, better-described entries. Duplication is a maintenance problem: several copies of a rule exist, so the fix is consolidation. More documentation helps the first and worsens the second.</p>
+<p>Prompt-as-policy and over-privileged access both show up as unauthorized actions, but one is a control never enforced and the other a control granted too broadly. A stronger sentence helps neither.</p>
+<blockquote>
+<p><strong>Review heuristic:</strong> If your proposed fix is "write a clearer instruction," check whether the problem is actually one that code, scope, or configuration should solve.</p>
+</blockquote>
+<h3 id="triaging-an-architecture-that-feels-wrong">Triaging an architecture that feels wrong</h3>
+<p>When a reviewer says a design feels wrong but cannot name why, a short routine restores clarity. Answer these questions in order before proposing changes.</p>
+<ol>
+<li>Where is the work spent? Look for unbounded loops and repeated calls; this exposes budget failures.</li>
+<li>What can change state? Inventory tools that write, send, delete, or publish and their authority; this exposes privilege failures.</li>
+<li>What does the model see at the decision point? Reconstruct actual context, not intended context; this exposes freshness failures.</li>
+<li>What happens on failure? Trace a failed step forward and ask whether it is visible; this exposes silent propagation.</li>
+<li>Which rule is written more than once? Search configuration, skills, prompts, and tool descriptions; this exposes drift.</li>
+</ol>
+<p>The fifth question is productive. Two copies of a rule drift apart, the agent follows one while planning and the other while executing, and the contradiction looks like a reasoning failure that invites a futile prompt rewrite.</p>
+<p>Triage also distinguishes the reported path from the actual one. Draw the request as it really runs, including retries, fallbacks, and subagents; the clean design diagram rarely contains the loop causing trouble.</p>
+<h3 id="the-review-board-checklist">The review-board checklist</h3>
+<p>A review board does not need a long form, only questions that force attention to each layer and seam. Require a concrete answer rather than a nod.</p>
+<pre><code class="language-text">ARCHITECTURE REVIEW CHECKLIST
+
+Scope and stop
+[ ] What is the success condition, and who detects it?
+[ ] What are the step, spend, and call ceilings?
+[ ] What happens visibly when a ceiling is reached?
+
+Boundary checks
+[ ] Which handoffs validate data before it crosses?
+[ ] Which tool results are filtered before re-entering context?
+[ ] Is untrusted source text separated from instructions?
+
+Authority
+[ ] Which actions can change external state?
+[ ] Which require an approval token enforced in code?
+
+Single source of truth
+[ ] Where is each durable rule defined exactly once?
+[ ] Do other layers reference that definition rather than copy it?
+
+Context health
+[ ] What is the token budget, and who enforces it?
+[ ] How are sources labeled for provenance?
+
+Failure path
+[ ] Which errors are retryable and which are terminal?
+[ ] What next action does each error result give the caller?
+
+Review points
+[ ] Where does a human inspect real work rather than a summary?
+[ ] Is the review depth matched to the failure affordance?
+</code></pre>
+<blockquote>
+<p><strong>Try it:</strong> Take a system you know well and answer the checklist with evidence, not intentions. Any item you answer with "we assumed" marks a seam that deserves attention.</p>
+</blockquote>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A compliance team asked for an assistant that reviews contract amendments against an internal policy manual. Early versions read a folder, produced a summary, and flagged clauses. Reviewers soon reported three problems: long stretches of activity with no report, flags on clauses the policy allowed, and one annotated copy saved over an original document.</p>
+<p>An architect traced one problematic request across the layers instead of rewriting prompts.</p>
+<p>At the workflow layer, a scheduled job launched reviews and expected a completion message. With no timeout, a stalled run left the queue waiting. The completion message existed only as prose in the instruction, so it was not reliably produced. This was an unbounded loop paired with a missing workflow signal.</p>
+<p>At the prompt layer, one instruction said "do not modify source documents," a configuration file repeated it differently, and a reusable instruction package added a third copy. One version said "avoid changing files," which the agent read as permission to annotate in place. This was duplicated instructions, and the overwritten original followed directly.</p>
+<p>At the tool layer, one file tool had both read and write capability under a broad credential, with no approval token. The prompt said not to modify sources, but the tool accepted the write. This was prompt-as-policy plus over-privileged access. The fix was a read-only tool for review and a separate write tool requiring approval.</p>
+<p>At the context layer, each run loaded the entire manual. As it grew, the governing rule was buried and the agent selected a similar-sounding paragraph elsewhere. The polished summary cited a real passage, making the mistake hard to notice: context dumping producing polished-but-wrong output. The repair was budgeted retrieval with source labels and a requirement that each flag cite a rule identifier.</p>
+<p>A retrieval call once returned an empty result. The agent read it as "no relevant policy" rather than a failure, and the workflow marked the run complete. Silent error propagation had turned a transient problem into a confident false conclusion; a typed error with a retry action fixed it.</p>
+<p>Changes followed source order: enforce a timeout and structured completion in the workflow, consolidate the duplicated rules, split the file tool, replace the full load with budgeted retrieval, and give errors an explicit status. Only then did the team revisit prompt wording, and the revision was small because the prompt had been carrying responsibilities that belonged elsewhere.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A scenario that mentions several symptoms at once is usually asking you to find the earliest responsible layer, not the most visible symptom.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Fixing the symptom in the layer where it appears instead of the layer where it originates.</li>
+<li>Raising a step ceiling when the real problem is an unreachable stop condition.</li>
+<li>Adding more tools to reduce wrong-tool selection, which usually worsens tool sprawl.</li>
+<li>Copying a durable rule into several configuration files to "make sure it is obeyed."</li>
+<li>Treating a permission statement in a prompt as an enforced control.</li>
+<li>Loading complete source documents to avoid the effort of designing retrieval.</li>
+<li>Assuming a successful-looking result means earlier steps succeeded.</li>
+<li>Reviewing only the happy path and ignoring retries, fallbacks, and subagent branches.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>The five layers form a relay; defects in one layer surface as symptoms in another.</li>
+<li>Cross-layer concerns such as reliability, governance, and cost require coordinated decisions, not a single owner.</li>
+<li>Bound the loop at every layer, with ceilings that produce visible outcomes when exceeded.</li>
+<li>Validate data at each handoff, matching the check to the damage a bad value could cause.</li>
+<li>Gate risky actions with controls enforced in code, with authority scoped to the task.</li>
+<li>Diagnose antipatterns by symptom, then repair the earliest responsible layer.</li>
+<li>Use a short review checklist to force evidence-based answers about budgets, boundaries, authority, duplication, context, failure, and review points.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>An agent repeatedly calls a search tool, produces no final answer, and the pipeline never advances. Which fix acts at the earliest responsible layer?</li>
+</ol>
+<p>A. Add a prompt sentence asking the agent to finish sooner.</p>
+<p>B. Add a step budget and an enforced stop condition in orchestration code.</p>
+<p>C. Increase the context window so more tool results fit.</p>
+<p>D. Rename the search tool for more reliable discovery.</p>
+<ol start="2">
+<li>A rule saying "never modify source documents" appears in configuration, a skill, and a prompt. Runs have added annotations because one copy says "avoid changing files." What is the best repair?</li>
+</ol>
+<p>A. Add a fourth copy with stronger wording.</p>
+<p>B. Ask the model to restate the rule before each action.</p>
+<p>C. Keep one authoritative definition and reference it elsewhere.</p>
+<p>D. Remove all file tools from the assistant.</p>
+<ol start="3">
+<li>Which situation most clearly demonstrates prompt-as-policy?</li>
+</ol>
+<p>A. A tool refuses a write without an approval token; the prompt explains why.</p>
+<p>B. A prompt says approval is needed, but the tool accepts the call without a token.</p>
+<p>C. A prompt lists allowed tools and the runtime filters them.</p>
+<p>D. A skill describes a workflow whose steps are enforced in code.</p>
+<ol start="4">
+<li>A polished summary cites a real paragraph from the policy manual, but the paragraph reflects a superseded rule. What repairs the root cause?</li>
+</ol>
+<p>A. Ask for a longer summary so more context is visible.</p>
+<p>B. Replace the full load with budgeted retrieval that labels sources and dates.</p>
+<p>C. Lower sampling so the answer is more repeatable.</p>
+<p>D. Add a second pass that rewrites the summary in another style.</p>
+<ol start="5">
+<li>A failed retrieval returned an empty result and the next step treated it as "no matching policy." Which principle was violated?</li>
+</ol>
+<p>A. Bounding the loop.</p>
+<p>B. Keeping one source of truth.</p>
+<p>C. Validating at boundaries and making failures visible.</p>
+<p>D. Matching review depth to failure affordance.</p>
+<ol start="6">
+<li>A catalog has three tools that read customer records, with overlapping descriptions and parameters. The agent picks the wrong one. What helps most?</li>
+</ol>
+<p>A. Add two more specialized tools for missing cases.</p>
+<p>B. Consolidate into a few clearly described tools with distinct purposes.</p>
+<p>C. Give all three tools broader permissions so any can finish.</p>
+<p>D. Write a prompt telling the agent to try each tool until one works.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p>Correct answer: B. A missing ceiling and absent stop condition are agentic-layer defects, and enforced code halts the loop. Option A is a prompt-level hope; prose cannot stop a loop with no enforced limit. Option C changes capacity, not control, and makes a runaway loop costlier. Option D addresses discovery, but the tool is plainly being found and called.</p>
+</li>
+<li>
+<p>Correct answer: C. Consolidation removes the drift and references preserve one authoritative rule. Option A adds another copy, guaranteeing another drift point. Option B puts a compliance decision inside model output, exactly the pattern to avoid. Option D removes capability instead of governing it, blocking legitimate reads too.</p>
+</li>
+<li>
+<p>Correct answer: B. The control exists only as prose and the tool does not enforce it, so the policy is advisory. Option A is the desired design because the token check holds regardless of the prompt. Option C is runtime filtering, an enforced control. Option D implements rules in code, the opposite of prompt-as-policy.</p>
+</li>
+<li>
+<p>Correct answer: B. Unfiltered, unlabeled context buried a superseded rule; retrieval with provenance and dates removes it. Option A adds material to an overloaded window and worsens selection. Option C affects consistency, not correctness, and repeats the wrong citation reliably. Option D changes presentation while leaving faulty evidence untouched.</p>
+</li>
+<li>
+<p>Correct answer: C. An empty result caused by failure should be classified and surfaced, not read as a finding. Option A concerns ceilings, which are not at issue. Option B concerns duplicated rules, unrelated here. Option D concerns how deeply a human reviews, which does not repair an invisible error.</p>
+</li>
+<li>
+<p>Correct answer: B. Fewer tools with accurate descriptions improve routing and remove overlap. Option A increases sprawl and makes selection harder. Option C widens authority without improving routing and adds security risk. Option D turns design into trial and error, wasting steps and risking side effects.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 25.</em></p>
+  <nav><a href="24-codebases-review-provenance.html">&larr; Previous</a><span></span><a href="26-preparation-framework.html">Next &rarr;</a></nav>
+</div>
+
+</body>
+</html>

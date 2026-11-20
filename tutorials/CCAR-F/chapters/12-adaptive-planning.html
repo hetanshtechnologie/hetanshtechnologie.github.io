@@ -1,0 +1,117 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>12. Adaptive Planning and Ambiguity</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>12. Adaptive Planning and Ambiguity</h1>
+
+<p>Every plan is written against assumptions, and the real world rarely reads them. A tool returns a different schema, a source is missing, or an early result contradicts the premise of step five. An adaptive plan treats change as input: it notices a mismatch, decides whether it matters, revises only the affected portion, and keeps correct work. This chapter covers the triggers, registers, questions, and guardrails that make that behaviour deliberate.</p>
+
+<h2>Triggers: when the plan is no longer valid</h2>
+
+<p>Replanning without a trigger is thrashing; failing to replan after a material change is stubbornness. Define triggers as observable conditions with thresholds, not as vague impressions that "things are going badly." Most useful triggers fall into five classes:</p>
+
+<table>
+<tr><th>Trigger class</th><th>Observable condition</th><th>Example threshold</th><th>Default response</th></tr>
+<tr><td>New evidence</td><td>Source fact contradicts a recorded assumption</td><td>Any contradiction in a critical field</td><td>Invalidate affected steps</td></tr>
+<tr><td>Tool failure</td><td>Consecutive failures of the same call</td><td>3 attempts in one stage</td><td>Substitute route or escalate</td></tr>
+<tr><td>Specification gap</td><td>Required field absent from the brief</td><td>Any field marked <code>unknown</code></td><td>Ask or choose a reversible default</td></tr>
+<tr><td>User correction</td><td>Explicit rejection of an intermediate result</td><td>One correction with a stated reason</td><td>Patch plan, keep stable prefix</td></tr>
+<tr><td>Budget or time</td><td>Consumed tokens or elapsed time</td><td>80% of budget with 50% of work left</td><td>Reduce scope, report shortfall</td></tr>
+</table>
+
+<p>Each trigger carries a severity: a missing optional field is a note; a missing required field is a blocker; a slow tool becomes a route-change trigger only when it breaches a deadline. Severity decides whether to pause, patch, or continue with a recorded deviation. Written rules turn "the agent got confused" into a traceable decision.</p>
+
+<h2>The replanning loop</h2>
+
+<p>Adaptation is a six-step loop: <strong>detect</strong> a trigger; <strong>scope</strong> which steps depended on the invalid premise; <strong>decide</strong> to continue, patch, substitute, or abort; <strong>preserve</strong> the stable prefix of valid steps; <strong>publish</strong> a new plan version with a change note; <strong>continue</strong> from the first affected step, reusing checkpoints whose digests still match.</p>
+
+<pre><code>replan:
+  trigger: tool_failure | new_evidence | spec_gap | user_correction | budget
+  impact: steps [3,4,5] because assumption A-02 changed
+  decision: patch
+  stable_prefix: [1,2]
+  new_plan_version: v4
+  change_note: "Currency set changed from 2 to 3; stage 3 must remap units."
+  budget: replans_left = 1, tokens_reserved = 12000
+  guard: if ( replans_left &lt; 1 &amp;&amp; severity == "blocker" ) -&gt; ask_user()</code></pre>
+
+<p>Preserving the stable prefix is the most important and most often skipped step. A naive replanner rewrites the entire plan from scratch, which invalidates checkpoints, repeats expensive tool calls, and can quietly alter decisions the user already approved. A good patch has three properties: it changes the smallest set of steps, it names the assumption that changed, and it keeps a diff. With a diff, a reviewer can answer "why is step 4 different?" without reconstructing the whole session.</p>
+
+<div class="tip"><strong>Bound the number of replans.</strong> Give a run a replan allowance — commonly two or three for a medium task — and reserve a slice of the token budget for it. When the allowance is exhausted, the agent must either complete with documented deviations or ask a human. Unlimited adaptation is a way of postponing the moment when the task should be declared impossible.</div>
+
+<h2>Assumption registers</h2>
+
+<p>An assumption register is a small table of things the plan believes but has not verified. It is the antidote to hidden premises. Each row has an ID, a statement, a confidence level, the source of the belief, a test that would verify it, and an expiry condition. When a trigger fires, the agent can look up which assumptions were affected instead of guessing.</p>
+
+<table>
+<tr><th>ID</th><th>Assumption</th><th>Confidence</th><th>Source</th><th>Verification test</th></tr>
+<tr><td>A-01</td><td>Input CSV uses UTF-8 encoding</td><td>High</td><td>File metadata</td><td>Read first 4 KB without errors</td></tr>
+<tr><td>A-02</td><td>All amounts are in one currency</td><td>Medium</td><td>Sample of 20 rows</td><td>Distinct currency codes = 1</td></tr>
+<tr><td>A-03</td><td>The approval API is reachable</td><td>Low</td><td>Documentation only</td><td>Health probe before stage 6</td></tr>
+</table>
+
+<p>Confidence is not decoration. Low-confidence assumptions deserve an early, cheap test — a health probe, a header check, a sample of 20 rows — before expensive work depends on them. This is the principle of <strong>front-loading uncertainty</strong>: spend a little effort early to avoid a large rewrite late. High-confidence assumptions still belong in the register, because when they fail the failure is usually surprising and needs a recorded reason.</p>
+
+<p>Expired assumptions should be re-verified rather than silently trusted. A fact sampled from a file at the start of a long run can be invalid if the file was updated during the run. Attach a digest or timestamp to the evidence source and invalidate any assumption whose source changed. If verification is impossible — for example, an external service is down — demote the assumption to <code>unverified</code> and let downstream gates require a human check before irreversible actions.</p>
+
+<h2>Clarification questions: asking well and asking once</h2>
+
+<p>A vague brief creates a decision: proceed with a default or ask. Ask when the answer changes the structure of the work, when a wrong guess is expensive or irreversible, or when two reasonable interpretations would produce incompatible outputs. Proceed when the difference is cosmetic, when a reversible default exists, or when the user is unavailable and a documented assumption can carry the run. A useful test is the <strong>rework test</strong>: if a wrong guess would force more than about 20% of completed work to be redone, ask now.</p>
+
+<p>Questions should be concrete and cheap to answer. Instead of "What format should the report use?", offer two named options with a recommendation: "Should the report be a one-page executive brief (default) or a detailed 10-page analysis? I recommend the brief for this audience unless you need the evidence tables." Good questions carry three things: a short context, a small set of mutually exclusive options, and a default that lets the user reply with a single word. Batch related questions into one message — three questions asked together cost one interruption; three interruptions cost three.</p>
+
+<div class="warn"><strong>Avoid hypothetical questions.</strong> Asking about a situation that has not occurred ("What would you do if the API were down?") shifts the burden back to the user. Ask about the live decision instead ("The API is down; should I use the cached export or stop?"). The second question has a real answer and an actionable consequence.</div>
+
+<p>When no answer is available, proceed with a conservative default and label it. Mark the affected output with <code>assumption: A-04</code> and include the assumption in the final report, so a reader can see which parts were decided on their behalf. Never convert an unanswered question into an unmarked fact; that is the point where an adaptable system becomes an unreliable one.</p>
+
+<h2>Incomplete specifications and safe defaults</h2>
+
+<p>Incomplete specs are normal at the start of a project. The architect's job is to make incompleteness explicit and to choose defaults whose failure is cheap. Three rules help. First, use an explicit sentinel such as <code>unknown</code> or <code>not_supplied</code> rather than an empty string or zero, so downstream components can detect missing information. Second, reorder work so reversible actions come first: draft before publish, simulate before execute, validate before send. Third, defer any step whose default could cause an external side effect. If the shipping address is missing, prepare the label but do not print it.</p>
+
+<p>Represent unknowns in the output schema itself. A field defined as <code>amount: number | "unknown"</code> forces every consumer to handle the unknown case. A field defined simply as <code>number</code> invites the model to invent a plausible value, and invented values are indistinguishable from real ones once they are in a report. For each unknown, record who could resolve it, by when, and what happens if nobody does — usually <code>omit_from_output</code>, <code>escalate</code>, or <code>use_default</code>.</p>
+
+<h2>Preventing replan thrash</h2>
+
+<p>An agent that replans after every new observation can become stuck in a loop: plan, discover, replan, discover a consequence of the replan, replan again. Three controls keep adaptation stable. A <strong>change threshold</strong> requires the new evidence to alter a critical field or a dependency before the plan changes; cosmetic differences are recorded, not acted upon. A <strong>cooldown</strong> prevents a second replan within a short window unless the trigger is a blocker. A <strong>stable prefix</strong> locks completed steps with valid digests so a replan cannot touch them.</p>
+
+<p>Track plan versions with a one-line reason each. If successive versions differ only because a field was misread, improve the reading step instead of patching downstream. Sometimes the right move is to stop adapting, report the ambiguity, and ask for a specification.</p>
+
+<div class="exercise"><strong>Exercise 12.1 — Build an assumption register</strong>
+<p>A planning task must book travel and submit an expense report. The brief says "book the usual option" and "submit after approval." List four assumptions with confidence levels, verification tests, and default actions if the assumption fails. Mark which should be checked before any booking occurs.</p>
+<p>Hint: front-load the checks whose failure would make a booking expensive to reverse.</p>
+</div>
+
+<div class="exercise"><strong>Exercise 12.2 — Patch, do not restart</strong>
+<p>A six-step report plan has completed steps 1 and 2. During step 3, a new source appears that changes a key figure used in steps 3 and 5; step 4 depends only on step 2. Write the replan decision: affected steps, stable prefix, new step order, and the change note. Then state one condition under which you would ask the user instead of patching.</p>
+<p>Hint: keep steps whose inputs are unchanged, order the rest around the new figure, and escalate if an approved number changes.</p>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why should triggers include thresholds rather than vague quality judgements?</li>
+<li>What is a stable prefix, and why must a replan preserve it?</li>
+<li>What columns make an assumption register actionable?</li>
+<li>Describe the rework test for deciding whether to ask a clarification question.</li>
+<li>Name two controls that prevent replan thrash.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Replanning should be triggered by observable conditions with declared severity and thresholds.</li>
+<li>A replanning loop detects, scopes, decides, preserves, publishes a diff, and resumes.</li>
+<li>Assumption registers turn hidden premises into testable items with confidence and expiry.</li>
+<li>Ask concrete, batched questions with options and a default when a wrong guess is costly.</li>
+<li>Represent unknowns explicitly and defer irreversible actions until they are resolved.</li>
+<li>Bound adaptation with replan allowances, change thresholds, and cooldowns.</li>
+</ul>
+
+<nav><a href="11-parallel-execution.html">&larr; Previous</a><span></span><a href="13-orchestrators-and-subagents.html">Next: Orchestrators and Subagents &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

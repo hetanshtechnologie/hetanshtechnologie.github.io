@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 13 — Tool Use: From Request to Executed Action</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 13</span>
+  <h1 id="chapter-13-tool-use-from-request-to-executed-action">Chapter 13 — Tool Use: From Request to Executed Action</h1>
+<p>A model can describe an action, but it cannot perform one. The moment an application needs a current balance, a saved record, or a changed file, a second actor has to enter the picture: your code. Tool use is the agreed format that lets the model request such an action and lets your code carry it out and report back. This chapter follows one request through that exchange, from the tool definition to the final answer.</p>
+<blockquote>
+<p><strong>Exam note:</strong> The model proposes a tool call; the application disposes of it. Choosing a tool and filling in arguments belong to the model. Validation, authorization, execution, and the returned result belong to your code.</p>
+</blockquote>
+<h2 id="learning-objectives">Learning objectives</h2>
+<p>By the end of this chapter you should be able to:</p>
+<ul>
+<li>Explain the request/execute split and state which actor owns each step of a tool round.</li>
+<li>Write a tool definition with a distinct name, a purpose-and-boundary description, and a usable input schema.</li>
+<li>Trace one tool call from the model's structured request to the result block your application sends back.</li>
+<li>Implement a small Python loop that handles text responses and repeated tool rounds.</li>
+<li>Distinguish built-in tools from custom tools and choose between them for a given requirement.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="two-actors-one-conversation">Two actors, one conversation</h3>
+<p>Language-model output is a sequence of tokens. Those tokens may look like an instruction, but nothing in the response opens a database connection or edits a file. When tool definitions are present, the model has one additional output option: a structured block naming a tool and supplying input values. That block is a request in the literal sense. Your application owns the credentials, permissions, and connections, so it checks the request, runs the real operation, and writes a result back into the conversation.</p>
+<p>Think of the exchange as a requisition. The model fills in the form; your code decides whether the form is valid and the action permitted. This separation is what makes tool use testable, auditable, and safe. A model cannot silently acquire a new permission just because a tool definition exists.</p>
+<p>The conversation is the record of the exchange. Each round adds the assistant's request and your result, so the model can explain a failure, correct an argument, or use one result in the next decision. Conversation state still lives in your application, as it did for ordinary requests.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating a tool request as evidence that an operation is safe. A request proves only that the model wanted the operation.</p>
+</blockquote>
+<h3 id="declaring-the-tool-the-model-can-request">Declaring the tool the model can request</h3>
+<p>A definition normally has three parts: a name, a natural-language description, and a JSON Schema for input. Names should be short and consistent, often verb plus object, such as <code>lookup_order</code>. The description carries most of the selection signal. It should state what the tool does, when it fits, when it does not, and any hard limit. A sentence beginning "Do not use for..." often helps more than another list of features.</p>
+<p>The schema should make invalid values difficult to express. Prefer enumerations for a closed set, mark required fields honestly, and state units and formats in property descriptions. A field called <code>amount</code> should say whether it means cents or currency units. The schema does not enforce business rules by itself, but it steers the model toward arguments your code can accept.</p>
+<pre><code class="language-json">{
+  &quot;name&quot;: &quot;lookup_order&quot;,
+  &quot;description&quot;: &quot;Return the status, carrier, and promised delivery date for one order. Use when a user asks where an order is or a delivery date must be verified. Do not use for creating, changing, or cancelling orders, or when no identifier was supplied.&quot;,
+  &quot;input_schema&quot;: {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;properties&quot;: {
+      &quot;order_id&quot;: {
+        &quot;type&quot;: &quot;string&quot;,
+        &quot;description&quot;: &quot;Identifier from the confirmation, for example ORD-4821&quot;
+      },
+      &quot;include_history&quot;: {
+        &quot;type&quot;: &quot;boolean&quot;,
+        &quot;description&quot;: &quot;Set true only when earlier status changes are asked about&quot;
+      }
+    },
+    &quot;required&quot;: [&quot;order_id&quot;]
+  }
+}
+</code></pre>
+<p>The exclusions prevent the two mistakes the application most wants to avoid. Tool-set size matters too: a long list of similar tools wastes tokens and confuses selection, while one enormous tool with a free-form <code>operation</code> string hides every real capability from the model.</p>
+<blockquote>
+<p><strong>Try it:</strong> Write two tools with close purposes and give each an explicit "Do not use" boundary. Ask the model to handle ten sample requests; unstable choices mean the boundary is still too vague.</p>
+</blockquote>
+<h3 id="the-sequence-of-one-tool-round">The sequence of one tool round</h3>
+<p>A round is the smallest complete exchange: declaration, decision, request, execution, result, and continuation.</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>What appears</th>
+<th>Owner</th>
+<th>Developer check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Declaration</td>
+<td>Tool names, descriptions, schemas</td>
+<td>Application</td>
+<td>Are only intended tools advertised?</td>
+</tr>
+<tr>
+<td>Decision</td>
+<td>Text or a request for a named tool</td>
+<td>Model</td>
+<td>Did the right tool win, if any?</td>
+</tr>
+<tr>
+<td>Request</td>
+<td>Tool name, input values, call identifier</td>
+<td>Model</td>
+<td>Does input satisfy the schema?</td>
+</tr>
+<tr>
+<td>Stop</td>
+<td>Response ends with a tool-related stop reason</td>
+<td>Model and API</td>
+<td>Did the loop switch modes?</td>
+</tr>
+<tr>
+<td>Execution</td>
+<td>Arguments checked, policy applied, operation run</td>
+<td>Application</td>
+<td>Is the caller authorized?</td>
+</tr>
+<tr>
+<td>Result</td>
+<td>Result block carrying the matching identifier</td>
+<td>Application</td>
+<td>Is content compact and safe?</td>
+</tr>
+<tr>
+<td>Continuation</td>
+<td>Text or another tool request</td>
+<td>Model</td>
+<td>Was the result used?</td>
+</tr>
+</tbody>
+</table>
+<p>Two details cause most bugs. The call identifier is the only reliable link between a request and its answer. The stop reason is the signal that tells your loop to pause answer handling and switch into execution mode; a loop that looks only for text silently discards tool requests. Failures are results too. A timed-out lookup should produce a clear error result so the conversation stays consistent and the model can respond honestly.</p>
+<h3 id="a-python-tool-loop">A Python tool loop</h3>
+<p>The loop keeps the conversation in a list, calls a client with the tool definitions, executes requests through a registry, and returns results. A step cap prevents a stubborn request from running forever.</p>
+<pre><code class="language-python">def answer_with_tools(client, system_prompt, user_text, tool_defs, registry, max_rounds=5):
+    messages = [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: user_text}]
+
+    for round_number in range(max_rounds):
+        response = client.messages.create(
+            model=&quot;general-frontier&quot;,
+            max_tokens=1024,
+            system=system_prompt,
+            messages=messages,
+            tools=tool_defs,
+        )
+        messages.append({&quot;role&quot;: &quot;assistant&quot;, &quot;content&quot;: response.content})
+
+        if response.stop_reason != &quot;tool_use&quot;:
+            return &quot;&quot;.join(
+                block.text for block in response.content
+                if getattr(block, &quot;type&quot;, None) == &quot;text&quot;
+            )
+
+        results = []
+        for block in response.content:
+            if getattr(block, &quot;type&quot;, None) != &quot;tool_use&quot;:
+                continue
+            handler = registry.get(block.name)
+            try:
+                if handler is None:
+                    raise ValueError(&quot;unknown tool&quot;)
+                output = handler.run(handler.validate(block.input))
+                results.append({
+                    &quot;type&quot;: &quot;tool_result&quot;,
+                    &quot;tool_use_id&quot;: block.id,
+                    &quot;content&quot;: output,
+                })
+            except Exception as exc:
+                results.append({
+                    &quot;type&quot;: &quot;tool_result&quot;,
+                    &quot;tool_use_id&quot;: block.id,
+                    &quot;is_error&quot;: True,
+                    &quot;content&quot;: f&quot;Tool could not complete: {exc}&quot;,
+                })
+
+        messages.append({&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: results})
+
+    return &quot;I could not finish within the allowed number of steps.&quot;
+</code></pre>
+<p>The request sends both conversation and tool list. The assistant's full response, including tool blocks, is appended before execution so the model can later see what it asked for; results are appended as a user message, which is the format the API expects. The registry is the control point: a name the model invents will not be found, and validation can check types and authority before side effects. Returning <code>is_error</code> results keeps the conversation well formed. In production, replace raw exception text with a sanitized message, a subject of the next chapter. The step cap is a reliability feature: without it, retries can consume unbounded time and tokens.</p>
+<h3 id="several-calls-in-one-response">Several calls in one response</h3>
+<p>A response can contain more than one tool request. Each block has its own call identifier, and the application returns one result per identifier; execution order does not matter. Dependencies change the picture. If the second call needs an identifier produced by the first, the model cannot know it yet, so the calls need two rounds.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Handling</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Independent reads</td>
+<td>Request together, execute concurrently</td>
+<td>Lower latency, no dependency risk</td>
+</tr>
+<tr>
+<td>Read then write using its output</td>
+<td>Separate rounds</td>
+<td>Write needs the later value</td>
+</tr>
+<tr>
+<td>Several writes to one record</td>
+<td>Separate rounds with checks</td>
+<td>Concurrent writes can overwrite</td>
+</tr>
+</tbody>
+</table>
+<p>Concurrency also has an operational cost. Ten simultaneous calls may trigger rate limits or overload a small service, so many applications cap execution and queue the rest in the execution layer rather than expecting the model to understand this.</p>
+<h3 id="built-in-tools-and-custom-tools">Built-in tools and custom tools</h3>
+<p>A built-in tool is supplied and executed by the platform, while a custom tool is defined by your application and executed by your code. Many applications use both: a hosted lookup for public facts and a custom lookup for internal records.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Built-in</th>
+<th>Custom</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Definition source</td>
+<td>Platform</td>
+<td>Your application</td>
+</tr>
+<tr>
+<td>Execution</td>
+<td>Platform environment</td>
+<td>Your process</td>
+</tr>
+<tr>
+<td>Private systems</td>
+<td>Usually indirect</td>
+<td>Direct, with your credentials</td>
+</tr>
+<tr>
+<td>Observability</td>
+<td>Summary only</td>
+<td>Full logs and metrics</td>
+</tr>
+<tr>
+<td>Setup effort</td>
+<td>Configuration and permissions</td>
+<td>Handler, validation, deployment</td>
+</tr>
+</tbody>
+</table>
+<p>A built-in tool trades visibility for convenience. A custom tool is necessary when the operation touches private data or when policy must be enforced at execution.</p>
+<blockquote>
+<p><strong>Exam note:</strong> Private data, custom authorization, or a precise audit trail points toward a custom tool. Low setup effort for a generic capability points toward a built-in tool.</p>
+</blockquote>
+<h3 id="when-a-tool-is-the-right-mechanism">When a tool is the right mechanism</h3>
+<p>The deciding question is whether the model must obtain something it cannot already see, or cause an effect outside the response. If not, a simpler mechanism wins. If a number can be calculated exactly in code, calculate it before the request instead of spending a tool round on it.</p>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Better mechanism</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Current order status</td>
+<td>Custom tool</td>
+<td>Value changes and sits behind credentials</td>
+</tr>
+<tr>
+<td>Answer as fixed JSON</td>
+<td>Structured output</td>
+<td>No external state needed</td>
+</tr>
+<tr>
+<td>Summarize a long policy file</td>
+<td>File or retrieval input</td>
+<td>Text is large and read-only</td>
+</tr>
+<tr>
+<td>Rewrite a paragraph's tone</td>
+<td>Prompt instruction</td>
+<td>Purely textual transform</td>
+</tr>
+<tr>
+<td>Create a calendar entry</td>
+<td>Tool with side effects</td>
+<td>Response alone cannot change state</td>
+</tr>
+</tbody>
+</table>
+<p>Consider a reporting assistant asked for total sales by region. The rows may sit in a warehouse, but the total is a deterministic sum. The right design runs the aggregation in the warehouse, or reads a precomputed view, and passes a small result into the request. A tool round that asks the model to add numbers reintroduces arithmetic error and wastes tokens. The same reasoning applies to sorting, deduplication, and unit conversion: do exact work in code and reserve model attention for judgment.</p>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal.</strong> Build a minimal tool round for an order-status assistant and observe the handoff.</p>
+<p><strong>Steps.</strong></p>
+<ol>
+<li>Define the <code>lookup_order</code> tool from this chapter with <code>order_id</code> required.</li>
+<li>Write a registry whose validator accepts identifiers shaped like <code>ORD-</code> followed by digits and whose runner returns three status fields from a local dictionary.</li>
+<li>Implement the loop with a step cap of three.</li>
+<li>Ask for <code>ORD-4821</code>, then ask for a status without supplying an identifier.</li>
+<li>Make the runner reject an unknown identifier with a short error message.</li>
+</ol>
+<p><strong>Expected observation.</strong> The first request produces one tool call and a final answer quoting the returned status. The missing identifier leads to a question or a validation error, never an invented number. The unknown identifier becomes an error result, the conversation stays valid, and a trace shows request, result, and answer as distinct entries.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p><strong>Problem.</strong> A support assistant is asked, "Where is order ORD-4821, and can we still promise Friday?" A system prompt tells it to answer from general knowledge and say something reasonable when uncertain. It confidently quotes wrong dates and cannot tell whether an order was cancelled.</p>
+<p><strong>Reasoning.</strong> Two facts are needed: the order's current state in the order system and the carrier's latest scan. Neither is stable or visible to the model in advance. A prompt cannot create information; it can only bias how missing information is handled. The team exposes <code>lookup_order</code> for state and <code>get_carrier_status</code> for the scan, with descriptions that forbid mutation and require an identifier. Both return small typed results with timestamps. Because they are independent once the identifier is known, they can be requested together and executed in parallel, each with its own call identifier.</p>
+<p><strong>Resolution.</strong> The assistant reports the packed status and the timestamped carrier scan, then either confirms the date or explains that it cannot be verified. If the carrier service is down, an error result lets the model answer the first half honestly. Logs capture tool names, arguments, and results, so a disputed answer can be reconstructed. Three evaluation requests cover an existing order, a cancelled order, and an unknown identifier; one description rewrite fixes a selection error, and the wrong-date failure disappears.</p>
+<blockquote>
+<p><strong>Exam note:</strong> If a requirement depends on changing or private information, obtain it through a tool. A prompt asking the model to be careful is not a substitute.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Returning a result without the call identifier it answers.</li>
+<li>Assuming a tool request is authorized merely because the model produced it.</li>
+<li>Writing overlapping descriptions that leave no principled way to choose.</li>
+<li>Running a dependent call in parallel and expecting it to see the first result.</li>
+<li>Letting a failed call go unanswered instead of returning an error result.</li>
+<li>Exposing one broad tool whose <code>operation</code> string hides real capabilities.</li>
+<li>Omitting a step cap, so retries consume unbounded time and tokens.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Tool use splits work between a model that requests an action and an application that executes it.</li>
+<li>A definition needs a distinct name, a boundary-aware description, and a precise input schema.</li>
+<li>A round proceeds through declaration, decision, request, execution, result, and continuation.</li>
+<li>Results must carry the originating call identifier, and failures should be returned as results.</li>
+<li>A Python loop appends the assistant response, executes handlers, and appends results before calling again.</li>
+<li>Multiple calls may be parallelized only when they are independent.</li>
+<li>Built-ins trade control for convenience; custom tools reach private systems and provide full observability.</li>
+<li>Tools serve external state and side effects; prompts, files, and structured output serve other needs.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A response contains two tool requests and a tool-related stop reason. What should the application do?</li>
+</ol>
+<p>A. Return the text portion and ignore the requests.</p>
+<p>B. Execute each registered request and return one result per call identifier.</p>
+<p>C. Merge both outputs into one message with no identifiers.</p>
+<p>D. Start a new conversation to forget the requests.</p>
+<ol start="2">
+<li>Which part of a definition most influences correct tool selection?</li>
+</ol>
+<p>A. The maximum token setting.</p>
+<p>B. The order of earlier messages.</p>
+<p>C. A specific description stating purpose, boundaries, and exclusions.</p>
+<p>D. The temperature setting.</p>
+<ol start="3">
+<li>A second call needs an identifier only the first can produce. How should they be handled?</li>
+</ol>
+<p>A. Issue both together and let the model guess.</p>
+<p>B. Issue both together and sort results by name.</p>
+<p>C. Execute the first, return its result, then allow a second round.</p>
+<p>D. Remove the identifier requirement from the second tool.</p>
+<ol start="4">
+<li>Which requirement best justifies a custom tool?</li>
+</ol>
+<p>A. Looking up a public encyclopedia entry.</p>
+<p>B. Running a generic calculation with no private inputs.</p>
+<p>C. Reading a customer record behind organization-specific access rules.</p>
+<p>D. Formatting an answer as JSON.</p>
+<ol start="5">
+<li>What is the main purpose of the call identifier?</li>
+</ol>
+<p>A. It tells the model which tool to use next.</p>
+<p>B. It links each result to the request it answers.</p>
+<p>C. It replaces argument validation.</p>
+<p>D. It determines request pricing.</p>
+<ol start="6">
+<li>A tool keeps timing out. Which response fits a reliable design?</li>
+</ol>
+<p>A. Return a short error result and bound retries.</p>
+<p>B. Let the call run until it succeeds.</p>
+<p>C. Return the full internal stack trace.</p>
+<p>D. Delete the tool definition entirely.</p>
+<ol start="7">
+<li>Which is the weakest candidate for a tool?</li>
+</ol>
+<p>A. Checking seat availability.</p>
+<p>B. Reading a shared configuration flag.</p>
+<p>C. Rewriting a sentence into a formal tone with no external data.</p>
+<p>D. Writing a ticket into a shared queue.</p>
+<ol start="8">
+<li>Two tools say "handles customer data" and "gets customer data", and selection is inconsistent. What is the best first fix?</li>
+</ol>
+<p>A. Add a third overlapping tool.</p>
+<p>B. Sharpen both descriptions with distinct purposes and negative cases.</p>
+<p>C. Remove all descriptions and let the model infer behavior.</p>
+<p>D. Raise the token limit on the request.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> Pending requests must be executed and matched by identifier. A leaves the user's question unanswered. C loses the association. D discards context and guarantees a worse answer.</p>
+</li>
+<li>
+<p><strong>C.</strong> Selection is driven by semantic signal in names and descriptions. A changes response length. B affects context but not tool meaning. D changes randomness, not meaning.</p>
+</li>
+<li>
+<p><strong>C.</strong> The dependent value exists only after the first round. A fabricates an identifier. B does not supply the missing value. D weakens the contract.</p>
+</li>
+<li>
+<p><strong>C.</strong> Private systems and custom rules require your code and credentials. A and B are generic. D is an output-format problem needing no executable tool.</p>
+</li>
+<li>
+<p><strong>B.</strong> The identifier is the correlation key. A is decided during selection. C is wrong because validation remains mandatory. D confuses metadata with billing.</p>
+</li>
+<li>
+<p><strong>A.</strong> A concise error keeps the conversation valid and bounded retries prevent a loop. B risks hanging. C leaks internals. D removes a possibly needed capability.</p>
+</li>
+<li>
+<p><strong>C.</strong> A pure text transform needs no external state. A and B require live data. D causes an effect outside the response.</p>
+</li>
+<li>
+<p><strong>B.</strong> Clear purposes and exclusions give the model a basis for choosing. A adds more ambiguity. C discards the only useful signal. D changes response length, not the decision.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 13.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="12-structured-output.html">&larr; Previous</a><a href="14-tool-contracts.html">Next: Tool Contracts, Errors, and Approval Patterns &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

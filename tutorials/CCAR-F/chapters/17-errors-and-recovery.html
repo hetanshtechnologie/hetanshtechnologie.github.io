@@ -1,0 +1,145 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>17. Error Classes, Detection, and Recovery</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>17. Error Classes, Detection, and Recovery</h1>
+
+<p>An agent that never fails is an agent that never does anything interesting. Every useful action crosses a boundary — a network, a database, a file system, a permission check — where the world can say no. The design question is not whether failures will happen, but whether the system notices them quickly and responds in a way that preserves trust. This chapter builds a vocabulary for failures and a process for recovery.</p>
+
+<h2>Three Sources of Failure</h2>
+
+<p>It helps to sort failures by <em>who is responsible</em>, because the appropriate response differs for each class. The first class is a <strong>tool error</strong>: the action itself was well formed, but the thing that executed it rejected or could not complete it. An API returns a rate-limit code, a query times out, a file is locked, or an authenticated session has expired. The request was reasonable; the environment refused it.</p>
+
+<p>The second class is a <strong>reasoning error</strong>. Here the machinery worked exactly as specified — the tool ran, the arguments validated, a result came back — but the choice was wrong. The agent queried yesterday's partition when today's was needed, called the read-only lookup when a write was required, or declared the task complete after inspecting only one of three required sources. These are not crashes. They are correct executions of an incorrect plan.</p>
+
+<p>The third class is an <strong>environment error</strong> — a failure of the execution context rather than of any action. The process runs out of memory, the context window fills before the answer is assembled, a mount disappears, or a service silently returns stale data. These are the most dangerous errors because they look like step-level success while corrupting the outcome.</p>
+
+<table>
+<thead><tr><th>Class</th><th>Typical signal</th><th>First response</th><th>Bad response</th></tr></thead>
+<tbody>
+<tr><td>Tool</td><td>HTTP 429/5xx, timeout, exception payload</td><td>Classify, then retry or switch provider</td><td>Replay identical request forever</td></tr>
+<tr><td>Reasoning</td><td>Wrong tool, wrong arguments, unsupported claim</td><td>Re-plan with the new observation</td><td>Retry the same call with the same arguments</td></tr>
+<tr><td>Environment</td><td>OOM, context exhaustion, missing mount</td><td>Shed load, trim context, checkpoint, escalate</td><td>Assume a clean result because no tool failed</td></tr>
+</tbody>
+</table>
+
+<p>The most common recovery mistake is applying the tool-error playbook to a reasoning error: resend the same call, get the same unhelpful answer, burn budget. A wrong question retried ten times is still the wrong question.</p>
+
+<div class="note"><strong>Naming matters less than attribution.</strong> You do not need to agree on a taxonomy with your team. You do need the agent to answer, after each anomaly, "was the fault in the action, in the plan, or in the stage?" Recovery starts with an honest attribution.</div>
+
+<h2>Signals That Reveal a Failure</h2>
+
+<p>Explicit signals are the easy ones: non-success status codes, exception objects, validation errors, and timeouts. A well-behaved tool returns these in a structured form so that the calling agent can inspect a field such as <code>retryable</code> instead of parsing prose. But many failures are <strong>silent</strong>, and detecting them requires watching the shape of the trajectory rather than a single step.</p>
+
+<ul>
+  <li><strong>Repetition.</strong> The same tool called three times with identical arguments usually means the agent did not incorporate the result, or the result was ambiguous.</li>
+  <li><strong>No progress.</strong> Ten steps pass, the scratchpad grows, but no new fact enters the working set. Measure progress by newly established facts, not by token count.</li>
+  <li><strong>Budget drift.</strong> A step that normally consumes two calls consumes twenty; cost spikes often precede visible failure.</li>
+  <li><strong>Claim/evidence mismatch.</strong> The summary asserts a number that never appeared in any tool output — a reasoning failure with a confident surface.</li>
+  <li><strong>Context pressure.</strong> As the window fills, earlier constraints are displaced and the agent violates rules it obeyed at step one.</li>
+</ul>
+
+<p>Practical systems combine in-step checks with an outer watchdog. The in-step check validates each observation before admitting it to memory. The watchdog watches aggregate properties — elapsed time, cumulative spend, steps since the last verified fact — and can stop a spiralling run even when no step reported an error.</p>
+
+<div class="warn"><strong>Absence of an error is not evidence of success.</strong> A tool that returns an empty list is not the same as a tool that found nothing; it may be a tool that queried the wrong tenant. Require tools to distinguish "no matching records" from "query not executed" in their payloads.</div>
+
+<h2>The Retry-or-Abort Decision</h2>
+
+<p>Once an anomaly is detected, the first branch is whether to try again. Use three questions: is the cause transient, is the action safe to repeat, and is there enough budget left for another attempt? Only when all three answers are yes does a retry make sense.</p>
+
+<table>
+<thead><tr><th>Situation</th><th>Retry?</th><th>Reason</th></tr></thead>
+<tbody>
+<tr><td>HTTP 429 rate limit, read-only call</td><td>Yes, with backoff</td><td>Transient, side-effect free</td></tr>
+<tr><td>HTTP 400 invalid argument</td><td>No, repair arguments first</td><td>Deterministic; identical retry cannot help</td></tr>
+<tr><td>HTTP 401 expired credential</td><td>No, refresh then retry</td><td>State must change before repetition works</td></tr>
+<tr><td>Payment submitted, response lost</td><td>No blind retry</td><td>Non-idempotent; use an idempotency key</td></tr>
+<tr><td>Wrong tool selected</td><td>No, re-plan</td><td>Reasoning error, not execution error</td></tr>
+<tr><td>Context window exhausted</td><td>No, compact or restart</td><td>Retrying reproduces the overflow</td></tr>
+</tbody>
+</table>
+
+<p>When you do retry, use bounded exponential backoff with jitter: increase the delay after each failure, add randomness to avoid synchronising parallel workers, and cap attempts at three. Log each retry with its attempt number and classification. An unbounded retry loop is not resilience; it is an expensive way to prove the service is down.</p>
+
+<div class="tip">Write the retry rule in the tool contract, not in the prompt. If the tool returns <code>{retryable: true, retry_after_ms: 800}</code>, the agent can follow a deterministic policy instead of improvising one from the prose of an error message.</div>
+
+<h2>Fallback Chains</h2>
+
+<p>When the primary path cannot deliver, a fallback chain offers the next-best option. The chain should be ordered by <em>fidelity</em>, not by convenience: try the closest substitute first, then progressively cheaper or less complete sources, and end with an explicit request for human input. A chain for a market-data question might be: live quote service, then delayed quote service, then the last cached snapshot with its timestamp, then a qualitative answer that names the data gap.</p>
+
+<pre><code>def answer_with_fallback(query, budget_ms=2500):
+    chain = [
+        ("live_quotes", lambda: call_live(query)),
+        ("delayed_quotes", lambda: call_delayed(query)),
+        ("cached_snapshot", lambda: read_cache(query, max_age_s=900)),
+    ]
+    for name, attempt in chain:
+        if budget_ms &lt;= 0:
+            break
+        result = attempt()
+        if result is not None and result.freshness_ok:
+            return {"value": result.value, "source": name,
+                    "confidence": result.confidence}
+        budget_ms -= result.elapsed_ms
+    return {"value": None, "source": "none",
+            "needs_human": True, "reason": "all sources unavailable"}</code></pre>
+
+<p>Three details make this work. Every rung reports source and freshness so downstream code applies the right trust level. The chain has a shared time budget, or a slow failing source consumes everything before the cache is tried. Exhausting the chain is a legitimate outcome, not an exception to swallow: the caller must receive a clearly labelled "I could not determine this" result.</p>
+
+<h2>Graceful Degradation</h2>
+
+<p>Graceful degradation reduces the scope or precision of an answer instead of failing entirely. A documentation assistant whose search backend is down can still answer from its local index, provided it says the sources are partial. A code-review agent that cannot run tests can still report structural issues, provided it does not claim the change is verified.</p>
+
+<p>The rule is that degraded output must be <strong>marked as degraded</strong>. An unlabelled partial answer is worse than no answer, because it invites the reader to act on false confidence. Attach a status field — <code>complete</code>, <code>partial</code>, or <code>blocked</code> — to the result envelope, and require downstream consumers to branch on it. In a multi-agent pipeline, that field travels with the handoff; a subagent must not strip the uncertainty marker when it writes its summary.</p>
+
+<div class="note">Degradation is a product decision as much as a technical one. Decide in advance which capabilities are essential and which are optional. If a feature cannot be safely offered without a given service, it should fail closed; if it can, it should fail open with a visible caveat.</div>
+
+<h2>Designing a Recovery Policy</h2>
+
+<p>A recovery policy answers the questions above before runtime. Keeping it outside the prompt makes it testable and reviewable:</p>
+
+<pre><code>retry:
+  max_attempts: 3
+  backoff_ms: [200, 400, 800]
+  jitter: 0.25
+  only_if: [retryable_flag, idempotent, budget_remaining]
+escalate_after: 3_failed_steps_or_8000ms
+fallbacks:
+  - live_service
+  - delayed_service
+  - cached_900s
+degraded_output_status: partial
+human_review_if: [confidence &lt; 0.6, any_write_attempt_failed]</code></pre>
+
+<div class="exercise"><strong>Exercise 17.1 — Classify before you fix.</strong> You observe three anomalies in a support agent: (a) the ticket lookup returns HTTP 429 twice; (b) the agent closes a ticket after reading only the first of three linked threads; (c) the process is killed for memory use during a large attachment scan. For each, name the failure class, state whether an identical retry is appropriate, and propose the first recovery action. Explain what signal told you the class.</div>
+
+<div class="exercise"><strong>Exercise 17.2 — Build a fallback chain.</strong> Design a chain for a report generator that normally reads a live metrics warehouse. Specify four rungs, the freshness threshold for each, a total time budget, and the exact status object returned when the chain is exhausted. Then write two tests: one where the first rung fails and the second succeeds, and one where all rungs fail. Explain why the exhausted case must not be reported as an empty-but-successful report.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+  <li>Why does retrying a well-formed call not help when the underlying problem is a reasoning error?</li>
+  <li>Name two signals that reveal a failure even when every individual tool call reports success.</li>
+  <li>Under what three conditions is a retry justified, according to the decision framework in this chapter?</li>
+  <li>What distinguishes a fallback chain from a graceful-degradation path, and why should each rung report its source?</li>
+  <li>Explain why a degraded result needs an explicit status field when it travels between agents.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+  <li>Classify anomalies by source — tool, reasoning, or environment — before choosing a response; the same symptom can require opposite remedies.</li>
+  <li>Detect silent failures through trajectory signals such as repetition, stalled progress, budget drift, and claim/evidence mismatch.</li>
+  <li>Retry only transient, idempotent actions within a remaining budget, using bounded backoff with jitter and a recorded classification.</li>
+  <li>Order fallback chains by fidelity, give them a shared budget, and treat exhaustion as an explicit outcome.</li>
+  <li>Degrade gracefully only with visible labels; unmarked partial answers destroy downstream trust.</li>
+</ul>
+
+<nav><a href="16-state-and-continuity.html">&larr; Previous</a><span></span><a href="18-enforcement-and-oversight.html">Next: Enforcement Layers, Hooks, and Human Oversight &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

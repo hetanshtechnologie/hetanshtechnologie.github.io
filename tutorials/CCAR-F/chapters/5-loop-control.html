@@ -1,0 +1,111 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>5. Stopping, Iterating, and Escalating</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>5. Stopping, Iterating, and Escalating</h1>
+
+<p>A loop without a stopping rule is a defect waiting for an input. The same property that lets an agent adapt — choosing its own next step — also lets it repeat a failed step forever, burn a budget on a question it cannot answer, or declare success prematurely. Control is not an optional safety accessory; it is part of the system's definition. This chapter turns "the loop should stop sensibly" into concrete budgets, conditions, detectors, and handoffs.</p>
+
+<h2>Why an unbounded loop is a defect</h2>
+
+<p>Three things go wrong when autonomy is unbounded. Cost grows without a ceiling: ten iterations at 2,000 tokens each is 20,000 tokens for one task. Latency becomes unpredictable: a request that usually finishes in four steps sometimes takes twenty. And failure becomes ambiguous: if the system never stops, you cannot tell whether it is still working or stuck. A bounded loop converts these into measurable quantities.</p>
+
+<p>Bounds also change behaviour for the better. When a system knows it has eight steps, it tends to use them deliberately; when it believes it has unlimited steps, it explores redundantly. This is why a step budget is not merely a kill switch — it is a resource-allocation decision that shapes the policy. Set it too low and legitimate work is cut off; set it too high and you pay for indecision.</p>
+
+<div class="note"><strong>Where budgets belong.</strong> A budget enforced only by telling the model "stop after eight steps" is a suggestion, not a control. The runtime must count iterations and tokens and refuse further tool calls when a limit is reached. Keep the instruction for the model's planning and the counter for enforcement.</div>
+
+<h2>Step budgets, token budgets, and time limits</h2>
+
+<p>Use at least two independent budgets. A <strong>step budget</strong> limits the number of decide–act iterations; a <strong>token budget</strong> limits total context consumed; a <strong>wall-clock limit</strong> protects latency. They fail differently. A loop can take five steps but 30,000 tokens because one tool returned a huge document; it can also take twenty cheap steps in two seconds. Any single budget leaves a gap.</p>
+
+<table>
+<tr><th>Budget</th><th>Typical starting value</th><th>What it catches</th><th>What it misses</th></tr>
+<tr><td>Steps</td><td>6–12 per task</td><td>Repeated actions, indecision</td><td>Huge single results</td></tr>
+<tr><td>Tokens</td><td>12k–30k per task</td><td>Context bloat, long documents</td><td>Many cheap steps</td></tr>
+<tr><td>Wall clock</td><td>2–30 seconds</td><td>Latency budget breaches</td><td>Cost overruns</td></tr>
+<tr><td>Write actions</td><td>0–3 per task</td><td>Uncontrolled side effects</td><td>Read-only waste</td></tr>
+</table>
+
+<p>Set the values from the requirement, not from habit. If a service must answer within three seconds at the 95th percentile and each model step averages 400 milliseconds, a twelve-step budget already consumes 4.8 seconds before tool time; the budget must be six steps or fewer. If the task is an overnight analysis with a two-minute allowance, twelve steps is generous but reasonable.</p>
+
+<p>Reserve part of the budget for recovery. A common pattern is to cap normal work at eight steps and keep two additional steps exclusively for correcting a detected failure. Without that reserve, the system exhausts its budget on the mistake and has no room to fix it.</p>
+
+<h2>Stop conditions: success, exhaustion, and defeat</h2>
+
+<p>Distinguish three reasons to stop. <strong>Success</strong> means the verification condition is met and the goal is satisfied. <strong>Exhaustion</strong> means the available sources or tools have been tried without finding an answer. <strong>Defeat</strong> means a constraint was violated — a policy denial, an unrecoverable tool error, or a budget hitting zero. Each deserves a different response.</p>
+
+<p>A success condition should be checkable from state, not inferred from tone. "The refund was issued and the confirmation id is recorded" is checkable. "The assistant believes the issue is resolved" is not. Where a check cannot be automated, require a human confirmation before labelling the task complete. This matters especially for write workflows: a tool returning 200 is evidence of an attempt, not proof that the business outcome occurred.</p>
+
+<p>Exhaustion is underused. Agencies often keep searching when every named source has returned nothing, because nothing told them the search space was finite. Give the loop an explicit list of sources and mark them as visited. When all are visited and the goal is unmet, stop and report what was checked. This produces a useful answer instead of a silent timeout.</p>
+
+<div class="exercise"><strong>Exercise 5.1 — Write stop conditions.</strong> For the goal "determine whether vendor V-118 is approved for payments over 10,000 units," list three distinct success conditions, one exhaustion condition based on a finite source list, and two defeat conditions. Then state which condition should trigger a human handoff and which should simply return a negative answer to the user.</div>
+
+<h2>Detecting loops and stalled progress</h2>
+
+<p>A loop is not merely long; it is unproductive repetition. Detection compares the current state to earlier states. Hash the tuple of <code>(tool_name, normalised_arguments, result_digest)</code> after each action. If the same hash appears three times, the system is almost certainly cycling. Normalise arguments so that a timestamp or a reordered key does not hide an identical call.</p>
+
+<p>Progress detection is subtler. Define a progress signal — a new fact added to state, a changed status field, a reduced open-question count. If four consecutive iterations add no new fact, the loop is stalled even if the tool calls differ. Stalled loops often arise from a mismatched tool: the model keeps querying a search endpoint that cannot answer a question requiring arithmetic.</p>
+
+<p>Once a cycle is detected, do not simply increment a counter and continue. Break the pattern deliberately: switch tool, ask the user for clarification, or escalate. Repeating the same action with a slightly different prompt is the classic failure of naive retry logic. The control layer should force a change of strategy, not just a change of wording.</p>
+
+<pre><code>loop_control:
+  max_steps: 8
+  reserve_steps: 2
+  max_tokens: 24000
+  max_wall_clock_ms: 15000
+  max_write_actions: 2
+  cycle_detection:
+    window: 12
+    identical_call_threshold: 3
+    progress_fields: [new_facts, open_questions, status]
+    stall_after_no_progress: 4
+  on_cycle: force_strategy_change
+  on_stall: escalate("no_progress")</code></pre>
+
+<div class="warn"><strong>Failure mode:</strong> a detector that counts only identical tool names. A loop that calls <code>search_docs(q1)</code>, <code>search_docs(q2)</code>, <code>search_docs(q3)</code> with synonyms looks varied but makes no progress. Include result digests and a progress signal, not just call identity.</div>
+
+<h2>Escalation paths and handoff payloads</h2>
+
+<p>Escalation is a controlled transfer of responsibility, not an admission of defeat. There are three common destinations: back to the user for clarification, to a human operator for a decision, and to a different automated component with different capabilities. Each needs a payload that carries enough context to continue without repeating work.</p>
+
+<p>A handoff payload should contain the original goal, the constraint that triggered escalation, the actions already taken, the key observations, the current best hypothesis, and the specific question the recipient must answer. Omitting the last item is the most common mistake — a human receives a transcript and has to infer what is being asked. State the ask explicitly: "Approve a refund of 120 units for ORD-104827; policy limit is 50; evidence attached."</p>
+
+<ol>
+<li>Detect the trigger: budget, policy denial, repeated cycle, or low confidence.</li>
+<li>Freeze state so the run cannot continue in parallel with the handoff.</li>
+<li>Build the payload with goal, actions, evidence, and a single explicit question.</li>
+<li>Route by trigger type — clarification to user, authority to operator, capability to specialist.</li>
+<li>Record the handoff identifier in the trace so the eventual resolution can be linked back.</li>
+</ol>
+
+<p>Escalation thresholds should reflect cost asymmetry. If a wrong answer costs little and a human interruption costs a lot, tolerate more uncertainty before escalating. If a wrong write action is expensive or regulated, escalate early. A refund agent might escalate at any amount above 50 units even when it is 95 percent confident, because the downside of an error is larger than the delay of a question.</p>
+
+<div class="exercise"><strong>Exercise 5.2 — Design an escalation payload.</strong> An agent investigating a failed payment has exhausted six steps, tried two payment APIs and one log source, and found a gateway error code it cannot interpret. Write a JSON handoff payload with at least seven fields, including the trigger, the explicit question, and enough evidence for a human to decide without repeating the searches. Then name one field you would add if the recipient were another agent instead of a person.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why do step, token, and wall-clock budgets need to be independent of one another?</li>
+<li>How does reserving additional steps for recovery change the behaviour of a bounded loop?</li>
+<li>Distinguish success, exhaustion, and defeat as stop conditions with one example each.</li>
+<li>Why is a result digest a better cycle signal than a tool name alone?</li>
+<li>What must a handoff payload contain, and why is an explicit question essential?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Unbounded loops fail on cost, latency, and diagnosability; bounds make behaviour measurable.</li>
+<li>Use step, token, wall-clock, and write-action budgets, with a reserve for recovery.</li>
+<li>Success must be verifiable from state; exhaustion follows a finite source list; defeat follows a constraint breach.</li>
+<li>Detect cycles with normalised call hashes and stalls with a progress signal, then force a strategy change.</li>
+<li>Escalation routes to a user, an operator, or a specialist depending on the trigger type.</li>
+<li>A good handoff carries the goal, actions, evidence, and one explicit question for the recipient.</li>
+</ul>
+
+<nav><a href="4-perceive-reason-act.html">&larr; The Observe–Decide–Act Loop</a><span></span><a href="6-when-workflows-win.html">Next: When a Fixed Workflow Wins &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

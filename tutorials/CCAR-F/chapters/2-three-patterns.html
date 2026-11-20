@@ -1,0 +1,121 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2. Chatbots, Workflows, and Agents</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>2. Chatbots, Workflows, and Agents</h1>
+
+<p>Three systems can use the same model, the same prompt style, and the same interface, yet behave in fundamentally different ways. A support chatbot answers questions. An order workflow routes a request through fixed stages. An agent decides what to do next based on what it observes. Confusing them causes bad designs: autonomy where determinism was needed, or a rigid pipeline where judgement was needed. This chapter supplies the vocabulary.</p>
+
+<h2>Three patterns, one shared vocabulary</h2>
+
+<p>Start with a definition that will be refined later: a <strong>chatbot</strong> is a conversational interface — the model responds to turns and may retrieve information, but the human controls the sequence. A <strong>workflow</strong> is an orchestrated pipeline whose stages and order are fixed by the designer; the model may sit inside one or more stages, but it does not choose the next stage. An <strong>agent</strong> is a system that selects its own next action from a set of available actions, observes the result, and continues until a goal or a limit is reached.</p>
+
+<p>The distinction is about <em>who chooses the next step</em>, not intelligence. A chatbot can be brilliant and still be a chatbot; a workflow can use several models and still be a workflow; an agent can be simple and still be an agent, because its defining property is the loop: perceive, decide, act, observe, repeat.</p>
+
+<table>
+<tr><th>Question</th><th>Chatbot</th><th>Workflow</th><th>Agent</th></tr>
+<tr><td>Who chooses the next step?</td><td>The human, turn by turn</td><td>The designer, in code</td><td>The system, at runtime</td></tr>
+<tr><td>Is the path known in advance?</td><td>Not fixed</td><td>Fixed</td><td>Emergent within bounds</td></tr>
+<tr><td>Can it change the world?</td><td>Usually no</td><td>Yes, through defined stages</td><td>Yes, through selected actions</td></tr>
+<tr><td>Typical failure</td><td>Confident wrong answer</td><td>Brittle edge case</td><td>Wandering or repeated action</td></tr>
+</table>
+
+<div class="note"><strong>Why this matters for selection.</strong> You cannot ask "which pattern is best?" in the abstract. You can ask "who must be allowed to choose the next step, given our constraints?" That reframing turns a preference argument into an engineering decision.</div>
+
+<h2>The conversational interface: turns without a plan</h2>
+
+<p>A chatbot is built around a dialogue loop in which each user message triggers a response. There may be system instructions, retrieved documents, memory of earlier turns, and even a lookup call, but the control flow is simple: wait for input, produce output. The system has no persistent goal that it pursues across turns unless a human keeps restating it.</p>
+
+<p>Consider a product-help assistant: a user asks about shipping, the system retrieves the policy and answers, then the user asks about returns. No stage order is planned; the human supplies it. This fits when the user knows their own intent and the system reduces friction.</p>
+
+<p>The failure mode is ungrounded confidence. Without an external check, a conversational interface can present a plausible but false policy as fact. Mitigations are retrieval with citations, uncertainty language, and handoff when a question falls outside scope. More turns do not improve grounding; connecting to evidence does.</p>
+
+<div class="exercise"><strong>Exercise 2.1 — Classify the control flow.</strong> For each scenario, name the pattern and identify who chooses the next step. (a) A travel assistant answers questions about visa rules and waits for each new question. (b) A claims system runs OCR, validation, fraud scoring, and decision in a fixed order, with a model only in the scoring stage. (c) A diagnostic helper reads error logs, queries a metrics service, edits a config, reruns tests, and stops when tests pass or after eight attempts. Write one sentence of justification per scenario.</div>
+
+<h2>The fixed pipeline: order as a design decision</h2>
+
+<p>A workflow encodes sequence in code. Stage two receives stage one's output; stage three runs only when stage two succeeds. The model is a component, not the conductor. This gives you predictable latency, reproducible behaviour, and straightforward testing — each stage can be evaluated in isolation with fixed fixtures.</p>
+
+<p>Take an invoice processor handling 10,000 documents per day. A pipeline reads the file, extracts fields with a model, validates totals arithmetically, checks the vendor against a master list, and writes a result to a queue; failures go to review. The designer decided all of this in advance, so the same input follows the same route — which matters when an auditor asks why a document was rejected.</p>
+
+<p>The weakness is the long tail. An invoice with a handwritten correction or unfamiliar vendor may fit no branch, so a rigid pipeline fails it or forces it through a mismatched one. The remedy is not to replace the pipeline with an agent but to add an explicit exception path that sends the rare case to a human or to a bounded reasoning stage with its own limits.</p>
+
+<pre><code>pipeline:
+  stages:
+    - id: ingest
+      type: deterministic
+    - id: extract
+      type: model
+      schema: invoice_fields_v3
+    - id: validate
+      type: deterministic
+      rule: "abs(total - sum(line_items)) &lt; 0.01"
+    - id: route
+      type: branch
+      on_failure: review_queue
+  max_stage_retries: 1</code></pre>
+
+<div class="tip">A useful test for a workflow: can you draw its graph on a whiteboard without any runtime data? If yes, you have a workflow. If the graph depends on a model's choice, you have at least one agentic component.</div>
+
+<h2>The agentic loop: choosing actions under uncertainty</h2>
+
+<p>An agent operates when the path cannot be fully specified ahead of time. It is given a goal, a set of tools, and constraints. On each iteration it observes the current state, decides on an action, executes it, and incorporates the observation. The loop continues until the goal is met, a stop condition fires, or a budget is exhausted.</p>
+
+<p>Imagine a support incident: a deployment raised error rates and the on-call helper must find the cause. It cannot know in advance whether to read logs, compare commits, query metrics, or roll back. It checks the spike, sees it began at 14:02, inspects deployments near that time, reads the change, and proposes a rollback. Each step depends on the previous observation — adaptive sequencing in response to evidence.</p>
+
+<p>Agency is expensive in three currencies. Each iteration consumes tokens, takes wall-clock time, and adds a chance of a poor decision. Four iterations at roughly 1,800 tokens each plus tool payloads can easily reach 12,000 tokens for a single request. If a deterministic three-step route solves 95 percent of cases, paying agentic costs for all of them is a design error. Reserve the loop for the portion that genuinely needs adaptation.</p>
+
+<div class="warn"><strong>Common failure:</strong> granting an agent write access "just in case" while the goal only requires investigation. Read-only tools let a loop explore safely; write tools turn a wrong decision into an incident. Grant the narrowest capability that can satisfy the goal, and add approval outside the model for irreversible actions.</div>
+
+<h2>The autonomy spectrum is a continuum</h2>
+
+<p>These patterns are not three boxes but positions on a spectrum of delegated choice. At one end the system only responds; at the other it plans and acts across many steps with little supervision. Most production systems sit in the middle, mixing a fixed skeleton with bounded autonomy in selected stages. Scoring a design on several axes makes the position visible.</p>
+
+<table>
+<tr><th>Axis (1 = fixed, 5 = delegated)</th><th>Chatbot</th><th>Workflow</th><th>Agent</th></tr>
+<tr><td>Choice of next step</td><td>1</td><td>2</td><td>5</td></tr>
+<tr><td>Choice of tools</td><td>1</td><td>2</td><td>4</td></tr>
+<tr><td>Ability to modify state</td><td>1</td><td>4</td><td>4</td></tr>
+<tr><td>Replanning after failure</td><td>1</td><td>2</td><td>5</td></tr>
+<tr><td>Predictable latency</td><td>3</td><td>5</td><td>1</td></tr>
+</table>
+
+<p>The agent column is not "best" on every axis. Its low predictability rules it out for high-volume, tight-latency services end to end. A mature design is usually a workflow scored 1–2 with one or two stages scored 4–5 where ambiguity is real.</p>
+
+<div class="exercise"><strong>Exercise 2.2 — Place a hybrid design on the spectrum.</strong> Draw a five-row scoring table for a meeting-notes system that transcribes audio, detects action items with a model, assigns owners by looking up a directory, and posts tasks to a tracker only after a human clicks approve. Score each row from the previous table, then write two sentences explaining which single stage has the most delegated choice and why the approval step changes the risk profile.</div>
+
+<h2>Worked comparison: one request, three implementations</h2>
+
+<p>Suppose a user asks: "Summarise why our Berlin orders are late and suggest a fix." A chatbot retrieves notes and writes a summary: one call, about 900 milliseconds, no live data. A workflow fetches the order table, groups delays by carrier, computes counts in code, and formats the result: two calls and three queries, about 1.4 seconds, reproducible. An agent queries the warehouse API, reads status pages, checks a notifications log, and drafts a fix: six to ten calls, perhaps 9–20 seconds, at variable cost.</p>
+
+<p>Which is right? A quick briefing from known sources needs the chatbot; an auditable monthly report needs the workflow; a genuinely unknown cause requiring live inspection justifies the agent. The requirement decides — that is the point of the comparison.</p>
+
+<p>Write the requirement as a constraint sentence before choosing: "We must produce an auditable breakdown within two seconds using only internal tables." That eliminates the agent and chatbot without debate. If you cannot write such a sentence, the real problem is unclear requirements, not unclear technology.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>What single question separates a chatbot from a workflow from an agent?</li>
+<li>Why does adding retrieval to a chatbot not make it an agent?</li>
+<li>Name one strength and one characteristic failure mode of a fixed pipeline.</li>
+<li>In the incident-response example, why is read-only access a better starting point than write access?</li>
+<li>A service must answer 20,000 requests per day in under one second. Which end of the autonomy spectrum fits, and what cost do you accept?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>The three patterns differ in who chooses the next step: human, designer, or the system at runtime.</li>
+<li>A chatbot is a conversational interface; its main risk is confident but ungrounded output.</li>
+<li>A workflow fixes stage order in code, giving determinism, testability, and brittle long-tail behaviour.</li>
+<li>An agent selects actions adaptively from observations, paying in latency, tokens, and decision risk.</li>
+<li>Autonomy is a continuum; most systems combine a fixed skeleton with bounded autonomy in a few stages.</li>
+<li>Choose the pattern after writing the binding requirement as a constraint sentence, not before.</li>
+</ul>
+
+<nav><a href="1-orientation.html">&larr; How to Use This Book</a><span></span><a href="3-tools-as-foundation.html">Next: Tools as the Basis of Agency &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

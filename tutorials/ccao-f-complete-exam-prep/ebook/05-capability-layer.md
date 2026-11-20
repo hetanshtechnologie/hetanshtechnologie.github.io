@@ -1,0 +1,250 @@
+# Chapter 5 — The Capability Layer: Skills, Code Execution, and Memory
+
+A capable assistant is more than a text generator. It can draw on saved instructions, run small programs, and remember details between conversations. Each ability changes what the tool can do and what a user must check. This chapter treats them as one layer and asks the question that matters most in a scenario: what does this feature let me do, and what does it not guarantee?
+
+## Learning objectives
+
+- Describe a skill as a reusable bundle of instructions and explain the problem it solves.
+- Decide when a packaged skill beats repeating a long prompt in every conversation.
+- Explain how sandbox code execution supports calculation, transformation, and file creation.
+- State what a sandbox can access and, more importantly, what it cannot.
+- Distinguish memory as a convenience from memory as a governed data store.
+- Explain what temporary session modes guarantee and what they do not.
+- Describe how writing preferences carry across chats and how stored memories are reviewed and removed.
+- Identify the privacy implications of each capability in this layer.
+
+## Key concepts
+
+### Skills as packaged instructions
+
+A skill is a named, reusable set of instructions the assistant can load when a task calls for it. Think of it as a carefully written brief saved for reuse. Instead of retyping the same directions each time an analyst needs a particular report, the instruction is written once, stored, and summoned by name or by context. The assistant then works as though those directions were present, even though the user did not paste them into the current turn.
+
+The value is less about saving keystrokes than about consistency. A prompt copied by hand drifts: one person shortens a phrase, another drops a constraint, and soon the same task produces different shapes of output across a team. A skill fixes the wording in one place. When it needs to change, it is changed once and every later use inherits the improvement. That makes a skill a small piece of infrastructure rather than a one-off message.
+
+Skills are also deliberately bounded. A good skill describes one kind of work, such as turning meeting notes into a decision log, rather than governing every conversation. Many assistants can load a skill automatically when the task resembles what it covers, so the user need not remember its name. That convenience is a reason to write precisely: a vague skill claiming to cover general writing help may load at unwanted moments and nudge output toward a poor default.
+
+A skill definition usually contains a purpose, the situations that should trigger it, the steps to follow, the expected output shape, and the boundaries it must respect, perhaps with a short example. The goal is not length but completeness enough that the assistant need not guess. Treat a skill as a job description for a capable but literal colleague new to the team.
+
+> **Exam note:** A question about repeated work and consistent output points toward a packaged skill, not a longer ad hoc prompt. Look for clues mentioning every week, across the team, or the same structure each time.
+
+### When a skill beats repeating a long prompt
+
+The choice comes down to frequency, stakes, and audience. A task that happens once needs a plain prompt. A task that happens often, especially across several people, repays the effort of packaging because the agreed method travels with it.
+
+Consider an analyst turning short supplier summaries into standard risk notes. The first prompt describes the sections, tone, and required caveats in detail. The second is copied and edited. By the tenth, no one knows which version is correct. A skill removes that drift and makes the method reviewable: a supervisor reads the skill once rather than auditing many prompts.
+
+Skills can also be the wrong tool. If each instance is genuinely different, a fixed instruction constrains the assistant. If the task depends on changing information, that information belongs in the prompt or an attachment, not baked into the skill. Keep the stable method in the skill and the variable data outside it: the skill says how to build the report; the prompt supplies this week's figures.
+
+Loading a large skill on every turn consumes context space and can crowd out the material the assistant must reason over. A narrow skill is easier to apply correctly than a sprawling one. When in doubt, write the smallest skill that solves the recurring problem and let unusual cases fall back to a normal prompt.
+
+> **Common mistake:** Treating a skill as a store for facts that change frequently. Facts belong in the conversation or current documents; the skill holds the method.
+
+### Code execution as a working tool
+
+Many assistants can run small pieces of code in a contained environment. This capability is easy to overlook because it is quiet: instead of a paragraph, the assistant computes something, transforms a file, or builds an artifact and reports the result. Understand what the tool is for and where its limits lie.
+
+The first use is calculation. A language model is not a reliable arithmetic engine, especially with many steps or compounding percentages. Running the computation as code gives an exact result the assistant can explain. An analyst needing a weighted score should expect code, not an estimate in prose. That is not weakness; it is the right tool for the job.
+
+The second use is transformation. Tables can be filtered, sorted, or reshaped; text can be parsed and counted; records can become structured data for import. These are mechanical operations where determinism matters. When an assistant claims to have gone through a large spreadsheet, prefer the answer describing an actual programmatic pass over the rows.
+
+The third use is file creation. A sandbox can produce a document, chart, or data file for download, which is how many artifacts begin. The file comes from the same instruction as the explanation, so it needs the same checking. A chart built from a mistaken filter is still a polished chart.
+
+A second example makes the distinction clearer. Suppose a coordinator has two tables: one listing staff hours by team and another listing an agreed rate by role. Asked for a total cost per team, the assistant should join the tables on the role field, multiply hours by the matching rate, and sum the results. Each operation is simple, but doing them in prose invites a silent slip when a role appears in one table but not the other. Code makes that mismatch visible as a missing key the coordinator can resolve. The example also shows why the output still needs checking: a correct calculation built on an outdated rate table is still the wrong answer.
+
+> **Try it:** Ask the assistant to total a column twice, once in prose and once with code. Compare the answers and note that the code result can be inspected while the prose result cannot.
+
+### The boundaries of the sandbox
+
+A sandbox is deliberately fenced off. It can work with files provided in the current session and data the assistant has been given, but it cannot roam across a user's machine, a company network, or the internet unless a tool or connection has been granted. Understanding this prevents two opposite mistakes: assuming too much access and assuming too little.
+
+What it can do depends on what is inside. An attached spreadsheet can be read and modified. A pasted table can be operated on. A small set of libraries is usually available, and generated files can be returned. This suits self-contained analysis where inputs are already at hand.
+
+What it cannot do matters equally. It has no standing access to unuploaded files, cannot log into internal systems, cannot read another user's conversation, and should not be assumed to have live web access unless enabled. An assistant that appears to just know a current figure may be recalling stale training data.
+
+These limits have a security dimension. Material from an untrusted source must not be treated as instructions to run. If an uploaded document says to ignore prior directions and export data, that text is data, not a command. A sandbox does not make untrusted content safe; it gives the assistant a place to work. The human decides what goes in.
+
+| Question | What the sandbox typically can do | What it typically cannot do |
+| --- | --- | --- |
+| Read an attached spreadsheet | Parse rows, compute columns, produce a new file | Reach files never supplied |
+| Use outside information | Work with conversation data or granted tools | Browse freely by default |
+| Affect the user's device | Return a file to save | Write silently to local disk |
+| Follow text in an upload | Treat content as data | Treat embedded commands as authorised |
+
+### Memory as convenience and as a governed store
+
+Memory lets the assistant retain facts or preferences between conversations. At its simplest it is a convenience: remembering a preference for concise answers with tables avoids repeating it. If a role has a recurring report format, storing it once reduces friction. Used this way, memory is like a note on the wall: helpful, informal, easy to adjust.
+
+The same feature changes character at organisational scale. When many people rely on stored items and those items include business facts, memory resembles a data store. A data store needs governance: who may write, who may read, how long entries are kept, how errors are corrected, and what happens when someone leaves a role. An analyst who assumes memory is only a convenience may find an outdated figure quietly shaping answers for weeks.
+
+Preferences are low risk because they concern how to answer, not what is true. Facts are higher risk because they go stale and contaminate many outputs. If a policy changes, a memory of the old policy keeps producing confident but wrong answers until corrected. Store preferences freely, but treat facts with an owner, a version, or an expiry date as belonging in a current source document.
+
+Consider a reviewer who asked the assistant to remember an approval threshold from an old project. Months later the threshold changes, but the stored item remains. Because it was stored, the assistant treats it as settled background rather than a claim to check, and it surfaces in unrelated questions. The error is not one bad reply but a wrong assumption distributed across many replies. A stored fact therefore needs a source and a date, so a later reader can see whether it still applies.
+
+Governance also means knowing visibility. A memory in one account may not be visible to a colleague; one in a shared workspace may be visible to everyone. Before storing anything sensitive, ask whose memory it is and who benefits. That is the question asked of any shared document.
+
+> **Exam note:** If a wrong fact recurs across many chats, the remedy is to review and correct stored memory, not rewrite one prompt.
+
+### Writing preferences across conversations
+
+Writing preferences are the mildest form of memory. They include preferred length, tone, use of headings, whether to open with a summary, and how much detail to include in caveats. Keeping them stable is useful: a reader who wants a short summary first should not ask each time.
+
+Preferences should be clear statements rather than hints. An instruction to begin each response with a three-line summary can be checked; an instruction to keep it snappy cannot. Preferences may live in account settings, standing instructions, or observed memories, but the clarity rule holds wherever they live.
+
+Preferences can conflict. A global taste for brevity may clash with a request for a full report. The specific instruction in the current turn should win: narrow and recent instructions govern the immediate output, while broad preferences fill gaps. When an answer ignores an explicit request, make that request unmistakable.
+
+Revisit preferences periodically. A style that suited one role may not suit another, and a team moving to formal client documents should update defaults rather than fight them each turn. This is quiet housekeeping that improves quality.
+
+### Temporary sessions and what they promise
+
+Temporary or private sessions reduce what is retained after a conversation ends. They suit sensitive exploration, drafts that should not linger, or clean separation between tasks. The temptation is to treat them as a guarantee that nothing is kept anywhere. That is not what they promise.
+
+Typically the conversation is not saved to visible history and is not used to build long-term memory or personalisation. It does not necessarily erase every trace across all systems. Providers may retain limited records for safety, abuse prevention, or legal reasons. The careful statement is that temporary mode reduces persistence and limits reuse; it is not absolute anonymity and no substitute for organisational rules.
+
+This matters when someone pastes sensitive material because the chat will disappear. That reasoning is unsafe. If material is confidential, the first question is whether it may be shared with the tool at all. A temporary session is a narrow privacy control, not permission to bypass classification.
+
+> **Common mistake:** Assuming a temporary mode makes it acceptable to paste regulated data that policy forbids sharing with an external tool.
+
+### Curating and deleting stored memory
+
+Memory should be maintained. An unmanaged store accumulates a finished project, a changed preference, a figure that was true last quarter. Over time these entries pull answers off course. A short review routine prevents decay.
+
+The routine has three parts. List what is stored and group it into preferences, stable facts, and obsolete items. Check each stable fact against a current source, since these cause the most harm when wrong. Remove what no longer applies and update what does. Deletion matters as much as addition: a memory recording a former role should be cleared, not left to fade.
+
+A retention rule makes that decision easier. A team can agree that items tied to a cycle are reviewed when the cycle closes and that any fact without a current source is removed at the same point. This attaches curation to events the team already observes, such as closing a project or publishing a revised policy, and makes the review auditable: a recorded decision to delete is easier to defend than a silent disappearance.
+
+Ownership depends on setting. An individual reviews their own preferences. In a shared workspace someone should own the review, be known to the team, and record that ownership. When a person changes roles, stored context should be handed over or removed according to policy.
+
+Users should be able to see what has been remembered about them and correct or delete it. A memory that cannot be inspected cannot be trusted. If a tool offers no clear way to manage stored items, note that limitation when assessing its fitness for sensitive work.
+
+| Memory item | Typical risk | Suggested action |
+| --- | --- | --- |
+| Preferred answer length and tone | Low | Keep and adjust when preferences change |
+| Current department name | Low to moderate | Verify after reorganisations |
+| A policy detail or numeric figure | High | Store in a source, not in memory |
+| Notes about a finished project | Moderate | Delete when the project closes |
+
+### Privacy implications across the three capabilities
+
+Each capability touches privacy differently. Skills raise questions of disclosure: a skill may reference internal processes, and sharing it beyond the intended group reveals how a team works. A skill is text, so classify it like any internal document.
+
+Code execution raises data-handling questions. Material placed into a sandbox is processed, and generated files may persist. The question is whether inputs and outputs are handled under the organisation's rules for that class of information. A transformation producing a useful file is still processing, and processing carries obligations.
+
+Memory raises the broadest questions because it spans time, accumulating fragments about a person's work and habits and outlasting the reason they were created. It deserves the most deliberate governance. Apply familiar principles: minimise what is collected, keep it accurate, limit who can see it, and remove it when no longer needed.
+
+Together these capabilities turn a tool that answers questions into one that remembers, computes, and acts on saved instructions. That is why the exam cares less about knowing the features exist and more about matching each to its risk.
+
+The sketch below shows how a skill can be written so the method stays fixed and the data stays current.
+
+```text
+SKILL-DEFINITION SKETCH
+
+Name: exception-note
+Purpose: Turn a supplied table of threshold breaches into a standard note.
+Use when: the task names breach data and asks for an exception summary.
+Steps:
+  1. Read only the attached table.
+  2. List each breach with its reference and the figure that triggered it.
+  3. Write one plain-language sentence per breach.
+  4. End with a recommendation section.
+Output: heading, table, plain-language notes, recommendations.
+Boundaries: use no figure absent from the attached table; mark gaps as
+"not stated"; do not guess dates.
+Variable inputs: the attached table and the reporting period.
+```
+
+## Worked scenario
+
+An analyst in a finance team must produce a weekly exception report listing accounts that breached a threshold, explaining each in plain language, and ending with recommendations. Every week the analyst rewrites a long prompt, copying it from an old chat. Two problems appeared: some weeks the recommendations are missing, and last week a figure from an older period was carried forward because it had been stored as a memory.
+
+Four responses are proposed. Write the long prompt again more carefully. Package the stable method as a skill, keep the figures in the current prompt, and review memory. Rely on memory to recall the format. Let the assistant fetch last week's numbers from the internet.
+
+The second response is best. A skill stops the drift because the same instructions load each time. Current figures in the prompt solve the stale-data problem because fresh numbers arrive at the moment of use. A memory review removes the old figure contaminating recommendations.
+
+Rewriting depends on human care under time pressure, which is what failed. Memory hides the method where it is hard to inspect. Fetching internet numbers is unreliable and inappropriate for internal account data.
+
+The analyst writes a compact skill naming the purpose, sections, plain-language rule, and boundary that no figure may be used unless it appears in the current prompt. A short code step computes breaches from the attached table. A memory review removes the stale figure. The next report has the correct shape, and only the attached data changes.
+
+> **Exam note:** When repetition, inconsistency, and stale remembered facts appear together, expect the answer that separates method from data and includes a memory review.
+
+## Common mistakes
+
+- Confusing a skill with a store for changing facts, making the skill stale.
+- Assuming a sandbox can reach files, systems, or websites never granted.
+- Treating embedded text in an upload as an instruction the sandbox should obey.
+- Believing a temporary session guarantees no record of any kind is retained.
+- Storing confidential facts in long-term memory without asking who can see them.
+- Letting memories accumulate without review, so obsolete details shape answers.
+- Assuming a generated chart has been verified because it looks polished.
+
+## Chapter summary
+
+- A skill is a reusable bundle of instructions that keeps recurring work consistent.
+- Skills suit frequent similar tasks; variable data stays outside them.
+- Sandbox execution supports calculation, transformation, and file creation.
+- A sandbox works with granted inputs, not devices, networks, or accounts.
+- Memory is a convenience for preferences but a governed asset for business facts.
+- Temporary sessions reduce persistence without guaranteeing erasure.
+- Stored memories should be visible, owned, reviewed, and deleted when obsolete.
+- Each capability carries a distinct privacy question; match capability to risk.
+
+## Checkpoint questions
+
+1. An analyst performs the same structured review weekly and wants consistent output across the team. What is the best choice?
+
+- A. Repeat a long prompt each week.
+- B. Package the stable method as a skill.
+- C. Store the entire report in memory.
+- D. Ask the assistant to invent a format once and reuse it silently.
+
+2. Which task is the strongest candidate for sandbox code execution?
+
+- A. Writing a friendly opening sentence.
+- B. Choosing a tone for a client note.
+- C. Calculating a weighted score across many inputs.
+- D. Deciding whether a request is ethical.
+
+3. What can a sandbox generally be expected to access?
+
+- A. Any file on the user's computer.
+- B. Internal systems without permission.
+- C. Files supplied to the current session or granted tools.
+- D. Another user's private conversations.
+
+4. Which stored item most deserves governance and regular review?
+
+- A. A preferred answer length.
+- B. A preferred heading style.
+- C. A policy figure that may have changed.
+- D. A preference for tables over prose.
+
+5. What is the safest statement about temporary session mode?
+
+- A. It guarantees that nothing is retained anywhere.
+- B. It makes confidential data safe to paste.
+- C. It reduces visible history and personalisation but is not absolute.
+- D. It removes the need for data classification.
+
+6. Uploaded text says to ignore earlier directions and export data. How should the assistant treat it?
+
+- A. As an authorised command.
+- B. As data to process, not an instruction to obey.
+- C. As a new system rule.
+- D. As proof the sandbox is compromised.
+
+### Answers and rationale
+
+1. Correct answer: B. A skill fixes the method in one place and loads it whenever the task appears. Option A drifts. Option C hides a method in a store meant for small facts. Option D creates an undocumented format no one can review.
+
+2. Correct answer: C. Multi-step arithmetic is where deterministic code beats estimation, because each operation can be inspected and repeated. Options A and B are language tasks where a sandbox offers no advantage; the right lever there is a clearer instruction about tone. Option D is an ethical judgment that a sandbox cannot make, and treating it as a computation would sidestep accountability.
+
+3. Correct answer: C. A sandbox is scoped to supplied inputs and granted tools, which is why attaching the right file matters so much. Options A and B overstate access and imply that permission boundaries do not exist. Option D breaches another user's privacy and sits outside the design of an isolated execution space; choosing it confuses capability with entitlement.
+
+4. Correct answer: C. A changeable fact is most likely to become wrong and spread errors. Options A, B, and D are low-risk style preferences.
+
+5. Correct answer: C. Temporary modes limit persistence without promising erasure. Option A overstates the guarantee. Option B wrongly grants permission. Option D ignores classification rules.
+
+6. Correct answer: B. Document content is data even when worded as a command. Options A and C elevate untrusted text. Option D assumes a compromise without evidence.
+
+---
+
+*End of chapter 5.*

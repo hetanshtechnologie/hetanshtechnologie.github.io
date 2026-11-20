@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 9 — Model Behaviour, Tokens, Context, and Cost</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f5f3ef;color:#24211d;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(60,50,40,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#9a5b2e;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#7c3a12;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#5d5148;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#8a7c70}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9a8f85;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#7c3a12}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #d97745;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#a2471b}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#6b2f0f}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #e3cfbe;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#7c3a12;color:#fff;font-weight:600}
+td{background:#fffaf6}
+pre{background:#251c17;color:#f4e6d8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#f5e4d7;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#7c3a12}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#fff4e8;border-left:4px solid #d97745;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#a2471b}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #e3cfbe;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#7c3a12;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #eee2d6}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#a2471b;text-decoration:none;display:inline-block;margin-bottom:16px}
+.site-brand{display:inline-block;margin-bottom:8px;line-height:0}
+.site-brand img{height:90px;width:auto;border-radius:10px;object-fit:contain}
+.callout{background:#fff4e8;border-left:4px solid #d97745;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#8a7c70;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand,.site-brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+<a class="site-brand" href="../../../"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1 id="chapter-9-model-behaviour-tokens-context-and-cost">Chapter 9 — Model Behaviour, Tokens, Context, and Cost</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Describe, in plain language, how a language model turns a prompt into a stream of tokens and why two identical requests can produce different answers.</li>
+<li>Explain what extended reasoning buys you, and recognize the workloads where its extra latency and spend are justified.</li>
+<li>Identify the engineering pieces that sit around a model call — queues, caches, timeouts, and fallbacks — and name the failure each one addresses.</li>
+<li>Compare capable, balanced, and fast model tiers against workload requirements instead of against a leaderboard.</li>
+<li>Budget a context window deliberately, leaving room for instructions, history, retrieved material, tool output, and the answer itself.</li>
+<li>Estimate spend from prompt and output token counts, and apply caching and batch discounts where they genuinely help.</li>
+<li>Distinguish low-latency modes from ordinary calls and list the trade-offs each one introduces.</li>
+<li>Judge a design by cost per successful task rather than cost per call.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="what-happens-between-a-prompt-and-an-answer">What happens between a prompt and an answer</h3>
+<p>It helps to stop thinking of a model as a database that looks up a fact and start thinking of it as a very large prediction machine. Your prompt is converted into small units called tokens. A token might be a whole short word, a piece of a longer word, a punctuation mark, or a space before a word. The model does not see letters; it sees a sequence of token identifiers.</p>
+<p>Given that sequence, the model produces a probability distribution over every token it knows. That distribution is a ranked guess at what comes next. One token is selected, appended to the sequence, and the process repeats. The answer you read is the accumulated result of thousands of these small decisions. Nothing in the loop consults a table of correct answers. Each step is a guess conditioned on everything that came before it, which is why the wording of your prompt matters so much: it shapes the probability distribution at every subsequent step.</p>
+<p>Two consequences follow immediately. First, output arrives incrementally. Because generation is sequential, a system can stream tokens to a user as they are produced, which improves perceived responsiveness even when total time is unchanged. Second, output length is a cost decision as well as a quality decision. A verbose answer consumes more of the window and more of the budget, because every generated token is another forward pass through the model.</p>
+<p>A subtle point that exam questions like to probe: the model predicts the next token, not the next character, and not the whole sentence at once. Token boundaries explain odd behaviours such as a model struggling to spell a word backwards or counting letters in a string. Those tasks are awkward when the unit of processing is a chunk of characters rather than a character. If a requirement depends on exact character manipulation, plan to use code for that step and let the model orchestrate the code, rather than expecting the model to count reliably on its own.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a scenario mentions character-level accuracy, reversals, or exact counting, the strong answer usually moves that work into a deterministic tool. The language model is a predictor over tokens, not a string utility library.</p>
+</blockquote>
+<h3 id="why-identical-requests-do-not-always-give-identical-answers">Why identical requests do not always give identical answers</h3>
+<p>The probability distribution produced at each step is not a command to take the single most likely token. A sampler chooses from the distribution, and the settings that govern that choice are part of the API contract on most platforms. At one extreme, the sampler always takes the top token; this is often described as greedy or temperature-zero behaviour. At the other extreme, it draws more freely from the higher-probability tokens, producing more varied output. A setting commonly called temperature rescales the distribution before sampling, and a setting often called top-p or nucleus sampling truncates the distribution to a cumulative probability mass before drawing.</p>
+<p>Nondeterminism therefore has two sources. One is sampling itself: even with identical input, a randomized draw can select different tokens when the distribution has several plausible candidates. The other is infrastructure: models are served by fleets of machines, routing can change, and backend improvements can alter behaviour over time. A platform may document that a given setting offers <em>best-effort</em> reproducibility rather than a guarantee, because hidden state and serving details are outside your control.</p>
+<p>This matters for engineering in a very practical way. If your test suite asserts that two runs return byte-identical prose, it will be flaky by design. Assert on properties instead: valid JSON, correct category, required fields present, tone within a defined range, or a fact drawn from the supplied source. Where an application truly needs stable output, reduce sampling randomness, keep prompts fixed, and pin model versions where the platform allows it. Even then, design for variation rather than assuming it has been eliminated.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating temperature-zero as a promise of reproducibility. It reduces randomness in the sampling step; it does not freeze the serving environment or the model version.</p>
+</blockquote>
+<h3 id="thinking-modes-and-extended-reasoning">Thinking modes and extended reasoning</h3>
+<p>Some models expose a mode in which they spend extra computation before answering. Rather than producing the answer immediately, the model generates a longer internal chain of working — exploring cases, checking arithmetic, reconsidering an assumption — and then returns a distilled result. From your application's perspective this looks like higher latency and higher output-token billing, because those working tokens are part of the response stream even if your user never sees them.</p>
+<p>Extended reasoning pays for itself when the task has structure that rewards intermediate work. Multi-step arithmetic, constraint satisfaction, diagnosis from several weak signals, careful comparison of two long documents, and planning under conflicting requirements are good candidates. The extra working gives the model more opportunities to catch an early mistake before it commits to an answer. In these cases the cost of a wrong answer — a bad clinical suggestion, an incorrect financial figure, a failed deployment — dwarfs the cost of the extra tokens.</p>
+<p>It does not pay for itself when the task is a direct lookup, a simple classification, a short rewrite, or an extraction where the answer is explicitly present in the input. On those workloads the additional computation mostly generates confidence about an already easy decision. If a one-line label is all you need, a thinking mode that produces a thousand working tokens is a poor trade: slower for the user, more expensive per request, and no measurable accuracy gain.</p>
+<p>A useful mental test is to ask what a careful human would need to do. If a careful human would pause, write down intermediate values, and check a few cases, extended reasoning is worth trying. If a careful human would glance and answer, it probably is not. Confirm with a small evaluation set: run the same examples with and without the thinking mode, compare accuracy, and compare latency at the tail rather than the average.</p>
+<table>
+<thead>
+<tr>
+<th>Workload</th>
+<th>Extended reasoning likely worth it?</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Label a support message as billing or technical</td>
+<td>No</td>
+<td>Direct pattern match; no intermediate steps needed</td>
+</tr>
+<tr>
+<td>Summarize a contract clause in one paragraph</td>
+<td>Usually no</td>
+<td>Compression task, not a reasoning task</td>
+</tr>
+<tr>
+<td>Reconcile totals across three inconsistent tables</td>
+<td>Yes</td>
+<td>Requires intermediate arithmetic and cross-checks</td>
+</tr>
+<tr>
+<td>Decide whether a migration plan violates two policies</td>
+<td>Yes</td>
+<td>Conflicting constraints benefit from explicit checking</td>
+</tr>
+<tr>
+<td>Rewrite a sentence in a friendlier tone</td>
+<td>No</td>
+<td>Style transformation, low error cost</td>
+</tr>
+<tr>
+<td>Diagnose intermittent failures from sparse logs</td>
+<td>Sometimes</td>
+<td>Helps if evidence must be combined; test it first</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Try it:</strong> Pick twenty examples from your own workload. Run them twice, varying only the reasoning mode. Record accuracy and the ninety-fifth-percentile latency. If accuracy is unchanged and latency doubles, you have measured a decision, not guessed at one.</p>
+</blockquote>
+<h3 id="the-engineering-layer-around-the-model">The engineering layer around the model</h3>
+<p>A model call is only one component in a production request. The behaviour your users experience is shaped by the machinery surrounding it, and exam scenarios often test whether you can name the right piece for the right failure.</p>
+<p>A <strong>queue</strong> smooths bursts. If traffic arrives in spikes and the upstream service has a rate limit, enqueueing requests and draining them at a controlled rate avoids rejections. Queues also buy you a place to record work that has not yet been attempted, which helps with retries. The cost is waiting time, so a queue is a poor fit for an interactive path where the user is staring at a spinner.</p>
+<p>A <strong>cache</strong> avoids repeating work. If the same instruction prefix, the same reference document, or the same classification question appears many times, storing the result or the reusable prefix saves both tokens and time. Caches help most when inputs repeat; they do nothing for unique requests. They also introduce staleness, so you need a policy for expiry and invalidation when the underlying document changes.</p>
+<p>A <strong>timeout</strong> bounds the damage from a slow call. Without one, a single hung request holds a connection, a worker, and possibly a user's attention indefinitely. Timeouts should be set from the latency budget of the whole workflow, not copied from a default. A short timeout on a slow but necessary call will manufacture failures; a long timeout on a fast path will let a bad dependency degrade every request.</p>
+<p>A <strong>fallback</strong> defines what happens when the primary path fails. The most common pattern is to retry a transient error, then try a smaller or faster tier, then return a safe degraded answer or a clear refusal to guess. A fallback is only useful if it is actually cheaper or more available than the primary path; falling back from one overloaded capable tier to another overloaded capable tier changes nothing.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Failure it addresses</th>
+<th>Cost of adding it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Queue</td>
+<td>Bursts, rate limits, lost work</td>
+<td>Added wait time and operational state</td>
+</tr>
+<tr>
+<td>Cache</td>
+<td>Repeated identical work</td>
+<td>Staleness and invalidation logic</td>
+</tr>
+<tr>
+<td>Timeout</td>
+<td>Hung calls consuming resources</td>
+<td>Abandoned work if set too aggressively</td>
+</tr>
+<tr>
+<td>Fallback</td>
+<td>Temporary unavailability or over-budget calls</td>
+<td>Complexity and possible quality drop</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Exam note:</strong> If a scenario describes a sudden traffic spike causing rate-limit errors on an asynchronous batch job, a queue is the direct answer. If it describes a user-facing assistant that must answer within two seconds, a queue before the call is usually the wrong answer because it adds latency.</p>
+</blockquote>
+<h3 id="choosing-among-capable-balanced-and-fast-tiers">Choosing among capable, balanced, and fast tiers</h3>
+<p>Model selection is a requirements exercise, not a prestige exercise. Vendors typically expose a family of models trading capability against speed and price. Rather than memorizing model names, classify them by what they are good at and match that to the workload.</p>
+<p>The <strong>capable tier</strong> is the strongest general reasoner. It handles ambiguity, long chains of dependencies, and subtle instruction following best. It is also the slowest and most expensive option, and it may be unnecessary for narrow tasks. Choose it when the error cost is high or when a simpler tier has demonstrably failed on your evaluation set.</p>
+<p>The <strong>fast tier</strong> is optimized for low latency and low unit cost. It excels at short, well-specified transformations: classification, extraction of an obvious field, reformatting, and quick drafts. Its weakness is complex reasoning and long, noisy contexts, where it may miss a constraint buried in the middle of a prompt. Choose it when the task is simple, volume is high, and mistakes are cheap and easy to detect downstream.</p>
+<p>The <strong>balanced tier</strong> sits between them and is the sensible default for many products. It provides enough reasoning for moderate complexity without the full cost of the top tier. When you do not yet know what a workload needs, start here, collect measurements, then move up or down with evidence.</p>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Fast tier</th>
+<th>Balanced tier</th>
+<th>Capable tier</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Best-fit tasks</td>
+<td>Classification, extraction, reformatting, short drafts</td>
+<td>Summaries, moderate analysis, customer-facing answers</td>
+<td>Multi-step reasoning, ambiguous policy calls, complex code review</td>
+</tr>
+<tr>
+<td>Relative latency</td>
+<td>Lowest</td>
+<td>Moderate</td>
+<td>Highest</td>
+</tr>
+<tr>
+<td>Relative price per token</td>
+<td>Lowest</td>
+<td>Middle</td>
+<td>Highest</td>
+</tr>
+<tr>
+<td>Tolerance for long, noisy context</td>
+<td>Limited</td>
+<td>Moderate</td>
+<td>Best</td>
+</tr>
+<tr>
+<td>Instruction-following precision</td>
+<td>Good for short instructions</td>
+<td>Good for mixed instructions</td>
+<td>Best for dense, conflicting constraints</td>
+</tr>
+<tr>
+<td>Extended reasoning support</td>
+<td>Often limited or absent</td>
+<td>Usually available</td>
+<td>Usually strongest</td>
+</tr>
+<tr>
+<td>Typical failure mode</td>
+<td>Misses a buried constraint</td>
+<td>Occasional shallow reasoning</td>
+<td>Overkill cost and slow tail latency</td>
+</tr>
+<tr>
+<td>Good default?</td>
+<td>Only for narrow, high-volume tasks</td>
+<td>Yes, until measurements say otherwise</td>
+<td>No, unless error cost is high</td>
+</tr>
+</tbody>
+</table>
+<p>Two practical rules follow. First, select on the <em>hardest common case</em>, not the average request. A tier that handles 90 percent of inputs but fails on the ten percent that matter to the business is the wrong tier. Second, selection is reversible. Route simple requests down and hard requests up, using a cheap classifier or an explicit signal from the caller. A mixed routing policy often beats a single global choice.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Picking the capable tier for everything because quality is "more important than cost." At high volume that decision dominates the bill, and it does not fix a poorly written prompt. Fix the prompt, measure, then decide whether the tier is still the constraint.</p>
+</blockquote>
+<h3 id="context-windows-and-token-budgeting">Context windows and token budgeting</h3>
+<p>The context window is the total number of tokens the model can consider in one request. It includes your system instructions, the conversation so far, retrieved documents, tool definitions, tool results, and the tokens reserved for the answer. It is a single shared budget, not a separate allowance for input and output. If you fill it with source material, you squeeze out room for the response, and the response may be cut off mid-sentence.</p>
+<p>Budgeting means assigning an allowance to each component before you write code. Instructions are usually small and stable, which makes them good candidates for caching. Conversation history grows without bound unless you truncate or summarize it. Retrieved documents are typically the largest and most variable part, and they deserve the tightest controls. Tool definitions are fixed overhead per request; if you expose twenty tools when the task needs three, you pay for seventeen definitions on every call. Output reservation is the part people forget: decide up front that the answer may take two thousand tokens, and never let the input crowd that out.</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>How to control it</th>
+<th>Typical risk if ignored</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>System instructions</td>
+<td>Keep concise; place stable prefix first</td>
+<td>Eats budget, harder to cache if edited often</td>
+</tr>
+<tr>
+<td>Few-shot examples</td>
+<td>Use the fewest that cover the pattern</td>
+<td>Redundant examples crowd out real input</td>
+</tr>
+<tr>
+<td>Conversation history</td>
+<td>Window it, or summarize older turns</td>
+<td>Unbounded growth; late instructions drown in early text</td>
+</tr>
+<tr>
+<td>Retrieved documents</td>
+<td>Rank, deduplicate, cap per document</td>
+<td>Relevant passage pushed out by padding</td>
+</tr>
+<tr>
+<td>Tool definitions and outputs</td>
+<td>Expose only relevant tools; trim verbose results</td>
+<td>Fixed overhead on every request</td>
+</tr>
+<tr>
+<td>Reserved output</td>
+<td>Set a maximum and subtract from the input budget</td>
+<td>Truncated answers and lost structure</td>
+</tr>
+<tr>
+<td>Safety margin</td>
+<td>Leave a small unused buffer</td>
+<td>Off-by-one overflow when token counts are estimates</td>
+</tr>
+</tbody>
+</table>
+<p>Token counting is approximate before the call, because tokenization depends on the exact characters and the model's vocabulary. Count with the tokenizer that matches the chosen model where possible, and treat the result as an estimate with a small buffer. On platforms that report usage after the call, feed those numbers back into your monitoring so the estimate can be calibrated against reality.</p>
+<p>Order also matters within the window. Many systems give special weight to material near the beginning and the end, while long middles are easier to overlook. Put the durable rules first, the task statement near the end, and the bulk of reference material between them. This is not a law of physics, but it is a useful default that also makes prompts easier for humans to review.</p>
+<blockquote>
+<p><strong>Exam note:</strong> If a scenario says a long document causes the answer to omit a requirement that appeared in the middle, the fix is context engineering — reorder, compress, or retrieve the relevant passage — not switching to a more expensive model as a first move.</p>
+</blockquote>
+<h3 id="caching-and-batch-discounts">Caching and batch discounts</h3>
+<p>Two mechanisms can reduce spend without changing the answer, provided your workload has the right shape.</p>
+<p><strong>Prompt caching</strong> reuses a prefix that is identical across many calls. You structure the request so the stable part — a long instruction block, a reference manual, a shared set of examples — comes first, and the variable part comes last. The platform stores the processed prefix and charges less for reading it again. To benefit, the prefix must be byte-for-byte stable, long enough that the saving matters, and reused before the cache entry expires. A timestamp or a random identifier at the start of the prefix destroys the benefit instantly. When the reference document changes, the cache key changes, so update deliberately rather than on every request.</p>
+<p><strong>Batch processing</strong> trades time for money. Instead of sending requests one at a time, you submit a file or collection, the provider runs them when capacity allows, and results arrive later at a reduced rate. The discount is real but the latency is unbounded from your application's point of view. Batch is excellent for nightly classification of archived messages, bulk summarization, and backfills. It is wrong for anything a user is waiting on.</p>
+<p>These mechanisms compose. A nightly job can use a cached reference prefix and a batch endpoint at the same time. An interactive assistant can use a cached prefix but cannot use batch. A high-volume classifier with unique short inputs may benefit from neither, which is a useful finding: it tells you to reduce token count or move to a cheaper tier rather than hoping a discount will arrive.</p>
+<table>
+<thead>
+<tr>
+<th>Technique</th>
+<th>Requires</th>
+<th>Saves</th>
+<th>Does not help when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Prompt caching</td>
+<td>Long identical prefix, repeated calls</td>
+<td>Repeated input tokens</td>
+<td>Every prompt is unique or the prefix changes constantly</td>
+</tr>
+<tr>
+<td>Batch endpoint</td>
+<td>Tolerance for delayed results</td>
+<td>A percentage of each token charge</td>
+<td>A user is waiting for the response</td>
+</tr>
+<tr>
+<td>Shorter prompts</td>
+<td>Editing discipline</td>
+<td>Input tokens on every call</td>
+<td>Needed context is genuinely large</td>
+</tr>
+<tr>
+<td>Output limits</td>
+<td>Clear answer contract</td>
+<td>Output tokens</td>
+<td>Answers are naturally long and required</td>
+</tr>
+</tbody>
+</table>
+<h3 id="low-latency-modes-and-their-trade-offs">Low-latency modes and their trade-offs</h3>
+<p>Some platforms offer a mode optimized for time to first token. The usual implementation runs a smaller, faster model for the initial part of the response and hands off to a larger model for later tokens, or applies a latency-focused serving path. From the outside the experience feels snappier, which matters for conversational products where a pause of a second is noticeable.</p>
+<p>The trade-offs are worth stating explicitly. A fast opening does not guarantee a fast whole answer; total completion time may be close to that of a standard call. The handoff can introduce a slight stylistic shift partway through the response. Some modes restrict features such as extended reasoning, large contexts, or certain tool behaviours, and eligibility may depend on the request shape. If your request does not qualify, the platform may route it to the standard path, so you cannot assume the latency benefit in every case.</p>
+<p>Use low-latency modes when the user is waiting and the task is conversational or lightweight. Avoid them when the answer must be correct on a first pass under difficult constraints, when you rely on a feature the mode excludes, or when your measurement shows that time to last token has not improved. Measure both time to first token and time to completion; optimizing only the first number can produce a product that starts quickly and finishes slowly.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Assuming that a low-latency mode is just a cheaper version of the standard model. It is a different serving strategy with feature restrictions, and it must be tested against the actual request shape.</p>
+</blockquote>
+<h3 id="measuring-cost-per-successful-task">Measuring cost per successful task</h3>
+<p>Cost per call is a misleading metric. A cheap call that returns unusable output and needs two retries is more expensive than a costly call that succeeds once. A fast tier that misclassifies seven percent of inputs may create a manual-review queue that costs far more than the tokens saved. The unit that matters is cost per successful task, where a successful task is one that meets the acceptance criteria of the workflow.</p>
+<p>The calculation is simple in form. Estimate the expected cost of one attempt, then divide by the probability that the attempt succeeds. If retries are possible, include the expected number of attempts and the cost of any downstream verification. Then compare that figure across designs, including the human time spent correcting mistakes. The tier with the lowest sticker price often loses once rework is counted.</p>
+<pre><code class="language-python">from dataclasses import dataclass
+
+@dataclass
+class PriceCard:
+    name: str
+    input_per_mtok: float
+    output_per_mtok: float
+    cached_input_per_mtok: float
+    batch_multiplier: float = 1.0
+
+# Illustrative placeholder rates, not published prices.
+CARDS = {
+    &quot;fast&quot;:     PriceCard(&quot;fast&quot;,     0.25,  1.25, 0.03, 0.50),
+    &quot;balanced&quot;: PriceCard(&quot;balanced&quot;, 3.00, 15.00, 0.30, 0.50),
+    &quot;capable&quot;:  PriceCard(&quot;capable&quot;, 15.00, 75.00, 1.50, 0.50),
+}
+
+def call_cost(card, input_tokens, output_tokens,
+              cached_tokens=0, batch=False):
+    fresh = max(0, input_tokens - cached_tokens)
+    total = (fresh / 1_000_000) * card.input_per_mtok
+    total += (cached_tokens / 1_000_000) * card.cached_input_per_mtok
+    total += (output_tokens / 1_000_000) * card.output_per_mtok
+    return total * card.batch_multiplier if batch else total
+
+def cost_per_success(cost_per_attempt, success_rate,
+                     max_attempts=1, review_cost=0.0):
+    # Expected spend across bounded retries, then amortized over successes.
+    expected_spend = 0.0
+    still_needed = 1.0
+    for _ in range(max_attempts):
+        attempts = still_needed
+        expected_spend += attempts * (cost_per_attempt + review_cost)
+        still_needed *= (1.0 - success_rate)
+    return expected_spend
+
+for tier in CARDS:
+    per_call = call_cost(CARDS[tier], 900, 40, cached_tokens=700)
+    print(tier, round(per_call, 6),
+          round(cost_per_success(per_call, 0.93, 1, 0.00005), 6))
+</code></pre>
+<p>Read the output as a comparison of designs, not as a real quote. The fast tier may have the lowest per-call number, but if its success rate is lower than the balanced tier's, the two columns can reorder. That reordering is the whole point of the exercise.</p>
+<p>A complete evaluation also tracks latency at the ninety-fifth percentile, because tail latency determines whether users abandon a request, and tracks the rate of silent failures — answers that look plausible but are wrong. Silent failures are the expensive ones, since they pass without triggering a retry and surface later as bad data.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a question offers a choice between "reduce tokens per call" and "route failures to a stronger model," check the volume and the error cost. High-volume, low-stakes work usually rewards the first; low-volume, high-stakes work rewards the second.</p>
+</blockquote>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A team runs an internal service that labels incoming feedback messages as one of four categories. Volume is about 200,000 messages per month. The labels feed a dashboard, not an automated action, and a mislabeled message is corrected by an analyst during a weekly review. There is no user waiting on an individual result. The current design sends every message to the capable tier with a long instruction block and extended reasoning enabled. The monthly bill is high, and a proposal on the table is to negotiate a larger discount.</p>
+<p>The first step is to describe the task honestly. It is a four-way classification with a short input, a stable instruction, and a cheap, detectable error. There are no multi-step dependencies, no arithmetic, and no conflicting constraints. That description immediately weakens the case for extended reasoning and for the capable tier. The dashboard use case also removes the latency constraint: since nobody waits, a batch endpoint is available.</p>
+<p>The second step is to measure quality rather than assume it. The team takes 500 labelled messages, representative of the real distribution, and runs three configurations: capable tier with reasoning, balanced tier without reasoning, and fast tier without reasoning. They score accuracy and inspect the confusion matrix. The capable and balanced tiers are within a fraction of a point of each other. The fast tier trails by two points, concentrated in one ambiguous category where the distinction depends on a policy nuance.</p>
+<p>The third step is to look at the cost model. The instruction block is identical for all 200,000 calls, so placing it first makes it cacheable. Because the work is asynchronous, batch pricing applies. Combining a cached prefix with batch submission removes the two largest avoidable charges. Output is a single label, so an output cap prevents accidental essays.</p>
+<p>The fourth step is to consider routing instead of a single global choice. Most messages are unambiguous; a small subset mentions the policy nuance. A cheap rule identifies that subset and sends only those to the balanced tier, while the rest go to the fast tier. The review queue receives the ambiguous subset automatically, which also gives the team fresh labelled examples for future evaluations.</p>
+<p>The resolution is a layered decision. Use the fast tier as the default, with a cached instruction prefix and batch submission. Route the small ambiguous slice to the balanced tier. Drop extended reasoning entirely, since measurement showed no gain. Keep a small human review loop, and log token usage and accuracy by route so the choice can be revisited with data. The team does not need a discount negotiation; it needs a design that matches a low-stakes, high-volume task to the cheapest tier that meets an explicitly measured accuracy bar.</p>
+<blockquote>
+<p><strong>Exam note:</strong> The reasoning pattern to reuse is: describe the task, measure tier quality on representative examples, apply structural savings such as caching and batch, then route exceptions. Reaching straight for a discount or a bigger model skips the steps that actually matter.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Choosing a model by reputation instead of by workload requirements and measured accuracy.</li>
+<li>Treating temperature-zero as a guarantee of identical output across time and infrastructure.</li>
+<li>Enabling extended reasoning for simple classification or extraction tasks, paying for tokens that buy nothing.</li>
+<li>Forgetting that the context window is shared, so a large input leaves no room for the answer.</li>
+<li>Building a prompt prefix that changes slightly on every call and then wondering why caching never helps.</li>
+<li>Using a batch endpoint on a request path where a user is waiting.</li>
+<li>Claiming a latency mode improves total completion time without measuring it.</li>
+<li>Comparing cost per call across tiers instead of comparing cost per successful task.</li>
+<li>Setting a timeout from a default value rather than from the workflow's latency budget.</li>
+<li>Adding a fallback that points to an equally overloaded service and calling it resilience.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>A model predicts one token at a time from a probability distribution; token boundaries explain several of its quirks.</li>
+<li>Sampling settings and serving infrastructure make exact reproducibility a best-effort goal, not a guarantee.</li>
+<li>Extended reasoning helps when a task benefits from intermediate checking, and wastes money on direct tasks.</li>
+<li>Queues absorb bursts, caches avoid repeated work, timeouts bound slow calls, and fallbacks define graceful degradation.</li>
+<li>Model tiers should be matched to task complexity, error cost, and volume; balanced is a reasonable starting default.</li>
+<li>The context window is one shared budget; allocate allowances for instructions, history, retrieved text, tools, and output.</li>
+<li>Caching needs a stable prefix and repetition; batch processing needs tolerance for delay.</li>
+<li>Low-latency modes improve time to first token at the cost of feature restrictions and uncertain total time.</li>
+<li>The meaningful unit of economics is cost per successful task, including retries, review, and silent failures.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A developer sets temperature to zero and expects byte-identical output for the same prompt every time. What is the best correction to that expectation?</li>
+</ol>
+<p>A. Temperature zero disables all randomness in the model itself, so the expectation is correct.
+B. Temperature zero reduces sampling randomness, but serving details and model versions can still change output.
+C. Temperature zero only affects output length, so the expectation was never related to determinism.
+D. Temperature zero guarantees identical tokens only when batch processing is enabled.</p>
+<ol start="2">
+<li>Which workload is the strongest candidate for extended reasoning?</li>
+</ol>
+<p>A. Assigning a one-word category to a short message
+B. Copying a date from a form into a JSON field
+C. Reconciling conflicting totals across several tables under a deadline
+D. Replacing formal wording with friendlier wording</p>
+<ol start="3">
+<li>A nightly job processes 50,000 archived documents, and nobody waits for individual results. Which two savings are most appropriate?</li>
+</ol>
+<p>A. A queue and a low-latency mode
+B. Prompt caching with a stable prefix and a batch endpoint
+C. A shorter timeout and a capable-tier fallback
+D. Extended reasoning and a larger context window</p>
+<ol start="4">
+<li>Why must an output reservation be part of context budgeting?</li>
+</ol>
+<p>A. Because output tokens are billed at a lower rate than input tokens
+B. Because the context window is shared and a full input leaves no room for the answer
+C. Because output tokens are not counted toward usage reporting
+D. Because output length is fixed by the tokenizer regardless of the prompt</p>
+<ol start="5">
+<li>A fast tier is cheaper per call but misclassifies a larger share of inputs, each of which enters a paid review queue. Which metric reveals the problem most clearly?</li>
+</ol>
+<p>A. Cost per successful task
+B. Tokens per second
+C. Number of calls per day
+D. Time to first token</p>
+<ol start="6">
+<li>What is the main requirement for prompt caching to reduce cost?</li>
+</ol>
+<p>A. The request must use extended reasoning.
+B. The output must be short.
+C. A long identical prefix must be reused across calls before the cache expires.
+D. The request must be submitted through a batch endpoint.</p>
+<ol start="7">
+<li>An interactive assistant must feel responsive, and the team wants faster first tokens. What should they measure before declaring success?</li>
+</ol>
+<p>A. Only the vendor's advertised tier name
+B. Both time to first token and time to completion, plus feature availability
+C. Only the number of tokens in the system prompt
+D. Only the cache hit rate</p>
+<ol start="8">
+<li>A user-facing request is failing because traffic spikes exceed a rate limit. Which layer directly addresses this, and what is its main cost?</li>
+</ol>
+<p>A. A batch endpoint; the cost is delayed results
+B. A queue; the cost is added waiting time
+C. Prompt caching; the cost is staleness
+D. A longer timeout; the cost is higher token usage</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> Sampling settings reduce randomness at the selection step, but routing, hardware, and model version changes can still alter output, so platforms describe this as best-effort. A is wrong because it overstates what the setting controls. C is wrong because temperature does influence selection, not just length. D is wrong because batch processing has no bearing on determinism.</p>
+</li>
+<li>
+<p><strong>C.</strong> Reconciliation requires intermediate computation and cross-checking, which is exactly what extended reasoning supports. A and B are direct tasks where the extra work buys little. D is a style transformation with low error cost, so the cheaper path is preferable.</p>
+</li>
+<li>
+<p><strong>B.</strong> A stable prefix makes caching effective, and tolerance for delay makes batch pricing available. A is wrong because a low-latency mode adds no value to an unattended job and a queue is not the main saving. C is wrong because a fallback does not reduce routine cost. D increases cost without a measured need.</p>
+</li>
+<li>
+<p><strong>B.</strong> Input and output share one window, so reserving output space prevents truncation. A is wrong because billing rates do not determine window allocation. C is wrong because output usage is normally reported. D is wrong because output length is not fixed by the tokenizer.</p>
+</li>
+<li>
+<p><strong>A.</strong> Cost per successful task includes the retries and review work caused by errors, exposing a false economy. B and D measure speed, not economics. C is a volume figure that says nothing about efficiency.</p>
+</li>
+<li>
+<p><strong>C.</strong> Caching depends on a reusable, unchanged prefix and a cache entry that has not expired. A is unrelated. B is helpful for cost but not a caching requirement. D is wrong because batch and caching are independent mechanisms.</p>
+</li>
+<li>
+<p><strong>B.</strong> A mode can start quickly yet finish slowly, and it may exclude features the request relies on. A is a label, not evidence. C and D measure only narrow inputs to the decision and cannot establish responsiveness or compatibility.</p>
+</li>
+<li>
+<p><strong>B.</strong> A queue smooths bursts and respects rate limits, at the price of waiting. A is wrong because batch delays results on an interactive path. C addresses repeated work, not spikes. D does not prevent rate-limit rejections and may worsen resource hold time.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 9.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="08-diagnosis-and-evaluations.html">&larr; Previous</a><span></span><a href="10-instructions-and-context.html">Next: Instructions, Examples, and Context Engineering &rarr;</a></nav>
+</div>
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../../tutorials/js/feedback.js"></script>
+<script src="../../../tutorials/js/access.js"></script>
+<script src="../../../tutorials/js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../../tutorials/js/progress.js"></script>
+</body>
+</html>

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 18 — Search Strategies, Reranking, and Retrieval Quality</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 18 — Search Strategies, Reranking, and Retrieval Quality</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Select and combine search strategies to match different query types and information needs.</li>
+    <li>Explain how candidate retrieval, fusion, and reranking work together in multi-stage retrieval pipelines.</li>
+    <li>Apply query transformation and filtering techniques to improve relevance and precision.</li>
+    <li>Measure retrieval quality with appropriate signals and diagnose common failure modes.</li>
+    <li>Balance relevance, latency, cost, and safety when tuning retrieval behavior.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>From query to evidence: the retrieval pipeline</h3>
+  <p>Query-time retrieval transforms a user need into a set of evidence candidates that can support a response. In simple cases, a single search pass may suffice. In more demanding systems, retrieval is a pipeline: interpret or transform the query, retrieve candidates from one or more indexes, filter by constraints, optionally rerank for relevance, and select a final context set for generation. Each stage offers opportunities to improve quality and opportunities to introduce latency or errors. Understanding the pipeline helps architects diagnose whether poor answers stem from missing candidates, poor ranking, irrelevant context selection, or downstream generation behavior.</p>
+  <p>Retrieval goals are often summarized as <strong>recall</strong> and <strong>precision</strong>. Recall asks whether relevant information is found at all; precision asks whether retrieved items are actually useful. Early stages typically prioritize recall—casting a wide enough net to include likely evidence—while later stages improve precision by filtering and ranking. Over-optimizing for one can harm the other: overly narrow retrieval misses key facts, while overly broad retrieval floods the context with noise and increases cost.</p>
+  <p>Query intent matters. A request for a specific identifier favors exact matching; a conceptual question favors semantic similarity; a constrained request may require filtering by product, region, time, or permission. Effective systems adapt strategy to intent rather than applying one method uniformly to all queries.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Treat retrieval as multi-stage when needed: maximize recall for candidates, then improve precision with filtering and reranking before adding context to the prompt.</p>
+  </div>
+
+  <h3>Search strategies: lexical, semantic, and hybrid</h3>
+  <p><strong>Lexical search</strong> matches query terms against indexed text, often using scoring methods that reward term relevance and rarity. It is strong for exact phrases, codes, proper names, and cases where users know the vocabulary in the source. <strong>Semantic search</strong> uses vector similarity to find passages with related meaning, helping when users paraphrase or when relevant content uses different wording. Each has blind spots: lexical search can miss synonyms, while semantic search can overlook exact tokens or return topically related but not specifically relevant passages.</p>
+  <p><strong>Hybrid search</strong> combines lexical and semantic retrieval to cover more query types. Results from different methods can be merged through fusion techniques that balance scores or ranks. Hybrid approaches are common in enterprise settings because user queries vary widely. However, hybrid retrieval introduces tuning decisions: how many candidates to fetch from each source, how to weight methods, and how to handle queries where one method is clearly more appropriate. Without evaluation, added complexity may not yield better outcomes.</p>
+  <p>Structured filtering complements these strategies. Metadata constraints—such as access scope, document type, recency, or language—can be applied before or after candidate retrieval depending on system design. Filtering is essential for correctness and governance, not merely optimization: retrieving unauthorized or obsolete content is a quality failure even if the text seems relevant.</p>
+
+  <table>
+    <tr>
+      <th>Query type</th>
+      <th>Likely strong strategy</th>
+      <th>Helpful complement</th>
+      <th>Common pitfall</th>
+    </tr>
+    <tr>
+      <td>Exact code, ID, or name</td>
+      <td>Lexical/keyword</td>
+      <td>Field filters, exact match boosts</td>
+      <td>Semantic-only search misses literal token</td>
+    </tr>
+    <tr>
+      <td>Conceptual “how/why” question</td>
+      <td>Semantic or hybrid</td>
+      <td>Reranking for answer relevance</td>
+      <td>Retrieving topically similar but unhelpful text</td>
+    </tr>
+    <tr>
+      <td>Policy question in specific domain/version</td>
+      <td>Hybrid + metadata filters</td>
+      <td>Recency/version constraints</td>
+      <td>Ignoring scope and returning outdated policy</td>
+    </tr>
+    <tr>
+      <td>Ambiguous short query</td>
+      <td>Query reformulation + hybrid</td>
+      <td>Clarification or diversified candidates</td>
+      <td>Overconfident retrieval from sparse intent</td>
+    </tr>
+  </table>
+
+  <h3>Query transformation and candidate expansion</h3>
+  <p>User queries are often incomplete, ambiguous, or phrased differently from source documents. Query transformation techniques aim to bridge this gap. <strong>Normalization</strong> handles spelling, casing, or terminology variants. <strong>Expansion</strong> adds related terms or synonyms. <strong>Rewriting</strong> reformulates a query into a clearer or more retrieval-friendly form. <strong>Decomposition</strong> breaks a complex question into subqueries that can be answered from different sources or sections. These techniques can improve recall but must be applied carefully to avoid drifting from the user’s intent.</p>
+  <p>In conversational or multi-step systems, the effective query may need to incorporate relevant context from prior turns—such as the entity being discussed—while excluding irrelevant history. Poorly managed context can cause retrieval to chase outdated topics or include sensitive details unnecessarily. When transformation is model-assisted, it should be evaluated like any other component: helpful rewrites improve evidence quality, but hallucinated or over-specific rewrites can degrade it.</p>
+  <p>Candidate set size is another tuning lever. Retrieving too few candidates risks missing the right evidence; retrieving too many increases reranking cost and can introduce noise. A common pattern is to retrieve a moderately broad set, apply filters, rerank, and pass only the top relevant passages into the generation context. The optimal numbers depend on corpus size, query diversity, and latency budget.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Passing many weakly relevant chunks into the prompt. Excess context can dilute key evidence, increase cost, and lead to confused or unfocused responses.</p>
+  </div>
+
+  <h3>Reranking and final context selection</h3>
+  <p>Initial retrieval methods optimize for efficient search over large indexes, but their top results are not always the best evidence for answering a specific question. <strong>Reranking</strong> applies a more selective relevance assessment to a candidate set, reordering items so the most useful passages appear first. Rerankers may consider query-passage interaction more deeply than first-stage retrieval, improving precision at additional computational cost. Because reranking operates on a limited candidate set, it complements rather than replaces broad retrieval.</p>
+  <p>Final context selection decides what the model will actually see. Selection should consider relevance, diversity, freshness, and token budget. Including multiple near-duplicate chunks wastes space, while including diverse supporting passages can improve completeness. Selection logic may also enforce constraints such as “include at least one authoritative source” or “prefer current version.” Provenance should be preserved so generated answers can cite or reference sources.</p>
+  <p>Reranking and selection policies should be evaluated end to end. A reranker that boosts semantically fluent but factually irrelevant passages can harm groundedness. Likewise, strict filtering that removes all candidates may force the system to answer without evidence unless fallback behavior is defined. Safe fallback options include asking for clarification, broadening search within allowed bounds, or stating that sufficient evidence was not found.</p>
+
+  <pre><code class="language-yaml">retrieval_pipeline:
+  query_stage:
+    normalize: true
+    rewrite: "when_ambiguous"
+    decompose: "for_multi_part_questions"
+  candidate_stage:
+    lexical_top_k: 20
+    semantic_top_k: 20
+    filters: ["access_scope", "language", "current_version"]
+  fusion: "rank_blend"
+  rerank:
+    enabled: true
+    input_candidates: 30
+    output_top_k: 6
+  context_selection:
+    max_chunks: 5
+    prefer: ["high_relevance", "source_diversity", "freshness"]
+  fallback:
+    if_no_evidence: "state_not_found_and_request_clarification"</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> For a set of failed answers, inspect which stage failed: were relevant documents absent from candidates, ranked too low, filtered out, or excluded from final context?</p>
+  </div>
+
+  <h3>Measuring and tuning retrieval quality</h3>
+  <p>Retrieval quality should be measured with representative queries and labeled expectations where feasible. Useful signals include whether relevant sources appear in top results, how highly they rank, whether unauthorized or outdated sources appear, and whether selected context supports correct answers. Offline evaluation with curated query-document pairs helps compare strategies systematically. Online signals—user feedback, reformulation rates, escalation rates, and groundedness outcomes—provide additional evidence but can be noisy.</p>
+  <p>Diagnosis benefits from stage-level instrumentation. Logging query transforms, candidate counts, filter effects, reranker scores, and final selected chunks (with appropriate safeguards) makes it possible to see where evidence was lost. Tuning should be iterative and controlled: changing chunking, embeddings, fusion weights, or reranking together obscures causality. Because improvements on one query class can regress another, evaluations should cover diverse intents and constraints.</p>
+
+  <table>
+    <tr>
+      <th>Symptom</th>
+      <th>Likely cause</th>
+      <th>Investigation</th>
+      <th>Possible adjustment</th>
+    </tr>
+    <tr>
+      <td>Relevant doc never appears</td>
+      <td>Recall or ingestion issue</td>
+      <td>Check index presence, chunking, query terms</td>
+      <td>Improve chunking, hybrid retrieval, query rewrite</td>
+    </tr>
+    <tr>
+      <td>Relevant doc appears low</td>
+      <td>Ranking/reranking weakness</td>
+      <td>Inspect scores and candidate set</td>
+      <td>Tune fusion, add reranker, adjust boosts</td>
+    </tr>
+    <tr>
+      <td>Irrelevant docs dominate</td>
+      <td>Precision/filtering issue</td>
+      <td>Review filters and semantic drift</td>
+      <td>Stronger filters, smaller/noisier candidate set</td>
+    </tr>
+    <tr>
+      <td>Answer uses outdated source</td>
+      <td>Freshness/version handling gap</td>
+      <td>Check metadata and selection rules</td>
+      <td>Version filters, recency preference, freshness fixes</td>
+    </tr>
+  </table>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A product support assistant uses retrieval to answer troubleshooting questions from a large knowledge base. Users report mixed results: queries containing exact error codes sometimes return generic articles, while broad “how do I fix…” questions sometimes miss the most relevant procedure. The system currently relies on semantic search only, retrieves the top ten chunks, and passes all of them into the prompt. Content is tagged by product area and version, but these tags are not consistently applied during retrieval.</p>
+
+  <h3>Analysis</h3>
+  <p>The symptoms indicate mismatched strategy and weak precision controls. Semantic-only search can underperform on exact error codes where lexical matching is strong. Passing ten uncurated chunks may include marginally related content, diluting the signal for generation. Ignoring product and version metadata risks retrieving irrelevant or outdated procedures, especially in a multi-product environment. The system needs better recall for literal queries, better precision in final context, and consistent constraint enforcement.</p>
+  <p>A multi-stage pipeline can address these issues: hybrid candidate retrieval to cover both exact and conceptual queries, metadata filters for product and current version, reranking to prioritize the most useful passages, and tighter final selection to fit the context budget. Evaluation should separately assess error-code queries and conceptual troubleshooting queries to ensure improvements do not trade one class for the other.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect introduces hybrid retrieval with lexical and semantic candidates, then applies mandatory filters for product area and supported version based on request context. A reranker scores the merged candidates, and the top five diverse, high-relevance chunks are selected for generation. Queries containing recognized error-code patterns receive an additional lexical boost. Fallback behavior is defined: if filtered results are insufficient, the assistant requests clarifying details rather than answering from weak evidence.</p>
+  <p>Instrumentation captures candidate sources, filter removals, reranked positions, and final context. Testing on labeled queries shows improved retrieval of exact-code articles and better focus for conceptual questions. Support feedback indicates fewer irrelevant responses and clearer citations. Ongoing tuning uses stage-level metrics to adjust candidate counts and selection rules as the knowledge base evolves.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Using a single search method for all query types despite differing retrieval needs.</li>
+    <li>Skipping metadata filters, leading to irrelevant, unauthorized, or outdated evidence.</li>
+    <li>Treating first-stage ranking as sufficient and overloading the prompt with weak candidates.</li>
+    <li>Applying query rewrites without evaluating whether they preserve user intent.</li>
+    <li>Tuning retrieval without stage-level measurements, making failures hard to diagnose.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Retrieval pipelines balance recall and precision through candidate search, filtering, reranking, and context selection.</li>
+    <li>Lexical, semantic, and hybrid strategies have complementary strengths that should match query intent.</li>
+    <li>Query transformation and metadata constraints can improve relevance but require careful control and evaluation.</li>
+    <li>Reranking and selective context assembly improve evidence quality within latency and token budgets.</li>
+    <li>Stage-level measurement and diagnosis enable targeted tuning and safer fallback behavior.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>What is the primary role of reranking in a retrieval pipeline?</p>
+      <p>A. To replace indexing entirely<br>
+      B. To improve precision by reordering a candidate set for relevance<br>
+      C. To guarantee freshness without metadata<br>
+      D. To increase the number of chunks sent to the prompt</p>
+    </li>
+    <li>
+      <p>Which strategy is most appropriate for a query containing an exact error code?</p>
+      <p>A. Semantic-only search with no lexical matching<br>
+      B. Lexical matching, often complemented by hybrid retrieval and filters<br>
+      C. Random candidate selection<br>
+      D. Ignoring the code and using only topic similarity</p>
+    </li>
+    <li>
+      <p>Why can adding more retrieved chunks reduce answer quality?</p>
+      <p>A. Because context windows never have limits<br>
+      B. Because irrelevant or redundant chunks can dilute key evidence and add noise<br>
+      C. Because reranking requires empty context<br>
+      D. Because filters stop working with large sets</p>
+    </li>
+    <li>
+      <p>What is a benefit of metadata filtering during retrieval?</p>
+      <p>A. It ensures only contextually and policy-appropriate content is considered<br>
+      B. It removes the need for evaluation<br>
+      C. It makes query intent irrelevant<br>
+      D. It guarantees perfect recall</p>
+    </li>
+    <li>
+      <p>A relevant document is indexed but never appears in candidates. What is the best next step?</p>
+      <p>A. Only rewrite the final answer prompt<br>
+      B. Investigate recall issues such as query strategy, chunking, or indexing representation<br>
+      C. Increase generation temperature<br>
+      D. Remove all filters without analysis</p>
+    </li>
+    <li>
+      <p>How should query rewriting be treated in a high-quality system?</p>
+      <p>A. As always correct and exempt from testing<br>
+      B. As a component to evaluate for intent preservation and retrieval impact<br>
+      C. As a replacement for source metadata<br>
+      D. As useful only for lexical search</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Reranking refines candidate ordering to improve relevance of selected evidence. A, C, and D misstate its purpose.</li>
+    <li><strong>Correct: B.</strong> Exact codes favor lexical matching, often strengthened by hybrid methods and constraints. A and D miss literal precision, and C is nonsensical.</li>
+    <li><strong>Correct: B.</strong> Excess or low-quality context can obscure important evidence and increase cost. A, C, and D are incorrect.</li>
+    <li><strong>Correct: A.</strong> Filters enforce relevance and governance constraints such as scope and version. B, C, and D overclaim.</li>
+    <li><strong>Correct: B.</strong> Absence from candidates indicates a recall-side problem to investigate. A and C address the wrong stage, and D may violate constraints.</li>
+    <li><strong>Correct: B.</strong> Rewrites can help or harm and must be evaluated for intent and outcomes. A, C, and D are incorrect assumptions.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 18.</em></p>
+
+  <nav>
+    <a href="17-retrieval-foundations.html">&larr; Previous</a>
+    <a href="19-integration-path-decisions.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

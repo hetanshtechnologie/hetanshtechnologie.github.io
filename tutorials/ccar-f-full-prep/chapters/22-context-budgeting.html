@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 22 — Context Budgeting, Trimming, and Compression</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f2f4f8;color:#1f2937;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(30,41,59,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#4f46e5;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#312e81;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#4b5563;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#6b7280}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9ca3af;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#312e81}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #6366f1;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#4338ca}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#3730a3}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #dbe2f0;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#312e81;color:#fff;font-weight:600}
+td{background:#fafbff}
+pre{background:#1e2233;color:#e8ecf8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#e8e9fb;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#3730a3}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#eef0ff;border-left:4px solid #6366f1;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#4338ca}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #dbe2f0;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#312e81;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #e6eaf5}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#4338ca;text-decoration:none;display:inline-block;margin-bottom:16px}
+.callout{background:#eef0ff;border-left:4px solid #6366f1;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#6b7280;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+
+<div class="chapter">
+  <a class="back" href="../">&larr; Back to the Full Prep Course</a>
+  <h1 id="chapter-22-context-budgeting-trimming-and-compression">Chapter 22 — Context Budgeting, Trimming, and Compression</h1>
+<p>Context is the working memory of an assistant call. It holds everything the model can consider while producing the next answer, and it is finite. When a session grows long, that space fills with instructions, conversation history, retrieved documents, tool results, drafts, and corrections. What gets crowded out is as important as what stays in: a forgotten constraint can derail an otherwise correct piece of work.</p>
+<p>This chapter treats context as an engineering resource with a hard budget. You will learn what consumes it, how to recognise pressure before it causes failures, and how to compress or restructure a session without losing what matters. The exam rewards candidates who think in terms of allocation and retention rather than simply adding more material.</p>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain why the context window is a hard budget shared by every part of a call.</li>
+<li>Identify the main consumers of context and the lifetime of each kind of content.</li>
+<li>Recognise the practical signs that a session is approaching its context limit.</li>
+<li>Compare trimming, summarisation, and compaction as ways to reclaim space.</li>
+<li>Apply a middle-saver strategy that protects early and late material while compressing the middle.</li>
+<li>Choose between restarting, summarising, and persisting facts externally.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="context-as-a-hard-budget">Context as a hard budget</h3>
+<p>Every call to a model has a finite amount of space in which the model can work. That space must hold the system instructions, the user messages, the accumulated history, any documents supplied, the results of tool calls, intermediate reasoning, and room for the answer itself. There is no invisible overflow area. If the content does not fit, something must be removed, truncated, or split across calls.</p>
+<p>It helps to think of context as a cache with a strict capacity rather than as a file the model can revisit at will. Items compete for space. A large tool result can crowd out an instruction that was given early. A long history can push a recently retrieved fact into a region the model uses less reliably. Because the budget is shared, adding more retrieved material is never free: it always displaces something else.</p>
+<p>The budget also has an output reserve. A call that consumes nearly all available space for input leaves little room for the answer, which can be cut off mid-sentence. Good budgeting allocates space for the expected response before filling the input. This is easy to forget when designing retrieval steps that happily return as much text as they can find.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a scenario describes a model forgetting an earlier instruction after a long session, the root cause is usually context pressure, not disobedience. The fix is to manage the budget, not to repeat the instruction more emphatically.</p>
+</blockquote>
+<h3 id="what-consumes-the-budget">What consumes the budget</h3>
+<p>Several distinct categories compete for space, and they behave differently. Instructions are usually present on every call: role definitions, layered project guidance, and packaged capabilities. They are compact but persistent, so they form a fixed cost. Conversation history grows with every exchange and is often the largest long-term consumer. Retrieved documents arrive in bursts and can be enormous relative to the question. Tool output is the classic surprise: a search or listing that returns thousands of lines can consume more space than the entire rest of the session.</p>
+<p>Drafts and intermediate work also matter. A model that writes a long analysis and then revises it several times keeps each version in context unless something removes it. Structured metadata, such as schema definitions and status records, adds a smaller but steady load. Even the reserve for the answer counts against the total.</p>
+<p>The useful question for each category is its lifetime. Some content must be present for every remaining call, such as the goal and the hard constraints. Some is needed once and can be discarded after it has been used, such as the raw output of a tool after it has been distilled. Some is valuable but only occasionally, such as a reference document that may be needed again later; that content belongs outside the active context, retrievable on demand. Classifying content by lifetime is the first step to controlling the budget.</p>
+<table>
+<thead>
+<tr>
+<th>Consumer</th>
+<th>Typical behaviour</th>
+<th>Lifetime</th>
+<th>Default action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>System and project instructions</td>
+<td>Fixed, present every call</td>
+<td>Persistent</td>
+<td>Keep compact and testable</td>
+</tr>
+<tr>
+<td>Conversation history</td>
+<td>Grows with every turn</td>
+<td>Long</td>
+<td>Compress older turns</td>
+</tr>
+<tr>
+<td>Retrieved documents</td>
+<td>Arrive in large bursts</td>
+<td>Task-specific</td>
+<td>Retrieve narrowly, keep excerpts</td>
+</tr>
+<tr>
+<td>Tool output</td>
+<td>Highly variable, often bulky</td>
+<td>Usually short</td>
+<td>Distill immediately after use</td>
+</tr>
+<tr>
+<td>Drafts and revisions</td>
+<td>Multiply during refinement</td>
+<td>Short</td>
+<td>Retain only the current version</td>
+</tr>
+<tr>
+<td>Output reserve</td>
+<td>Must be left free</td>
+<td>Every call</td>
+<td>Allocate before filling input</td>
+</tr>
+</tbody>
+</table>
+<h3 id="signs-of-approaching-the-limit">Signs of approaching the limit</h3>
+<p>Context pressure rarely announces itself with an error at first. It shows up as subtle changes in behaviour. The model begins to ignore an instruction given near the start of the session. It answers a question inconsistently because it is relying on a recent restatement rather than the original. It produces vaguer conclusions, drops caveats, or contradicts a decision made earlier. These symptoms are easy to misread as carelessness.</p>
+<p>A well-known pattern is the weakness for material in the middle of a long context. Information at the beginning and end tends to be used more reliably than information buried centrally. As the session grows, a crucial fact can sit in that middle region and effectively disappear from practical consideration. The fact is technically present but functionally lost.</p>
+<p>Other signals are mechanical. Tool calls may be truncated, output may stop abruptly, and latency or cost may climb as each call resends a larger payload. If the same instruction has to be repeated several times to get consistent behaviour, that repetition is itself a sign that the budget needs attention. The right response is structural: reduce, reorganise, or split the context rather than adding more text.</p>
+<h3 id="trimming-summarisation-and-compaction">Trimming, summarisation, and compaction</h3>
+<p>There are three related ways to reclaim space, and they differ in how much information they preserve. <em>Trimming</em> removes content that is redundant or no longer needed: duplicate tool results, superseded drafts, and conversational filler. It is essentially lossless with respect to the facts that matter. <em>Summarisation</em> replaces a body of text with a shorter narrative version. It is lossy by nature, because a summary must choose what to omit. <em>Compaction</em> is a broader term for rewriting the context into a denser representation that retains the information needed to continue, often combining trimming and summarisation with structured notes.</p>
+<p>The design decision is what must survive verbatim. Constraints, identifiers, decisions, commitments, and exact quotations usually should not be paraphrased. A summary that turns "never include client identifiers" into "handle client data carefully" has destroyed a hard rule. Background discussion, repeated explanations, and raw tool dumps are usually safe to compress. A good compaction step produces a structured record rather than a free-flowing paragraph, because structured notes make it easier to check what survived.</p>
+<p>Compaction should be triggered deliberately, not left to chance. Common triggers include a threshold on how much of the budget is occupied, the completion of a major subtask, or the start of a new phase of work. Compacting at a phase boundary is especially effective because the summary can be organised around what the next phase needs. Compacting in the middle of an active reasoning chain risks losing the thread.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Summarising the whole session into one paragraph and continuing as if nothing changed. This tends to erase exact constraints and decisions, which are precisely the items that must be preserved.</p>
+</blockquote>
+<h3 id="the-middle-saver-strategy">The middle-saver strategy</h3>
+<p>Because early and late positions in a context are used more reliably than the middle, a useful strategy is to protect the two ends and compress the centre. Think of the context as three regions. The <em>pinned head</em> holds the original task, the role, and the non-negotiable constraints. It is never compressed, because losing it changes the nature of the work. The <em>pinned tail</em> holds the most recent state: the latest user request, the current best answer, and the next intended action. It is also kept verbatim because it defines continuity.</p>
+<p>The <em>rolling middle</em> contains everything between them: completed exchanges, retrieved material, and tool results. As the budget tightens, this region is repeatedly rewritten into a compact set of notes. Decisions made, facts verified, open questions, and distilled tool findings are retained; conversational padding and superseded drafts are discarded. The middle summary is itself rolled forward, so each compaction consumes the previous summary plus new material.</p>
+<p>This arrangement has several advantages. The model keeps the goal in view at the front and the current state in view at the back, which is where attention is strongest. The middle holds a dense map of what has happened rather than the raw journey. When the map grows too large, it is compressed again without touching the protected ends. The strategy also makes it clear when compaction is no longer enough: if the pinned head and tail together consume too much space, the task itself needs to be split or restarted.</p>
+<h3 id="restart-summarise-or-persist">Restart, summarise, or persist</h3>
+<p>When pressure builds, there are three primary responses, and they are not interchangeable. <em>Restarting</em> means beginning a fresh session with a distilled brief that contains the goal, constraints, decisions, and current state. It is the cleanest option when the old session has accumulated noise or when the work has shifted phase. Its cost is the loss of nuance that was never written into the brief.</p>
+<p><em>Summarising</em> means continuing in the same session with a compacted history. It preserves continuity and is appropriate when the thread of reasoning still matters. Its risk is drift: each summary is an interpretation, and repeated summarisation can gradually change the meaning of earlier decisions. Keeping critical phrases verbatim reduces this risk.</p>
+<p><em>Persisting externally</em> means storing facts outside the active context, in a file, record, or memory store, and retrieving them selectively when needed. This is the right choice for information that must survive beyond one session or be shared across tasks. It requires retrieval discipline: a store that is never consulted is wasted, and a store that is dumped wholesale recreates the problem it was meant to solve.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Preferred response</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Session is noisy but task is unchanged</td>
+<td>Summarise and continue</td>
+<td>Preserves continuity while reclaiming space</td>
+</tr>
+<tr>
+<td>Work has shifted to a new phase</td>
+<td>Restart with a distilled brief</td>
+<td>Removes material irrelevant to the new phase</td>
+</tr>
+<tr>
+<td>Facts must survive across sessions</td>
+<td>Persist externally and retrieve selectively</td>
+<td>Avoids carrying everything in every call</td>
+</tr>
+<tr>
+<td>Pinned material alone exceeds the budget</td>
+<td>Split the task into smaller calls</td>
+<td>No compaction can recover enough space</td>
+</tr>
+<tr>
+<td>A tool dump dominates the context</td>
+<td>Distill and discard the raw result</td>
+<td>The raw text has served its purpose</td>
+</tr>
+</tbody>
+</table>
+<h3 id="building-a-budget-an-exercise">Building a budget: an exercise</h3>
+<p>A practical way to manage context is to construct a budget before a long session, then check against it as work proceeds. Start by listing what must be present on every call and estimating its relative size. Next, estimate what each phase will add: documents, tool results, and drafts. Reserve a portion for the output. Finally, decide in advance which thresholds trigger compaction, external persistence, or a restart. This converts context management from a reaction into a plan.</p>
+<p>The following compaction plan illustrates the structure. It uses relative shares rather than fixed capacities so the pattern can be applied to any environment.</p>
+<pre><code class="language-text">PINNED HEAD (never compress)
+- original task statement and success criteria
+- role definition and non-negotiable constraints
+- output contract and required field names
+
+ROLLING MIDDLE (compress at threshold)
+- decisions made, with the reasoning that cannot be reconstructed
+- facts verified, with their source labels
+- open questions and unresolved conflicts
+- tool results distilled to short findings
+
+PINNED TAIL (keep verbatim)
+- latest instruction from the user
+- current best answer or working state
+- the single next action
+
+TRIGGERS
+- compact the middle when it exceeds the planned share
+- persist facts externally when they are needed in later phases
+- restart when pinned head plus tail leave no working room
+</code></pre>
+<p>The value of writing this down is that it forces explicit choices. If the pinned head is larger than expected, you can shorten the instructions before the session begins. If tool output is likely to dominate, you can design the tool calls to return summaries rather than raw data. A budget-builder exercise is really a design review in disguise.</p>
+<blockquote>
+<p><strong>Try it:</strong> For an upcoming task, list the five largest expected context consumers and assign each a share of the budget. Identify which share you would compress first if the total ran over. That item is your compaction candidate.</p>
+</blockquote>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A team is preparing a due-diligence memo from a large set of internal documents. The assistant reads each document, extracts relevant passages, and drafts sections of the memo. Early in the session the team states a hard constraint: client identifiers must never appear in the memo. The work proceeds well at first, but after many document reads and tool calls the draft begins to include identifiers that were present in the source passages. When questioned, the assistant produces a vague explanation about handling data carefully. The constraint was present in the original instruction but had been pushed out of practical reach.</p>
+<p>An architect reviews the session and finds the expected pattern. The pinned instruction at the start was still technically in the context, but it sat behind a long mass of retrieved text and intermediate drafts. The most recent messages concerned formatting, which dominated attention. Several tool calls had returned full documents when only short excerpts were needed. No compaction had occurred because nobody had defined a trigger.</p>
+<p>The remediation has four parts. First, the hard constraint and the memo outline are moved into a pinned head that is reasserted at every phase boundary. Second, tool calls are changed to return short excerpts with source labels instead of entire documents; the raw text, when occasionally needed, is retrieved separately. Third, a rolling middle summary is maintained with three sections: verified facts, open questions, and decisions, each written as compact notes with exact phrases preserved for rules. Fourth, the latest instruction and current draft are kept verbatim as the pinned tail.</p>
+<p>When the extracted material from the first phase is complete, the team persists verified facts to an external record, then restarts a fresh session for drafting with a distilled brief containing the outline, the constraints, and pointers to the record. The drafting session stays short, and the final memo contains no client identifiers. The team also adds a simple check that scans the output for identifier patterns before it leaves the workflow.</p>
+<p>Notice that the solution is not a stronger reminder. It is a structure that keeps the reminder where it will be used, reduces the volume of material competing with it, and splits the work so no single session has to hold everything.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Assuming that a larger context window removes the need for budgeting, when added material still competes for attention.</li>
+<li>Repeating an early instruction many times instead of changing the structure that pushed it out of effective use.</li>
+<li>Returning full documents from tools when a short excerpt would serve the current question.</li>
+<li>Summarising constraints and identifiers into vague general phrases, destroying the precision that made them useful.</li>
+<li>Compacting in the middle of an active reasoning chain rather than at a clean phase boundary.</li>
+<li>Keeping multiple superseded drafts in the context when only the current version matters.</li>
+<li>Treating external persistence as a cure-all without a plan for retrieving the stored facts selectively.</li>
+<li>Failing to reserve output space, so a long input causes the answer to be cut short.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Context is a hard, shared budget covering instructions, history, documents, tool output, drafts, and the answer reserve.</li>
+<li>Content should be classified by lifetime: persistent, single-use, or occasionally needed and better stored outside the session.</li>
+<li>Pressure shows up as forgotten instructions, inconsistent answers, vagueness, truncation, and rising cost.</li>
+<li>Trimming removes redundancy, summarisation compresses narrative, and compaction produces a dense structured record that retains what matters.</li>
+<li>The middle-saver strategy pins the head and tail verbatim while repeatedly compressing the centre.</li>
+<li>Restart when a phase changes, summarise when continuity matters, and persist externally when facts must outlive a session.</li>
+<li>A written budget with explicit triggers turns context management into a plan rather than a reaction.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A long session begins to ignore a constraint given at the start. What is the most likely cause?</li>
+</ol>
+<p>A. The model has decided the constraint is no longer relevant.
+B. The constraint has been displaced from effective use by accumulated context, so the budget needs managing.
+C. The constraint was written in prose rather than as a question.
+D. The session needs a longer output reserve.</p>
+<ol start="2">
+<li>Which category of content is usually the best candidate for immediate distillation after use?</li>
+</ol>
+<p>A. The original task statement.
+B. Non-negotiable safety constraints.
+C. A large tool result whose useful content is a few findings.
+D. The latest user instruction.</p>
+<ol start="3">
+<li>Which statement about summarisation is most accurate?</li>
+</ol>
+<p>A. It preserves every detail if written carefully.
+B. It is lossy, so exact constraints and identifiers should be kept verbatim elsewhere.
+C. It removes the need for any other context strategy.
+D. It only applies to tool output.</p>
+<ol start="4">
+<li>In the middle-saver strategy, what belongs in the pinned tail?</li>
+</ol>
+<p>A. The oldest instructions and the original goal.
+B. A compressed history of all completed work.
+C. The latest instruction, the current state, and the next action.
+D. Every document retrieved so far.</p>
+<ol start="5">
+<li>Facts must survive across several separate sessions and be shared with other tasks. What is the best response?</li>
+</ol>
+<p>A. Repeat them in every prompt from memory.
+B. Persist them externally and retrieve them selectively when needed.
+C. Keep them in the middle summary of one long session forever.
+D. Remove them from all sessions to save space.</p>
+<ol start="6">
+<li>A compaction plan shows that the pinned head and tail together leave almost no working room. What should happen?</li>
+</ol>
+<p>A. Compact the middle again more aggressively.
+B. Add more documents to give the model more to work with.
+C. Split the task into smaller calls or restart with a narrower brief.
+D. Repeat the original instruction until it fits.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B</strong> is correct because context pressure pushes early material out of effective attention. <strong>A</strong> is wrong because the model is not making a deliberate decision to disregard a rule. <strong>C</strong> is wrong because prose is not the issue; position and competition for space are. <strong>D</strong> is wrong because a larger output reserve would make the input problem worse.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because a bulky tool result has usually served its purpose once its findings are extracted. <strong>A</strong> and <strong>B</strong> are wrong because the task and constraints are pinned content that must remain verbatim. <strong>D</strong> is wrong because the latest instruction defines continuity and belongs in the tail.</p>
+</li>
+<li>
+<p><strong>B</strong> is correct because summarisation necessarily omits detail, so critical exact phrases need separate protection. <strong>A</strong> is wrong because no summary preserves everything. <strong>C</strong> is wrong because summarisation is one tool among several. <strong>D</strong> is wrong because summarisation applies to many kinds of content.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because the tail protects current state and the immediate next step. <strong>A</strong> describes the pinned head, not the tail. <strong>B</strong> describes the rolling middle. <strong>D</strong> is wrong because retaining every document defeats the purpose of the strategy.</p>
+</li>
+<li>
+<p><strong>B</strong> is correct because external persistence with selective retrieval supports reuse without bloating every session. <strong>A</strong> is unreliable and wasteful. <strong>C</strong> is wrong because one session cannot serve unrelated tasks. <strong>D</strong> is wrong because discarding needed facts loses information.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because when protected regions consume the budget, no amount of middle compression helps and the work must be split. <strong>A</strong> is wrong because the middle is no longer the binding constraint. <strong>B</strong> is wrong because adding documents increases pressure. <strong>D</strong> is wrong because repetition adds more content rather than freeing space.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 22.</em></p>
+  <nav><a href="21-quality-batch-review.html">&larr; Previous</a><span></span><a href="23-escalation-containment.html">Next &rarr;</a></nav>
+</div>
+
+</body>
+</html>

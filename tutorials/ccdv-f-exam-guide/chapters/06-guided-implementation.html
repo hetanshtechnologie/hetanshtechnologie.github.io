@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 6 — A Guided Implementation from Script to Service</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f5f3ef;color:#24211d;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(60,50,40,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#9a5b2e;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#7c3a12;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#5d5148;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#8a7c70}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9a8f85;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#7c3a12}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #d97745;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#a2471b}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#6b2f0f}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #e3cfbe;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#7c3a12;color:#fff;font-weight:600}
+td{background:#fffaf6}
+pre{background:#251c17;color:#f4e6d8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#f5e4d7;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#7c3a12}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#fff4e8;border-left:4px solid #d97745;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#a2471b}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #e3cfbe;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#7c3a12;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #eee2d6}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#a2471b;text-decoration:none;display:inline-block;margin-bottom:16px}
+.site-brand{display:inline-block;margin-bottom:8px;line-height:0}
+.site-brand img{height:90px;width:auto;border-radius:10px;object-fit:contain}
+.callout{background:#fff4e8;border-left:4px solid #d97745;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#8a7c70;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand,.site-brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+<a class="site-brand" href="../../../"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1 id="chapter-6-a-guided-implementation-from-script-to-service">Chapter 6 — A Guided Implementation from Script to Service</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<p>By the end of this chapter you should be able to:</p>
+<ul>
+<li>Lay out a project skeleton that separates prompts, adapters, application logic, and configuration.</li>
+<li>Set up an environment with dependency pinning, secrets handling, and a repeatable run command.</li>
+<li>Accept input in several formats and normalize it into one internal representation.</li>
+<li>Implement streaming output and explain why it changes both the user experience and the error model.</li>
+<li>Abstract over more than one vendor behind a single stable interface.</li>
+<li>Decide when to serve a request in realtime and when to hand it to a batch job.</li>
+<li>Apply caching, extended thinking, and model selection as deliberate tools rather than defaults.</li>
+<li>Promote a working script into a long-running service with health checks and runtime configuration.</li>
+<li>Reason about a document-processing pipeline that must meet a latency budget.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="the-build-path-for-this-chapter">The build path for this chapter</h3>
+<p>This chapter follows one application from a blank directory to a running service. The point is not to memorize a file tree; it is to understand <em>why each step exists</em> and what breaks if you skip it. Each stage adds a capability while keeping the earlier boundaries intact from Chapter 5. By the end, the thing you deploy is the same logic you started with, wrapped in an interface that can be tested, observed, and operated.</p>
+<p>The sequence is deliberately practical:</p>
+<ol>
+<li>Create a skeleton and a reproducible environment.</li>
+<li>Normalize multi-format input at the edge.</li>
+<li>Stream output so long responses feel responsive.</li>
+<li>Hide vendor differences behind one adapter interface.</li>
+<li>Split realtime work from batch work.</li>
+<li>Add caching, thinking, and model selection for control over cost and quality.</li>
+<li>Promote the script into a service with health checks and runtime configuration.</li>
+</ol>
+<p>Treat this as a layered build. A decision made early, such as keeping prompts in versioned files, is what makes a later decision, such as attaching a prompt version to a trace, trivial. The exam rewards the same habit: recognize which early choice enables the later requirement.</p>
+<h3 id="step-1-project-skeleton-and-environment-setup">Step 1: Project skeleton and environment setup</h3>
+<p>A good skeleton makes the right thing easy and the wrong thing awkward. The layout below separates concerns by directory so that a prompt author, an application developer, and an operator can each work without stepping on the others.</p>
+<pre><code class="language-text">contractlens/
+  pyproject.toml
+  .env.example
+  README.md
+  src/
+    contractlens/
+      __init__.py
+      config.py            # typed settings, loaded at startup
+      domain.py            # typed requests, results, failures
+      orchestration.py     # the use-case sequence
+      prompts/
+        review_v3.txt      # immutable, versioned prompt templates
+        registry.py        # maps version ids to file contents
+      adapters/
+        __init__.py
+        model_base.py      # abstract model interface
+        provider_a.py      # concrete adapter for first vendor
+        provider_b.py      # concrete adapter for alternate vendor
+        cache.py           # response cache with canonical keys
+        tools/
+          clause_lookup.py # versioned tool adapter
+      input/
+        normalize.py       # pdf, docx, text, html -&gt; Document
+      output/
+        stream.py          # streaming writer and event types
+      service/
+        app.py             # HTTP handlers, thin by design
+        health.py          # liveness and readiness checks
+        worker.py          # batch queue consumer
+      observability/
+        trace.py           # trace record creation and storage
+  tests/
+    test_orchestration.py
+    test_validation.py
+    fakes.py               # fake model and fake tools
+  deploy/
+    service-config.json    # runtime configuration example
+</code></pre>
+<p>Several choices deserve attention.</p>
+<ul>
+<li><strong>Prompts live as files, not string literals.</strong> A prompt is content that changes independently of code, so it needs its own file and its own version identifier. The registry maps an identifier such as <code>review_v3</code> to the file contents and never mutates them in place.</li>
+<li><strong>Adapters are grouped under one folder.</strong> Every external dependency, whether a model vendor or a tool, has a place to live. Application code imports from <code>adapters.model_base</code>, not from a vendor SDK.</li>
+<li><strong>The service layer is thin.</strong> Handlers parse requests and delegate. If a handler grows prompt text or retry logic, the boundary is leaking.</li>
+<li><strong>Fakes live with tests.</strong> A deterministic fake model that returns a fixed typed result is what makes the orchestration layer testable without network calls.</li>
+</ul>
+<p>Environment setup should be equally deliberate. Pin dependencies in <code>pyproject.toml</code>, keep a checked-in <code>.env.example</code> that lists required variable names with placeholder values, and never commit real keys. Load secrets from the environment or a secret manager at startup, validate that required values are present, and fail fast if not. Provide one repeatable command for the common flows: run the service, run the tests, and run a single-document smoke test.</p>
+<pre><code class="language-bash">python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+cp .env.example .env
+export APP_ENV=development
+python -m contractlens.service.app
+python -m pytest tests/
+</code></pre>
+<blockquote>
+<p><strong>Common mistake:</strong> Letting a project grow without a pinned dependency set. A foundations exam may not ask about lockfiles directly, but scenario answers that favor reproducibility over convenience are usually the right ones.</p>
+</blockquote>
+<h3 id="step-2-accepting-multi-format-input">Step 2: Accepting multi-format input</h3>
+<p>Real documents arrive as plain text, PDF, word-processing files, and web pages. The model consumes text, so the edge of the system must convert each format into a single internal <code>Document</code> value with a stable shape. This is a classic adapter problem: many inputs, one internal representation.</p>
+<p>Define the internal type once:</p>
+<pre><code class="language-python">from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Document:
+    text: str
+    source_format: str
+    page_count: int
+    character_count: int
+    truncated: bool = False
+</code></pre>
+<p>Then give each format a small converter that produces this type. The orchestration layer only ever sees <code>Document</code>, so adding a new format never touches the model code.</p>
+<table>
+<thead>
+<tr>
+<th>Input format</th>
+<th>Conversion approach</th>
+<th>Typical pitfall</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plain text</td>
+<td>Read as UTF-8 with explicit error handling</td>
+<td>Wrong encoding silently corrupts characters</td>
+</tr>
+<tr>
+<td>PDF</td>
+<td>Extract text per page and preserve page markers</td>
+<td>Reading order can scramble columns and tables</td>
+</tr>
+<tr>
+<td>Word document</td>
+<td>Read the document body's text nodes</td>
+<td>Headers, footers, and comments may be missed or included wrongly</td>
+</tr>
+<tr>
+<td>HTML or web page</td>
+<td>Strip markup and scripts, keep readable text</td>
+<td>Navigation text drowns out the article</td>
+</tr>
+<tr>
+<td>Image of text</td>
+<td>Optical character recognition, then treat as text</td>
+<td>Low confidence output needs a quality flag</td>
+</tr>
+</tbody>
+</table>
+<p>Two concerns dominate this step: fidelity and size. Fidelity means the extracted text actually represents what the document says. A PDF with two columns can produce interleaved text if extraction ignores layout, and the model will reason about nonsense. Size matters because context is finite and billed. A hundred-page document cannot be sent in one request, so the normalizer should report a <code>truncated</code> flag or hand off to a chunking strategy that the orchestration layer controls.</p>
+<p>Carry provenance through normalization. Record the source format, the page or section boundaries, and any extraction warnings. When a later answer cites a clause, that citation should point back to a real location in the original document. This is the input-side counterpart of the traceability work from the previous chapter.</p>
+<blockquote>
+<p><strong>Exam note:</strong> If a scenario mentions garbled answers for a particular file type, suspect the extraction step, not the prompt. The model can only reason about the text it receives.</p>
+</blockquote>
+<p>Normalization is also where you decide what <em>not</em> to send. Remove repeated headers, hidden metadata, and boilerplate that consumes tokens without adding meaning. But be conservative: aggressive cleaning can delete a clause that matters. A good rule is to remove only content you can identify confidently as non-substantive, and to keep a record of what was removed.</p>
+<h3 id="step-3-implementing-streaming-output">Step 3: Implementing streaming output</h3>
+<p>For a short answer, waiting for the whole response is fine. For a long document review, a user staring at a blank screen for several seconds assumes the system is broken. Streaming sends tokens as they are produced, so the interface shows progress immediately and feels responsive even when total time is unchanged.</p>
+<p>At the boundary, streaming changes the shape of the result. Instead of returning one value, the adapter returns an iterator of events:</p>
+<pre><code class="language-python">from dataclasses import dataclass
+from typing import Iterator
+
+@dataclass(frozen=True)
+class TextDelta:
+    text: str
+
+@dataclass(frozen=True)
+class StreamDone:
+    trace_id: str
+    total_tokens: int
+
+@dataclass(frozen=True)
+class StreamError:
+    reason: str
+    retryable: bool
+    trace_id: str
+
+StreamEvent = TextDelta | StreamDone | StreamError
+
+def stream_review(request) -&gt; Iterator[StreamEvent]:
+    ...
+</code></pre>
+<p>The consumer writes each <code>TextDelta</code> to the response as it arrives and stops cleanly on <code>StreamDone</code> or <code>StreamError</code>. Keeping the event types typed means the caller does not parse a proprietary streaming protocol; it just switches on three known cases.</p>
+<p>Streaming introduces obligations that a single-response call does not.</p>
+<ul>
+<li><strong>Validation moves earlier or becomes two-phase.</strong> You cannot validate a complete JSON object until it is complete. For structured output, either accumulate the stream and validate at the end, or use a format that is valid incrementally and still run a final check. Never hand partial JSON to downstream code as if it were final.</li>
+<li><strong>The error model changes.</strong> A failure can happen after some text has already been sent. You cannot retract those tokens, so the client needs a clear terminal event indicating the stream ended incomplete. Designing for this avoids a UI that looks successful but quietly lost the ending.</li>
+<li><strong>Cancellation matters.</strong> If the client disconnects, the server should stop generating rather than continue paying for tokens nobody will read. Wire the client's disconnect signal into the adapter's cancellation path.</li>
+<li><strong>Tracing still applies.</strong> The trace is created before streaming starts, and the terminal event carries the same <code>trace_id</code>, so a partial stream is auditable too.</li>
+</ul>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating streaming as only a presentation trick and bolting it onto handlers. Because it changes validation and error handling, it belongs in the interface and orchestration layers, not just the UI.</p>
+</blockquote>
+<p>Decide deliberately whether a given endpoint streams. Interactive requests usually benefit. Batch jobs usually do not, because there is no viewer to reassure and streaming adds complexity to retry logic. The choice is part of the contract, not an implementation detail.</p>
+<h3 id="step-4-abstracting-over-more-than-one-vendor">Step 4: Abstracting over more than one vendor</h3>
+<p>Vendor dependence is a business risk and a design smell. Models differ in price, speed, output style, tool-calling conventions, and availability. A system that can address more than one vendor through a single interface can route traffic, survive an outage, and compare quality on the same task.</p>
+<p>The abstraction is an interface with a narrow set of operations, plus one adapter per vendor. Application code imports only the interface.</p>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>What the shared interface exposes</th>
+<th>What each adapter hides</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Request shape</td>
+<td>Typed request with text and options</td>
+<td>Vendor-specific message and parameter formats</td>
+</tr>
+<tr>
+<td>Output</td>
+<td>Typed result or typed failure</td>
+<td>Vendor response envelopes and status conventions</td>
+</tr>
+<tr>
+<td>Streaming</td>
+<td>Iterator of typed events</td>
+<td>Vendor streaming protocol and chunk format</td>
+</tr>
+<tr>
+<td>Structured output</td>
+<td>Schema reference and validation handoff</td>
+<td>How the vendor expresses a schema constraint</td>
+</tr>
+<tr>
+<td>Tool calls</td>
+<td>Typed tool declarations and results</td>
+<td>Vendor function-calling syntax</td>
+</tr>
+<tr>
+<td>Authentication</td>
+<td>Credentials injected at construction</td>
+<td>Header names and token exchange details</td>
+</tr>
+<tr>
+<td>Errors</td>
+<td>Normalized retryable / non-retryable failure</td>
+<td>Vendor error codes and rate-limit semantics</td>
+</tr>
+</tbody>
+</table>
+<p>A few rules keep the abstraction honest.</p>
+<ol>
+<li><strong>Design the interface around your needs, not around any vendor's SDK.</strong> If you copy a vendor's terminology into your interface, you have not abstracted anything; you have merely renamed a dependency.</li>
+<li><strong>Normalize errors.</strong> One vendor's rate limit and another's timeout should both become <code>retryable=True</code> failures your orchestration layer understands. Otherwise every retry decision needs vendor-specific branches.</li>
+<li><strong>Keep differences as data.</strong> If a vendor has a genuinely unique capability, represent it as an optional capability flag or a named option, not as a special method that leaks into every caller.</li>
+<li><strong>Test all adapters against the same contract suite.</strong> Run the same set of tests against each adapter's fake to prove they honor the interface.</li>
+</ol>
+<p>Model selection builds naturally on this abstraction. Because the caller names a <em>capability</em>, not a product, the routing logic can map capabilities to concrete models per environment.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When an option proposes calling two vendor SDKs from different handlers and comparing strings, reject it. The correct design is one interface with adapters, so routing and comparison happen behind a stable seam.</p>
+</blockquote>
+<h3 id="step-5-combining-realtime-requests-with-batch-jobs">Step 5: Combining realtime requests with batch jobs</h3>
+<p>Not every request deserves the same treatment. A user waiting on an answer needs a fast, interactive path. A nightly run over ten thousand documents cares about throughput and cost, not immediate response. Treating both as the same kind of work produces a service that is slow under load and expensive to operate.</p>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Realtime path</th>
+<th>Batch path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Trigger</td>
+<td>A user action or API call</td>
+<td>Schedule, queue message, or file arrival</td>
+</tr>
+<tr>
+<td>Latency target</td>
+<td>Seconds</td>
+<td>Minutes to hours</td>
+</tr>
+<tr>
+<td>Success signal</td>
+<td>Response returned to caller</td>
+<td>Job marked complete with results stored</td>
+</tr>
+<tr>
+<td>Model choice</td>
+<td>Faster, smaller model where acceptable</td>
+<td>Higher-quality or cheaper-per-token model as appropriate</td>
+</tr>
+<tr>
+<td>Streaming</td>
+<td>Usually yes</td>
+<td>Usually no</td>
+</tr>
+<tr>
+<td>Retry strategy</td>
+<td>Bounded, inline, with fallback</td>
+<td>Queued with backoff, resumed from checkpoints</td>
+</tr>
+<tr>
+<td>Failure visibility</td>
+<td>Immediate error to caller</td>
+<td>Alert, dead-letter queue, and operator dashboard</td>
+</tr>
+<tr>
+<td>State</td>
+<td>Short-lived session</td>
+<td>Durable job record with progress</td>
+</tr>
+<tr>
+<td>Cost control</td>
+<td>Per-request limits</td>
+<td>Budget caps and concurrency limits</td>
+</tr>
+</tbody>
+</table>
+<p>The two paths should share the same domain types, the same adapters, and the same validation. What differs is the orchestration around them. The realtime handler calls the model interface directly and returns a typed result or failure. The batch worker pulls a job, iterates over documents, writes results to storage, and updates progress. Reusing the core logic is what guarantees that a nightly review and an interactive review produce the same kind of answer.</p>
+<p>A queue is the usual bridge. The realtime path can enqueue work when a request is too large for the latency budget, returning a job identifier immediately. This is a common and correct pattern: accept the request, do the work asynchronously, and let the caller poll or subscribe for completion. The key is that the job record carries the same trace metadata as an inline call, so auditability survives the handoff.</p>
+<p>Idempotency matters more in batch. A worker that crashes halfway through must be able to restart without duplicating results. Give each job and each document within it a stable key, record completed items, and make writes idempotent. Combine this with bounded retries so a poison document cannot consume the queue forever; route repeated failures to a dead-letter path for inspection.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Running batch workloads directly inside HTTP handlers to reuse code. This ties up request threads, makes latency unpredictable, and loses the durability that batch jobs need.</p>
+</blockquote>
+<h3 id="step-6-adding-caching-thinking-and-model-selection">Step 6: Adding caching, thinking, and model selection</h3>
+<p>The previous steps produce a correct system. These three additions make it efficient and controllable. Each is a lever with a cost, and the exam likes to test whether you know when <em>not</em> to use one.</p>
+<h4 id="caching">Caching</h4>
+<p>Many requests repeat. The same document may be reviewed twice, or the same question asked with different wording. A cache stores a computed result under a key derived from the request so identical work is not repeated.</p>
+<p>The hard part is the key. A cache key must include everything that can change the answer: the canonical input, the prompt version, the model version, the effective configuration such as temperature, and the enabled tools. Omit any of these and a configuration change can silently serve stale answers. A key built from a raw prompt string combined through string concatenation is fragile; build it from a canonical object and hash it.</p>
+<p>Caching rules worth remembering:</p>
+<ul>
+<li>Cache only when the call is deterministic enough for reuse. A low-temperature, well-structured extraction is a good candidate; an open-ended creative answer is not.</li>
+<li>Attach an expiry and invalidate on prompt or model version changes. Including versions in the key already handles the common case.</li>
+<li>Respect privacy. Do not cache content belonging to one tenant under a key another tenant can reach, and include tenant scope in the key.</li>
+<li>Record cache hits in traces. A quality analysis that ignores cache hits can misattribute results to the wrong model version.</li>
+</ul>
+<h4 id="extended-thinking">Extended thinking</h4>
+<p>Some models can spend extra computation before answering, often exposed as a "thinking" or reasoning budget. This helps on tasks with multi-step inference, tricky constraints, or careful arithmetic, at the cost of latency and token spend.</p>
+<p>Treat thinking as a per-task setting, not a global default. A classification task with a controlled vocabulary rarely benefits. A review that must reconcile conflicting clauses across twenty pages may. Set the budget through configuration so it can be tuned per environment, and record the value in the trace, because changing it can change answers just as surely as changing the model.</p>
+<blockquote>
+<p><strong>Exam note:</strong> If a scenario stresses a strict latency budget, increasing the thinking budget is usually the wrong move. Reach for a faster model, caching, or streaming first.</p>
+</blockquote>
+<h4 id="model-selection">Model selection</h4>
+<p>Model selection means mapping a task to an appropriate model rather than using one model for everything. The mapping should be explicit, versioned, and observable.</p>
+<p>A simple routing policy might look like this:</p>
+<ul>
+<li>Use a small, fast model for formatting, classification, and simple extraction.</li>
+<li>Use a larger model for judgments that require synthesis across a document.</li>
+<li>Use a fallback model only when the primary is unavailable, and record that it was used.</li>
+<li>Route batch work to a model optimized for cost per token when quality comparisons show it is adequate.</li>
+</ul>
+<p>The route decision belongs in configuration or a small policy component, not scattered through handlers. Every trace must name the model actually used, because a fallback makes the configured primary misleading. Model selection and the abstraction from Step 4 fit together: the orchestration asks for a capability, the policy resolves it to a concrete model, and the adapter handles the specifics.</p>
+<h3 id="step-7-promoting-the-script-into-a-long-running-service">Step 7: Promoting the script into a long-running service</h3>
+<p>A script runs once and exits. A service stays up, serves many callers, and must be operable by people who did not write it. Promotion is mostly about adding the operational shell around logic you already have: configuration at startup, health checks, graceful shutdown, concurrency limits, and structured logging.</p>
+<p>A service configuration file gathers the runtime settings in one reviewable place. It mirrors the typed configuration object from the previous chapter but is supplied by the deployment environment rather than baked into code.</p>
+<pre><code class="language-json">{
+  &quot;service&quot;: {
+    &quot;name&quot;: &quot;contractlens&quot;,
+    &quot;environment&quot;: &quot;production&quot;,
+    &quot;request_timeout_s&quot;: 20,
+    &quot;max_concurrent_requests&quot;: 32,
+    &quot;max_attempts&quot;: 2
+  },
+  &quot;model&quot;: {
+    &quot;default_capability&quot;: &quot;document-review&quot;,
+    &quot;capabilities&quot;: {
+      &quot;document-review&quot;: { &quot;provider&quot;: &quot;provider-a&quot;, &quot;snapshot&quot;: &quot;2026-06-14&quot; },
+      &quot;fast-extract&quot;: { &quot;provider&quot;: &quot;provider-b&quot;, &quot;snapshot&quot;: &quot;2026-05-30&quot; }
+    },
+    &quot;fallback&quot;: { &quot;provider&quot;: &quot;provider-b&quot;, &quot;snapshot&quot;: &quot;2026-06-02&quot; },
+    &quot;thinking_budget_tokens&quot;: 0,
+    &quot;max_output_tokens&quot;: 800
+  },
+  &quot;prompt&quot;: { &quot;active_version&quot;: &quot;review_v3&quot; },
+  &quot;cache&quot;: { &quot;enabled&quot;: true, &quot;ttl_s&quot;: 120, &quot;scope&quot;: &quot;tenant&quot; },
+  &quot;tools&quot;: { &quot;enabled&quot;: [&quot;clause_lookup@1.2&quot;] },
+  &quot;queue&quot;: { &quot;enabled&quot;: true, &quot;max_batch_items&quot;: 500, &quot;visibility_timeout_s&quot;: 120 },
+  &quot;observability&quot;: { &quot;trace_sample_rate&quot;: 1.0, &quot;log_level&quot;: &quot;info&quot; }
+}
+</code></pre>
+<p>Notice what is present: pinned snapshots, an active prompt version, a versioned tool identifier, a thinking budget set to zero for a latency-sensitive path, and a tenant-scoped cache. Every one of these values can change an answer, so every one belongs in the fingerprint attached to traces.</p>
+<p>Health checks let an operator or platform decide whether the service is working.</p>
+<ul>
+<li><strong>Liveness</strong> answers "is the process alive and responsive?" It should be cheap and must not depend on external systems, or a vendor outage will cause needless restarts.</li>
+<li><strong>Readiness</strong> answers "can this instance accept traffic?" It may check that configuration loaded, required secrets are present, and the queue connection is healthy.</li>
+<li><strong>Dependency checks</strong> for the model vendor and tools should be reported separately, not folded into liveness. A degraded external dependency is a signal for routing or alerting, not for killing the process.</li>
+</ul>
+<p>Graceful shutdown matters too. On a stop signal, the service should stop accepting new requests, finish in-flight work where possible, flush traces and logs, and release worker connections. A service that drops traces on shutdown breaks the audit story you built in the previous chapter.</p>
+<p>Runtime configuration should be reloadable where safe, but changes must be recorded. Switching the active prompt version without a stamp makes past and future requests indistinguishable. Prefer a controlled reload that logs the old and new fingerprints and annotates subsequent traces.</p>
+<blockquote>
+<p><strong>Try it:</strong> Add a readiness endpoint to a scratch service that verifies configuration loaded and secrets are present, then deliberately remove a required variable and watch the endpoint fail while liveness stays green. That distinction is the whole point.</p>
+</blockquote>
+<h2 id="worked-scenario">Worked scenario</h2>
+<h3 id="the-situation">The situation</h3>
+<p>A document-processing pipeline reviews incoming contracts and returns a risk summary. The team has a hard latency budget: the median response must be under four seconds and the ninety-fifth percentile under eight seconds. Volume is uneven, with quiet mornings and sudden bursts after a batch upload. Initial measurements show a median of roughly nine seconds and frequent timeouts during bursts. The task is to bring the pipeline within budget without dropping the auditability or output quality the team relies on.</p>
+<h3 id="breaking-down-the-latency">Breaking down the latency</h3>
+<p>The first move is measurement, not guessing. Instrumented traces show three contributors:</p>
+<ol>
+<li>Extraction of text from large PDFs takes about one second on average and much longer on scanned files.</li>
+<li>Generation dominates: eight seconds for a full review with a large model and a generous thinking budget.</li>
+<li>Queueing during bursts adds several seconds because requests share a small pool of model calls.</li>
+</ol>
+<p>The traces also reveal that roughly forty percent of incoming documents are exact repeats of ones reviewed earlier in the day.</p>
+<h3 id="applying-the-levers-in-order">Applying the levers in order</h3>
+<p>The team works through a deliberate sequence, choosing changes that attack the largest contributor first.</p>
+<p><strong>Reframe the request path.</strong> Very large documents are no longer reviewed inline. The handler extracts text, checks a size threshold, and if the document is too large, enqueues a batch job and returns a job identifier immediately. The caller polls for the result. This removes the worst extraction and generation cases from the latency distribution entirely, because they are no longer on the measured interactive path. The job record carries the same prompt, model, tool, and config identifiers as an inline call, so auditability is preserved.</p>
+<p><strong>Turn on caching with a correct key.</strong> The cache key includes a hash of the normalized document, the active prompt version, the model snapshot, the temperature, and the enabled tool versions, scoped by tenant. The forty percent repeat rate now returns in milliseconds. Cache hits are recorded in traces, so quality monitoring can still segment them correctly.</p>
+<p><strong>Reduce the thinking budget on the interactive route.</strong> The traces showed that the large thinking budget was spent on tasks that a controlled-vocabulary schema already constrained. Setting the interactive budget to zero and reserving thinking for the batch route cuts generation time substantially. The batch path keeps the higher budget because it has no interactive deadline.</p>
+<p><strong>Route by capability.</strong> Simple fields, such as document type and language, move to a fast small model through the capability router. Only the risk-summary step uses the larger model. Because both vendors sit behind the same interface, this is a configuration change to the capability map rather than a rewrite.</p>
+<p><strong>Add streaming for the remaining interactive reviews.</strong> The total generation time does not fall much for the summary step, but the user sees text immediately rather than after a long blank wait. Perceived responsiveness improves, and the terminal stream event carries the trace identifier so partial streams remain auditable.</p>
+<p><strong>Bound concurrency and retries.</strong> The service sets a maximum number of concurrent model calls and a two-attempt retry limit. Excess requests are queued rather than all competing at once, which removes the burst-driven queueing spikes. Fallback to the alternate vendor is recorded explicitly in each trace.</p>
+<h3 id="result-and-reasoning">Result and reasoning</h3>
+<p>After the changes, the measured median falls to about two seconds and the ninety-fifth percentile to just over six seconds, inside the budget. Quality checks on a held-out set show no meaningful regression for the interactive summary, because the schema still constrains output and the harder cases moved to the more thorough batch route rather than being weakened.</p>
+<p>The lesson is the order of operations. The team did not begin by swapping in a different model or shortening the prompt. They measured, then attacked the largest contributors with structural changes: moving unsuited work off the interactive path, avoiding repeated work, matching the thinking budget to the task, and controlling concurrency. Each change was chosen because the trace data pointed at it, and each preserved the version stamping that makes answers auditable.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A latency question with several plausible options usually rewards the structural answer: move work off the critical path, avoid duplicate work, or match the model to the task. "Add more compute" is rarely correct when a deadline is the constraint.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Beginning implementation before defining the internal document type and versioned prompt identifiers.</li>
+<li>Scattering vendor SDK calls through handlers instead of hiding them behind one adapter interface.</li>
+<li>Building cache keys from raw prompt text while omitting model version, configuration, or tenant scope.</li>
+<li>Letting a cache serve answers from an old prompt or model version after a rollout.</li>
+<li>Treating streaming as a UI-only feature and ignoring its effect on validation, errors, and cancellation.</li>
+<li>Handing partial streamed JSON to downstream code as if it were a validated result.</li>
+<li>Running large batch workloads inside request handlers.</li>
+<li>Sending every available tool to the model on every request.</li>
+<li>Applying a large thinking budget globally, even on latency-sensitive or simple classification tasks.</li>
+<li>Folding vendor health into liveness checks, causing restarts during an external outage.</li>
+<li>Changing active prompt or model versions at runtime without recording the change in traces.</li>
+<li>Dropping traces and logs during shutdown, breaking the audit trail at the worst moment.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Start with a skeleton that separates prompts, adapters, domain logic, service code, and tests, backed by a pinned, reproducible environment.</li>
+<li>Normalize every input format into one typed <code>Document</code>, carrying provenance and watching for fidelity and size limits.</li>
+<li>Streaming improves perceived responsiveness but requires typed events, careful validation, clear terminal errors, cancellation, and tracing.</li>
+<li>A single vendor-neutral interface with one adapter per vendor enables routing, fallback, and comparison without leaking SDK details.</li>
+<li>Realtime and batch paths should share core logic while differing in trigger, latency target, retry strategy, and state handling.</li>
+<li>Caching, thinking budgets, and model selection are levers with costs; apply them per task and record their values in traces.</li>
+<li>Promotion to a service adds startup configuration, liveness and readiness checks, graceful shutdown, and controlled runtime changes.</li>
+<li>For latency budgets, measure first, then move unsuited work off the critical path, avoid duplicates, and match models to tasks.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>Why should prompt templates live in versioned files rather than inline string literals?</li>
+</ol>
+<ul>
+<li>A. Files are easier to print.</li>
+<li>B. Prompts change independently of code and need a stable identifier for tracing and audit.</li>
+<li>C. Inline strings cannot be sent to a model.</li>
+<li>D. Files reduce the number of tokens in a prompt.</li>
+</ul>
+<ol start="2">
+<li>A PDF review produces garbled answers while plain-text reviews are fine. What is the most likely cause?</li>
+</ol>
+<ul>
+<li>A. The model version is wrong.</li>
+<li>B. The prompt needs more examples.</li>
+<li>C. Text extraction from the PDF is preserving poor reading order or layout.</li>
+<li>D. The cache is enabled.</li>
+</ul>
+<ol start="3">
+<li>Which statement about streaming is correct?</li>
+</ol>
+<ul>
+<li>A. Streaming shortens total generation time.</li>
+<li>B. Streaming removes the need for validation.</li>
+<li>C. Streaming changes validation, error handling, cancellation, and tracing, not just presentation.</li>
+<li>D. Streaming is only useful in batch jobs.</li>
+</ul>
+<ol start="4">
+<li>What is the main benefit of a single vendor-neutral model interface with per-vendor adapters?</li>
+</ol>
+<ul>
+<li>A. It makes every vendor produce identical text.</li>
+<li>B. It lets routing, fallback, and testing happen behind one stable seam.</li>
+<li>C. It eliminates the need for a schema.</li>
+<li>D. It guarantees lower cost.</li>
+</ul>
+<ol start="5">
+<li>Which cache key is most defensible for a model response?</li>
+</ol>
+<ul>
+<li>A. The raw prompt string only.</li>
+<li>B. The document text only.</li>
+<li>C. A hash of the canonical input plus prompt version, model snapshot, configuration, enabled tools, and tenant scope.</li>
+<li>D. The current timestamp.</li>
+</ul>
+<ol start="6">
+<li>For a request with a strict eight-second latency budget, which change is most appropriate first?</li>
+</ol>
+<ul>
+<li>A. Increase the thinking budget to improve quality.</li>
+<li>B. Move oversized documents to an asynchronous batch path and cache repeated inputs.</li>
+<li>C. Send every available tool so the model can answer in one step.</li>
+<li>D. Remove all tracing to reduce overhead.</li>
+</ul>
+<ol start="7">
+<li>What distinguishes a liveness check from a readiness check?</li>
+</ol>
+<ul>
+<li>A. Liveness checks the vendor API; readiness checks the database.</li>
+<li>B. There is no difference; they are synonyms.</li>
+<li>C. Liveness shows the process is responsive without external dependencies; readiness shows the instance can accept traffic.</li>
+<li>D. Readiness restarts the process; liveness does not.</li>
+</ul>
+<ol start="8">
+<li>A fallback model handled a request during an outage. What must the trace record?</li>
+</ol>
+<ul>
+<li>A. Only the primary model that was configured.</li>
+<li>B. The model actually used, with its snapshot, so the record reflects what happened.</li>
+<li>C. Nothing, because fallback is invisible to callers.</li>
+<li>D. Only the response text.</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B is correct.</strong> Prompts are content that evolves separately from code; a file with an immutable identifier supports version stamping, rollback, and audit. A is irrelevant. C is false because inline strings work perfectly well with models. D is false because file storage does not change token count.</p>
+</li>
+<li>
+<p><strong>C is correct.</strong> When one format fails and others succeed, the format-specific conversion step is the prime suspect; poor reading order feeds nonsense to the model. A would affect all formats. B might change answers but would not explain the format-specific pattern. D is not indicated by the symptom.</p>
+</li>
+<li>
+<p><strong>C is correct.</strong> Streaming alters where validation happens, how partial failures are signalled, how cancellation works, and how traces are closed. A is false because total generation time is roughly unchanged. B is false because final validation is still required. D is backwards; batch jobs rarely benefit from streaming.</p>
+</li>
+<li>
+<p><strong>B is correct.</strong> The interface is the seam that makes routing, fallback, and fake-based testing possible without touching callers. A is false because models keep their distinct behavior. C is false because schemas are still needed. D overpromises; an interface enables cost decisions but does not guarantee savings.</p>
+</li>
+<li>
+<p><strong>C is correct.</strong> Every input that can change the answer must be part of the key, plus tenant scope for isolation. A and B omit versions and configuration, risking stale or cross-tenant results. D produces a key that never repeats, defeating caching.</p>
+</li>
+<li>
+<p><strong>B is correct.</strong> Moving unsuited work off the critical path and avoiding duplicate work attack latency structurally while preserving quality and audit. A increases latency. C adds cost and distraction without addressing the budget. D removes the evidence needed to diagnose and would harm auditability.</p>
+</li>
+<li>
+<p><strong>C is correct.</strong> Liveness must avoid external dependencies so an outage does not trigger pointless restarts; readiness may check that configuration and connections are usable. A is wrong because liveness should not call the vendor. B is false; the two serve different purposes. D is false; neither check necessarily restarts a process.</p>
+</li>
+<li>
+<p><strong>B is correct.</strong> Traces must record effective values, including the fallback actually used, or the record is confidently wrong. A describes intent rather than reality. C ignores an audit requirement. D lacks the version metadata needed for reproduction.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 6.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="05-designing-the-boundary.html">&larr; Previous</a><span></span><a href="07-working-in-the-repository.html">Next: Working Inside the Repository with an AI Coding Assistant &rarr;</a></nav>
+</div>
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../../tutorials/js/feedback.js"></script>
+<script src="../../../tutorials/js/access.js"></script>
+<script src="../../../tutorials/js/tts.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+<script src="../../../tutorials/js/progress.js"></script>
+</body>
+</html>

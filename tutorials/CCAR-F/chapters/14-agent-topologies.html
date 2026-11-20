@@ -1,0 +1,110 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>14. Topologies and Agent Selection</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>14. Topologies and Agent Selection</h1>
+
+<p>A topology is the pattern of communication among agents, a separate decision from plan shape: a hierarchical plan can run on a star, and a parallel plan through a shared workspace. Topology decides who talks to whom, how much context is copied, where bottlenecks form, and which failures are survivable. This chapter compares star, chain, tree, blackboard, and debate, then gives selection criteria.</p>
+
+<h2>Star: one hub, many spokes</h2>
+
+<p>In a star, a central agent communicates with all workers, and workers do not communicate with one another. It is the direct implementation of the orchestrator-and-subagents pattern from the previous chapter. With <em>n</em> workers, a simple exchange costs about <code>2n</code> messages: one task out and one result back per worker. The hub holds the global view, assigns scope, and validates results, which makes conflict resolution straightforward.</p>
+
+<p>The hub is also the bottleneck. Every result passes through its context, so ten workers returning 2,000 tokens each place 20,000 tokens of material in the hub before synthesis. Beyond roughly eight to twelve workers, the hub's context becomes the limiting resource and its judgement degrades: it starts skim-reading results. Mitigations include asking workers for shorter structured returns, staging results in groups of four or five, or moving to a tree. A hub failure is total — no worker has the authority to continue — so the hub's decisions and checkpoints should be persisted frequently.</p>
+
+<h2>Chain: a relay of specialists</h2>
+
+<p>A chain passes work from one agent to the next: researcher to analyst to writer to reviewer. With <em>n</em> agents there are only <code>n &minus; 1</code> handoffs, making it the cheapest topology in message count and the easiest to audit — each link has one sender and one receiver. It maps naturally onto pipelines with real stage ordering, and it gives each agent a small, stable context.</p>
+
+<p>The chain's weakness is cumulative distortion. Each agent receives a representation created by the previous one, not the original evidence. If the analyst compresses twelve findings into three sentences, the writer can only work with three sentences. A chain of five agents can drift substantially from the source while every individual handoff looks reasonable. Defences include passing immutable artifact references alongside summaries, requiring each agent to cite the original source, and allowing later agents to query earlier stages rather than accepting their prose. Chains also serialise latency: the total time is the sum of all links, so they are a poor choice when work can proceed in parallel.</p>
+
+<div class="tip"><strong>Chain versus pipeline.</strong> A pipeline is a plan with ordered stages; a chain is a communication topology that can implement one. You can run a five-stage pipeline on a star (the hub performs each stage) or on a chain (one agent per stage). Choose the topology by asking who needs to see what, not by counting stages.</div>
+
+<h2>Tree: hierarchy with local aggregation</h2>
+
+<p>A tree introduces intermediate coordinators. A root delegates to three branch leads, each of which manages five workers. Instead of 15 results arriving at the root, three summaries arrive; the root resolves only cross-branch conflicts. Message count is approximately <code>2(n &minus; 1)</code> for a tree with <em>n</em> agents — slightly more than a star — but the context per node is much smaller. Depth adds latency because a result must travel upward one level at a time.</p>
+
+<p>Trees are the right shape when the problem decomposes into genuinely different domains: separate regional markets, separate subsystems of a codebase, separate sections of a large document. They are wasteful when the branches are doing identical work — that is a fan-out pattern with an unnecessary middle management layer. The classic tree failure is summary loss at branch boundaries. Give each branch a fixed return shape and keep evidence references reachable from the root, so a suspicious summary can be expanded on demand instead of triggering a full re-run.</p>
+
+<table>
+<tr><th>Topology</th><th>Messages for n agents</th><th>Context duplication</th><th>Single point of failure</th><th>Best fit</th></tr>
+<tr><td>Star</td><td>about 2n</td><td>High at the hub</td><td>Hub</td><td>Small parallel teams, central control</td></tr>
+<tr><td>Chain</td><td>n &minus; 1</td><td>Low but lossy</td><td>Any link</td><td>Ordered refinement</td></tr>
+<tr><td>Tree</td><td>about 2(n &minus; 1)</td><td>Moderate, local to branches</td><td>Root or branch lead</td><td>Large heterogeneous work</td></tr>
+<tr><td>Blackboard</td><td>about 2n plus conflicts</td><td>Low; shared artifact</td><td>Shared store</td><td>Iterative, interdependent discovery</td></tr>
+<tr><td>Debate</td><td>roughly 4n or more</td><td>High; repeated viewpoints</td><td>Judge</td><td>High-risk decisions with competing hypotheses</td></tr>
+</table>
+
+<h2>Blackboard: a shared workspace</h2>
+
+<p>In a blackboard topology, agents read from and write to a shared artifact — a problem board, a shared document, a structured knowledge base. There is no central router; agents pick up the next item that matches their role and post findings for others to use. This is a good fit for open-ended investigation where agents cannot predict in advance which discovery will matter: a security review, a root-cause analysis, a design exploration.</p>
+
+<p>The cost is coordination discipline. Without conventions, agents overwrite one another, duplicate work, or read partially written entries. A workable blackboard needs three mechanisms: typed entries with owners and timestamps, a reservation or claim protocol so only one agent works an item, and an append-only log so history is not lost. Versioning is essential because an agent may act on information that was true when it read it but was later revised. A shared store is also a single point of failure and a security boundary — every agent that can read the board sees everything on it, which may conflict with data-scope requirements.</p>
+
+<div class="warn"><strong>Blackboard failure mode: anchoring.</strong> When all agents see the same early hypothesis, they tend to reinforce it rather than challenge it. Periodically seed independent checks that do not read the board until they have produced a candidate answer, or reserve a dedicated sceptic role.</div>
+
+<h2>Debate: structured disagreement</h2>
+
+<p>A debate topology has competing agents advance different answers and a judge compare them. A minimal form uses two proposers with different mandates and one evaluator; a stronger form adds a critic who attacks both proposals before the judge rules. This is the most expensive of the five shapes — with <em>n</em> participants the message count can exceed <code>4n</code> because arguments, rebuttals, and judgements circulate repeatedly — but it is valuable when the cost of a wrong decision is high and the evidence genuinely supports multiple interpretations.</p>
+
+<p>Debate only works if the roles are different in substance. Two agents given the same prompt and the same data usually produce the same answer, so the "debate" becomes a duplicate vote. Give one agent a conservative mandate, another a coverage-oriented mandate, and a third the task of finding disconfirming evidence. Require the judge to cite which argument survived and why, and record the losing arguments rather than discarding them — they are useful if the decision is revisited. Debate is a poor fit for routine extraction, high-volume classification, or any task where latency is the primary constraint.</p>
+
+<h2>Selection criteria and anti-patterns</h2>
+
+<p>Choose a topology from four questions. <strong>Dependency:</strong> does work arrive in a fixed order (chain), in independent slices (star or tree), or unpredictably (blackboard)? <strong>Context:</strong> does every agent need the same large body of material (blackboard) or only its own slice (star/tree)? <strong>Risk:</strong> is a wrong answer cheap to correct, or does it warrant adversarial checking (debate)? <strong>Scale:</strong> how many agents are needed before the hub's context or the queue becomes the bottleneck (tree)? Budget and latency then act as tie-breakers.</p>
+
+<pre><code>select_topology:
+  if ( fixed_order &amp;&amp; slices &lt; 6 )        -&gt; chain
+  else if ( independent &amp;&amp; workers &lt;= 10 ) -&gt; star
+  else if ( independent &amp;&amp; domains_differ ) -&gt; tree
+  else if ( emergent_dependencies )         -&gt; blackboard
+  else if ( high_impact &amp;&amp; ambiguous )  -&gt; debate
+  else                                      -&gt; single_agent
+  hard_limits: max_agents = 20, max_hops = 4, max_context_per_agent = 16k</code></pre>
+
+<p>Anti-patterns are worth naming. A star with twenty workers is usually a tree waiting to be designed. A chain with ten links is usually a pipeline that needs checkpoints or a star inside one stage. A blackboard without an append-only log is a shared file that will be overwritten. A debate over a factual extraction task is theatre. And any topology whose message count exceeds the value of the work it coordinates is an expensive way to look sophisticated. The best multi-agent design is often no multi-agent design: a single agent with good tools and a clear contract beats a five-agent topology with vague handoffs.</p>
+
+<div class="exercise"><strong>Exercise 14.1 — Select a topology</strong>
+<p>For each scenario, choose a topology and justify it with one dependency observation and one risk observation.</p>
+<ol>
+<li>A help-desk draft must be classified, enriched with account data, written, and legally checked before sending.</li>
+<li>Twelve engineers' notes must be searched for evidence about a production outage; each discovery may change what the others look for.</li>
+<li>Two plausible root causes exist for a failing payment flow; a wrong choice would trigger a costly migration.</li>
+</ol>
+<p>Hint: match each scenario's dependency pattern and risk level to one topology, then name its main safeguard.</p>
+</div>
+
+<div class="exercise"><strong>Exercise 14.2 — Count the messages</strong>
+<p>Compare star, chain, and two-level tree topologies for 16 agents. Assume one task message and one result message per worker in a star, one handoff per link in a chain, and a tree with one root, four branch leads, and twelve workers (each worker exchanges with its lead; each lead exchanges with the root). Which topology minimises messages, and which minimises the number of results the root must read in detail?</p>
+<p>Hint: count pairs at each level; then compare how many results the root must read and how many hops a result travels.</p>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why does a star topology become problematic beyond roughly ten workers?</li>
+<li>What information should be passed alongside a summary in a chain to limit drift?</li>
+<li>Name two mechanisms a blackboard needs to avoid duplicate or overwritten work.</li>
+<li>Why do two agents given identical prompts rarely produce a useful debate?</li>
+<li>Which two questions should be answered before choosing a topology?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Star centralises control but concentrates context and failure in the hub.</li>
+<li>Chain is cheap and ordered but suffers cumulative distortion and serial latency.</li>
+<li>Tree scales heterogeneous work by aggregating locally before reaching the root.</li>
+<li>Blackboard supports emergent dependencies but needs claims, versions, and an append-only log.</li>
+<li>Debate is worth its cost only for high-impact decisions with genuinely different mandates.</li>
+<li>Select topology from dependency, context, risk, and scale — then check the message bill.</li>
+</ul>
+
+<nav><a href="13-orchestrators-and-subagents.html">&larr; Previous</a><span></span><a href="15-messages-and-handoffs.html">Next: Agent Messages and Handoff Protocols &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

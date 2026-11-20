@@ -1,0 +1,104 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>33. Scoped Instructions and Team Patterns</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>33. Scoped Instructions and Team Patterns</h1>
+
+<h2>Why one global file stops scaling</h2>
+<p>A single CLAUDE.md at the repository root is an excellent starting point. It gives every session the same basics: how to run tests, which branch conventions apply, where the domain vocabulary lives. It begins to fail when the repository contains several subsystems with genuinely different rules. A monorepo may hold a Python data pipeline, a TypeScript web client, and a set of infrastructure definitions. Telling the model "always use pytest" is wrong for the client, and "never edit generated files" may be correct in one directory and irrelevant in another.</p>
+<p>The failure is not loud. The model reads the global file, applies a rule from the wrong subsystem, and produces a plausible change that fails review. Because the file is always present, its instructions receive the same weight as a rule that actually belongs to the directory being edited. Scope is a way of restoring signal: the closer a rule is to the code it governs, the more likely it is to be applied at the right time and ignored everywhere else.</p>
+<p>There are two mechanisms to combine. The first is a subdirectory instruction file, loaded when the session works inside that subtree. The second is a path-scoped rule, a standalone instruction with a glob pattern that decides when it applies. They solve different problems: directory files describe a place, while path rules describe a pattern that can occur in several places.</p>
+
+<h2>Subdirectory instruction files and load order</h2>
+<p>Place a file named CLAUDE.md inside a subdirectory to add guidance for that subtree. If the repository root has one and <code>services/payments/</code> has another, a session editing <code>services/payments/client.py</code> sees both. The root file is the base layer; the nested file is an overlay. Both are in context, so a nested file should add local knowledge rather than repeat the entire root document.</p>
+<p>Order matters when the two disagree. Treat the most specific file as the tie-breaker: a nested rule overrides a general one only inside its own subtree. Do not rely on the model to reconcile a direct contradiction. If the root says "use tabs" and a subdirectory says "use two spaces," you have created a test of interpretation rather than a rule. Write the nested file as an explicit exception — "In this directory only, use two spaces because the generated protobuf wrappers require it" — so the model can see that both statements are true.</p>
+<p>Keep nested files short. A useful target is 20 to 60 lines. Anything longer is usually a sign that the content belongs in a repository document that the instruction file points to. The instruction file should answer three questions: what is unusual here, what must never be changed, and which command proves a change is correct.</p>
+
+<h2>Path-scoped rules with glob patterns</h2>
+<p>A path-scoped rule lives in a separate file and declares the paths where it applies. In the working layout used by this book, rules are kept under <code>.claude/rules/</code> with YAML-style frontmatter at the top. A minimal example looks like this:</p>
+
+<pre><code>---
+description: Apply strict validation to public API handlers
+paths:
+  - "src/api/**/*.ts"
+  - "src/**/routes/*.ts"
+---
+
+# Public API handlers
+
+Every handler must validate the request body before use.
+Use the schema objects in src/schemas/; do not hand-roll checks.
+Return a 400 response with an `errors` array for invalid input.
+Never log raw request bodies — they may contain credentials.
+Match &lt;path&gt; values relative to the repository root, not the shell cwd.
+</code></pre>
+
+<p>The glob patterns are evaluated against file paths the session touches. A rule marked <code>src/api/**/*.ts</code> is intended for TypeScript handlers under that tree, not for test fixtures or documentation. Wildcards are generous by default: <code>**</code> crosses directory boundaries, while <code>*</code> normally stays within one segment. Write the narrowest pattern that covers the real cases, then add a second pattern if a separate directory needs the same rule.</p>
+
+<div class="note"><strong>Scope is a routing decision.</strong> A path-scoped rule that matches nothing is dead weight in the repository but harmless in context. A rule that matches too much is worse: it competes with correct local instructions on every unrelated file. Review glob patterns the way you would review a CI filter.</div>
+
+<h2>Exclusions and negative scope</h2>
+<p>Most rule systems let you describe what is out of scope as well as what is in scope. Use exclusions for generated code, vendored dependencies, snapshots, and historical directories. A typical mistake is to write a rule for <code>src/**/*.py</code> and then discover that it fires inside <code>src/legacy/</code> where the code is frozen. An exclusion such as <code>!src/legacy/**</code> makes the intent explicit and survives later refactors better than an informal warning in prose.</p>
+<p>Be careful with overlapping positive and negative patterns. When two rules both match a file and give conflicting guidance, the result depends on load order and specificity, which is exactly the kind of hidden behaviour you want to avoid. Prefer a single rule with a precise pattern over two broad rules that cancel each other out. If you need a true exception, state it in the same file:</p>
+
+<pre><code>---
+paths:
+  - "services/**/*.py"
+  - "!services/legacy_v1/**"
+---
+
+Use structured logging from platform.log for all new service code.
+The legacy_v1 tree is excluded because it targets Python 3.8 and
+uses the older logging adapter; do not modernise it in feature PRs.
+</code></pre>
+
+<div class="warn"><strong>Failure mode:</strong> "the model ignored my rule." Before blaming the model, check whether the file was loaded at all. Verify the current working directory, confirm the pattern matches the exact path string, and look for a contradictory instruction in a higher-priority file. Three configuration faults explain most apparent disobedience.</div>
+
+<h2>Team patterns that survive review</h2>
+<p>Instructions are source code for behaviour, so give them the same lifecycle. Store shared rules in version control, require review for changes, and keep them small enough that a diff is meaningful. A practical ownership model has three layers:</p>
+<ul>
+<li><strong>Repository baseline</strong> — root file with build commands, branch policy, and vocabulary. Owned by the platform team.</li>
+<li><strong>Domain overlays</strong> — subdirectory files for each service or package. Owned by the team that merges into that subtree.</li>
+<li><strong>Cross-cutting rules</strong> — path-scoped files for concerns such as SQL safety, secret handling, or accessibility. Owned by whoever enforces the concern organisation-wide.</li>
+</ul>
+<p>A useful convention is to include a "why" sentence in every non-obvious rule. "Do not use <code>SELECT *</code> in repository queries" is a constraint; adding "because the reporting tables contain a column with personal data that must be explicitly projected" turns it into knowledge the model can generalise from. When the model meets a similar table not covered by the rule, the reason helps it make the right call.</p>
+<p>Another effective pattern is a pointer rather than a copy. If the organisation already maintains a style guide, the instruction file should name the document and the relevant section, not paste 400 lines into context. The model can read the referenced file on demand when it needs the detail. This is cheaper in tokens and avoids two sources of truth drifting apart.</p>
+
+<div class="tip"><strong>Onboarding test:</strong> ask a new teammate to find the answer to "how do I add a migration?" using only the instruction files. If they cannot, the model probably cannot either. Treat that as a documentation bug, not a prompting problem.</div>
+
+<div class="exercise"><strong>Exercise 33.1 — Design a three-layer rule set.</strong> A repository contains <code>web/</code> (React), <code>api/</code> (Python), and <code>infra/</code> (Terraform). Write outlines for a root instruction file and two subdirectory files. Then add one path-scoped rule with a glob that matches only API test files. State which layer wins if the root and a subdirectory disagree about formatting.</div>
+
+<div class="exercise"><strong>Exercise 33.2 — Debug a scope failure.</strong> A rule intended for <code>src/api/**/*.ts</code> is being applied to <code>src/api-gateway/main.ts</code>. Diagnose the cause, rewrite the pattern, and add an exclusion so generated code under <code>src/api/generated/</code> is skipped. Explain how you would verify the fix with a single targeted session.</div>
+
+<h2>Measuring whether scope works</h2>
+<p>Treat instruction scope as something you can test. Pick five representative tasks: one in each subsystem, one cross-cutting change, and one task that should trigger a safety rule. Run them with the rule set enabled and record whether the expected rule appeared in the model's reasoning and whether the resulting diff obeyed it. A score of four out of five usually reveals one pattern that is too broad or one exception that was never written down.</p>
+<p>Also watch for context cost. Ten short rules that fire on every task can consume more attention than one long document that is read once. Consolidate rules that always apply together, and split only when the trigger conditions genuinely differ. The goal is not the maximum number of rules; it is the smallest set that reliably changes behaviour where it should.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>When should a rule live in a subdirectory instruction file rather than in a path-scoped rule file?</li>
+<li>Why is an explicit exception better than two contradictory instructions in different layers?</li>
+<li>What does a negative glob pattern such as <code>!src/legacy/**</code> accomplish?</li>
+<li>Name three checks to perform before concluding that the model ignored a rule.</li>
+<li>What is the trade-off between many small rules and one consolidated instruction file?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Use root instructions for universal facts and subdirectory files for local exceptions.</li>
+<li>Path-scoped rules route guidance by glob pattern; narrow patterns beat broad ones with disclaimers.</li>
+<li>Exclusions protect generated, vendored, and frozen code from well-intentioned rules.</li>
+<li>Treat instruction files as reviewed source code with clear ownership and a stated reason.</li>
+<li>Verify scope with representative tasks and watch the token cost of always-on rules.</li>
+</ul>
+
+<nav><a href="32-claude-md-hierarchy.html">&larr; Previous</a><span></span><a href="34-commands-and-skills.html">Next: Slash Commands and Skills &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

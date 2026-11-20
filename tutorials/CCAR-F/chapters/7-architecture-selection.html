@@ -1,0 +1,111 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>7. Choosing an Architecture</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>7. Choosing an Architecture</h1>
+
+<p>By now you can describe a chatbot, a workflow, and an agent, and you know why a fixed path often wins. The remaining question is how to choose deliberately when a real system mixes all three. This chapter provides a scored framework, a worked comparison, a sensitivity check, and a migration path. The aim is to replace "it feels agentic" with an argument you can defend in a design review or an exam scenario.</p>
+
+<h2>Selection is a constraint-matching exercise</h2>
+
+<p>Begin by writing down constraints as numbers wherever possible. "Fast enough" becomes "p95 under 1.5 seconds." "Cheap" becomes "under 400 currency units per day at 50,000 requests." "Reliable" becomes "fewer than one invalid write per 10,000 tasks." "Handles novelty" becomes "at least 85 percent of unseen request shapes resolved without a human." Constraints that cannot be quantified still matter, but make them explicit categories — regulated, auditable, safety-critical — rather than vague adjectives.</p>
+
+<p>Then separate hard constraints from preferences. A hard constraint eliminates options: if a regulation requires a deterministic decision record, a pure agent is out. A preference merely reorders the remaining options: lower cost is nice unless it breaks the latency ceiling. Mixing the two is a frequent error — teams treat "we prefer less complexity" as if it forbade a useful architecture, or treat "we like flexibility" as if it overrode an audit rule.</p>
+
+<div class="note"><strong>Output of this step:</strong> a one-page constraint sheet with five to eight entries, each marked hard or preferred, each with a number or a clear category. Every later decision refers back to it.</div>
+
+<h2>A scored decision framework</h2>
+
+<p>Score each candidate architecture from 1 (poor) to 5 (excellent) on the criteria that matter, multiply by weights that sum to 1.0, and compare the totals. The numbers are not truth; they are a structured conversation. Their value is that they force you to state how much you value each property and reveal when a choice depends on a single assumption.</p>
+
+<table>
+<tr><th>Criterion</th><th>Weight</th><th>What a 5 looks like</th></tr>
+<tr><td>Determinism and compliance</td><td>0.25</td><td>Every decision traceable to a versioned rule</td></tr>
+<tr><td>Latency</td><td>0.20</td><td>p95 comfortably inside the target</td></tr>
+<tr><td>Cost at target volume</td><td>0.15</td><td>Within budget with headroom</td></tr>
+<tr><td>Adaptability to novel inputs</td><td>0.25</td><td>Resolves unseen shapes without redesign</td></tr>
+<tr><td>Testability</td><td>0.15</td><td>Contract tests and branch coverage possible</td></tr>
+</table>
+
+<p>Apply the weights to three candidates for an internal document-routing service: a pure workflow, a pure agent, and a hybrid with a fixed skeleton and one reasoning stage. The workflow scores 5 on determinism, latency, cost, and testability, but 2 on adaptability. The agent scores 2 on the first two and on cost, 5 on adaptability, and 2 on testability. The hybrid scores 4 across all five.</p>
+
+<pre><code>weights: { determinism: 0.25, latency: 0.20, cost: 0.15, adaptability: 0.25, testability: 0.15 }
+scores:
+  workflow: { determinism: 5, latency: 5, cost: 5, adaptability: 2, testability: 5 }
+  agent:    { determinism: 2, latency: 2, cost: 2, adaptability: 5, testability: 2 }
+  hybrid:   { determinism: 4, latency: 4, cost: 4, adaptability: 4, testability: 4 }
+result:
+  workflow: 4.25
+  hybrid:   4.00
+  agent:    2.75</code></pre>
+
+<p>The workflow wins narrowly, and that narrowness is informative. The decision is not "agents are bad"; it is "with these weights, the workflow's predictability just outweighs the hybrid's flexibility." Change a weight and the answer changes — which is exactly what you want a design review to surface.</p>
+
+<h2>Worked comparison and sensitivity check</h2>
+
+<p>Now suppose the business discovers that 30 percent of incoming documents are novel and currently land in a manual queue at a high cost per item. Adaptability becomes the dominant concern. Reweight: adaptability 0.50, and the other four criteria 0.125 each. The workflow total becomes 3.50, the agent 3.50, and the hybrid 4.00. The hybrid now wins clearly. Notice that the pure agent did not become attractive even with adaptability weighted heavily — its poor latency and determinism still drag it down.</p>
+
+<table>
+<tr><th>Weight set</th><th>Workflow</th><th>Hybrid</th><th>Agent</th><th>Winner</th></tr>
+<tr><td>Balanced (first table)</td><td>4.25</td><td>4.00</td><td>2.75</td><td>Workflow</td></tr>
+<tr><td>Adaptability-dominant</td><td>3.50</td><td>4.00</td><td>3.50</td><td>Hybrid</td></tr>
+<tr><td>Latency-and-audit-dominant</td><td>4.63</td><td>4.00</td><td>2.50</td><td>Workflow</td></tr>
+</table>
+
+<p>A sensitivity check asks which single number would have to change to reverse the decision. In the balanced case, the workflow leads the hybrid by 0.25. If adaptability rose from 2 to 4 for the hybrid, or if determinism fell from 5 to 4 for the workflow, the order flips. That tells you exactly what to investigate: how common are novel documents, and how strict is the audit requirement? Spend analysis time there, not on polishing every score.</p>
+
+<div class="exercise"><strong>Exercise 7.1 — Score a candidate set.</strong> A customer onboarding service must respond in under two seconds, must record the reason for every rejection, and faces unusual applications in about 20 percent of cases. Define five criteria with weights summing to 1.0, score a workflow, a hybrid, and an agent, and compute the weighted totals. Then run one sensitivity change and state which criterion would have to move to alter the winner.</div>
+
+<h2>Migration paths between architectures</h2>
+
+<p>Architecture selection is rarely a one-time event. Systems move along the autonomy spectrum as requirements change. A safe migration goes in small, observable steps, each with a rollback. The most common direction is workflow to hybrid: keep the fixed skeleton and replace one brittle branch with a bounded reasoning stage that has its own tool set and budget. The next step, if justified, is to widen that stage's authority — never to remove the surrounding limits.</p>
+
+<ol>
+<li><strong>Instrument first.</strong> Add trace fields for route, reason, latency, and manual-queue outcome before changing anything.</li>
+<li><strong>Identify the bottleneck stage.</strong> Use the data to find which rule or branch causes most escalations.</li>
+<li><strong>Replace one branch.</strong> Introduce a bounded decision with a schema, a step budget, and a fallback.</li>
+<li><strong>Shadow and compare.</strong> Run the new path alongside the old one, comparing outcomes without changing user-facing behaviour.</li>
+<li><strong>Cut over with a kill switch.</strong> Flip traffic gradually and keep the old route available for immediate rollback.</li>
+</ol>
+
+<p>Migration in the opposite direction — agent to workflow — is also common, usually after cost or reliability problems. The technique is to mine traces for repeated paths. If 80 percent of runs use the same three steps in the same order, encode those three as a pipeline and keep the remaining 20 percent on an explicit fallback path. You lose theoretical flexibility and gain measurable stability, which is often the correct trade.</p>
+
+<div class="warn"><strong>Migration hazard:</strong> changing architecture and tool contracts at the same time. If outcomes shift, you cannot tell whether the new topology or the new input schema caused it. Change one dimension per release and keep comparable metrics across versions.</div>
+
+<h2>Common selection errors</h2>
+
+<p>One error is scoring on capability instead of constraints — giving a high mark to an architecture because it <em>could</em> handle anything, even when the system will only ever see ten request shapes. Another is treating cost as a single number rather than a distribution: an agent's average may look acceptable while its tail drives the worst-case bill and the latency breach. Ask for p50 and p95 costs, not just a mean.</p>
+
+<p>A third error is ignoring the human system. An architecture that escalates 2 percent of 50,000 daily requests sends 1,000 items to people; that is roughly two per minute during an eight-hour shift and may be impossible to staff. The "cheap" workflow that sends 5 percent to review creates 2,500 items a day. Selection must include the operator's capacity as a hard constraint.</p>
+
+<p>Finally, do not confuse a framework's defaults with a requirement. A platform may make an agent loop the easiest thing to build; that says nothing about the problem. Write the constraint sheet first, score the candidates second, and implement third. The order is the point.</p>
+
+<div class="exercise"><strong>Exercise 7.2 — Plan a migration.</strong> A support agent currently averages six steps and 9 seconds per request; 78 percent of traces follow the same four-step path, and reviewers handle 400 escalations per day. Describe a two-release migration to a hybrid design. For each release, state the single dimension you change, the metric you compare, and the rollback trigger.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why must hard constraints be separated from preferences before scoring architectures?</li>
+<li>How does a sensitivity check make a scored decision more useful?</li>
+<li>In the worked example, why did the pure agent remain unattractive even when adaptability was weighted at 0.50?</li>
+<li>What is the purpose of shadowing a new path before cutting traffic over?</li>
+<li>Why should escalation rates be treated as a hard constraint in architecture selection?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Write quantified constraints and label them hard or preferred before comparing designs.</li>
+<li>A weighted scorecard turns preferences into explicit numbers and reveals which assumptions drive the choice.</li>
+<li>Sensitivity analysis identifies the single value that would reverse a decision, focusing further investigation.</li>
+<li>Migrate in small steps: instrument, replace one branch, shadow, then cut over with a kill switch.</li>
+<li>Mine traces when moving from agent to workflow; encode the dominant repeated path and keep an explicit fallback.</li>
+<li>Change one dimension per release and include human review capacity as a hard constraint.</li>
+</ul>
+
+<nav><a href="6-when-workflows-win.html">&larr; When a Fixed Workflow Wins</a><span></span><a href="8-task-decomposition.html">Next: Breaking Goals Into Subtasks &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

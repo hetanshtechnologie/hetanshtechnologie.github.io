@@ -1,0 +1,102 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>43. The Context Window</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>43. The Context Window</h1>
+<p>The context window is the total amount of text a model can consider in one call. It is simultaneously a memory limit, a budget line, a latency knob, and a quality risk. Architects who treat it as "a big number that is always enough" discover the truth during an incident: the retrieved documents, the system prompt, the tool schemas, and the chat history all compete for the same finite space. This chapter makes that competition explicit and gives you a budgeting method.</p>
+
+<h2>Tokens, limits, and what actually counts</h2>
+<p>Models measure context in tokens, not characters. In English, a token is often a word or part of a word; a useful planning approximation is that 100 tokens are roughly 75 words, or that one token averages about four characters. Code, identifiers, and non-Latin scripts can be far denser. Never size a prompt by character count alone.</p>
+<p>A modern long-context model may advertise a window in the hundreds of thousands of tokens. That number is a hard ceiling, not a recommended operating point. Several things consume it in every request:</p>
+<ul>
+<li>The system instruction and any persistent rules — often 300 to 2,000 tokens.</li>
+<li>Tool definitions. Fifteen tools with detailed schemas can cost 3,000 tokens before any user input arrives.</li>
+<li>Conversation history, which grows each turn.</li>
+<li>Retrieved documents, which are usually the largest and most variable block.</li>
+<li>Reserved output space. If you ask for a 2,000-token answer, that space must remain available.</li>
+</ul>
+<p>Compute the usable input as <code>window - reserved_output - fixed_overhead</code>. On a 200,000-token window with 4,000 reserved for output and 5,000 of fixed overhead, you have about 191,000 tokens for history and evidence. That sounds generous until a retrieval step returns fifty full documents at 6,000 tokens each — 300,000 tokens, well beyond the ceiling. The failure is not a model defect; it is an unbudgeted retrieval call.</p>
+<div class="tip">Count tokens with the tokenizer that matches your model, in CI, on representative inputs. A rough multiplier is fine for early design but not for a production guard. Assert that the final assembled prompt is below the budget before it is sent.</div>
+
+<h2>Cost, speed, and quality trade-offs</h2>
+<p>Long context is not free even when it fits. Three costs rise together with prompt length.</p>
+<table>
+<thead><tr><th>Dimension</th><th>As context grows</th><th>Why it matters</th></tr></thead>
+<tbody>
+<tr><td>Input cost</td><td>Increases roughly linearly with tokens</td><td>A 50,000-token prompt billed repeatedly can dominate the budget</td></tr>
+<tr><td>Latency to first token</td><td>Usually increases, often superlinearly</td><td>User-facing agents feel sluggish past a few thousand tokens</td></tr>
+<tr><td>Reliability</td><td>Can decrease after a point</td><td>Relevant detail may be overlooked amid distractors</td></tr>
+</tbody>
+</table>
+<p>Consider a retrieval assistant processing 10,000 queries a day. Shortening the average prompt from 12,000 to 4,000 tokens removes 8,000 tokens per query, or 80 million tokens a day. Even at a modest per-token price, that is a material line item. The same change typically reduces time to first token as well, so the user experience improves alongside the invoice.</p>
+<p>Quality is subtler. Adding more relevant evidence helps up to a point; adding irrelevant evidence can hurt. The practical rule is to maximise <em>signal density</em> rather than total context. Five precise passages beat thirty loosely related ones. When in doubt, retrieve more candidates and then rerank down to a small set before assembly.</p>
+
+<h2>Attention dilution and position effects</h2>
+<p>A long prompt does not give every token equal influence. Two well-documented effects matter in practice. First, information at the very beginning and very end of a context tends to be recalled more reliably than information buried in the middle — sometimes called a lost-in-the-middle pattern. Second, as distractors accumulate, the model's effective attention to any single fact is diluted.</p>
+<p>You can observe this without special tooling. Place a unique fact — say a confirmation code <code>HT-7742</code> — in a document set of twenty, then vary its position: first, middle, last. Ask a question that requires the code. Repeat thirty times per position with a fresh surrounding text. A drop in accuracy for the middle position is the dilution effect made visible on your own data.</p>
+<p>Design around it rather than fighting it:</p>
+<ol>
+<li>Put the task instruction and the acceptance criteria at the front.</li>
+<li>Put the single most important evidence passage near the end, immediately before the question.</li>
+<li>Include a short explicit index or recap of the evidence in the middle so key facts are repeated, not merely present once.</li>
+<li>Remove near-duplicate passages; repetition of similar text is a major source of dilution.</li>
+</ol>
+<div class="warn">Do not assume a bigger window fixes reasoning. If an answer requires joining three facts, a window that contains all three but buries one in 100,000 tokens of noise can still fail. Retrieval precision and positioning beat raw capacity.</div>
+
+<h2>Budgeting a context window</h2>
+<p>Treat the window like memory in an embedded system: allocate fixed regions, cap the variable ones, and assert the total. A workable budget for a support agent might look like this.</p>
+<pre><code>WINDOW            = 128000   # model context limit
+RESERVED_OUTPUT   =  4096    # room for the answer
+FIXED_OVERHEAD    =  6000    # system + tool schemas
+SAFETY_MARGIN     =  2048    # tokenizer drift
+USABLE            = WINDOW - RESERVED_OUTPUT - FIXED_OVERHEAD - SAFETY_MARGIN
+# USABLE = 115856 tokens for history + retrieved evidence
+
+HISTORY_CAP       = 24000    # last 8 turns, summarised beyond that
+EVIDENCE_CAP      = 88000    # at most 12 reranked passages, 7000 each
+ASSERT (history + evidence) &lt;= USABLE &amp;&amp; passages &lt;= 12</code></pre>
+<p>The assertion is the point. If it fails, the application must act — drop the oldest history, rerank more aggressively, or refuse and ask a narrower question. Silently truncating in the middle of a JSON tool schema is a classic cause of baffling production errors.</p>
+<p>Set per-source caps too. A single retrieved document should rarely be allowed to consume more than a fixed share, say 10 percent of the evidence budget. Otherwise one verbose file crowds out all other evidence and the answer silently degrades to a single-source summary. Log the final composition of every prompt — counts by source, tokens per region — so you can diagnose quality regressions by what was in the window.</p>
+
+<h2>A decision table for context pressure</h2>
+<p>When the budget is tight, choose a response deliberately. The right move depends on which region is oversized and whether the missing information is essential.</p>
+<table>
+<thead><tr><th>Symptom</th><th>Likely cause</th><th>First action</th><th>Last resort</th></tr></thead>
+<tbody>
+<tr><td>History alone exceeds cap</td><td>Too many turns retained verbatim</td><td>Summarise turns older than the last eight</td><td>Start a new session with a state handoff</td></tr>
+<tr><td>Evidence exceeds cap</td><td>Retrieval returned too many documents</td><td>Rerank and keep top passages</td><td>Ask the user to narrow the query</td></tr>
+<tr><td>Fixed overhead too large</td><td>Too many tool definitions loaded</td><td>Load tools per turn, not all at once</td><td>Split the agent into specialists</td></tr>
+<tr><td>Answer quality falls despite fitting</td><td>Dilution and near-duplicates</td><td>Deduplicate, reorder key evidence to the end</td><td>Reduce to the minimal evidence set</td></tr>
+</tbody>
+</table>
+<div class="exercise"><strong>Exercise 43.1 — Compute a budget.</strong> Assume a 200,000-token window, 8,000 tokens reserved for output, 7,500 tokens of fixed overhead, and a 2,000-token safety margin. Compute the usable input. Then design an allocation that gives history at most 30,000 tokens and evidence at most 12 passages, and write the assertion your application would evaluate before sending a request.</div>
+<div class="exercise"><strong>Exercise 43.2 — Design a dilution test.</strong> Create an experiment to measure whether a key fact is lost in the middle of a long context. Specify the fact, the number of distractor documents, the positions you will test, the number of repetitions, and the accuracy metric. State what result would cause you to change prompt ordering rather than model choice.</div>
+
+<h2>Making the budget a system property</h2>
+<p>Context budgeting belongs in infrastructure, not in individual prompts. Build a single assembly function that receives history, evidence, tool definitions, and reserved output, then enforces caps and logs the composition. Every caller uses it. When a new tool is added, the fixed overhead rises and the assembly function automatically reduces the evidence cap — with an alert if the reduction crosses a threshold. This centralisation is what turns context from a vague constraint into an engineering resource you can measure, forecast, and defend in a design review.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why is character count an unreliable proxy for context size, and what should you use instead?</li>
+<li>Given a 128,000-token window with 4,096 reserved output and 6,000 fixed overhead, what remains for history and evidence before a safety margin?</li>
+<li>Describe the lost-in-the-middle effect and two ordering choices that reduce it.</li>
+<li>Why does adding more retrieved documents sometimes lower answer quality?</li>
+<li>What should an application do when its pre-send context assertion fails, and why is silent truncation dangerous?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Context is measured in tokens and shared by instructions, tools, history, evidence, and reserved output.</li>
+<li>Longer prompts cost more, increase latency, and can reduce reliability through dilution.</li>
+<li>Middle-position facts are recalled less reliably; place key evidence at the edges and deduplicate.</li>
+<li>Budget explicitly: reserve output, cap fixed overhead, and assert the assembled size before sending.</li>
+<li>Handle context pressure with per-region strategies — summarise history, rerank evidence, load tools selectively.</li>
+</ul>
+<nav><a href="42-structured-output-and-evals.html">&larr; Previous</a><span></span><a href="44-memory-and-trimming.html">Next: Memory, Facts, and Trim Strategies &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 29 — Prompt Injection, Secrets, and Layered Guardrails</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 29</span>
+  <h1 id="chapter-29-prompt-injection-secrets-and-layered-guardrails">Chapter 29 — Prompt Injection, Secrets, and Layered Guardrails</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain why instructions and data sharing one text channel makes language-model applications a distinct security problem.</li>
+<li>Recognize prompt injection, including indirect injection arriving through a tool result, and describe containment measures.</li>
+<li>Identify paths by which personal data and secrets can leak into context, responses, and logs.</li>
+<li>Apply redaction before text is sent to a model, and explain why source-side removal is stronger.</li>
+<li>Distinguish authentication, authorization, and access control, and describe least-privilege design for tools and identities.</li>
+<li>Build layered guardrails and use hooks to block or gate destructive actions deterministically.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="why-this-is-not-an-ordinary-input-field">Why this is not an ordinary input field</h3>
+<p>In a conventional application, submitted text is data; a form field cannot rewrite server code. In a model application, that text is read alongside the instructions in the same channel, and the model cannot reliably tell a trusted rule from hostile content. That property is the root of a whole class of attacks.</p>
+<p>The second property is that the model can cause side effects. A tool-using assistant calls a function because it decided the action would help, and that decision can be manipulated by text it read. The tool layer is part of the attack surface, not a neutral utility.</p>
+<p>A helpful framing is the deputy problem: the assistant acts for a user while holding its own permissions. Someone who cannot reach a protected resource directly may persuade the deputy to fetch it. Security means making that authority small, checkable, and hard to redirect.</p>
+<p>Start by drawing boundaries. List where untrusted text enters — user messages, files, retrieved documents, tool results, third-party pages, error messages — where decisions are made, and where side effects leave. Controls belong where these lines are crossed.</p>
+<blockquote>
+<p><strong>Key insight:</strong> Retrieved content is untrusted content. A document becomes no safer because it lives in your knowledge base rather than arriving in a chat message.</p>
+</blockquote>
+<h3 id="the-threat-landscape">The threat landscape</h3>
+<p>A threat table turns worry into specific risks with an entry point and a control that breaks the chain. These groups chain together: an injection aims at exfiltration, which succeeds because a tool is over-privileged and output handling is weak.</p>
+<table>
+<thead>
+<tr>
+<th>Threat</th>
+<th>Typical entry point</th>
+<th>What the attacker wants</th>
+<th>Control that breaks the chain</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Direct prompt injection</td>
+<td>The user's own message</td>
+<td>Override rules, reveal hidden instructions, change behavior</td>
+<td>Input checks, clear instruction priority, output validation, limited tools</td>
+</tr>
+<tr>
+<td>Indirect injection via a tool result</td>
+<td>A fetched page, email, ticket, or file the assistant reads</td>
+<td>Plant instructions the user never typed</td>
+<td>Treat results as data, delimit them, scan them, never grant authority from content</td>
+</tr>
+<tr>
+<td>Data exfiltration</td>
+<td>A tool with a configurable destination or a generated link</td>
+<td>Move private context outside the trust boundary</td>
+<td>Minimize context, allowlist destinations, restrict network egress, redact</td>
+</tr>
+<tr>
+<td>Over-privileged tool</td>
+<td>A broad tool that reads, writes, and calls anything</td>
+<td>Turn one mistaken decision into a large impact</td>
+<td>Split tools by purpose, narrow parameters, scope credentials</td>
+</tr>
+<tr>
+<td>Insecure output handling</td>
+<td>Model output passed to a shell, query, page, or template</td>
+<td>Execute injected text downstream</td>
+<td>Encode and validate output, parameterize queries, never evaluate generated text</td>
+</tr>
+<tr>
+<td>Credential exposure</td>
+<td>Hard-coded keys, prompts, committed config, or verbose logs</td>
+<td>Reuse a valid secret</td>
+<td>Secret manager, runtime injection, rotation, log scrubbing</td>
+</tr>
+<tr>
+<td>Destructive action</td>
+<td>A write, delete, payment, or message tool</td>
+<td>Cause irreversible change</td>
+<td>Pre-tool hook, approval gate, dry run, reversible staging</td>
+</tr>
+</tbody>
+</table>
+<p>Two observations help. Narrowing tools helps against injection, exfiltration, and destructive actions at once. And no single control covers a whole chain; several small barriers limit damage if one fails.</p>
+<p>Indirect injection deserves attention because the victim may be the operator. A ticket-summarizing tool will eventually receive a ticket saying to forward the customer list externally. Delimiters and a note that enclosed text is data reduce risk but cannot eliminate it, since language can be rephrased endlessly. Containment, not perfect detection, is the goal.</p>
+<blockquote>
+<p><strong>Exam note:</strong> An answer claiming that clever prompt wording fully prevents injection is wrong. Exam-correct answers favor containment: fewer tools, narrower permissions, external validation, approval gates, and limited egress.</p>
+</blockquote>
+<h3 id="untrusted-input-data-leakage-and-personal-data">Untrusted input, data leakage, and personal data</h3>
+<p>Minimizing what enters context is the most reliable privacy control: information never supplied cannot be echoed into a response or smuggled out through a tool. Teams often send entire records when one field would do, creating a larger exposure than the accuracy they gain.</p>
+<p>Leakage paths vary. A response may repeat an identifier; a tool may place private data in a URL logged by a proxy; an error may echo the request; a trace may store every prompt broadly. Each is a place data leaves without anyone deciding it should.</p>
+<p>Personal data needs deliberate handling. Identify sensitive fields, avoid sending them unless required, and redact the rest before the call. Set retention periods that match debugging needs and store identifiers rather than raw values.</p>
+<p>Redaction replaces sensitive values with placeholders before text is sent, ideally close to the source so downstream components never see raw values. The snippet applies patterns to user text and retrieved content, returning detected labels for logging.</p>
+<pre><code class="language-python">import re
+
+PATTERNS = {
+    &quot;email&quot;: re.compile(r&quot;\b[\w.+-]+@[\w-]+\.[\w.-]+\b&quot;),
+    &quot;card&quot;: re.compile(r&quot;\b(?:\d[ -]*?){13,16}\b&quot;),
+    &quot;token&quot;: re.compile(r&quot;\b(?:sk|ak)[A-Za-z0-9_-]{16,}\b&quot;),
+}
+
+def redact(text: str) -&gt; tuple[str, list[str]]:
+    seen = []
+    for label, pattern in PATTERNS.items():
+        text, count = pattern.subn(f&quot;[{label}_REDACTED]&quot;, text)
+        if count:
+            seen.append(label)
+    return text, seen
+
+def prepare_for_model(user_text: str, retrieved: str):
+    safe_user, in_user = redact(user_text)
+    safe_context, in_context = redact(retrieved)
+    return safe_user, safe_context, in_user + in_context
+</code></pre>
+<p>Pattern redaction is incomplete; it misses formats you did not anticipate. Back it with source minimization, output checks, and restricted logging. Tasks that genuinely need a value call for a safer design, such as tokenizing it and substituting back after the response.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Redacting only the final response while sending raw personal data in the prompt. The model's context and your trace store are also destinations that deserve protection.</p>
+</blockquote>
+<h3 id="identity-authentication-authorization-and-access-control">Identity: authentication, authorization, and access control</h3>
+<p>Three terms are often blurred. Authentication establishes who is calling; authorization decides what that identity may do; access control is the machinery that enforces it. An assistant should run as a recognizable identity with narrow permissions, not a shared administrator account.</p>
+<p>Consider a tool that reads customer records. Even if the assistant judges a record relevant, the backend must verify that the requesting user is entitled to it. Authorization belongs downstream, because the model's decision is not a security decision; trusting it turns injection into a breach.</p>
+<p>Scope across tenants and environments: prototype credentials should not reach production data, and read-only roles should not write. Audit records complete the picture by recording who asked, which identity acted, which tool ran with which arguments, what approval was given, and the outcome.</p>
+<blockquote>
+<p><strong>Exam note:</strong> If a question uses the word "who," think authentication. If it asks "may they," think authorization. If it asks "what actually happened," think audit logging. Distractors often swap these deliberately.</p>
+</blockquote>
+<h3 id="secrets-credentials-and-api-keys">Secrets, credentials, and API keys</h3>
+<p>A secret grants access: an API key, token, password, signing key, or connection string. Secrets do not belong in code, prompts, context, committed config, or logs. They belong in a secret manager or injected environment variable, reaching the process only at runtime.</p>
+<p>Three habits do most of the work. Scope each secret to the smallest permissions and environments; rotate on schedule and immediately on suspicion; prefer short-lived credentials so an attacker has a smaller window.</p>
+<p>Secrets and models interact in one specific way: a secret in context can be repeated by the model, summarized into a tool argument, or captured in a trace. Keeping it out of context is stronger than asking the model not to mention it. Scrub secret patterns before logging and fail loudly when a credential is missing.</p>
+<p>If a key appears publicly, treat it as compromised at once. Rotate first, then determine access and look for unusual activity. Remove it from repository history, scan other repositories, add scanning rules, monitor reuse, and document the timeline.</p>
+<blockquote>
+<p><strong>Security note:</strong> A published key is a compromised key. Rotation is cheap; the investigation can follow once the value no longer works.</p>
+</blockquote>
+<h3 id="layered-guardrails-least-privilege-and-hooks">Layered guardrails, least privilege, and hooks</h3>
+<p>Guardrails are deterministic checks around the model call. Input guardrails inspect what will be sent; output guardrails inspect what came back or what a tool is about to do. They are testable and independent of the model's mood, which makes them the right place to enforce rules that must hold.</p>
+<p>Least privilege is the principle behind them. Give each tool one purpose, constrain parameters with enumerations and ranges, and enforce the same constraints in code; a schema guides the model but is not a guarantee.</p>
+<p>Hooks are callbacks at defined points — message arrival, before a tool executes, after it returns. Their value is that they run in your code, outside the model's influence. A pre-tool hook can block or gate a destructive action, and a post-tool hook can scan returned text before it re-enters context.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Where it runs</th>
+<th>What it can stop</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Source minimization</td>
+<td>Before data is gathered</td>
+<td>Sensitive values ever entering context or logs</td>
+</tr>
+<tr>
+<td>Input guardrail</td>
+<td>Before the model call</td>
+<td>Oversized input, obvious abuse, unsanitized active content</td>
+</tr>
+<tr>
+<td>Tool schema and policy</td>
+<td>At tool definition and argument validation</td>
+<td>Malformed arguments, disallowed destinations, broad paths</td>
+</tr>
+<tr>
+<td>Pre-tool hook</td>
+<td>Immediately before execution</td>
+<td>Destructive or state-changing actions without approval</td>
+</tr>
+<tr>
+<td>Output guardrail</td>
+<td>After a response or tool result</td>
+<td>Leaked secrets, personal data, disallowed content, unsafe text</td>
+</tr>
+<tr>
+<td>Identity and access control</td>
+<td>In the downstream service</td>
+<td>Actions the requesting user is not entitled to perform</td>
+</tr>
+<tr>
+<td>Network egress limits</td>
+<td>At the process boundary</td>
+<td>Outbound contact with unapproved hosts</td>
+</tr>
+<tr>
+<td>Audit and monitoring</td>
+<td>Throughout</td>
+<td>Undetected patterns and unexplainable incidents</td>
+</tr>
+</tbody>
+</table>
+<p>The hook below shows a deterministic gate for destructive actions. It never asks the model whether an action is safe; it inspects the tool name and arguments and returns a decision the execution layer honors.</p>
+<pre><code class="language-python">DESTRUCTIVE = {&quot;delete_file&quot;, &quot;drop_table&quot;, &quot;send_email&quot;, &quot;charge_card&quot;}
+
+def pre_tool_use(tool_name: str, arguments: dict) -&gt; dict:
+    if tool_name in DESTRUCTIVE:
+        return {
+            &quot;decision&quot;: &quot;require_approval&quot;,
+            &quot;reason&quot;: &quot;action changes state or sends data&quot;,
+            &quot;preview&quot;: {&quot;tool&quot;: tool_name, &quot;target&quot;: arguments.get(&quot;target&quot;)},
+        }
+    return {&quot;decision&quot;: &quot;allow&quot;}
+</code></pre>
+<p>Because the check sits before execution, injected wording cannot skip it. Requiring approval keeps legitimate work possible, and showing the resolved target lets the approver decide. Where an error is extreme, prefer blocking plus reversible staging.</p>
+<p>Content policy ties the layers together. Write testable rules: which categories are refused, which fields redacted, which actions need approval, which roles are allowed. Vague policies produce inconsistent enforcement. Keep adversarial prompts in the regression suite so later changes cannot quietly weaken defense.</p>
+<blockquote>
+<p><strong>Try it:</strong> Pick one tool you have built and list every destination and path its current credential can reach. If the list is longer than the tool's stated purpose, split the tool or narrow the credential before shipping.</p>
+</blockquote>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal:</strong> Demonstrate that a hostile instruction in a tool result is harmless when several containment layers are present.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Create a scratch document containing a paragraph that instructs the assistant to copy configuration data to an external address.</li>
+<li>Run an assistant that reads the document with a broad write tool and no hooks. Record what it attempts.</li>
+<li>Replace the broad tool with a single-purpose tool that writes only to a fixed directory, and restrict its credential.</li>
+<li>Add the redaction function from this chapter to both the user text and the retrieved document before the model call.</li>
+<li>Add the pre-tool hook above and require approval for any write. Replay the same document and record the difference.</li>
+</ol>
+<p><strong>Expected observation:</strong> In the first run, the injected paragraph influences the plan and a risky write is attempted. In the final run, the instruction still appears in context, but the destination is invalid, the hook demands approval, and secrets are placeholders. The manipulation no longer causes harm.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A team builds an assistant that reads shared project documents and writes status notes. One file contains a paragraph asking the reader to include a deployment token in the next note and place a copy in a public folder. The assistant prepares exactly that write, using a token found in another readable file.</p>
+<p>The chain is clear. The paragraph is indirect injection through retrieved content, and the objective is exfiltration. It succeeds only because the write tool accepts arbitrary paths, the credential can read the token, no redaction runs, and no hook stands between decision and write. Every link is a place to insert a barrier.</p>
+<p>The first change is structural: a single-purpose note tool writes only to a fixed directory with a credential limited to it, making the public folder unreachable. Next, deployment configuration is moved out of the readable workspace and the exposed token is rotated. Redaction is applied to retrieved text before it enters context, a pre-tool hook requires approval for writes and displays the resolved target, and an output scan blocks notes containing secret patterns.</p>
+<p>When the hostile document is replayed, the injected paragraph is still in the trace, but the destination is outside the tool's allowed area, the hook demands approval, and the token no longer exists at its old value. The assistant may produce an odd note, yet the attack chain cannot complete.</p>
+<p>The team adds the document to the adversarial regression set and writes a policy rule that notes must never contain credential-shaped strings. A later prompt change that weakens the format will now be caught by tests rather than by an incident. The principle is to make the consequences of untrusted influence small and visible rather than trying to make the model perfectly trustworthy.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Treating the system prompt as a security boundary instead of guidance the model may ignore.</li>
+<li>Forgetting that tool results and retrieved documents are untrusted input.</li>
+<li>Giving one tool broad read, write, and network powers for convenience.</li>
+<li>Sending full records when a single field would satisfy the task.</li>
+<li>Redacting only responses while leaving raw data in prompts and traces.</li>
+<li>Embedding API keys in source code, committed configuration, prompts, or verbose logs.</li>
+<li>Waiting to rotate an exposed key until after finishing the investigation.</li>
+<li>Enforcing destination rules only in natural language rather than in a hook or connector.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Shared text channels and tool-driven side effects make model applications a distinct security problem.</li>
+<li>Map untrusted entry points, decision points, and side-effect exits, then place controls on the crossings.</li>
+<li>Indirect injection through tool results is dangerous because the user may never know hostile text arrived.</li>
+<li>Minimize context, redact before sending, restrict destinations, and limit network egress to prevent leakage.</li>
+<li>Authentication establishes identity, authorization grants permission, and access control enforces it downstream.</li>
+<li>Secrets stay out of code, prompts, context, and logs; scope them narrowly and rotate them quickly.</li>
+<li>Layered guardrails combine minimization, input checks, tool policy, hooks, output scans, and identity checks.</li>
+<li>Hooks run in your code before a side effect, so injected wording cannot bypass a destructive-action gate.</li>
+<li>Write content policies as testable rules and keep adversarial cases in the regression suite.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A retrieved web page tells the assistant to ignore its rules and send private notes to an external address. Which response is strongest?</li>
+</ol>
+<p>A. Add a stronger sentence to the system prompt.</p>
+<p>B. Narrow the tools, validate destinations in a hook, and restrict outbound network access.</p>
+<p>C. Increase the amount of context so the model has more information.</p>
+<p>D. Remove the page only after a leak is observed.</p>
+<ol start="2">
+<li>Why is indirect injection harder to notice than direct injection?</li>
+</ol>
+<p>A. It only affects the model's tone.</p>
+<p>B. It arrives through content the assistant reads, without the user typing the attack.</p>
+<p>C. It is automatically removed by output formatting.</p>
+<p>D. It requires administrator credentials to work.</p>
+<ol start="3">
+<li>Which practice most reliably prevents a secret from appearing in a model response?</li>
+</ol>
+<p>A. Asking the model not to repeat it.</p>
+<p>B. Keeping the secret out of the context and scanning outputs for secret patterns.</p>
+<p>C. Storing it in a committed configuration file.</p>
+<p>D. Logging the full prompt for later review.</p>
+<ol start="4">
+<li>A tool can read a file, write to any path, and call any URL. Which change best embodies least privilege?</li>
+</ol>
+<p>A. Add a warning in the tool description.</p>
+<p>B. Split it into narrow tools with constrained parameters and a scoped credential.</p>
+<p>C. Increase the model's effort setting.</p>
+<p>D. Retry failed calls more times.</p>
+<ol start="5">
+<li>Where should a rule that no file may be deleted outside a fixed directory be enforced?</li>
+</ol>
+<p>A. In a pre-tool hook that inspects the resolved path.</p>
+<p>B. In the system prompt.</p>
+<p>C. In the user's question.</p>
+<p>D. In a comment in the tool definition.</p>
+<ol start="6">
+<li>Which log record is most useful for auditing an assistant's actions?</li>
+</ol>
+<p>A. A line stating that a tool ran.</p>
+<p>B. The full text of every prompt without filtering.</p>
+<p>C. The calling identity, tool name, resolved arguments, decision, reason, and outcome.</p>
+<p>D. Only the final answer shown to the user.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> Restricting capabilities, enforcing policy in a hook, and limiting egress break the attack chain at several points. A relies on guidance that injected text may override. C adds material the attacker can also influence. D is reactive and may leave other sources exposed.</p>
+</li>
+<li>
+<p><strong>B.</strong> Hostile text can arrive through files, pages, or messages the assistant processes, so the user may introduce it unknowingly. A is false because tool-using assistants can act. C is false because formatting does not neutralize intent. D is false because no elevated attacker privilege is required.</p>
+</li>
+<li>
+<p><strong>B.</strong> A value absent from context cannot be echoed, and an output scan catches patterns that do appear. A depends on an instruction the model may ignore. C creates an easily exposed copy. D adds another location where the secret can leak.</p>
+</li>
+<li>
+<p><strong>B.</strong> Narrow tools, constrained parameters, and scoped credentials limit what a manipulated model can do. A is guidance, not enforcement. C changes reasoning effort, not authority. D addresses retries, which are irrelevant to privilege.</p>
+</li>
+<li>
+<p><strong>A.</strong> A pre-tool hook runs in code before the side effect and cannot be bypassed by wording. B, C, and D are all natural-language signals that a model may disregard, especially under injection.</p>
+</li>
+<li>
+<p><strong>C.</strong> Those fields allow an incident to be reconstructed, including why a decision was made. A lacks detail. B risks storing sensitive data while still omitting decisions. D ignores the tool activity where the important events occur.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 29.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="28-failure-modes.html">&larr; Previous</a><a href="30-exam-readiness.html">Next: Key Distinctions, Exam Simulators, and Quick Reference &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

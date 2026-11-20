@@ -1,0 +1,116 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>13. Orchestrators and Subagents</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>13. Orchestrators and Subagents</h1>
+
+<p>Delegation works only when the delegate has a bounded job and can be held to it. An orchestrator owns the goal, plan, allocation, and acceptance decisions; a subagent has a narrow mission and limited permissions. The distinction is about <em>authority and scope</em>, not model size. This chapter turns it into rules for task framing, permission boundaries, isolation, and verification.</p>
+
+<h2>Two different jobs</h2>
+
+<p>The orchestrator should do the work that requires a view of the whole: interpreting the user's intent, choosing a plan shape, assigning subgoals, tracking budgets, resolving conflicts between workers, and deciding when to stop. Subagents should do the work that benefits from a clean, focused context: searching a corpus, analysing one component, drafting one section, or testing one hypothesis. A subagent that starts making cross-cutting decisions — changing the plan, approving its own output, contacting other subagents without permission — has escaped its scope, and the system loses the very property delegation was meant to provide.</p>
+
+<table>
+<tr><th>Concern</th><th>Orchestrator</th><th>Subagent</th></tr>
+<tr><td>Goal</td><td>Owns the full objective and success criteria</td><td>Owns one stated outcome</td></tr>
+<tr><td>Plan</td><td>Creates, versions, and revises it</td><td>Executes assigned steps only</td></tr>
+<tr><td>Resources</td><td>Allocates token and tool budgets</td><td>Reports consumption, requests more</td></tr>
+<tr><td>Results</td><td>Validates and integrates</td><td>Produces structured output and evidence</td></tr>
+<tr><td>Escalation</td><td>Decides when to ask a human</td><td>Raises flags, never self-approves</td></tr>
+</table>
+
+<p>A common anti-pattern is the "echo orchestrator": a coordinator whose only function is to forward the original prompt to five subagents and paste their answers together. It adds latency and cost without adding judgement. If the orchestrator is not making at least one decision that a worker could not make — sequencing, conflict resolution, budget trade-offs, or final acceptance — the delegation structure should be removed.</p>
+
+<h2>Task envelopes: scope in writing</h2>
+
+<p>Subagent scope should be an explicit artifact, not a sentence in a prompt. A task envelope contains a unique task ID, the objective in one or two sentences, the inputs the worker may use, the exact output schema, acceptance criteria, a tool allowlist, a token or step budget, and a named escalation path. Without an envelope, a worker fills gaps with its own assumptions — and those assumptions are invisible to the orchestrator until they appear in the result.</p>
+
+<pre><code>task:
+  id: audit-auth-03
+  objective: "Find authentication bypass paths in src/auth; report only reachable issues."
+  inputs: [ "src/auth/**", "docs/threat-model.md" ]
+  forbidden_inputs: [ "production credentials", "customer data" ]
+  output_schema: { findings: array&lt;Finding&gt;, confidence: number, evidence: array&lt;Ref&gt; }
+  acceptance: "Every finding has a file:line reference and a reproduction step."
+  tools: [ read_file, grep, run_unit_test ]
+  budget: { max_tokens: 12000, max_tool_calls: 25, deadline_seconds: 180 }
+  escalation: "If a path needs production access, stop and report NEEDS_ACCESS."</code></pre>
+
+<p>Acceptance criteria are the most valuable field. "Report findings" invites a long essay; "every finding has a file:line reference and a reproduction step" produces checkable work. The budget fields are equally important: a worker without a cap can spend 60,000 tokens proving a point that needed 4,000. Budgets also give the orchestrator a clean signal — a worker that hits its cap has not failed, but its partial result must be marked as incomplete rather than treated as a finished answer.</p>
+
+<div class="tip"><strong>One outcome per worker.</strong> A subagent asked to "review the code and also update the docs and maybe fix the tests" will optimise whichever part it encounters first. Give it one primary outcome, and turn the others into separate tasks with their own acceptance criteria.</div>
+
+<h2>Authority limits</h2>
+
+<p>Authority should be granted as a small allowlist, not withheld as a long list of prohibitions. Four boundaries are worth defining explicitly:</p>
+
+<ol>
+<li><strong>Tool boundary</strong> — which tools the worker may call. A research worker gets read-only search; only the orchestrator gets publish permissions.</li>
+<li><strong>Data boundary</strong> — which files, records, or tenants it may read. Path prefixes and record scopes are easier to enforce than prose instructions.</li>
+<li><strong>Decision boundary</strong> — what it may decide alone. A worker may propose a design or rank options, but approval tokens, external messages, and money-moving actions stay with the orchestrator or a human.</li>
+<li><strong>Delegation boundary</strong> — whether it may spawn further workers. Default to no; allow nesting only with a depth limit, such as one additional level.</li>
+</ol>
+
+<p>Write the boundary as a capability that the runner enforces, not as an instruction the model might ignore under pressure. If the worker is told "do not modify files" but the file-writing tool is present, a confusing test case can produce a modification. Remove the tool or filter it at the runtime. The same applies to credentials: give the worker a scoped token with a short lifetime rather than a general token plus a warning. When a boundary is breached, the event should be logged and the result quarantined, not quietly accepted because the answer looked useful.</p>
+
+<h2>Isolation: containing blast radius</h2>
+
+<p>Isolation is what makes a misbehaving subagent survivable. Four forms are useful in combination. <strong>Context isolation</strong> means the worker sees only its envelope and approved inputs, not the entire conversation; this reduces distraction and prevents it from inheriting unrelated assumptions. <strong>Workspace isolation</strong> means giving it a separate directory, worktree, or sandbox, so experiments cannot corrupt the main branch. <strong>Credential isolation</strong> means scoped, short-lived tokens and no shared secrets. <strong>Failure isolation</strong> means a worker crash is converted into a structured failure result for the orchestrator rather than terminating the whole run.</p>
+
+<div class="warn"><strong>Isolation is not a substitute for validation.</strong> A sandboxed worker can still return a confident wrong answer. Isolation limits damage; it does not establish correctness. Keep the acceptance gate even for trusted workers.</div>
+
+<p>Isolation has a cost. Each isolated worker may rebuild its own context, reread the same reference document, and duplicate effort across shards. A reasonable compromise is to share <em>immutable references</em> — a read-only document store, a pinned schema version, a snapshot of the repository — while keeping mutable outputs private until the collector merges them. That gives workers a consistent view of the world without giving them a shared surface to corrupt.</p>
+
+<h2>Verifying subagent output</h2>
+
+<p>The orchestrator should treat worker output as untrusted evidence. Verification happens at three levels. <strong>Structural checks</strong> confirm that the output matches the declared schema: required fields, types, enumeration values, and size limits. <strong>Evidence checks</strong> confirm that references exist and support the claims — a cited file and line must contain the asserted code, a cited source must contain the asserted number. <strong>Substantive checks</strong> test a sample of the claims independently, for example by rerunning one of the reported reproduction steps or recomputing one figure from the raw data.</p>
+
+<p>Sampling is an economic decision. If a worker returns 40 findings and full verification costs 2,000 tokens each, checking all 40 costs 80,000 tokens. Checking the 5 highest-impact findings plus a random 5 gives strong signal for about 20,000 tokens. State the sampling rule in the orchestrator's configuration so it can be reviewed: <code>verify_all_where severity == high</code>, <code>verify_random 20% otherwise</code>. Any failed sample should trigger full verification of that worker's remaining claims, because one fabricated citation usually means the verification habit is absent throughout.</p>
+
+<p>Confidence scores from a worker are useful for routing, not for truth. A worker reporting 0.95 confidence on an unverifiable claim is still unverified. Weight confidence when merging competing results, but require evidence before accepting claims that drive irreversible decisions. Return partial results with explicit status: <code>accepted</code>, <code>accepted_with_caveats</code>, <code>rejected</code>, or <code>needs_evidence</code>. Never silently drop a rejected finding — the orchestrator needs to know that a potential issue was seen and excluded, with a reason.</p>
+
+<h2>Overhead and the case against delegation</h2>
+
+<p>Delegation is not free. A worker must receive an envelope, read inputs, reason, and return a result; the orchestrator must frame the task and validate the answer. In a small workflow that overhead can exceed the gain. Suppose a task takes 6,000 tokens when performed directly. Three subagents with 800-token envelopes, 4,000 tokens of work each, and 600-token results cost roughly 16,200 tokens, plus the orchestrator's synthesis. The three workers may finish in a third of the time, but the run costs nearly three times as much. That trade is sensible for a deadline and poor for a batch job.</p>
+
+<p>Delegate when the subproblem has a distinct context need, a distinct permission scope, or genuine independence that enables parallelism. Avoid delegation when the task is small, when every step needs the same large shared context, when the orchestrator cannot specify acceptance criteria, or when validation would cost as much as doing the work. A useful review question is: "What decision does the orchestrator make with the worker's result that it could not make as well from its own work?" If there is no answer, keep the work local.</p>
+
+<div class="exercise"><strong>Exercise 13.1 — Write a task envelope</strong>
+<p>Frame a subagent task for reviewing a Python module that calculates invoice totals. The worker may read code and run tests but must not modify files or access production data. Require a structured result with issue severity, file:line reference, and a test command. Include a budget and an escalation condition.</p>
+<p>Hint: name the exact module, the read-only tools, the output fields, and the condition that triggers <code>NEEDS_CONTEXT</code>.</p>
+</div>
+
+<div class="exercise"><strong>Exercise 13.2 — Set authority limits</strong>
+<p>An orchestrator manages three workers: a researcher, a draft writer, and a publisher. Give each a tool allowlist, data scope, decision rights, and delegation right. Then describe what happens when the researcher discovers a broken source link and believes it should rewrite the final report.</p>
+<p>Hint: only the orchestrator resolves contradictions; the researcher returns a flagged result with evidence.</p>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why is authority and scope, rather than model size, the defining difference between an orchestrator and a subagent?</li>
+<li>Name five fields of a useful task envelope.</li>
+<li>Why should tool permissions be enforced at runtime instead of by prompt instruction?</li>
+<li>Distinguish context isolation from failure isolation with one example each.</li>
+<li>When is delegation likely to cost more than it saves?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Orchestrators own goals, plans, budgets, conflict resolution, and final acceptance.</li>
+<li>Subagents own one bounded outcome expressed in a task envelope with acceptance criteria.</li>
+<li>Grant authority as explicit allowlists for tools, data, decisions, and delegation.</li>
+<li>Isolate context, workspaces, credentials, and failures to contain blast radius.</li>
+<li>Validate structure, evidence, and a sample of substance before accepting worker output.</li>
+<li>Delegate only when scope, parallelism, or distinct permissions justify the overhead.</li>
+</ul>
+
+<nav><a href="12-adaptive-planning.html">&larr; Previous</a><span></span><a href="14-agent-topologies.html">Next: Topologies and Agent Selection &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

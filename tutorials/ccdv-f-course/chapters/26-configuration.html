@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 26 — Configuration, Skills, Plugins, Permissions, and CI</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 26</span>
+  <h1 id="chapter-26-configuration-skills-plugins-permissions-and-ci">Chapter 26 — Configuration, Skills, Plugins, Permissions, and CI</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Place settings at the correct scope and predict which value wins when scopes conflict.</li>
+<li>Treat project instructions and rules as versioned assets with a predictable hierarchy.</li>
+<li>Distinguish skills, slash commands, subagents, hooks, connectors, and plugins by what each contributes.</li>
+<li>Review a plugin or marketplace entry for capability, scope, and dependencies before enabling it.</li>
+<li>Choose permission modes and allow or deny rules that fit the risk of a task.</li>
+<li>Run an assistant non-interactively, request streamed events, and consume JSON output in CI.</li>
+<li>Explain how sessions, resumption, and headless runs interact in an automated workflow.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="settings-scopes-and-precedence">Settings scopes and precedence</h3>
+<p>Configuration is layered, so one key — a model, a permission rule, an enabled plugin — can be defined in several places. Conflicts resolve in a fixed order: organisation-managed policy first, then command-line flags, project-local settings, shared project settings committed to the repository, and finally user settings that yield to anything more specific. A headless run can therefore force an output format with a flag regardless of stored files.</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Where it lives</th>
+<th>Shared</th>
+<th>Precedence</th>
+<th>Use for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Managed policy</td>
+<td>Organisation configuration</td>
+<td>Yes</td>
+<td>Highest</td>
+<td>Non-negotiable security rules</td>
+</tr>
+<tr>
+<td>Command line</td>
+<td>Flags on one invocation</td>
+<td>No</td>
+<td>High</td>
+<td>CI overrides and one-off runs</td>
+</tr>
+<tr>
+<td>Project local</td>
+<td>Settings file on one machine</td>
+<td>No</td>
+<td>Medium</td>
+<td>Personal paths and experiments</td>
+</tr>
+<tr>
+<td>Project shared</td>
+<td>Settings file committed to the repo</td>
+<td>Yes</td>
+<td>Medium-low</td>
+<td>Team tools, hooks, plugin approvals</td>
+</tr>
+<tr>
+<td>User</td>
+<td>Personal settings for all projects</td>
+<td>No</td>
+<td>Lowest</td>
+<td>Individual defaults</td>
+</tr>
+</tbody>
+</table>
+<p>Anything the team relies on belongs in a versioned file; anything personal belongs in a local or user file. A rule confined to one workstation will not reach teammates or CI, while a machine-specific path in a shared file breaks every other checkout.</p>
+<p>Versioned prompts extend this discipline to the text that steers the model. Instruction files, rules, skills, and subagent definitions are ordinary repository content: reviewable, diffable, and releasable with code. A change to a verification command or forbidden path should travel through a reviewed pull request, leaving a history that explains later shifts in behaviour.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A rule that must apply everywhere and cannot be bypassed belongs in managed policy or in a committed project setting backed by an enforced hook. A local file or an instruction sentence is not enough.</p>
+</blockquote>
+<h3 id="project-instructions-and-the-rule-hierarchy">Project instructions and the rule hierarchy</h3>
+<p>Instruction files are standing context, and they are not all equal. Managed instructions outrank project text. A project-root file describes repository-wide conventions; in a monorepo, parent and subdirectory files add detail for their own trees; user-level instructions supply personal preferences at the lowest tier. Non-conflicting statements accumulate. When they conflict, the higher-authority or more specific source governs the files at hand.</p>
+<p>Keep the root file small and push detail outward. It might name verification commands, while a subdirectory file records a different test runner for a legacy package. Rules can be scoped by path so they load only for matching files. Such text is still guidance: a rule requiring a second reviewer helps a human reading the diff but does not stop a write, so pair critical boundaries with an enforced check. Never place tokens or private endpoints in instruction files; they are versioned and copied into context.</p>
+<pre><code class="language-text">---
+paths:
+  - &quot;services/legacy/**/*.py&quot;
+---
+
+# Legacy package rules
+
+- This package keeps the old error envelope; do not modernise it in passing.
+- Run `python -m pytest services/legacy/tests` for changes here.
+- Edits to `adapter.py` require a second reviewer.
+</code></pre>
+<blockquote>
+<p><strong>Common mistake:</strong> Adding a team convention to a personal configuration and expecting new joiners to inherit it.</p>
+</blockquote>
+<p>Reconcile files that disagree about the test command instead of relying on precedence, or developers will verify with different commands.</p>
+<h3 id="skills-and-slash-commands">Skills and slash commands</h3>
+<p>A skill is a packaged procedure loaded when a request matches its purpose. Its short description stays visible to the model, while the body and supporting files are fetched only on selection. This progressive disclosure keeps always-present context small while making specialist knowledge available at the right time. A skill might explain how to prepare a release note, add a migration, or apply a review checklist to a sensitive module.</p>
+<p>A slash command is an explicit entry point: the person types a short command to begin a known workflow rather than relying on the model to notice that a skill applies. Some skills are configured for explicit invocation only, which gives the same user-controlled timing. The real distinction is who decides <em>when</em>: model-selected skills suit recurring but varied work, while explicit commands suit short, repeatable operations.</p>
+<p>A good skill has a narrow trigger, a short procedure with a verification step, and a statement of when to stop and ask. A vague description loads it on unrelated tasks. Rules needed in every session belong in an instruction file, not a skill.</p>
+<h3 id="subagents-and-agent-memory">Subagents and agent memory</h3>
+<p>A subagent is a separate assistant instance launched for a bounded task. It has its own context window, tools, and instructions, and returns a result instead of sharing the whole conversation. Separation helps when a task generates enough intermediate text to swamp the main session, when independent investigations can run in parallel, or when a specialist needs a different tool set. A review subagent can inspect a diff without inheriting the assumptions that shaped the edits.</p>
+<p>The cost is handoff. A subagent sees only what you pass it, so state the goal, the files in scope, the expected output, and its authority. Verify findings before acting; isolation reduces bias but does not guarantee correctness.</p>
+<p>Memory covers several stores. Committed project instructions suit durable team facts. User-level instructions follow one person between projects and suit personal preferences. Automatically accumulated memory records patterns observed across sessions, usually outside the repository; it aids continuity but is neither shared nor authoritative. Task-specific knowledge belongs in a skill or in the subagent request.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Recording a critical "never do this" rule only in automatic memory. It may not load for a given task and is invisible to teammates and CI.</p>
+</blockquote>
+<h3 id="plugins-marketplaces-scopes-and-dependencies">Plugins, marketplaces, scopes, and dependencies</h3>
+<p>A plugin is an installable bundle that may carry skills, subagent definitions, slash commands, hooks, connector configuration, and settings, all described by a manifest. A marketplace is a catalogue that makes plugins discoverable. Neither term implies review: a listing means a package is reachable, not that its behaviour suits your repository.</p>
+<p>Installation scope follows the same logic as settings. A user-scoped plugin follows one person; a project-scoped plugin is recorded so teammates can obtain the same set, though they may still approve what runs; a local-scoped plugin stays on one machine. For team work, favour project scope with a committed record and keep a short inventory of what is enabled and why.</p>
+<p>Dependencies matter because bundles rarely stand alone. A manifest may require another plugin, tool, or connector server, making install order and version selection part of reproducibility. Pin versions and treat upgrades as reviewable changes. A plugin that registers tools widens what the assistant can do with your permissions, so inspect its tool list, injected instructions, and network endpoints. Prefer read-only connections during evaluation.</p>
+<blockquote>
+<p><strong>Exam note:</strong> Before enabling a bundle across a team, review its contents, dependencies, and scopes, then record the decision in version control. Catalogue prominence is not evidence of safety.</p>
+</blockquote>
+<h3 id="choosing-an-extension-type">Choosing an extension type</h3>
+<p>Several mechanisms can appear to solve the same problem. Ask whether the need is knowledge, action, enforcement, or distribution.</p>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Mechanism</th>
+<th>Why it fits</th>
+<th>Watch for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Always-present convention</td>
+<td>Instruction file or scoped rule</td>
+<td>Standing context for relevant paths</td>
+<td>Bloat as it grows</td>
+</tr>
+<tr>
+<td>Occasional procedure</td>
+<td>Skill</td>
+<td>Body loaded on task match</td>
+<td>Vague description blocks selection</td>
+</tr>
+<tr>
+<td>User-triggered workflow</td>
+<td>Slash command or explicit skill</td>
+<td>Person controls timing</td>
+<td>Drift between command and skill text</td>
+</tr>
+<tr>
+<td>Parallel or unbiased work</td>
+<td>Subagent</td>
+<td>Separate context and tools</td>
+<td>Nuance lost in handoff</td>
+</tr>
+<tr>
+<td>Deterministic guard</td>
+<td>Hook</td>
+<td>Runs as code, not model judgment</td>
+<td>Wrong exit-code meaning</td>
+</tr>
+<tr>
+<td>New external capability</td>
+<td>Connector server</td>
+<td>Typed tools and data</td>
+<td>New data-exposure boundary</td>
+</tr>
+<tr>
+<td>Distribution of several pieces</td>
+<td>Plugin</td>
+<td>One install, one manifest</td>
+<td>Hidden capability and dependencies</td>
+</tr>
+<tr>
+<td>Machine-specific values</td>
+<td>Local settings or environment</td>
+<td>Kept off shared config</td>
+<td>Teammates do not inherit them</td>
+</tr>
+</tbody>
+</table>
+<p>Choose the smallest mechanism that satisfies the need; a plugin is excessive for one sentence of guidance.</p>
+<h3 id="sessions-permission-modes-and-safe-autonomy">Sessions, permission modes, and safe autonomy</h3>
+<p>A session is the live state of an interaction: transcript, plan, tools run, and accumulated edits. Resuming continues that state, which is efficient when a task pauses but can carry stale assumptions forward. A fresh session suits unrelated work. Automation should choose explicitly rather than inherit this by accident.</p>
+<p>Permission modes express a broad policy about tool requests. Plan mode allows reading and proposing but blocks mutation, making it a strong default for analysis jobs. Default mode asks before actions considered risky. An edit-accepting mode approves file changes while pausing for other categories. A bypass mode removes prompts entirely and belongs only in disposable environments.</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Allowed without asking</th>
+<th>Appropriate use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plan</td>
+<td>Reads and search</td>
+<td>Analysis, unfamiliar repositories</td>
+</tr>
+<tr>
+<td>Default</td>
+<td>Reads and selected safe tools</td>
+<td>Interactive development</td>
+</tr>
+<tr>
+<td>Accept edits</td>
+<td>File edits in the working tree</td>
+<td>Well-understood local iteration</td>
+</tr>
+<tr>
+<td>Bypass</td>
+<td>All tool requests</td>
+<td>Throwaway sandbox only</td>
+</tr>
+</tbody>
+</table>
+<p>Allow lists name tools needing no confirmation; deny rules block a path outright. Deny wins over a permissive mode, and hooks add checks the mode cannot override. This grants autonomy inside a narrow area while keeping deployments behind a human decision.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Disabling prompts on a shared runner because a job kept hanging. If a policy must be bypassed for the job to finish, the allow list or the job's tool set is wrong.</p>
+</blockquote>
+<h3 id="headless-runs-streaming-and-json-in-ci">Headless runs, streaming, and JSON in CI</h3>
+<p>Headless mode runs without a terminal. One request is sent, the result captured, and the process exits. Flags select the model, limit tools and turns, set a permission mode, and choose an output format. Saving output to a file keeps a transcript without flooding the build log.</p>
+<pre><code class="language-bash">claude -p &quot;Review the current diff for unsafe error handling. Cite file paths.&quot; \
+  --permission-mode plan \
+  --allowedTools &quot;Read,Glob,Grep,Bash(git diff:*)&quot; \
+  --max-turns 8 \
+  --output-format json &gt; review-result.json
+</code></pre>
+<p>Streaming output suits jobs that show progress or react before the run finishes. A stream of JSON events exposes message and content-block activity, so a consumer can forward partial text or inspect a tool result early. Partial-message events increase volume; enable them only when token-level updates are needed.</p>
+<pre><code class="language-bash">claude -p &quot;Summarise the failing test output in three lines.&quot; \
+  --output-format stream-json --verbose --include-partial-messages \
+  &lt; failing-test.txt | jq -c 'select(.type == &quot;content_block_delta&quot;)'
+</code></pre>
+<p>A JSON result is convenient because pipelines can query fields with a standard tool, but structured is not the same as trustworthy. A representative result carries an event type, a success or error subtype, the assistant's text, a session identifier, token usage, cost, and timing. Treat the text as untrusted data: never evaluate it as code or interpolate it into a shell command. Check the process exit status, check the error indicator, then validate the fields your pipeline needs against a small schema.</p>
+<p>Pin the model version so a backend change cannot silently alter results. Set timeouts and turn limits to bound cost. Pass credentials through environment variables, never committed prompt text. Avoid bypassing permissions on shared runners, store the session identifier for resumption, and redact sensitive material from artifacts.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A pipeline should fail on either an unsuccessful exit code or an error result. Neither signal alone is complete.</p>
+</blockquote>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal:</strong> make interactive work and a headless check follow the same rules, then verify the configuration through structured output.</p>
+<ol>
+<li>Add a committed project settings file allowing read-only tools and one test command, plus an instruction file naming that command.</li>
+<li>Add a local settings file with a personal preference and confirm it is not committed.</li>
+<li>Add a skill with a narrow description for a change summary; confirm it loads only for a matching request.</li>
+<li>Run a headless request in plan mode with a read-only allow list and <code>--output-format json</code>; save the result.</li>
+<li>Query the file for the success indicator, session identifier, and text. Repeat with a request requiring a write and observe the denial.</li>
+</ol>
+<p><strong>Expected observation:</strong> the first run succeeds with a valid result, while the write request is refused or paused. Removing the committed settings file changes behaviour on the next run, proving where the rule lived.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A team relies on verbal conventions for assistant work. Engineers ask for a particular test command in each session, and one person keeps a preferred rule in a personal file. Some pull requests include test evidence; others do not, and the CI job occasionally runs a command that exists only on a laptop.</p>
+<p>The team reorganises. Universal rules move into a committed instruction file with the exact verification command. Package-specific guidance goes into scoped rules, so the legacy module keeps its test runner. A short skill covers release notes with a description narrow enough to avoid accidental loading. A hook refuses writes to generated files, and permission rules allow the test command while denying publishing.</p>
+<p>For automation, CI invokes the assistant in plan mode with only read tools and the diff command allowed, validates the JSON fields, and posts the text after human confirmation. A candidate plugin lists one subagent, two skills, and an external connector; the team records it at project scope with a pinned version and keeps the connector read-only. When a build agent's local settings allow an extra tool, that override is removed. New joiners now receive the configuration with the clone.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Defining team rules only in local or user settings, so teammates and CI never see them.</li>
+<li>Placing a machine-specific path in a committed settings file.</li>
+<li>Writing skills with vague descriptions that load on nearly every request.</li>
+<li>Using a plugin where a two-line instruction would suffice.</li>
+<li>Enabling a bundle without inspecting its tools, injected instructions, dependencies, or network access.</li>
+<li>Depending on automatic memory for safety-critical prohibitions.</li>
+<li>Choosing bypass permissions on a shared runner to avoid approval prompts.</li>
+<li>Assuming a JSON result is valid merely because the process exited successfully.</li>
+<li>Omitting model pinning in automation, so behaviour drifts without a code change.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Settings are layered; managed policy and flags outrank project and user files, and local overrides stay local.</li>
+<li>Team rules belong in committed files so they are reviewed, inherited, and reproducible in CI.</li>
+<li>Instructions and path-scoped rules form a hierarchy; conflicts should be removed, not relied upon.</li>
+<li>Skills provide on-demand procedures; slash commands give the person control over timing.</li>
+<li>Subagents buy context isolation and parallelism at the cost of an explicit handoff.</li>
+<li>Plugins package several capabilities and add dependency, scope, and trust questions.</li>
+<li>Permissions combine modes, allow and deny rules, and hooks; deny rules are not overridden by a relaxed mode.</li>
+<li>Headless runs with JSON or streamed output enable automation, but results need status checks and validation.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A rule must apply to every project in an organisation and cannot be overridden. Where should it live?</li>
+</ol>
+<ul>
+<li>A. In each developer's user settings.</li>
+<li>B. In managed policy at the highest scope.</li>
+<li>C. In a project-local settings file.</li>
+<li>D. In a skill description.</li>
+</ul>
+<ol start="2">
+<li>Which change is most likely to be inherited by teammates and a CI runner?</li>
+</ol>
+<ul>
+<li>A. A sentence in a personal instruction file.</li>
+<li>B. A local settings edit on one workstation.</li>
+<li>C. A committed project settings file and scoped rule.</li>
+<li>D. A plugin enabled for one user account.</li>
+</ul>
+<ol start="3">
+<li>When should a procedure become a skill rather than a root instruction?</li>
+</ol>
+<ul>
+<li>A. When it must appear in every session.</li>
+<li>B. When it is needed only for a recognisable class of task.</li>
+<li>C. When it contains a secret credential.</li>
+<li>D. When it replaces permission checks.</li>
+</ul>
+<ol start="4">
+<li>What is the main benefit of assigning a task to a subagent?</li>
+</ol>
+<ul>
+<li>A. It removes the need to describe the task.</li>
+<li>B. It guarantees a correct result without review.</li>
+<li>C. It isolates context and tools for focused or parallel work.</li>
+<li>D. It automatically enforces repository permissions.</li>
+</ul>
+<ol start="5">
+<li>Before enabling a plugin across a team, what should be checked first?</li>
+</ol>
+<ul>
+<li>A. Whether the marketplace lists it prominently.</li>
+<li>B. Whether its tools, injected instructions, dependencies, and access are understood.</li>
+<li>C. Whether its name resembles an existing tool.</li>
+<li>D. Whether it installs without configuration.</li>
+</ul>
+<ol start="6">
+<li>A job must analyse a diff without changing files. Which permission mode fits?</li>
+</ol>
+<ul>
+<li>A. Bypass.</li>
+<li>B. Accept edits.</li>
+<li>C. Plan.</li>
+<li>D. Default with no allow list.</li>
+</ul>
+<ol start="7">
+<li>A pipeline parses JSON from a headless run. What additional check is essential?</li>
+</ol>
+<ul>
+<li>A. Confirm exit status and error status, then validate required fields.</li>
+<li>B. Assume valid JSON means an accurate result.</li>
+<li>C. Execute the returned text to verify it is meaningful.</li>
+<li>D. Disable tool restrictions for a more detailed result.</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> Managed policy is built for centrally enforced rules. <strong>A</strong> is personal. <strong>C</strong> applies to one machine and is easily removed. <strong>D</strong> is model guidance, not a policy scope.</p>
+</li>
+<li>
+<p><strong>C.</strong> Committed files travel with the repository and reach automation. <strong>A</strong> and <strong>B</strong> are machine-specific. <strong>D</strong> leaves everyone else unchanged.</p>
+</li>
+<li>
+<p><strong>B.</strong> On-demand loading is the purpose of a skill. <strong>A</strong> describes an instruction file. <strong>C</strong> is unsafe in any mechanism. <strong>D</strong> confuses guidance with enforcement.</p>
+</li>
+<li>
+<p><strong>C.</strong> A separate context and tool set supports isolation and parallel work. <strong>A</strong> is false because handoffs need clear descriptions. <strong>B</strong> overstates reliability. <strong>D</strong> belongs to permissions and hooks.</p>
+</li>
+<li>
+<p><strong>B.</strong> Reviewing contents and dependencies is the responsible step. <strong>A</strong> and <strong>C</strong> are superficial signals. <strong>D</strong> mistakes ease of installation for safety.</p>
+</li>
+<li>
+<p><strong>C.</strong> Plan mode allows reading and analysis while preventing mutation. <strong>A</strong> and <strong>B</strong> permit changes. <strong>D</strong> may prompt or grant more authority than needed.</p>
+</li>
+<li>
+<p><strong>A.</strong> Structured output still needs status checks and field validation. <strong>B</strong> trusts format over content. <strong>C</strong> creates a code-execution risk from model text. <strong>D</strong> weakens the security boundary for no gain.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 26.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="25-repo-assistant.html">&larr; Previous</a><a href="27-tracing-errors.html">Next: Tracing, Errors, Recovery, and Monitoring &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

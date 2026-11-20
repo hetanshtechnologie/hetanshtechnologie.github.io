@@ -1,0 +1,122 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>48. Confidence, Sampling, and Provenance</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>48. Confidence, Sampling, and Provenance</h1>
+<p>A single accuracy number hides almost everything you need to know. It does not tell you which fields are unreliable, which slice of customers is affected, or whether a correct-looking claim came from evidence or invention. This chapter builds a finer-grained quality layer: confidence attached to individual fields, calibration sets that make those scores meaningful, stratified sampling that finds hidden failures, review queues that route work by risk, and provenance that maps each claim back to its source.</p>
+
+<h2>Per-field confidence</h2>
+<p>Confidence at the level of a whole response is nearly useless. A form with six fields may be perfect on five and badly wrong on the date; an overall score of 0.9 conceals the one field that matters. Ask for a confidence value alongside each extracted or reasoned field, and keep it as structured data rather than prose.</p>
+<p>Uncalibrated scores are worse than none, because a system may use them to skip review. Collect scores on a labelled set and check them in buckets: among fields scored 0.7–0.8, what fraction were right? If the answer is 55 percent, the score is optimistic and must be adjusted.</p>
+<p>Confidence can come from several sources, and they should not be conflated:</p>
+<ul>
+<li><strong>Model self-report</strong> — cheap, often overconfident, useful as a weak signal.</li>
+<li><strong>Consensus</strong> — agreement across two or three sampled generations; disagreement lowers confidence.</li>
+<li><strong>Evidence strength</strong> — a value copied from a source document scores higher than one inferred from context.</li>
+<li><strong>Rule agreement</strong> — a value that passes deterministic checks such as date ranges or checksums scores higher.</li>
+</ul>
+<p>Combine them with a transparent rule: start from evidence strength, add a consensus bonus, and cap the result if a deterministic check fails.</p>
+
+<h2>Calibration sets</h2>
+<p>A calibration set is a labelled sample used to map raw scores to real probabilities. Build it from representative production-like inputs, not from hand-picked examples. Aim for at least 200 to 500 labelled fields spread across the score range; if almost everything scores above 0.9, deliberately include harder cases so the high range is tested.</p>
+<ol>
+<li><strong>Label independently.</strong> A reviewer marks each field correct or incorrect without seeing the model's confidence, to avoid anchoring.</li>
+<li><strong>Bucket the scores.</strong> Group into ranges such as 0–0.5, 0.5–0.7, 0.7–0.85, 0.85–0.95, and 0.95–1.0.</li>
+<li><strong>Compute observed accuracy</strong> in each bucket and compare with the mean predicted score.</li>
+<li><strong>Fit a mapping.</strong> Use a small monotonic mapping — even a table of bucket corrections — so ordering is preserved.</li>
+<li><strong>Hold out a test slice.</strong> Never evaluate the mapping on the same fields used to fit it.</li>
+</ol>
+<pre><code># predicted bucket -&gt; observed accuracy on labelled fields
+mapping = {
+  "0.50-0.70": 0.61,
+  "0.70-0.85": 0.74,
+  "0.85-0.95": 0.88,
+  "0.95-1.00": 0.97
+}
+def calibrated(raw):
+    b = bucket(raw)
+    return mapping[b]
+accept = calibrated(raw) &gt;= 0.90 &amp;&amp; check_count &gt;= 2</code></pre>
+<p>The last line shows how a calibrated score becomes an action: accept automatically only when the calibrated probability clears a threshold and at least two deterministic checks passed. Notice that the guard uses escaped comparison and logical operators so it renders correctly as code. Thresholds should be set from the cost of an error, not from habit — a typos in a display label can tolerate 0.7, while a payment amount may require 0.99.</p>
+<div class="tip">Recalibrate after any prompt, model, or schema change. Confidence is a property of the whole pipeline, not of the model alone, and a change to retrieval can shift scores substantially.</div>
+
+<h2>Stratified sampling</h2>
+<p>Random sampling answers "how are we doing overall." Stratified sampling answers "how are we doing for each group that matters," and it finds failures that overall metrics bury. Define strata before you sample: language, document type, customer tier, source system, input length, and whether the case was handled on the first attempt are common axes.</p>
+<p>Suppose overall accuracy is 94 percent, but splitting by document type reveals 99 percent for short forms and 71 percent for scanned tables. A random sample of 200 cases might contain only fifteen scanned tables, enough to look like noise. A stratified sample deliberately includes sixty from that stratum, making the problem undeniable.</p>
+<table>
+<thead><tr><th>Stratum</th><th>Share of traffic</th><th>Sample size</th><th>Why oversample</th></tr></thead>
+<tbody>
+<tr><td>Short digital forms</td><td>60%</td><td>80</td><td>Baseline performance</td></tr>
+<tr><td>Scanned tables</td><td>15%</td><td>60</td><td>Known difficult, high error rate</td></tr>
+<tr><td>Non-English inputs</td><td>10%</td><td>40</td><td>Small but business-critical</td></tr>
+<tr><td>Long multi-page documents</td><td>15%</td><td>45</td><td>Context pressure risk</td></tr>
+</tbody>
+</table>
+<p>Oversampling changes the mix, so weight results when reporting an overall figure and show stratum-level numbers first. Also keep a regression slice of known past failures; test it on every release.</p>
+
+<h2>Review queues</h2>
+<p>Not every output deserves human attention, and not all attention is equally valuable. A review queue routes items by risk so reviewers spend time where they change outcomes. Route on a combination of calibrated confidence, error cost, and novelty.</p>
+<ul>
+<li><strong>High-risk automatic route.</strong> Low confidence on a critical field, or any action above an authority limit.</li>
+<li><strong>Sample-based route.</strong> A small random slice of accepted items, typically 2 to 5 percent, to estimate residual error.</li>
+<li><strong>Disagreement route.</strong> Cases where two passes or two extractors produced different values.</li>
+<li><strong>Novelty route.</strong> Inputs unlike the calibration distribution, such as a new document template.</li>
+</ul>
+<p>Order the queue by expected value — error probability times error cost — and give each item a compact card with the input, output, confidence values, and evidence references. Corrections should flow back into the evaluation set.</p>
+<p>Track queue health with three numbers: volume as a percentage of total items, median time to decision, and the fraction of reviewed items that required a correction. A very low correction rate means the gate is too conservative and expensive; a very high rate means quality upstream is poor and review is merely absorbing the cost. Aim for a moderate rate that offset the review expense by prevented errors.</p>
+<div class="warn">Do not let reviewers see the model's suggested answer before the source when measuring accuracy. Otherwise they tend to agree with it, and your correction rate becomes a measure of politeness rather than correctness.</div>
+
+<h2>Claim-to-source mappings</h2>
+<p>Provenance is the ability to trace a claim to the material that supports it. At minimum, every generated claim that asserts a fact should carry a reference: a document id with an offset, a tool result id, or a database row with a timestamp. Free-floating claims cannot be verified, and unverifiable claims cannot be safely trusted.</p>
+<pre><code>{
+  "claim_id": "C-14",
+  "text": "The refund window is 30 days",
+  "field": "refund_window_days",
+  "value": 30,
+  "confidence": 0.94,
+  "sources": [
+    {"doc_id": "policy-2026-v3", "offset": 1284,
+     "quote": "Refunds requested within 30 days are eligible"},
+    {"doc_id": "faq-2026-09", "offset": 402,
+     "quote": "Standard window: thirty days"}
+  ],
+  "mapping_status": "aligned",
+  "guard": "sources.length &gt;= 1 &amp;&amp; mapping_status != 'unmapped'"
+}</code></pre>
+<p>The <code>quote</code> field is what makes the mapping checkable. A reference without a quote requires a human to open the source; a short quote lets an automated pass verify that the words actually appear there. Require at least one source for every factual claim, and flag <code>unmapped</code> claims for review automatically.</p>
+<p>Mappings also support citation: an answer can link to the exact passage, letting a reader challenge a claim quickly — the fastest route to discovering a retrieval error.</p>
+
+<h2>Conflict annotation</h2>
+<p>Sources disagree. One document says thirty days, another says forty-five; two tools return different balances. The wrong response is to pick one silently. Annotate the conflict: preserve both values with their sources, record the resolution rule applied, and mark the field as contested.</p>
+<p>A resolution rule might prefer the most recent source, the most authoritative source, or a human decision. Whichever you choose, record it. A field marked <code>contested</code> with both values visible lets a reviewer see the disagreement without reopening the investigation. It also feeds a useful metric: conflict frequency by source pair, which often reveals a stale document that should be removed from the index.</p>
+<p>Conflicts should lower confidence automatically. If two sources disagree and no rule resolves the difference cleanly, cap the field's calibrated confidence below the automatic-accept threshold so the item routes to review. This closes the loop back to the queue: confidence, sampling, and provenance are not separate features but one connected quality system.</p>
+<div class="exercise"><strong>Exercise 48.1 — Build a calibration set.</strong> Describe how you would assemble 300 labelled fields for a date-extraction task. Specify the strata, the labelling procedure that avoids anchoring, the score buckets, and the holdout strategy. State a threshold for automatic acceptance of a field whose error costs 50 units, and justify it.</div>
+<div class="exercise"><strong>Exercise 48.2 — Design provenance output.</strong> Define a structured record for a claim in a benefits-eligibility answer. Include field, value, confidence, at least two sources with quotes, and a conflict annotation. Write the guard that blocks automatic publication when a claim is unmapped or contested without a resolution rule.</div>
+
+<p>Taken together, these techniques turn quality into something you can inspect. Per-field confidence localises risk; calibration sets make the numbers honest; stratified sampling finds the weak slices; review queues spend human attention where it pays; provenance makes claims checkable; conflict annotation preserves disagreement instead of hiding it. A system with all six can answer not only "what accuracy did we get?" but "which fields, for which customers, supported by which documents, with what unresolved disagreements." That is the level of detail a serious review demands.</p>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why is a single overall confidence score less useful than per-field scores? Give an example.</li>
+<li>Name four sources of confidence and explain why they should not be merged blindly.</li>
+<li>How does stratified sampling find failures that random sampling can miss?</li>
+<li>What four routes can feed a review queue, and what does a low correction rate suggest?</li>
+<li>Why should a conflict lower confidence and route to review when no resolution rule applies?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Attach calibrated confidence to individual fields and combine signals with transparent rules.</li>
+<li>Build a held-out calibration set and map score buckets to observed accuracy.</li>
+<li>Sample by meaningful strata and weight results when reporting an overall figure.</li>
+<li>Route review by risk, novelty, disagreement, and a small random audit slice.</li>
+<li>Map every claim to quoted sources and annotate conflicts with values, sources, and resolution rules.</li>
+</ul>
+<nav><a href="47-coherence-and-compaction.html">&larr; Previous</a><span></span><a href="49-exam-readiness.html">Next: Exam Readiness and Study Plan &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

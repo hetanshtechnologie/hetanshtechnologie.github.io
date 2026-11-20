@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 20 — Agent SDK, Hooks, Deployment, and Trace Diagnosis</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 20</span>
+  <h1 id="chapter-20-agent-sdk-hooks-deployment-and-trace-diagnosis">Chapter 20 — Agent SDK, Hooks, Deployment, and Trace Diagnosis</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Identify what an agent SDK provides and which responsibilities remain with the application team.</li>
+<li>Implement deterministic hook checks that can deny or retry tool calls.</li>
+<li>Compare self-hosted and vendor-hosted runtime choices against concrete constraints.</li>
+<li>Diagnose a failing agent by matching trace signatures to missing design patterns.</li>
+<li>Apply exam-lens reasoning to agent architecture questions.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="what-an-agent-sdk-actually-supplies">What an agent SDK actually supplies</h3>
+<p>An agent SDK is a library and runtime for the loop described in the previous chapters. It usually supplies a loop engine, a tool registry that describes tools to the model, a hook bus, adapters for context and memory, a trace sink, and helpers for subagent coordination. Some offerings also provide deployment templates. What matters is not the branding but the set of responsibilities the SDK takes over.</p>
+<p>The application team still owns the parts that encode intent. It writes the goal and instructions, selects tools and their effect classes, defines budgets, decides which actions require approval, chooses what is stored in memory, and interprets traces. An SDK can make these choices configurable; it cannot decide what is correct for a particular business problem.</p>
+<table>
+<thead>
+<tr>
+<th>SDK surface</th>
+<th>What it controls</th>
+<th>Question to ask before using it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Loop engine</td>
+<td>How proposals, tool calls, and observations are sequenced</td>
+<td>Can we see and bound every iteration?</td>
+</tr>
+<tr>
+<td>Tool registry</td>
+<td>Descriptions, schemas, and available capabilities</td>
+<td>Are effect classes enforced or only documented?</td>
+</tr>
+<tr>
+<td>Hook bus</td>
+<td>Callbacks at lifecycle moments</td>
+<td>Can a hook deny an action, or only log it?</td>
+</tr>
+<tr>
+<td>Context adapters</td>
+<td>How history is selected, rendered, and compacted</td>
+<td>Which decisions and references survive compaction?</td>
+</tr>
+<tr>
+<td>Memory adapters</td>
+<td>What is stored across runs and how it is retrieved</td>
+<td>Can writes be reviewed and revoked?</td>
+</tr>
+<tr>
+<td>Trace sink</td>
+<td>How events are recorded and correlated</td>
+<td>Are arguments redacted and worker traces linked?</td>
+</tr>
+</tbody>
+</table>
+<p>A useful habit is to keep a written map of these surfaces for any SDK in use. When behavior surprises the team, the map tells them where to look first. Without it, debugging becomes a search through someone else's abstraction.</p>
+<h3 id="hooks-for-deterministic-checks">Hooks for deterministic checks</h3>
+<p>A hook is ordinary code attached to a lifecycle moment. Its defining property is determinism: the same proposal and policy state produce the same decision, with no model in the loop. That makes hooks the correct place for checks that must hold when the model makes a poor choice.</p>
+<p>A complete policy distinguishes three outcomes. <strong>Allow</strong> passes the call to execution. <strong>Retry</strong> returns a correctable problem to the model without consuming a real action, which is appropriate for malformed arguments. <strong>Deny</strong> blocks the call and records a reason, which is appropriate for a disallowed tool, a missing approval, or a suspicious argument. Denial should fail closed: if the policy service cannot answer, the action does not proceed.</p>
+<pre><code class="language-python">def before_tool(call, policy, approvals, registry):
+    tool = registry.get(call.name)
+    if tool is None or tool.name not in policy.allowlist:
+        return Deny(&quot;tool not registered for this run&quot;)
+
+    problem = tool.schema.validate(call.args)
+    if problem:
+        return Retry(f&quot;invalid arguments: {problem}&quot;)
+
+    if tool.effect in (&quot;write&quot;, &quot;external&quot;) and not approvals.has(call.id):
+        return Deny(&quot;visible action requires approval&quot;)
+
+    if secrets.looks_like_credential(call.args):
+        return Deny(&quot;credential-like value in tool arguments&quot;)
+
+    return Allow(call)
+
+
+def after_tool(result, sink, store):
+    sink.record(compact(result), redact=True)
+    if result.is_oversized:
+        return store.artifact_and_return_reference(result)
+    return result
+</code></pre>
+<p>Order matters. Cheap structural checks run before checks that require human state, and the approval check runs before any argument reaches a real system. The after-tool hook keeps the trace useful without carrying bulk into context. Notice that the approval rule is expressed by effect class, so a new externally visible tool inherits the same protection automatically.</p>
+<blockquote>
+<p><strong>Exam note:</strong> If a question contrasts "make the instruction stricter" with "add a before-tool hook that denies the action," choose the hook. Instructions are guidance; a hook on the execution path is enforcement.</p>
+</blockquote>
+<h3 id="self-hosted-versus-vendor-hosted-deployment">Self-hosted versus vendor-hosted deployment</h3>
+<p>Deployment determines who runs the loop, who stores traces, and which constraints can be met. A self-hosted runtime gives the team control over the loop code, hook order, network boundaries, and log storage. A vendor-hosted runtime removes most operational work and may offer managed scaling and built-in observability, at the price of less control over internals and data placement.</p>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Self-hosted runtime</th>
+<th>Vendor-hosted runtime</th>
+<th>Decision lens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Control of loop and hooks</td>
+<td>Full control over order and code</td>
+<td>Limited to exposed configuration</td>
+<td>Does a required check need custom code?</td>
+</tr>
+<tr>
+<td>Data placement</td>
+<td>Data can stay inside a chosen boundary</td>
+<td>Data passes through a managed service</td>
+<td>Must content remain in a region or network?</td>
+</tr>
+<tr>
+<td>Operations</td>
+<td>Team owns scaling, patching, and uptime</td>
+<td>Provider owns infrastructure</td>
+<td>Does the team have an operations function?</td>
+</tr>
+<tr>
+<td>Latency</td>
+<td>Depends on local design and network</td>
+<td>Depends on service routing</td>
+<td>Is there a hard response-time contract?</td>
+</tr>
+<tr>
+<td>Cost shape</td>
+<td>Fixed capacity plus usage</td>
+<td>Usage-based billing</td>
+<td>Is spend predictable or variable?</td>
+</tr>
+<tr>
+<td>Upgrade cadence</td>
+<td>Team chooses when to change versions</td>
+<td>Provider controls rollout</td>
+<td>Can the team absorb breaking changes?</td>
+</tr>
+<tr>
+<td>Trace ownership</td>
+<td>Stored in team-controlled systems</td>
+<td>Stored in provider tooling</td>
+<td>Who needs access for audit?</td>
+</tr>
+<tr>
+<td>Failure domain</td>
+<td>Local faults are visible and controllable</td>
+<td>Provider incidents are external</td>
+<td>Is independent recovery required?</td>
+</tr>
+</tbody>
+</table>
+<p>Hybrid designs are common. A team may run the loop and hooks on its own infrastructure while calling a hosted model endpoint, keeping sensitive tool execution local. Another team may host the runtime but send traces to its own logging system. The exam tends to test the constraint, not the product: if data cannot leave a network, the loop and tool execution must respect that; if there is no operations capacity, a managed runtime is more realistic.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Assuming a hosted runtime removes the need for hooks or budgets. Deployment changes where checks run; it does not remove the need for them.</p>
+</blockquote>
+<h3 id="diagnosing-an-agent-from-its-trace">Diagnosing an agent from its trace</h3>
+<p>Trace diagnosis is a reasoning skill. Start at the stop reason, then walk backward to the first step where the run diverged from the goal. A late symptom, such as a wrong final answer, is often caused by an earlier missing signal: an unverified observation, a lost constraint, or a policy that never fired.</p>
+<p>The following table maps common signatures to the pattern that is usually absent. It is a diagnostic aid, not a substitute for reading the actual events.</p>
+<table>
+<thead>
+<tr>
+<th>Trace signature</th>
+<th>Likely missing pattern</th>
+<th>Check to add</th>
+<th>Weak response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Same proposal and same observation repeated many times</td>
+<td>No-progress detection</td>
+<td>Compare recent observations and halt on repetition</td>
+<td>Increase the step cap</td>
+</tr>
+<tr>
+<td><code>complete</code> status with an empty or invalid artifact</td>
+<td>Independent verifier at the finish boundary</td>
+<td>Validate schema or artifact before accepting</td>
+<td>Ask the model to be more careful</td>
+</tr>
+<tr>
+<td>Disallowed tool executed successfully</td>
+<td>Allowlist enforced in the registry or hook</td>
+<td>Deny unregistered tools before execution</td>
+<td>Add the tool name to the prompt</td>
+</tr>
+<tr>
+<td>Denied approval followed by an equivalent tool call</td>
+<td>Policy expressed by effect class</td>
+<td>Cover all externally visible effects</td>
+<td>Rename the blocked tool</td>
+</tr>
+<tr>
+<td>Early constraints ignored in late steps</td>
+<td>Preservation-focused compaction</td>
+<td>Keep constraints and decisions in the summary</td>
+<td>Keep only the most recent messages</td>
+</tr>
+<tr>
+<td>Worker result has claims but no identifiers</td>
+<td>Evidence requirement in the summary contract</td>
+<td>Reject summaries without references</td>
+<td>Trust the worker's confidence value</td>
+</tr>
+<tr>
+<td>Trace ends with no status entry</td>
+<td>Explicit stop handling and trace close</td>
+<td>Emit a stop reason for every terminal path</td>
+<td>Infer the outcome from the last call</td>
+</tr>
+<tr>
+<td>Costs spike while the answer stays the same</td>
+<td>Context offloading or reuse of prior results</td>
+<td>Render compact observations and cache stable reads</td>
+<td>Remove all budgets</td>
+</tr>
+<tr>
+<td>Long worker traces cannot be correlated</td>
+<td>Shared run identifier across branches</td>
+<td>Tag every event with run and worker identifiers</td>
+<td>Delete worker traces to simplify storage</td>
+</tr>
+</tbody>
+</table>
+<p>Correlation matters when delegation is involved. Each worker's trace should carry the parent run identifier so that a manager's decision can be traced back to the evidence that produced it. Redaction belongs at recording time: secrets in tool arguments should never reach the trace store, even temporarily.</p>
+<blockquote>
+<p><strong>Try it:</strong> Take a failed run and write a one-sentence story from its trace: what the agent saw, what it chose, what stopped it. If the story contains a gap, that gap is the missing pattern.</p>
+</blockquote>
+<h3 id="exam-lens-architecture-decisions">Exam-lens architecture decisions</h3>
+<p>Agent architecture questions usually hide a constraint in plain language. A short routine helps. Name the constraint first: fixed path, variable path, sensitive data, irreversible action, tight latency, or limited operations capacity. Choose the smallest shape that handles it. Put enforcement at the moment where the risky action occurs. Require evidence that the result is real. Leave a trace that explains the ending.</p>
+<p>Four habits cover most correct answers. Prefer a mechanism to a stronger instruction. Prefer an effect class to a tool-name rule. Prefer a bounded agent in the middle of a workflow to an unbounded agent with good intentions. Prefer an explicit stopped status to a guessed success. When two options both sound reasonable, the one that still works after the model makes a bad choice is usually right.</p>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal.</strong> Add a deterministic hook to a small agent and diagnose its behavior from the resulting trace.</p>
+<ol>
+<li>Register two tools: one read-only lookup and one that sends a message.</li>
+<li>Add a before-tool hook that denies the send tool unless an approval record exists.</li>
+<li>Run the agent and ask it to send a message without granting approval.</li>
+<li>Inspect the trace entry for the denial and confirm the tool did not execute.</li>
+<li>Grant approval for a second run and compare the trace entries.</li>
+<li>Introduce a malformed argument on the lookup tool and confirm the hook returns a retry rather than a denial.</li>
+</ol>
+<p><strong>Expected observation.</strong> The first run stops or reports the blocked action with a recorded reason, and no message leaves the system. The second run shows an approval event followed by execution. The malformed lookup produces a retry instruction in the view but no real tool call, illustrating the difference between correctable and blocking failures.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<h3 id="the-problem">The problem</h3>
+<p>A team uses an agent to prepare release notes and email them to subscribers. A recent run sent an unfinished summary: the trace showed that the agent had read only the first half of the change log. The email tool had been described as requiring review in the system prompt, but no code checked for approval. The final step accepted the model's own statement that the notes were complete.</p>
+<h3 id="reasoning">Reasoning</h3>
+<p>Three patterns are missing. There is no verifier at the finish boundary, so completeness is asserted rather than checked. There is no effect-class hook, so an externally visible action can run without approval. The trace does not record a constraint check, so nobody can see which source material was considered complete. The system prompt's warning is not a mechanism.</p>
+<h3 id="resolution">Resolution</h3>
+<p>The team marks the email tool as externally visible and adds a before-tool hook that denies it unless an approval record exists for that run. The approval view shows the draft, the change-log entries it used, and the entries not yet reviewed. A verifier checks that the draft references every merged change and that each reference resolves before the draft can be presented for approval. The trace records the read operations, the verifier result, the approval, and the send outcome with redacted addresses.</p>
+<p>A follow-up review finds that compaction had dropped the "use the full change log" constraint late in the run. The context adapter is changed to preserve the goal and constraints verbatim when summarizing older steps. The final design still allows the agent to assemble the notes, but it cannot declare completion unchecked or send anything unapproved.</p>
+<table>
+<thead>
+<tr>
+<th>Symptom in original trace</th>
+<th>Missing pattern</th>
+<th>Remedy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Send happened without approval</td>
+<td>Effect-class hook</td>
+<td>Deny visible actions until approved</td>
+</tr>
+<tr>
+<td><code>complete</code> despite missing entries</td>
+<td>Independent verifier</td>
+<td>Check references to all merged changes</td>
+</tr>
+<tr>
+<td>Late steps ignored the full-log constraint</td>
+<td>Preservation-focused compaction</td>
+<td>Retain constraints in summaries</td>
+</tr>
+<tr>
+<td>No record of the decision to send</td>
+<td>Stop and approval trace events</td>
+<td>Emit correlated events for every terminal path</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Exam note:</strong> A wrong outward action is rarely fixed by a better prompt. Look for the control that can prevent the action and the trace that can prove what happened.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Assuming an SDK supplies the business rules that decide which actions are safe.</li>
+<li>Treating hook observability as equivalent to hook enforcement.</li>
+<li>Expressing approval policy by tool name instead of by effect class.</li>
+<li>Deploying a hosted runtime without budgets or traces because the provider "handles it."</li>
+<li>Reading only the final answer in a trace instead of finding the first wrong step.</li>
+<li>Increasing step caps to fix repetition instead of adding no-progress detection.</li>
+<li>Accepting a worker summary without evidence identifiers.</li>
+<li>Choosing a deployment model before checking data-placement and operations constraints.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>An agent SDK supplies runtime pieces; the team owns goals, effect classes, budgets, approvals, and interpretation.</li>
+<li>Hooks are deterministic checks on the action path, with distinct allow, retry, and deny outcomes.</li>
+<li>Approval policy should follow effect classes so equivalent actions cannot bypass it.</li>
+<li>Self-hosted runtimes buy control; vendor-hosted runtimes buy operational simplicity; hybrids are common.</li>
+<li>Trace diagnosis matches a signature to a missing pattern and fixes the first wrong step.</li>
+<li>Correlated, redacted traces make delegated runs explainable.</li>
+<li>Exam-lens reasoning prefers mechanisms over instructions and explicit stopped statuses over guesses.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>Which responsibility typically remains with the application team when using an agent SDK?</li>
+</ol>
+<p>A. Running the model call loop
+B. Registering tool schemas
+C. Deciding which tool effects require approval
+D. Storing the trace events emitted by hooks</p>
+<ol start="2">
+<li>A tool call has malformed arguments. What is the most appropriate hook outcome?</li>
+</ol>
+<p>A. Deny, because any bad call should stop the run
+B. Retry, so the model can correct the arguments without a real action
+C. Allow, because schemas are advisory
+D. Ignore the call and continue without recording it</p>
+<ol start="3">
+<li>A denied send is followed by a different tool that sends the same message. What is the root problem?</li>
+</ol>
+<p>A. The step cap is too high
+B. The policy was tied to a tool name rather than an effect class
+C. The model is too capable
+D. The trace was redacted</p>
+<ol start="4">
+<li>Which constraint most strongly favors a self-hosted runtime?</li>
+</ol>
+<p>A. The team has no operations staff
+B. Data must remain inside a specific network boundary
+C. The workload is small and variable
+D. The team wants managed scaling</p>
+<ol start="5">
+<li>A trace shows <code>complete</code> with an empty output file. Which pattern is missing?</li>
+</ol>
+<p>A. No-progress detection
+B. An independent verifier at the finish boundary
+C. A tool registry
+D. Parallel workers</p>
+<ol start="6">
+<li>What is the best first move when diagnosing a failed run?</li>
+</ol>
+<p>A. Replace the model
+B. Read the stop reason and walk back to the first wrong step
+C. Delete the trace and rerun with more tools
+D. Increase all budgets</p>
+<ol start="7">
+<li>Which trace practice supports delegated debugging?</li>
+</ol>
+<p>A. Giving each event a run and worker identifier
+B. Storing only the manager's final answer
+C. Removing worker traces to save space
+D. Recording arguments without redaction</p>
+<ol start="8">
+<li>A team runs its loop and tool execution locally but calls a hosted model endpoint. Which statement is accurate?</li>
+</ol>
+<p>A. Hooks are unnecessary because the model is hosted
+B. Local execution can still enforce tool policy and keep tool data inside the boundary
+C. Deployment choice determines whether the task needs an agent
+D. Trace events must be discarded when any hosted service is involved</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>Correct: C.</strong> Approval policy encodes business judgment and stays with the team. A, B, and D are runtime services an SDK commonly provides, though configurations vary.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> Malformed arguments are correctable, so a retry that returns the schema error is appropriate. A is wrong because it treats a fixable mistake as a policy violation. C is wrong because schemas should be enforced. D is wrong because all attempts belong in the trace.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> An effect-class rule covers every tool with the same outward effect; a name-based rule can be routed around. A is unrelated to bypass. C is not a design diagnosis. D concerns privacy, not authorization.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> A hard data-placement constraint favors running the loop and tools where that boundary can be enforced. A, C, and D favor a managed option instead.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> Completion must be checked against an artifact or schema. A addresses repetition, not false completion. C addresses tool description, not verification. D adds workers without fixing the finish gate.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> The stop reason and the first divergence give a targeted fix. A is a guess. C destroys evidence. D may increase cost without addressing the cause.</p>
+</li>
+<li>
+<p><strong>Correct: A.</strong> Shared identifiers let a manager decision be traced to worker evidence. B loses the evidence chain. C loses branch detail. D risks storing secrets.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> A hybrid design keeps control of tool execution and policy locally even when inference is remote. A is wrong because model hosting does not remove the need for enforcement. C is wrong because shape follows the task, not the deployment. D is wrong because traces can and should be kept with redaction.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 20.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="19-delegation-subagents.html">&larr; Previous</a><a href="21-model-families.html">Next: Model Families and Thinking Modes &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

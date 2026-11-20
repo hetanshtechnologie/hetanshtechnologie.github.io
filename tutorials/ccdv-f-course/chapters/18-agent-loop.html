@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 18 — Inside the Agent Loop</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 18</span>
+  <h1 id="chapter-18-inside-the-agent-loop">Chapter 18 — Inside the Agent Loop</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Describe the observe–think–act–observe cycle and explain why tool results drive the next iteration.</li>
+<li>Build a loop with explicit stop conditions, step budgets, and an honest status when it cannot finish.</li>
+<li>Separate a model's proposal from the harness that validates, executes, and verifies it.</li>
+<li>Place deterministic hooks around tool calls so policy holds even when the model chooses badly.</li>
+<li>Use a trace to reconstruct what the loop saw, did, and why it stopped.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="the-four-beats-and-the-fuel-between-them">The four beats and the fuel between them</h3>
+<p>An agent is a repeating cycle with four beats. <strong>Observe</strong> means assemble the current view: the goal, the facts kept so far, the plan if one exists, and the most recent tool results. <strong>Think</strong> means ask the model what to do next, given that view and the available tools. <strong>Act</strong> means execute the chosen action through a controlled interface that checks arguments and permissions. Then <strong>observe</strong> again, because the result becomes new input for the next pass.</p>
+<p>The last beat is what separates an agent from a model called in a loop. If a program asks the same question repeatedly and discards each answer, it is only generating text. When the result of an action changes the view, the loop has feedback, and feedback is what makes correction possible. Consider an agent reconciling nightly sales files. It reads a totals report and discovers a mismatch, so it fetches the second file. That file shows a currency conversion note, so it asks for the exchange table. Each observation narrows the next decision.</p>
+<p>Tool results are the fuel of the cycle. A successful result supplies data. An empty result says the search found nothing, which often calls for a broader query. A recoverable error says the tool was called badly, so corrected arguments may work. A permanent error says the approach is wrong. A policy denial says a boundary was reached. All of these belong in the view; hiding a failure from the model causes the same call to be repeated.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating a tool exception as a reason to abort the whole run. Many exceptions are useful observations. Only security violations, denied approvals, and exhausted budgets should end a run immediately.</p>
+</blockquote>
+<h3 id="a-loop-you-can-read">A loop you can read</h3>
+<p>The pseudocode below keeps the four beats visible and puts every stop decision outside the model. It is a teaching skeleton, not a production implementation.</p>
+<pre><code class="language-text">state = Session(goal, seed_facts, budget, trace)
+
+while True:
+    if state.elapsed() &gt; budget.clock:
+        return halt(&quot;clock expired&quot;, state.trace)
+
+    view = state.current_view()        # goal + kept facts + recent observations
+    proposal = model.propose(view, state.allowed_tools)
+    state.trace.add(iteration, &quot;proposal&quot;, proposal)
+
+    if proposal.kind == &quot;answer&quot;:
+        if state.verifier(proposal.payload):
+            return complete(proposal.payload, state.trace)
+        state.note(&quot;verifier rejected: &quot; + state.last_reason)
+        # fall through: the rejection is an observation, not a stop
+
+    state.guard(proposal)              # allowlist, schema, effect class, secrets
+    if state.guard.denied:
+        state.trace.add(iteration, &quot;policy_block&quot;, state.guard.reason)
+        return halt(&quot;policy&quot;, state.trace)
+
+    if state.effect_is_external(proposal) and not state.approve(proposal):
+        return halt(&quot;approval denied&quot;, state.trace)
+
+    result = state.tools.run(proposal.tool, proposal.args)
+    state.trace.add(iteration, &quot;observation&quot;, compact(result))
+    state.observe(result)              # failures and empty results included
+
+    if state.repeating(last=3):
+        return halt(&quot;no progress&quot;, state.trace)
+
+    if state.tokens_spent &gt; budget.tokens or state.calls &gt; budget.calls:
+        return halt(&quot;budget&quot;, state.trace)
+
+    iteration += 1
+    if iteration &gt; budget.steps:
+        return halt(&quot;step cap&quot;, state.trace)
+</code></pre>
+<p>Several details matter. Budgets are checked inside the loop, because effort accumulates. A rejected answer does not end the run but becomes feedback. Guard denials are recorded before the halt, so the trace explains what was attempted. Every observation is appended in compact form, preserving references while trimming bulk. The final fallback is a <code>halt</code> with a reason, never a silent failure or a guessed success.</p>
+<table>
+<thead>
+<tr>
+<th>Stop condition</th>
+<th>Trigger</th>
+<th>Enforced by</th>
+<th>Returned status</th>
+<th>Failure it prevents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Verified answer</td>
+<td>Verifier accepts the proposal</td>
+<td>Harness check</td>
+<td><code>complete</code></td>
+<td>Declaring success without evidence</td>
+</tr>
+<tr>
+<td>Clock expiry</td>
+<td>Wall-clock limit passed</td>
+<td>Harness timer</td>
+<td><code>halt</code></td>
+<td>Unbounded user waiting</td>
+</tr>
+<tr>
+<td>Step cap</td>
+<td>Maximum iterations reached</td>
+<td>Loop counter</td>
+<td><code>halt</code></td>
+<td>Endless deliberation</td>
+</tr>
+<tr>
+<td>Tool-call budget</td>
+<td>Call count exceeds the cap</td>
+<td>Harness counter</td>
+<td><code>halt</code></td>
+<td>Runaway external requests</td>
+</tr>
+<tr>
+<td>Token budget</td>
+<td>Accumulated tokens exceed the ceiling</td>
+<td>Harness meter</td>
+<td><code>halt</code></td>
+<td>Uncontrolled spend</td>
+</tr>
+<tr>
+<td>No progress</td>
+<td>Recent observations are identical</td>
+<td>Repetition detector</td>
+<td><code>halt</code></td>
+<td>Repeating the same failing call</td>
+</tr>
+<tr>
+<td>Policy denial</td>
+<td>Tool is disallowed or arguments are invalid</td>
+<td>Hook or guard</td>
+<td><code>halt</code> or retry</td>
+<td>Unauthorized or malformed action</td>
+</tr>
+<tr>
+<td>Approval denied</td>
+<td>A person refuses a visible action</td>
+<td>Approval gate</td>
+<td><code>halt</code></td>
+<td>Unauthorized external change</td>
+</tr>
+<tr>
+<td>Asked for input</td>
+<td>The model requests clarification</td>
+<td>Harness routing</td>
+<td><code>needs_input</code></td>
+<td>Guessing when facts are missing</td>
+</tr>
+</tbody>
+</table>
+<p>A step cap alone is not a safety system. It bounds effort but not harm: a few iterations may still contain a destructive write. The table should be read as a set of complementary limits, each aimed at a different failure.</p>
+<h3 id="what-to-feed-back-from-a-tool-result">What to feed back from a tool result</h3>
+<p>Not every observation is equally useful. The harness decides how much of a result enters the view, and that decision strongly affects the quality of later thinking. Full tool output is rarely helpful; ten pages of search results push the important excerpt to the edges of attention and cost tokens on every later iteration. A compact rendering with a reference keeps the fact available without carrying the bulk.</p>
+<table>
+<thead>
+<tr>
+<th>Observation kind</th>
+<th>What it tells the loop</th>
+<th>Useful reaction</th>
+<th>Unhelpful reaction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Success with data</td>
+<td>New facts are available</td>
+<td>Update the view and continue</td>
+<td>Copy raw output into every later message</td>
+</tr>
+<tr>
+<td>Empty result</td>
+<td>Nothing matched this query</td>
+<td>Broaden the query or change source</td>
+<td>Repeat the identical query</td>
+</tr>
+<tr>
+<td>Recoverable error</td>
+<td>Arguments or timing were wrong</td>
+<td>Correct arguments and retry once</td>
+<td>Treat it as final failure</td>
+</tr>
+<tr>
+<td>Permanent error</td>
+<td>The tool or source cannot serve this request</td>
+<td>Switch approach or stop honestly</td>
+<td>Retry indefinitely</td>
+</tr>
+<tr>
+<td>Policy denial</td>
+<td>A boundary was reached</td>
+<td>Record and stop or ask for approval</td>
+<td>Try a different tool with the same effect</td>
+</tr>
+<tr>
+<td>Approval denied</td>
+<td>A person refused the action</td>
+<td>Stop with a clear reason</td>
+<td>Reword the request until approved</td>
+</tr>
+<tr>
+<td>Oversized output</td>
+<td>The source is too large for the view</td>
+<td>Keep a summary plus an identifier</td>
+<td>Truncate silently and lose the key fact</td>
+</tr>
+<tr>
+<td>Contradictory data</td>
+<td>Sources disagree</td>
+<td>Mark uncertainty and seek a tie-breaker</td>
+<td>Pick one source arbitrarily</td>
+</tr>
+</tbody>
+</table>
+<p>Preservation matters when the view is condensed. Keep decisions already made, rejected hypotheses with their reasons, identifiers, and constraints from the original request. Drop verbose logs and duplicated text. The trace can hold the full detail for audit while the model sees a curated view.</p>
+<h3 id="the-harness-is-not-the-model">The harness is not the model</h3>
+<p>It helps to name the two participants clearly. The model proposes actions; it does not enforce rules. The <strong>harness</strong> is the surrounding program that calls the model, validates proposals, dispatches tools, shapes the view, runs checks, and decides when the run ends. Everything with teeth lives in the harness.</p>
+<p>A minimal harness has five checks. First, a schema check rejects malformed tool arguments before any real system is touched. Second, an allowlist restricts calls to tools registered for this task. Third, an effect class marks each tool as read-only, state-changing, or externally visible, which determines whether approval is required. Fourth, a verifier tests the final answer independently of the model's claim of completion. Fifth, a repetition detector compares recent observations to catch a stuck loop.</p>
+<p>The verifier deserves special attention. If the model says "done" and the harness accepts that statement, verification is not happening. A verifier might check that a required schema is satisfied, that a produced file exists, or that every cited identifier resolves. When verification fails, the failure is appended to the view so the next iteration can correct course.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a scenario asks how to stop an agent from announcing success too early, add an independent verifier at the finish boundary, not a stronger instruction in the prompt.</p>
+</blockquote>
+<h3 id="hooks-as-deterministic-guards-around-tool-calls">Hooks as deterministic guards around tool calls</h3>
+<p>A hook is a callback attached to a specific moment in the run. It is deterministic: given the same proposal and policy state, it makes the same decision every time, without asking a model to judge. That property is why hooks are the right place for enforcement. A prompt can request careful behavior; a hook can refuse the call.</p>
+<pre><code class="language-text">before_tool(proposal, policy):
+    if proposal.tool not in policy.allowlist:
+        deny(&quot;tool not registered for this task&quot;)
+    if not schema_valid(policy.schema_for(proposal.tool), proposal.args):
+        retry(&quot;invalid arguments: &quot; + schema_errors)
+    if policy.effect(proposal.tool) in (&quot;write&quot;, &quot;external&quot;):
+        if not approval_from_operator(proposal):
+            deny(&quot;visible action requires approval&quot;)
+    if contains_secret_pattern(proposal.args):
+        deny(&quot;credential-like value in arguments&quot;)
+    allow(proposal)
+
+after_tool(result, policy):
+    log(compact(result))
+    if policy.exceeds_size(result): store_artifact(result) and keep_reference()
+</code></pre>
+<p>Place hooks where they can actually intercept the action. A check written after execution can report a mistake but cannot prevent it. Denials should fail closed: if the policy service is unavailable, the action is not performed. Approval rules should be expressed by effect class rather than by a single tool name, otherwise a denied tool can be replaced by another tool with the same outward effect.</p>
+<blockquote>
+<p><strong>Try it:</strong> List your tools and mark each one read-only, state-changing, or externally visible. Write one hook rule per class. Then check whether any tool can bypass the rule through an alias.</p>
+</blockquote>
+<h3 id="tracing-a-loop">Tracing a loop</h3>
+<p>A trace is an ordered record of the run. It turns "the agent behaved strangely" into a sequence that can be inspected. Useful entries include the iteration number, a hash or summary of the view, the proposal, the guard outcome, the executed tool with redacted arguments, a compact observation, token counters, and the final stop reason.</p>
+<table>
+<thead>
+<tr>
+<th>Trace field</th>
+<th>Question it answers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>View summary</td>
+<td>What information was available at this step?</td>
+</tr>
+<tr>
+<td>Proposal and tool arguments</td>
+<td>What did the model intend to do?</td>
+</tr>
+<tr>
+<td>Guard outcome</td>
+<td>Was the action allowed, retried, or blocked?</td>
+</tr>
+<tr>
+<td>Observation</td>
+<td>What did the world return?</td>
+</tr>
+<tr>
+<td>Counters</td>
+<td>How close was the run to a budget limit?</td>
+</tr>
+<tr>
+<td>Stop reason</td>
+<td>Why did the run end, and was the status honest?</td>
+</tr>
+</tbody>
+</table>
+<p>A good trace supports replay without exposing secrets. Redaction happens before storage, and identifiers link entries across worker contexts when delegation is used. When a run stops, the trace should make the reason obvious; if the only clue is "maximum steps reached," the team has learned that the loop was bounded but not why it failed to progress.</p>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal.</strong> Instrument a small agent loop so that a stuck tool call stops the run with a readable trace.</p>
+<ol>
+<li>Write a loop with one tool that returns the same failing result on every call.</li>
+<li>Add a proposal log, a guard log, and an observation log with iteration numbers.</li>
+<li>Add a repetition detector that compares the last three observations.</li>
+<li>Add a step cap and a tool-call cap with different values.</li>
+<li>Run the loop and record the final status and stop reason.</li>
+<li>Change the tool to return an empty result and notice how the loop reacts differently.</li>
+</ol>
+<p><strong>Expected observation.</strong> Without the repetition detector, the run reaches the step cap after wasting its calls. With it, the run stops earlier and names "no progress" as the reason. The trace shows the identical observations that triggered the stop, which is much more useful than a bare iteration count.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<h3 id="the-problem">The problem</h3>
+<p>A finance team uses an agent to reconcile nightly sales files. The agent reads a totals report, fetches the detail file, checks for mismatches, and produces a short exception memo. Recently a run spent its entire budget calling the detail file tool with the same date, produced no memo, and reported success. The team needs to know whether the fault is in the model, the tool, or the loop.</p>
+<h3 id="reasoning">Reasoning</h3>
+<p>The trace shows the first observation contained a currency mismatch. The next three proposals were identical calls with the same date argument, and each observation repeated the same error text. No repetition detector fired, so the loop consumed its full call budget. The final proposal was an answer written from incomplete data, and the harness accepted it because there was no verifier. Two patterns are missing: a no-progress check and an independent completion check.</p>
+<h3 id="resolution">Resolution</h3>
+<p>The team adds a repetition detector over compacted observations and a verifier that requires the memo to name at least one resolved exception or explicitly state that none could be resolved with references. The detail tool's contract is updated so the error distinguishes "file not ready" from "wrong date," giving the loop a useful choice between waiting and changing arguments. A hook redacts the credential-like parameter that appeared in the tool arguments before the trace is stored.</p>
+<p>The loop now stops with <code>halt("no progress")</code> when three observations match, and the status is distinct from <code>complete</code>. On a different night, when the file is genuinely late, the agent reads the recoverable error, waits, and retries with a bounded backoff. The trace records every proposal and guard decision, so the next incident can be diagnosed in minutes rather than reconstructed from guesses.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A run that "finished successfully" with incomplete work points to a missing verifier; a run that repeated the same call points to a missing no-progress check. These are different fixes.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Believing that more iterations automatically improve an agent's answer.</li>
+<li>Reporting a capped run as a success instead of an explicit stopped status.</li>
+<li>Checking budgets only once before the loop begins.</li>
+<li>Hiding tool errors from the model so identical calls are repeated.</li>
+<li>Letting the model verify its own completion claim.</li>
+<li>Putting policy checks in prompts rather than in hooks on the action path.</li>
+<li>Writing full tool output into the view instead of a compact form with references.</li>
+<li>Storing traces that include secrets or unbounded raw artifacts.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>The cycle is observe, think, act, observe; tool results are the feedback that enables correction.</li>
+<li>A harness owns validation, execution, context shaping, verification, and stopping; the model only proposes.</li>
+<li>Stop conditions cover success, time, steps, calls, tokens, repetition, policy, approval, and clarification.</li>
+<li>A verifier must be independent of the model's claim of completion.</li>
+<li>Hooks are deterministic guards placed on the action path, and denials should fail closed.</li>
+<li>Compact observations preserve decisions and references while shedding bulk.</li>
+<li>A structured trace with redacted arguments turns a strange run into a diagnosable one.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>What makes an agent different from a model called repeatedly in a loop?</li>
+</ol>
+<p>A. The agent uses a larger model
+B. The agent feeds action results back into the next decision
+C. The agent has no tool definitions
+D. The agent writes a longer system prompt</p>
+<ol start="2">
+<li>A loop reaches its step cap while mid-task. What should it return?</li>
+</ol>
+<p>A. Its best guess, marked as success
+B. A stopped status with the reason and the trace
+C. A new loop with the same view
+D. Nothing, so the caller retries blindly</p>
+<ol start="3">
+<li>Which pair of checks addresses both repeated failing calls and premature success?</li>
+</ol>
+<p>A. Longer prompt and a bigger model
+B. No-progress detection and an independent verifier
+C. More tools and a wider context window
+D. Fewer iterations and no trace</p>
+<ol start="4">
+<li>Where should a check for a disallowed tool be enforced?</li>
+</ol>
+<p>A. In the final answer text
+B. In a before-tool hook that denies execution
+C. In the memory store
+D. In a compaction summary</p>
+<ol start="5">
+<li>A search tool returns an empty result. What is the most useful reaction?</li>
+</ol>
+<p>A. Stop the run as a permanent failure
+B. Repeat the same query until it succeeds
+C. Broaden the query or try another source
+D. Report the empty result as a verified answer</p>
+<ol start="6">
+<li>Why should approval rules use effect classes instead of tool names?</li>
+</ol>
+<p>A. Effect classes are shorter to write
+B. Effect classes cover equivalent outward actions as well
+C. Tool names cannot be logged
+D. Approval is unnecessary for read-only tools</p>
+<ol start="7">
+<li>Which trace field best answers "what did the model intend to do at step five?"</li>
+</ol>
+<p>A. Token counter
+B. Proposal and tool arguments
+C. Stop reason
+D. View summary</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>Correct: B.</strong> Feedback from observations changes later decisions, which is the defining property. A is wrong because model size is irrelevant. C is wrong because agents normally need tools. D is wrong because prompt length does not create a loop.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> An honest stopped status separates incomplete work from success. A hides failure. C would likely repeat the same problem. D leaves the caller with no explanation.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> Repetition detection catches stuck calls; a verifier blocks unchecked completion. A offers heuristic changes, not guarantees. C may worsen cost and confusion. D removes evidence and makes diagnosis harder.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> A hook on the action path can prevent the call and record the denial. A is too late. C concerns storage, not control. D concerns context size, not policy.</p>
+</li>
+<li>
+<p><strong>Correct: C.</strong> An empty result is a signal to change the search, not a terminal error. A confuses "nothing found" with failure. B wastes the budget. D presents missing evidence as an answer.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> A class such as "externally visible write" covers every alias with the same effect. A is not a reason. C is false; tool names are routinely logged. D is true but irrelevant to the question of coverage.</p>
+</li>
+<li>
+<p><strong>Correct: B.</strong> The proposal entry records the intended action and its arguments. A records cost only. C explains the ending, not a mid-run intention. D shows available information, not the choice made.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 18.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="17-workflow-or-agent.html">&larr; Previous</a><a href="19-delegation-subagents.html">Next: Delegation, Subagents, and Memory Isolation &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

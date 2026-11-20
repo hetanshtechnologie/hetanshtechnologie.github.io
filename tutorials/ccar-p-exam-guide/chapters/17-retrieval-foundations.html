@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 17 — Retrieval Foundations: Chunking, Enrichment, and Indexing</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 17 — Retrieval Foundations: Chunking, Enrichment, and Indexing</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Explain why retrieval quality depends on ingestion and data preparation, not only on query-time prompting.</li>
+    <li>Choose chunking strategies that preserve meaning, context, and retrievability for different content types.</li>
+    <li>Apply metadata enrichment and document structure signals to improve filtering, ranking, and provenance.</li>
+    <li>Compare indexing representations and understand how embeddings, keywords, and hybrid stores support retrieval.</li>
+    <li>Design ingestion pipelines with freshness, governance, and evaluation in mind.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Retrieval as a system, not a single step</h3>
+  <p>Retrieval-augmented systems aim to ground responses in relevant information from approved sources. Many teams focus on the visible moment when a user question triggers a search, but retrieval quality is largely determined earlier: how content is collected, cleaned, segmented, enriched, and indexed. If important facts are split apart, stripped of context, mislabeled, or omitted from the index, no prompt can reliably recover them at query time. Retrieval foundations therefore sit at the intersection of data engineering, information architecture, and AI behavior design.</p>
+  <p>A useful mental model separates <strong>ingestion</strong> from <strong>retrieval</strong>. Ingestion prepares content for efficient and accurate access: parsing documents, extracting structure, chunking text, generating representations, attaching metadata, and storing artifacts. Retrieval uses those prepared artifacts to find candidate information relevant to a request. Generation then synthesizes an answer using retrieved context and instructions. Weakness at any stage propagates forward. For example, poor chunk boundaries can reduce recall, missing metadata can prevent correct filtering, and stale indexes can produce outdated answers even when the search mechanism works as designed.</p>
+  <p>Because sources and use cases vary, there is no universal ingestion recipe. Policy manuals, product catalogs, support tickets, code repositories, and meeting transcripts have different structures and retrieval needs. Architects should select foundations based on content characteristics, query patterns, freshness requirements, and governance constraints, then validate with representative evaluations.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> When a scenario describes missing or irrelevant retrieved passages, consider ingestion issues—chunking, metadata, parsing, or freshness—before assuming the model or prompt is the primary cause.</p>
+  </div>
+
+  <h3>Chunking: balancing granularity and context</h3>
+  <p>Chunking divides source content into units that can be indexed and retrieved. The central trade-off is granularity. Small chunks can improve precision by matching specific passages, but they may omit surrounding context needed for correct interpretation. Large chunks preserve more context but can dilute relevance, increase token cost, and make it harder to pinpoint the answer. Effective chunking aims to create units that are semantically coherent, self-contained enough to be useful, and aligned with how users ask questions.</p>
+  <p>Strategies vary by content type. <strong>Fixed-size chunking</strong> splits by token or character count and is simple but may cut sentences or sections awkwardly. <strong>Structure-aware chunking</strong> uses headings, paragraphs, tables, or semantic boundaries to keep related ideas together. <strong>Sliding windows</strong> introduce overlap so information near boundaries appears in adjacent chunks, reducing the risk of split concepts at the cost of duplication and storage. For hierarchical documents, parent-child or multi-level chunking can retrieve precise passages while retaining links to broader sections for context.</p>
+  <p>Chunk design should also consider downstream usage. If answers must cite specific clauses, chunks may need stable identifiers and boundaries aligned to those clauses. If tables or lists carry meaning, parsing must preserve structure rather than flattening content into ambiguous text. Preprocessing quality—handling headers, footers, boilerplate, and formatting artifacts—often has as much impact as the chunk size itself.</p>
+
+  <table>
+    <tr>
+      <th>Chunking approach</th>
+      <th>Strengths</th>
+      <th>Weaknesses</th>
+      <th>Good fit</th>
+    </tr>
+    <tr>
+      <td>Fixed-size</td>
+      <td>Simple, predictable processing</td>
+      <td>May break meaning at boundaries</td>
+      <td>Uniform text with limited structure</td>
+    </tr>
+    <tr>
+      <td>Structure-aware</td>
+      <td>Preserves logical sections and readability</td>
+      <td>Requires reliable parsing of structure</td>
+      <td>Manuals, policies, articles with headings</td>
+    </tr>
+    <tr>
+      <td>Overlapping windows</td>
+      <td>Reduces boundary loss</td>
+      <td>Duplication, higher index size/cost</td>
+      <td>Narrative content where ideas span breaks</td>
+    </tr>
+    <tr>
+      <td>Hierarchical (parent/child)</td>
+      <td>Balances precision with surrounding context</td>
+      <td>More complex ingestion and retrieval logic</td>
+      <td>Long documents with nested sections</td>
+    </tr>
+  </table>
+
+  <h3>Metadata enrichment and provenance</h3>
+  <p>Metadata turns raw chunks into governable, filterable knowledge assets. Common attributes include source document, section title, author or owner, creation and update timestamps, access classification, product or region, language, and version. Metadata enables pre-filtering (for example, restricting retrieval to a tenant or current policy version), ranking boosts, and display of provenance in answers. Without it, systems may retrieve plausible but unauthorized, outdated, or irrelevant content.</p>
+  <p>Enrichment can be manual, rule-based, or model-assisted. Extracted headings, summaries, entities, and keywords can improve discoverability, but enrichment itself must be validated: incorrect labels can hide relevant content or surface wrong content confidently. Provenance fields are especially important for trust and auditability. When a response cites where information came from and when it was last updated, users and reviewers can assess reliability and detect staleness.</p>
+  <p>Governance requirements should shape metadata design. If access is role-based, chunks must carry or map to access controls that retrieval can enforce. If retention policies apply, lifecycle metadata supports deletion or expiration. If multiple jurisdictions are involved, residency or classification tags may be required. Treating metadata as optional decoration creates downstream quality and compliance risks.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Indexing content without access-control and freshness metadata. Retrieval may return relevant text that a user should not see or that no longer reflects current truth.</p>
+  </div>
+
+  <h3>Indexing representations and storage choices</h3>
+  <p>An index organizes prepared content for efficient lookup. Different representations support different retrieval behaviors. <strong>Keyword or lexical indexes</strong> match terms and phrases, often excelling at exact identifiers, names, and domain-specific vocabulary. <strong>Vector indexes</strong> store embeddings—numeric representations of meaning—enabling semantic similarity search that can find relevant passages even when wording differs. Many practical systems combine approaches so each compensates for the other’s weaknesses.</p>
+  <p>Embeddings are not magic; their usefulness depends on model choice, content quality, chunking, and domain fit. Short, context-poor chunks may embed ambiguously. Domain jargon or specialized formats may require evaluation to confirm semantic retrieval performs well. Index configuration—such as similarity metrics and update strategies—also affects behavior and cost. Architects should understand that changing chunking or embedding models typically requires reprocessing content and re-evaluating quality.</p>
+  <p>Storage and update design influence freshness and reliability. Full reindexing is simple but can be costly for large corpora; incremental updates reduce latency between source changes and availability but require careful handling of deletions, versioning, and consistency. Indexes should support traceability from retrieved chunk back to source artifact and version so that answers can be explained and corrected.</p>
+
+  <table>
+    <tr>
+      <th>Representation</th>
+      <th>Best at</th>
+      <th>Limitations</th>
+      <th>Design implication</th>
+    </tr>
+    <tr>
+      <td>Lexical/keyword</td>
+      <td>Exact terms, codes, names</td>
+      <td>May miss paraphrases/synonyms</td>
+      <td>Useful for identifiers and precise filters</td>
+    </tr>
+    <tr>
+      <td>Vector/semantic</td>
+      <td>Meaning similarity, paraphrases</td>
+      <td>May miss exact tokens; domain sensitivity</td>
+      <td>Needs good chunking and evaluation</td>
+    </tr>
+    <tr>
+      <td>Hybrid</td>
+      <td>Balanced recall across query types</td>
+      <td>More complexity in tuning/fusion</td>
+      <td>Common choice for mixed workloads</td>
+    </tr>
+    <tr>
+      <td>Structured fields</td>
+      <td>Filtering, faceting, constraints</td>
+      <td>Depends on metadata quality</td>
+      <td>Requires disciplined enrichment</td>
+    </tr>
+  </table>
+
+  <h3>Ingestion pipelines, freshness, and evaluation</h3>
+  <p>Ingestion should be treated as a managed pipeline with clear stages: source acquisition, parsing, normalization, chunking, enrichment, representation generation, indexing, and validation. Each stage can fail or degrade quality. Observability into pipeline runs—documents processed, errors, skipped items, and processing time—helps teams detect issues before users encounter poor retrieval. Versioning source and index states supports rollback and comparison when changes affect outcomes.</p>
+  <p>Freshness policies define how quickly updates in source systems must appear in retrieval results. Some domains require near-real-time updates; others can tolerate periodic refresh. The acceptable lag should be explicit, measurable, and aligned with user expectations. When freshness cannot be guaranteed, responses may need to communicate uncertainty or show source timestamps. Evaluation should include representative queries that test recall, relevance, filtering correctness, and provenance, not only anecdotal spot checks.</p>
+
+  <pre><code class="language-json">{
+  "ingestion_pipeline": {
+    "source": "policy_repository",
+    "steps": [
+      "parse_and_clean",
+      "structure_aware_chunking",
+      "attach_metadata",
+      "generate_embeddings",
+      "upsert_index"
+    ],
+    "metadata_required": ["source_id", "section", "updated_at", "access_scope", "version"],
+    "freshness_target_minutes": 60,
+    "quality_checks": ["chunk_length_bounds", "missing_metadata", "embedding_failures", "sample_retrieval_tests"]
+  }
+}</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Take one representative document and manually inspect its chunks. Check whether each chunk is understandable alone, correctly labeled, and traceable to a specific source section.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>An organization builds an internal assistant to answer questions about operating procedures. Users report two recurring problems: answers sometimes miss critical steps that appear later in the same procedure, and answers occasionally cite outdated guidance after procedures are revised. The knowledge base includes long documents with headings, tables, and versioned updates. The current pipeline splits documents into fixed-size blocks with minimal metadata and performs a full reindex weekly.</p>
+
+  <h3>Analysis</h3>
+  <p>The reported issues point to foundation problems. Missing steps suggest chunk boundaries are breaking procedural continuity or that chunks lack enough context to be recognized as relevant. Fixed-size splitting may separate prerequisites from actions or detach table rows from headers. Outdated citations indicate a freshness and versioning gap: weekly reindexing is too slow for revised procedures, and without clear version metadata the system cannot prefer or surface current guidance reliably.</p>
+  <p>Improving prompts alone will not resolve these causes. The pipeline needs structure-aware chunking aligned to procedures and sections, preservation of tables, and metadata for source, section, version, effective date, and access scope. Freshness must be addressed through more frequent or incremental updates and explicit handling of superseded content. Evaluation should include queries that target multi-step procedures and recently changed documents.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect redesigns ingestion to parse headings and procedure steps, creating chunks that keep related steps together while using limited overlap for long sections. Tables are retained in structured form with headers. Each chunk is enriched with document identifier, section path, version, updated timestamp, and access scope. The index supports incremental upserts when procedures change and marks previous versions as superseded.</p>
+  <p>Retrieval responses include source section and update date, enabling users to judge currency. A test set of representative questions—especially those requiring complete procedures and those affected by recent revisions—is run after each pipeline change. User feedback and retrieval metrics show improved completeness and fewer outdated citations, demonstrating that foundational ingestion choices directly affect answer quality.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Choosing chunk size arbitrarily without considering content structure and query patterns.</li>
+    <li>Stripping headings, tables, or context that users need to interpret retrieved passages correctly.</li>
+    <li>Omitting metadata for version, freshness, provenance, or access control.</li>
+    <li>Assuming semantic embeddings remove the need for parsing quality and relevance evaluation.</li>
+    <li>Allowing index freshness to lag behind source updates without communicating or managing staleness.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Retrieval quality is built during ingestion through parsing, chunking, enrichment, and indexing decisions.</li>
+    <li>Chunking must balance precision and context, using strategies appropriate to document structure and use cases.</li>
+    <li>Metadata and provenance enable filtering, access control, freshness awareness, and trustworthy citations.</li>
+    <li>Lexical, vector, and hybrid representations offer complementary strengths and require evaluation in context.</li>
+    <li>Managed pipelines with freshness targets and quality checks keep retrieval systems reliable as sources evolve.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>Why can ingestion design be the root cause of poor retrieval results?</p>
+      <p>A. Because query-time prompts can always compensate for missing index content<br>
+      B. Because chunking, parsing, metadata, and indexing determine what can be found and understood<br>
+      C. Because embeddings eliminate the need for source structure<br>
+      D. Because freshness only matters for user interface design</p>
+    </li>
+    <li>
+      <p>What is the main trade-off when choosing smaller chunks?</p>
+      <p>A. Higher precision but potential loss of surrounding context<br>
+      B. Guaranteed access control enforcement<br>
+      C. No need for metadata<br>
+      D. Automatic elimination of staleness</p>
+    </li>
+    <li>
+      <p>Which metadata is most directly useful for preventing outdated answers?</p>
+      <p>A. Font color<br>
+      B. Version or last-updated timestamp<br>
+      C. File icon<br>
+      D. Embedding dimension only</p>
+    </li>
+    <li>
+      <p>When are lexical retrieval methods particularly valuable?</p>
+      <p>A. When queries rely on exact identifiers, codes, or specific terms<br>
+      B. When no evaluation is possible<br>
+      C. When all content is unstructured audio with no text<br>
+      D. When access control is unnecessary</p>
+    </li>
+    <li>
+      <p>What is a key benefit of provenance attached to retrieved chunks?</p>
+      <p>A. It replaces the need for retrieval<br>
+      B. It allows users and systems to trace information to source and assess trust<br>
+      C. It guarantees the answer is correct<br>
+      D. It removes the need for freshness policies</p>
+    </li>
+    <li>
+      <p>A corpus changes daily but is reindexed monthly. What risk is most likely?</p>
+      <p>A. Improved grounding with no downside<br>
+      B. Retrieval of stale content that no longer reflects current sources<br>
+      C. Reduced need for metadata<br>
+      D. Automatic correction of outdated chunks</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Ingestion determines how content is represented and accessible for retrieval. A, C, and D ignore foundational dependencies.</li>
+    <li><strong>Correct: A.</strong> Smaller chunks can match narrowly but may omit needed context. B, C, and D are unrelated guarantees.</li>
+    <li><strong>Correct: B.</strong> Version and update metadata support freshness-aware retrieval and display. A and C are irrelevant, and D alone does not address currency.</li>
+    <li><strong>Correct: A.</strong> Lexical methods excel at exact matches and specific tokens. B, C, and D do not describe their strengths.</li>
+    <li><strong>Correct: B.</strong> Provenance supports traceability and trust assessment. C and D overstate its effect, and A is incorrect.</li>
+    <li><strong>Correct: B.</strong> Slow reindexing relative to source changes creates staleness risk. A, C, and D are not valid outcomes.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 17.</em></p>
+
+  <nav>
+    <a href="16-tool-design-permissions-and-auth.html">&larr; Previous</a>
+    <a href="18-search-reranking-and-quality.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>28. MCP in Production</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>28. MCP in Production</h1>
+
+<p>A server that works for one developer on a laptop is not yet a production service. Production adds several tenants, a security boundary, an upgrade path, and people who need to understand failures at 3 a.m. This chapter covers the capabilities and constraints that appear at that point: model calls initiated by the server, notifications and roots, authentication, versioning, and the choice between built-in and custom tools.</p>
+
+<h2>What changes when a server goes live</h2>
+
+<p>The biggest change is that the server is no longer the only actor. A client may connect from a laptop, a CI runner, or a hosted agent, and each of those callers carries a different identity and a different budget. State that was harmless in a single-user demo — a global cache, a mutable working directory, a single API key — becomes a cross-tenant leak when shared.</p>
+
+<p>Design for isolation from the start. Put tenant identifiers in an authenticated context rather than in tool arguments, because an argument is model-controlled. Give each request a correlation identifier and carry it through logs, downstream calls, and error responses. Define what happens when a dependency is unavailable: return a structured error with a retry hint rather than hanging until the client's timeout fires.</p>
+
+<h2>Server-initiated model calls</h2>
+
+<p>Normally the model calls tools. Occasionally the server needs the model: to summarize a large document before returning it, to choose between two interpretations of an ambiguous record, or to draft text that the server will then validate. The server can send a sampling request to the client, asking it to run a completion on the server's behalf.</p>
+
+<p>The request carries messages, a system prompt, a token ceiling, and optional model preferences. It cannot invoke tools, which keeps this channel from becoming an unbounded recursive loop. The client may approve, modify, or reject the request; it may also apply its own token budget. A correct server therefore treats rejection as a normal outcome with a deterministic fallback.</p>
+
+<pre><code>{
+  "method": "sampling/createMessage",
+  "params": {
+    "messages": [{"role": "user", "content": {
+      "type": "text", "text": "Condense this change log to five bullets."}}],
+    "systemPrompt": "You write terse engineering summaries.",
+    "maxTokens": 300,
+    "modelPreferences": {"costPriority": 0.7, "speedPriority": 0.4}
+  }
+}
+
+# Server-side ceiling: never let a caller exceed the approved budget
+if requested_tokens &lt; 1 or requested_tokens &gt; 300:
+    requested_tokens = 300
+if client_rejected and fallback_text is None:
+    return deterministic_truncate(change_log, max_chars=1200)</code></pre>
+
+<p>Use sampling sparingly. Every model call adds latency, cost, and nondeterminism to a path that may be on the critical route of an agent loop. If a regular expression or a sorting function gives the same answer, use that instead. Good uses include language generation and judgment calls that cannot be expressed as a rule; poor uses include parsing structured data or deciding whether a number is in range.</p>
+
+<div class="warn">A sampling request is not a privileged channel. The client may show it to the user, edit the messages, or refuse it. Do not put secrets, hidden instructions, or decisions that must be authoritative into a sampling request.</div>
+
+<h2>Notifications, roots, and progress</h2>
+
+<p>Three mechanisms let a server communicate outside the request–response path. Log notifications carry a level such as <code>debug</code>, <code>info</code>, <code>warning</code>, or <code>error</code> plus a logger name; they are for operators, not for end users. Progress notifications are tied to a token supplied by the caller in the original request: each update includes the token, a current value, an optional total, and a short message. Roots tell the server which directories a client has made available.</p>
+
+<table>
+<tr><th>Mechanism</th><th>Direction</th><th>Typical use</th></tr>
+<tr><td>Log notification</td><td>Server &rarr; client</td><td>Diagnostic events, dependency failures</td></tr>
+<tr><td>Progress notification</td><td>Server &rarr; client</td><td>Long index build, bulk export</td></tr>
+<tr><td>Roots list</td><td>Client &rarr; server</td><td>Allowed filesystem starting points</td></tr>
+<tr><td>Roots changed</td><td>Client &rarr; server</td><td>User opened a second project</td></tr>
+</table>
+
+<p>Roots are a boundary, not a hint. If a client advertises <code>file:///home/me/project/</code>, the server resolves every relative path against that root and rejects paths that escape it with <code>..</code> segments or symlinks. Re-read the root list when a change notification arrives; a stale root either blocks legitimate work or grants access to a directory the user has since removed.</p>
+
+<p>Progress tokens should be opaque strings with a short lifetime. Emit updates at a fixed cadence, for example every 250 milliseconds, and always send a final update that marks completion. A job that stops sending progress without a terminal message looks hung to a client even if it finished successfully.</p>
+
+<div class="exercise"><strong>Exercise 28.1 — Bound a server-initiated call</strong>
+<ol>
+<li>A server asks the client to summarize a 200 KB document with no token limit. Identify two risks and the field that controls the first one.</li>
+<li>The client rejects the sampling request. Write the fallback behavior that keeps the tool call useful without model output.</li>
+<li>State which parts of a sampling request must not contain secrets, and why.</li>
+</ol>
+</div>
+
+<h2>Authentication and least privilege</h2>
+
+<p>Remote servers should authenticate every request. A bearer token in the <code>Authorization</code> header is common, validated for signature, expiry, issuer, and audience. Do not accept an identity from a query parameter or a tool argument: both appear in logs and can be altered by the caller. Map scopes to capabilities at the gateway and again inside the server, so a mistake in one layer does not grant access.</p>
+
+<p>Least privilege applies per tool, not per server. A principal with <code>records:read</code> may call <code>search_record</code> but must receive a denial from <code>delete_record</code>. Return a clear authorization error rather than an empty result, because an empty result invites the model to broaden its query. Keep the audit record short and consistent: timestamp, principal, tool name, a hash of the arguments, decision, duration, and result size. Redact fields known to contain personal data.</p>
+
+<table>
+<tr><th>Control</th><th>Failure without it</th></tr>
+<tr><td>Short-lived tokens (15–60 min)</td><td>A leaked credential works for months</td></tr>
+<tr><td>Per-tool scopes</td><td>Read-only users can mutate data</td></tr>
+<tr><td>Root containment</td><td>Path traversal reaches unrelated files</td></tr>
+<tr><td>Audit log</td><td>No way to reconstruct an incident</td></tr>
+</table>
+
+<div class="tip">Treat the model's tool arguments as hostile input that happens to be well formed. Validate types, ranges, and tenant ownership in the handler even when the schema already passed.</div>
+
+<h2>Versioning across a fleet</h2>
+
+<p>In production, clients and servers upgrade at different times. The initialize exchange carries a protocol version and capability flags; both sides should fall back to a mutually supported level or fail with a clear message. Never silently ignore an unknown field that changes behavior. Declare optional features behind capability flags so an older client never calls a method its server does not understand.</p>
+
+<p>Roll out changes in stages. Deploy to a small canary group, watch error rates and tool latency for an hour, then widen the rollout. Keep the previous server version available for one release cycle so a client can be rolled back quickly. When you must remove a tool, first return a structured deprecation warning in the response metadata for two releases; only then drop the declaration.</p>
+
+<h2>Built-in tools versus custom tools</h2>
+
+<p>Clients supply general-purpose tools such as reading a local file, editing text, running a shell command, and searching the web. Your server supplies domain tools. The two sets should complement each other. Duplicating a built-in capability invites inconsistent behavior: two file readers with different path rules, or two search tools with different result shapes.</p>
+
+<table>
+<tr><th>Question</th><th>Prefer built-in</th><th>Prefer custom</th></tr>
+<tr><td>Operation</td><td>Generic file or shell work</td><td>Domain action with business rules</td></tr>
+<tr><td>Authority</td><td>User's local environment</td><td>Shared service and its permissions</td></tr>
+<tr><td>Determinism</td><td>Simple, well-understood behavior</td><td>Validation, policy, and audit required</td></tr>
+<tr><td>Context cost</td><td>Rarely used in a session</td><td>Called often with compact results</td></tr>
+</table>
+
+<p>A useful pattern is to wrap rather than replace. A custom <code>publish_release</code> tool can call the client's file reader to gather artifacts, apply the organization's checks, and then commit through an authenticated service. The model sees one clear action; the server keeps the policy. Avoid exposing all twenty internal tools when three well-chosen ones cover the workflow, and measure how often each tool is called before adding more.</p>
+
+<div class="exercise"><strong>Exercise 28.2 — Draw the boundary</strong>
+<ol>
+<li>A team wants a tool that reads a YAML config file from the checked-out project. Decide whether built-in file reading or a custom tool is better, and give one reason.</li>
+<li>Add an approval step that checks the config against a schema before publishing. Where does that logic belong?</li>
+<li>List three fields you would record in the audit entry for the publish action.</li>
+</ol>
+</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Why can a sampling request never invoke tools, and how should a server handle client rejection?</li>
+<li>What is a progress token, and what should the final progress message do?</li>
+<li>Why are roots a security boundary rather than a suggestion?</li>
+<li>Name two checks on a bearer token and one reason to deny per tool rather than per server.</li>
+<li>When should a custom tool duplicate a built-in capability?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>Production adds tenant isolation, authentication, observability, and controlled upgrades to a working server.</li>
+<li>Sampling lets a server request a model completion, but the client may refuse and the server needs a deterministic fallback.</li>
+<li>Log, progress, and roots notifications extend the protocol beyond request–response; roots must be enforced against path traversal.</li>
+<li>Authenticate every remote request, scope permissions per tool, and keep a compact audit trail.</li>
+<li>Negotiate versions at initialize time, canary releases, and deprecate declarations before removal.</li>
+<li>Prefer built-in tools for generic operations and custom tools for domain actions that need policy and audit.</li>
+</ul>
+
+<nav><a href="27-mcp-transports.html">&larr; Previous</a><span></span><a href="29-claude-code-architecture.html">Next: Claude Code Architecture and Setup &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

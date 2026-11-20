@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 9 — Cloud Hosts, Sessions, and Integration Decisions</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 9</span>
+  <h1 id="chapter-9-cloud-hosts-sessions-and-integration-decisions">Chapter 9 — Cloud Hosts, Sessions, and Integration Decisions</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain what it means to reach a model through a cloud provider rather than a direct vendor endpoint.</li>
+<li>Describe what a provider abstraction simplifies and which differences it cannot erase.</li>
+<li>State where conversation state lives and how to keep separate users and sessions isolated.</li>
+<li>Compare direct API access with managed hosting using control, operations, compliance, and cost lenses.</li>
+<li>Apply a decision checklist to a scenario with competing requirements.</li>
+<li>Recognize how exam questions encode constraints and turn them into an integration choice.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="two-ways-to-reach-the-same-kind-of-capability">Two ways to reach the same kind of capability</h3>
+<p>An application can call a model through the vendor's own interface, or it can reach models through a cloud platform that hosts or brokers access. In the second arrangement, the platform supplies the endpoint, authentication, billing relationship, and often extra services such as private networking, logging, or governance controls. The model may be identical, but the surrounding contract changes: request shapes, error codes, region choices, and quota management follow the platform's conventions.</p>
+<p>Teams choose managed hosting for several reasons. A billing and identity relationship may already exist with a cloud platform. Residency rules may require traffic to stay inside a particular environment. Procurement may prefer one contract, and a shared gateway can centralize policy, observability, and key rotation. None of these reasons concerns raw model quality; they concern the system around the model.</p>
+<p>The trade-off is a layer of translation. Platform-specific message formats, streaming events, and error types must be mapped into something the application understands. Newest features may arrive later through a broker than through the direct interface. Capabilities can differ between models available on the same platform, so code that assumes uniform behavior will eventually fail.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a scenario emphasizes existing cloud contracts, regional data rules, or a shared governance layer, the intended direction is usually managed hosting rather than a brand-new direct integration.</p>
+</blockquote>
+<h3 id="what-the-abstraction-changes-and-what-it-does-not">What the abstraction changes, and what it does not</h3>
+<p>A provider abstraction is a thin layer between business code and any specific endpoint. Done well, it presents one internal shape for messages, one way to request streaming, one set of error categories, and one method for listing available capabilities. Adapters translate that internal shape into whatever a particular host expects. Application code then deals with intents such as "answer this question with grounding" instead of vendor field names.</p>
+<p>The abstraction simplifies real work. Credentials live in one place, so rotation does not require edits across the codebase. Retry and timeout policy applies consistently, and telemetry uses common field names for fair comparisons. Swapping a backend for testing becomes configuration rather than rewriting, and different workloads can use different models without scattered conditionals.</p>
+<p>It does not make providers identical. Context limits, media types, pricing, rate limits, and streaming details still differ, and a capability on one backend may be absent on another. Retention and regional processing depend on the host and contract, not the abstraction. A layer that pretends uniformity hides real differences, so expose capabilities explicitly and check them before use.</p>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Direct vendor API</th>
+<th>Cloud-hosted or brokered access</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Authentication and billing</td>
+<td>Separate relationship per vendor</td>
+<td>Consolidated with the cloud account</td>
+</tr>
+<tr>
+<td>Request and event formats</td>
+<td>Vendor-native</td>
+<td>Platform-specific or translated by a gateway</td>
+</tr>
+<tr>
+<td>Feature availability</td>
+<td>Usually earliest</td>
+<td>May lag or differ by model and region</td>
+</tr>
+<tr>
+<td>Data residency controls</td>
+<td>Vendor-dependent</td>
+<td>Often tied to platform regions and networking</td>
+</tr>
+<tr>
+<td>Operational tooling</td>
+<td>Build or integrate separately</td>
+<td>Platform logging, monitoring, and policy tools</td>
+</tr>
+<tr>
+<td>Switching cost</td>
+<td>Higher if calls are scattered</td>
+<td>Lower when a clean adapter layer exists</td>
+</tr>
+<tr>
+<td>Operational burden</td>
+<td>More handled by the application team</td>
+<td>More delegated to the platform</td>
+</tr>
+</tbody>
+</table>
+<p>A deliberately leaky abstraction is the practical compromise. Normalize the common path, but represent capabilities as data, report unsupported features clearly, and keep provider-specific options in a narrow configuration area. Write a small adapter test for each backend so that translation mistakes surface before production.</p>
+<pre><code class="language-python">from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class ProviderProfile:
+    name: str
+    supports_vision: bool
+    supports_streaming: bool
+    max_input_tokens: int
+
+PROFILES = {
+    &quot;direct&quot;: ProviderProfile(&quot;direct&quot;, True, True, 200_000),
+    &quot;cloud&quot;: ProviderProfile(&quot;cloud&quot;, True, True, 200_000),
+}
+
+def require_capability(profile: ProviderProfile, feature: str) -&gt; None:
+    if feature == &quot;vision&quot; and not profile.supports_vision:
+        raise ValueError(f&quot;{profile.name} cannot accept image blocks&quot;)
+    if feature == &quot;streaming&quot; and not profile.supports_streaming:
+        raise ValueError(f&quot;{profile.name} cannot stream responses&quot;)
+
+def dispatch(provider_key: str, needs_vision: bool) -&gt; str:
+    profile = PROFILES[provider_key]
+    if needs_vision:
+        require_capability(profile, &quot;vision&quot;)
+    return f&quot;selected adapter: {profile.name}&quot;
+</code></pre>
+<p>The point of this snippet is not the particular fields. It is that a request states what it needs, and the layer checks capability before a call is made. A missing capability becomes a clear error at the boundary rather than a confusing failure deep in generation.</p>
+<h3 id="session-hygiene-and-state-ownership">Session hygiene and state ownership</h3>
+<p>A model does not remember a conversation between requests. Every call carries the context the application chooses to send. Conversation state therefore belongs in application storage: a database, cache, or document store keyed by a session identifier. Confusing this with model memory is one of the most durable misconceptions in AI application work. If a follow-up question needs earlier turns, the application must include them in the next request.</p>
+<p>Session hygiene has several parts. Each history must be isolated so one conversation cannot leak into another. Identifiers should be unpredictable, and access checks must precede every read. Old sessions expire under a defined retention policy, controlling cost and exposure. Histories are summarized or trimmed near the context budget, keeping the current task rather than a raw transcript. Secrets and unnecessary personal data never enter conversation state.</p>
+<p>State ownership also determines how failures behave. If the browser holds the whole history, a lost tab loses the conversation and a malicious client can edit prior turns. If the backend owns it, the application can enforce ordering, apply redaction, and keep an audit trail, at the cost of storage and retrieval work. Most production assistants choose backend ownership with a short client-side pointer. A multi-device experience needs that server-side store; a single-page demo may not.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Assuming a session identifier is the conversation. The identifier is only a key; the actual turns live wherever the application stores them and must be reattached to each request.</p>
+</blockquote>
+<p>Session contents deserve the same review as prompts. System instructions are stable and shared; per-turn user content is untrusted and may try to override policy, and tool results can carry the same hazard. Storing these categories separately makes the right trust level easier to apply when rebuilding a request, and it lets evaluations replay a session with one part changed.</p>
+<h3 id="choosing-between-direct-access-and-managed-hosting">Choosing between direct access and managed hosting</h3>
+<p>The choice is rarely about which option is better in the abstract. It is about which constraints dominate. A small team shipping a prototype may value the fastest path to a working call and a single SDK. A regulated enterprise may value regional processing, private endpoints, and a unified audit trail far more than the newest feature. A platform team supporting several products may value a common gateway above all.</p>
+<p>Cost comparisons must include more than token price. Managed hosting can add per-request overhead or require committed capacity, but it may reduce staffing needs for key management, monitoring, and gateway maintenance. Direct access may look cheaper on a price sheet while creating operational work that nobody budgeted. Conversely, a platform fee is hard to justify when it adds latency and offers no capability the team needs.</p>
+<p>Risk and resilience also matter. Depending on one route creates a single point of failure, yet adding a second route introduces translation bugs and inconsistent behavior. A reasonable middle position is a clean internal interface with one primary backend and a tested fallback for the subset of features both support. Deciding which features are in that subset is a design activity, not an afterthought.</p>
+<table>
+<thead>
+<tr>
+<th>Decision lens</th>
+<th>Question to ask</th>
+<th>Points toward direct access</th>
+<th>Points toward managed hosting</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Latency</td>
+<td>Is time to first token tightly bounded?</td>
+<td>Fewest hops and full control of routing</td>
+<td>Acceptable overhead with regional endpoints</td>
+</tr>
+<tr>
+<td>Privacy and residency</td>
+<td>Must data stay in a named region or network?</td>
+<td>Vendor-specific controls already approved</td>
+<td>Platform regions and private networking available</td>
+</tr>
+<tr>
+<td>Governance</td>
+<td>Need one place for keys, policies, and logs?</td>
+<td>Small estate with few consumers</td>
+<td>Shared gateway and audit tooling</td>
+</tr>
+<tr>
+<td>Capability needs</td>
+<td>Is the newest feature required now?</td>
+<td>Earliest access to new features</td>
+<td>Feature set is sufficient and stable</td>
+</tr>
+<tr>
+<td>Team skills</td>
+<td>Who maintains integration code?</td>
+<td>Team comfortable with vendor specifics</td>
+<td>Prefer delegated operations</td>
+</tr>
+<tr>
+<td>Budget model</td>
+<td>How is spend measured and capped?</td>
+<td>Direct usage pricing fits the forecast</td>
+<td>Consolidated billing and platform caps fit</td>
+</tr>
+<tr>
+<td>Scale and resilience</td>
+<td>Are spikes or outages expected?</td>
+<td>Custom traffic engineering in place</td>
+<td>Platform capacity and routing available</td>
+</tr>
+<tr>
+<td>Change risk</td>
+<td>How often might the backend switch?</td>
+<td>Low expected churn</td>
+<td>High churn; adapter layer already exists</td>
+</tr>
+</tbody>
+</table>
+<p>No single row decides the matter. A project can score managed hosting on governance and direct access on capability, which means the team must rank the lenses before choosing. That ranking is exactly what the exam likes to test: it presents a constraint, hides it in narrative form, and expects the candidate to name the dominant one.</p>
+<h3 id="exam-style-reasoning-about-constraints">Exam-style reasoning about constraints</h3>
+<p>Scenario questions rarely say "choose managed hosting." They describe a situation and ask for the most appropriate integration decision. A reliable routine is to translate the story into constraints, separate hard constraints from preferences, and then eliminate options that violate a hard constraint.</p>
+<p>Consider the phrasing patterns. "Traffic must never leave the approved network footprint" is a hard constraint that rules out any route not offering private connectivity, regardless of model quality. "The organization already has a single cloud contract and wants one bill" is a governance preference that favors consolidation. "The feature must ship next week with a small team" favors the path with the least new machinery. "The assistant must not invent policy" is a grounding requirement, not a hosting choice, though it may drive a retrieval design that influences where data is stored.</p>
+<p>Watch for distractors that solve the wrong problem. Changing the prompt will not fix a regional data rule. Adding retries will not fix a missing capability. Switching models will not solve session leakage between users. A good answer addresses the constraint named in the question and does not silently introduce a new risk. When two options both seem plausible, prefer the one that keeps choices reversible: a narrow adapter and explicit capabilities preserve options, while scattering vendor calls through business logic closes them.</p>
+<blockquote>
+<p><strong>Exam note:</strong> Translate soft words such as "must," "should," and "prefer" into hard and soft constraints. A "must" eliminates options; a "prefer" only ranks them.</p>
+</blockquote>
+<h2 id="decision-checklist">Decision checklist</h2>
+<p>Use this checklist before committing to an integration path. Each item should have an answer that can be tested, not a vague intention.</p>
+<ul>
+<li>What is the dominant hard constraint: residency, latency, capability, budget, or governance?</li>
+<li>Which model features are genuinely required rather than merely nice to have?</li>
+<li>Where will conversation state live, and who owns its retention policy?</li>
+<li>How are sessions isolated, expired, and protected from cross-user leakage?</li>
+<li>Which backend owns credentials, and what is the rotation procedure?</li>
+<li>What does the internal abstraction normalize, and which capabilities remain explicit?</li>
+<li>How are streaming events, error categories, and usage totals translated?</li>
+<li>Is there a tested fallback for the features both candidate backends support?</li>
+<li>Can the choice be reversed with configuration changes instead of a rewrite?</li>
+<li>Which constraint would force a different answer if it changed?</li>
+</ul>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal:</strong> Compare two provider profiles and practice choosing one from constraints rather than preference.</p>
+<ol>
+<li>Create a small configuration module with two provider profiles like the one above.</li>
+<li>Write a function that accepts a request description with fields for vision, streaming, region, and governance needs.</li>
+<li>Add a capability check that raises a clear error when a requirement cannot be met.</li>
+<li>Run three cases: a prototype chat, a regulated support assistant with a regional requirement, and a bulk job with no interactive user.</li>
+<li>Record which profile each case selects and which constraint decided it.</li>
+</ol>
+<p><strong>Expected observation:</strong> Different cases select different profiles even with identical code. You should see that a hard regional requirement overrides a preference for newest features, and that a bulk job cares more about queuing and cost than about streaming support. The capability check should fail early and clearly when a requirement is unsupported.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A company runs a customer assistant on a direct vendor interface. Growth brings two pressures: the security team requires all traffic to stay within an already approved cloud footprint, and finance wants one consolidated bill. At the same time, a pilot feature needs a capability that the available managed catalogue does not yet expose.</p>
+<p><strong>Reasoning.</strong> Two constraints are hard: network footprint and consolidated billing. Both point toward a managed route in the existing cloud platform. The missing capability is important for one pilot but not for the core assistant, so it is a preference for that pilot rather than a blocker for the whole product. Treating it as universal would let a narrow need dictate the architecture for every user.</p>
+<p><strong>Resolution.</strong> The team introduces an internal interface with an adapter for the managed platform and moves production traffic onto it. Regional endpoints and private networking satisfy the security requirement, and billing consolidates. The pilot runs through a separate, explicitly labeled direct adapter behind the same interface, with capability checks preventing other code from depending on it. Conversation history moves into the backend store with per-user isolation and a retention window, so no session state depends on either provider. Telemetry uses common field names with a provider tag, allowing fair comparison. When the managed catalogue gains the needed capability, only the configuration changes.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Assuming the model remembers prior turns when the application did not resend them.</li>
+<li>Letting a session identifier stand in for actual state ownership and access control.</li>
+<li>Treating a provider abstraction as if it erased differences in features, limits, and pricing.</li>
+<li>Choosing a backend before ranking the hard constraints in the scenario.</li>
+<li>Comparing token prices while ignoring operational and governance costs.</li>
+<li>Scattering provider-specific calls through business logic and losing the ability to switch.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Managed hosting supplies endpoints, identity, billing, and often governance, with platform-specific formats and possible feature lag.</li>
+<li>A provider abstraction normalizes common operations but should expose real capability differences explicitly.</li>
+<li>Conversation state belongs in application storage, with isolation, expiry, and careful trust boundaries.</li>
+<li>Direct access favors earliest features and full control; managed hosting favors consolidation, residency, and shared operations.</li>
+<li>Decision lenses include latency, privacy, governance, capability, skills, budget, scale, and reversibility.</li>
+<li>Exam scenarios should be read as constraints: hard constraints eliminate options, preferences only rank them.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A policy requires all model traffic to remain inside an approved private network. What is the first design consequence?</li>
+</ol>
+<ul>
+<li>A. Increase the system prompt length</li>
+<li>B. Choose a route that offers private connectivity and an approved region</li>
+<li>C. Add more retries to the existing direct endpoint</li>
+<li>D. Store longer conversation histories in the browser</li>
+</ul>
+<ol start="2">
+<li>Which statement about a provider abstraction is accurate?</li>
+</ol>
+<ul>
+<li>A. It makes every backend support identical features</li>
+<li>B. It removes the need for authentication</li>
+<li>C. It standardizes common operations while leaving real differences visible</li>
+<li>D. It guarantees lower token prices</li>
+</ul>
+<ol start="3">
+<li>Where should conversation state live for a multi-device assistant with access control?</li>
+</ol>
+<ul>
+<li>A. In the model's memory between requests</li>
+<li>B. In browser storage only</li>
+<li>C. In backend storage keyed by an access-controlled session identifier</li>
+<li>D. Inside the system prompt template</li>
+</ul>
+<ol start="4">
+<li>A pilot needs a brand-new capability that the managed catalogue lacks, while the core product values consolidated billing. What is a reasonable split?</li>
+</ol>
+<ul>
+<li>A. Move everything to the direct interface</li>
+<li>B. Abandon the pilot regardless of its value</li>
+<li>C. Use labeled adapters behind one internal interface for the distinct cases</li>
+<li>D. Duplicate business logic for each backend</li>
+</ul>
+<ol start="5">
+<li>Which wording in a scenario signals a hard constraint rather than a preference?</li>
+</ol>
+<ul>
+<li>A. "The team would like faster responses"</li>
+<li>B. "Data must not leave the approved region"</li>
+<li>C. "A single dashboard would be convenient"</li>
+<li>D. "The prototype should be simple"</li>
+</ul>
+<ol start="6">
+<li>What is the main risk of pretending all providers are identical?</li>
+</ol>
+<ul>
+<li>A. Requests become too short</li>
+<li>B. Unsupported features fail at runtime and useful differences are hidden</li>
+<li>C. Sessions automatically become more secure</li>
+<li>D. Token usage stops being recorded</li>
+</ul>
+<ol start="7">
+<li>Which item belongs on a session hygiene checklist?</li>
+</ol>
+<ul>
+<li>A. Defining expiry and isolation for stored conversations</li>
+<li>B. Increasing output length on every request</li>
+<li>C. Removing all system instructions</li>
+<li>D. Sending the full history to every user</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> A network-residency rule is a hard constraint, so the route must provide private connectivity in an approved region. A changes prompt size, not network path. C retries cannot change where traffic flows. D moves state without addressing the network requirement.</p>
+</li>
+<li>
+<p><strong>C.</strong> A good layer standardizes common operations while exposing genuine differences. A is false because capabilities differ. B is false because credentials are still required. D is false because pricing is set by the provider.</p>
+</li>
+<li>
+<p><strong>C.</strong> Backend storage with an access-controlled key supports multiple devices, isolation, and retention policy. A is false because models do not retain conversation state across calls. B loses state on device changes and invites tampering. D would hard-code user data into a shared instruction.</p>
+</li>
+<li>
+<p><strong>C.</strong> Separate labeled adapters behind one interface let each workload use the route that fits without duplicating business logic. A ignores billing. B discards valid value unnecessarily. D creates maintenance risk and blocks future switching.</p>
+</li>
+<li>
+<p><strong>B.</strong> "Must not" expresses a hard prohibition that eliminates options. The other phrases describe desires or preferences that only rank options.</p>
+</li>
+<li>
+<p><strong>B.</strong> Uniform pretense hides real differences and lets unsupported features fail during execution. A is unrelated. C is false; security depends on design. D is false because usage can still be recorded with a translation layer.</p>
+</li>
+<li>
+<p><strong>A.</strong> Expiry and isolation are core session hygiene concerns. B changes generation length, not state. C removes useful guidance. D would leak conversations between users.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 9.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="08-streaming-async.html">&larr; Previous</a><a href="10-prompt-architecture.html">Next: Prompt Architecture and Instruction Priority &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

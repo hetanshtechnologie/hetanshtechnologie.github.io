@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 8 — Decomposing Complex Work into Verifiable Units</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 8 — Decomposing Complex Work into Verifiable Units</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Break complex objectives into smaller, well-defined subtasks with clear inputs, outputs, and completion criteria.</li>
+    <li>Use dependency thinking to determine sequencing, parallel opportunities, and aggregation points.</li>
+    <li>Choose an appropriate level of granularity that balances clarity and overhead.</li>
+    <li>Decide when decomposition is preferable to a richer single prompt or consolidated step.</li>
+    <li>Design recomposition and validation steps so partial outputs form a reliable final result.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Why decomposition improves reliability</h3>
+  <p>Complex objectives often combine multiple kinds of work: understanding a request, gathering information, analyzing alternatives, applying rules, and producing a final artifact. When all of this is attempted in one undifferentiated step, errors are harder to detect and correct. The system may skip requirements, mix reasoning with formatting, or produce an answer that sounds coherent while omitting critical checks. Decomposition addresses this by separating concerns into subtasks that can be specified, executed, and verified independently.</p>
+  <p>Decomposition also supports better use of context and capabilities. Each subtask can receive only the information and instructions it needs, reducing noise and improving focus. Different subtasks may benefit from different techniques: one may require retrieval, another deterministic calculation, another structured generation, and another validation. By aligning technique to subtask, the overall solution becomes more predictable and easier to improve.</p>
+  <p>However, decomposition is not automatically beneficial. Splitting work creates interfaces and handoffs, which introduce overhead and opportunities for misunderstanding. The goal is not to create the largest number of steps, but to create the right units of work—units that are meaningful, testable, and efficient to combine. Good decomposition clarifies the problem; poor decomposition fragments it.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Favor subtasks that produce verifiable intermediate outputs. If an intermediate result cannot be checked, errors may pass unnoticed into the final answer.</p>
+  </div>
+
+  <h3>Defining subtasks with inputs, outputs, and criteria</h3>
+  <p>A well-defined subtask has a clear purpose and a contract. The contract states what inputs are required, what output must be produced, what constraints apply, and how completion is determined. This clarity enables consistent execution and makes validation possible. For example, “analyze the request” is vague, while “extract required fields, identify missing information, and return a structured list of gaps” is specific and testable.</p>
+  <p>Completion criteria are especially important. They distinguish “an attempt was made” from “the subtask is done.” Criteria may include schema validity, presence of required evidence, adherence to policy rules, or successful comparison against a threshold. When criteria are explicit, the system can decide whether to proceed, retry, request clarification, or escalate. Without criteria, downstream steps may consume incomplete or malformed inputs.</p>
+
+  <table>
+    <tr>
+      <th>Subtask element</th>
+      <th>Question it answers</th>
+      <th>Example</th>
+      <th>Verification approach</th>
+    </tr>
+    <tr>
+      <td>Objective</td>
+      <td>What is this step trying to achieve?</td>
+      <td>Identify relevant policy sections</td>
+      <td>Check relevance against query intent</td>
+    </tr>
+    <tr>
+      <td>Inputs</td>
+      <td>What information is required?</td>
+      <td>User request and approved source index</td>
+      <td>Confirm required inputs present</td>
+    </tr>
+    <tr>
+      <td>Output contract</td>
+      <td>What must be produced?</td>
+      <td>Ranked list with source identifiers</td>
+      <td>Schema and completeness checks</td>
+    </tr>
+    <tr>
+      <td>Constraints</td>
+      <td>What limits apply?</td>
+      <td>Use only approved sources</td>
+      <td>Policy and provenance checks</td>
+    </tr>
+    <tr>
+      <td>Completion criteria</td>
+      <td>When is it done?</td>
+      <td>At least one supported match or explicit no-match result</td>
+      <td>Rule-based acceptance test</td>
+    </tr>
+  </table>
+
+  <h3>Dependencies, sequencing, and parallel opportunities</h3>
+  <p>Subtasks often have dependencies: one step needs the output of another before it can run. Mapping dependencies reveals a natural sequence and highlights opportunities for parallel execution. Independent subtasks—such as gathering information from separate sources or evaluating different options against the same criteria—can run concurrently to reduce latency. Dependent subtasks must be ordered, and their interfaces must be reliable because downstream work assumes upstream correctness.</p>
+  <p>Dependency thinking also helps identify aggregation points. When parallel or branching work produces partial outputs, the design must specify how results are combined, compared, or selected. Aggregation is not a trivial final step; it may require conflict resolution, prioritization, or synthesis under constraints. Explicit aggregation logic prevents the system from implicitly trusting whichever output appears first or most confident.</p>
+  <p>A simple dependency view can be expressed as a directed flow: nodes represent subtasks and edges represent required inputs. Even without formal tooling, sketching this flow helps architects detect missing steps, unnecessary sequencing, and unclear handoffs. It also supports communication with stakeholders by making the plan visible and reviewable.</p>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> For a complex request, list subtasks on paper and draw arrows for dependencies. Any subtask with no clear input source or no consumer is a signal to revise the decomposition.</p>
+  </div>
+
+  <h3>Choosing the right level of granularity</h3>
+  <p>Granularity refers to how finely work is divided. Excessively coarse decomposition leaves too much complexity inside each step, reducing verifiability. Excessively fine decomposition creates many handoffs, increasing overhead and the chance of context loss. The appropriate level depends on the task’s complexity, the need for validation, the independence of components, and operational constraints such as latency and cost.</p>
+  <p>A useful heuristic is to split work where responsibilities differ in kind or where verification is valuable. Parsing and validation differ from synthesis; retrieval differs from policy checking; calculation differs from explanation. Splitting along these boundaries often yields steps with clear contracts. Conversely, splitting a cohesive activity into artificial micro-steps can add coordination cost without improving control.</p>
+
+  <table>
+    <tr>
+      <th>Granularity choice</th>
+      <th>Advantages</th>
+      <th>Disadvantages</th>
+      <th>When appropriate</th>
+    </tr>
+    <tr>
+      <td>Coarse (few steps)</td>
+      <td>Lower overhead, simpler flow</td>
+      <td>Harder to verify and debug internally</td>
+      <td>Low complexity, stable tasks, tight latency budgets</td>
+    </tr>
+    <tr>
+      <td>Moderate (balanced)</td>
+      <td>Verifiable stages with manageable overhead</td>
+      <td>Requires clear contracts and aggregation</td>
+      <td>Most multi-stage business tasks</td>
+    </tr>
+    <tr>
+      <td>Fine (many steps)</td>
+      <td>High control and isolation per step</td>
+      <td>High coordination cost, context fragmentation</td>
+      <td>High-risk or highly heterogeneous tasks with strong checks</td>
+    </tr>
+  </table>
+
+  <h3>Decompose or consolidate: making the trade-off</h3>
+  <p>Not every complex-sounding request requires decomposition. Sometimes a single, well-structured instruction with sufficient context and a clear output format performs adequately and more efficiently. Consolidation can be preferable when subtasks are tightly interdependent, when intermediate outputs are hard to define, or when latency and cost constraints are strict. It can also be appropriate early in exploration, with decomposition introduced later if evaluation reveals systematic failures.</p>
+  <p>Decomposition is more compelling when different subtasks require different tools or permissions, when intermediate verification reduces risk, when parts can run in parallel, or when failures must be localized. Evidence from evaluation should guide the choice: if a consolidated approach repeatedly omits steps or mixes concerns, decomposition may address the root cause. If a decomposed approach adds overhead without improving outcomes, consolidation may be the better fit.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Decomposing by default without evidence. Extra steps add cost and failure points; each split should earn its place by improving clarity, control, or performance.</p>
+  </div>
+
+  <h3>Recomposition and validation of partial outputs</h3>
+  <p>Decomposition creates partial outputs that must be recomposed into a final result. Recomposition should be explicit: define how outputs are merged, what takes precedence when sources conflict, and what constitutes a complete final artifact. Validation at this stage checks not only individual parts but also their consistency as a whole. A set of locally correct fragments can still form an incorrect or incomplete whole if aggregation logic is weak.</p>
+  <p>Validation can occur at multiple levels. Step-level checks catch malformed or incomplete intermediate results early. Cross-step checks verify consistency, such as ensuring that conclusions are supported by gathered evidence. Final checks assess whether the assembled output meets user requirements, policy constraints, and quality criteria. Layered validation reduces the chance that errors survive to delivery.</p>
+
+  <pre><code class="language-json">{
+  "objective": "prepare a grounded response to a policy question",
+  "subtasks": [
+    {
+      "id": "interpret",
+      "output": {"intent": "string", "required_points": ["string"]},
+      "done_when": "intent and required points identified"
+    },
+    {
+      "id": "retrieve",
+      "depends_on": ["interpret"],
+      "output": {"sources": [{"id": "string", "excerpt": "string"}]},
+      "done_when": "at least one relevant source or explicit no-source result"
+    },
+    {
+      "id": "draft",
+      "depends_on": ["interpret", "retrieve"],
+      "output": {"answer": "string", "citations": ["string"]},
+      "done_when": "all required points addressed or gaps stated"
+    },
+    {
+      "id": "validate",
+      "depends_on": ["draft"],
+      "output": {"status": "pass|fail", "issues": ["string"]},
+      "done_when": "policy and completeness checks executed"
+    }
+  ]
+}</code></pre>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A compliance support team wants a system that answers staff questions about internal procedures. Each response must address the specific question, cite approved sources, highlight any conditions or exceptions, and state when information is insufficient. Early trials with a single consolidated prompt produce fluent answers, but reviewers find recurring issues: some responses miss exceptions, others cite irrelevant passages, and a few present conclusions without adequate support.</p>
+
+  <h3>Analysis</h3>
+  <p>The failures suggest mixed responsibilities within one step: interpreting intent, finding relevant material, synthesizing an answer, and checking completeness are happening without explicit boundaries. These are different kinds of work with different verification needs. Intent interpretation can be checked for required points; retrieval can be checked for relevance and provenance; drafting can be checked for coverage and citation; and a final validation can confirm policy alignment and completeness. The task also benefits from evidence-linked outputs, which are easier to enforce when retrieval and drafting are separated.</p>
+  <p>Granularity should be moderate. Excessive splitting would add latency to an interactive use case, but a few verifiable stages can target the observed defects. The key dependencies are clear: retrieval depends on interpretation, drafting depends on both, and validation depends on the draft. Parallelism is limited, so the benefit comes from control and verifiability rather than speed.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect decomposes the process into four stages: interpret the question and list required points; retrieve relevant approved passages with identifiers; draft a response that addresses each point with citations and explicit gaps; and validate coverage, citation presence, and policy constraints before delivery. Each stage has a structured output and completion criteria. If retrieval returns no adequate source, the workflow produces a qualified response and escalation signal rather than an unsupported answer.</p>
+  <p>After introducing this structure, evaluation focuses on stage-level outcomes: intent completeness, retrieval relevance, citation accuracy, and validation pass rates. This makes it easier to identify where failures originate and to improve the responsible stage. The moderate decomposition addresses the observed issues without imposing unnecessary coordination overhead.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Defining subtasks without clear outputs or completion criteria, making verification impossible.</li>
+    <li>Ignoring dependencies, which leads to missing inputs, incorrect sequencing, or weak aggregation.</li>
+    <li>Choosing granularity based on habit rather than on verifiability, risk, and overhead.</li>
+    <li>Assuming decomposition always outperforms a well-structured consolidated step.</li>
+    <li>Recomposing partial outputs without cross-checking consistency, coverage, and evidence.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Decomposition improves reliability by separating complex objectives into focused, verifiable subtasks.</li>
+    <li>Clear contracts—inputs, outputs, constraints, and completion criteria—enable consistent execution and validation.</li>
+    <li>Dependency mapping clarifies sequencing, parallel opportunities, and aggregation points.</li>
+    <li>Appropriate granularity balances control and clarity against coordination overhead.</li>
+    <li>Effective recomposition and layered validation ensure partial outputs form a complete, consistent result.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>What most strongly characterizes a well-defined subtask?</p>
+      <p>A. A broad objective with flexible interpretation<br>
+      B. Clear inputs, outputs, constraints, and completion criteria<br>
+      C. Dependence on undocumented assumptions<br>
+      D. An output that cannot be checked</p>
+    </li>
+    <li>
+      <p>Why is dependency mapping useful in decomposition?</p>
+      <p>A. It eliminates the need for validation<br>
+      B. It reveals sequencing requirements and parallel opportunities<br>
+      C. It guarantees all subtasks are independent<br>
+      D. It replaces aggregation logic</p>
+    </li>
+    <li>
+      <p>When is a consolidated single step potentially preferable to decomposition?</p>
+      <p>A. When subtasks are tightly interdependent and overhead would outweigh benefits<br>
+      B. When intermediate verification is critical for high-risk decisions<br>
+      C. When parts require different tools and permissions<br>
+      D. When failures must be localized precisely</p>
+    </li>
+    <li>
+      <p>What risk arises from excessively fine granularity?</p>
+      <p>A. Improved verifiability with no trade-offs<br>
+      B. Increased coordination overhead and context fragmentation<br>
+      C. Elimination of aggregation needs<br>
+      D. Automatic reduction in latency</p>
+    </li>
+    <li>
+      <p>What is the purpose of recomposition validation?</p>
+      <p>A. To ensure partial outputs form a complete and consistent final result<br>
+      B. To avoid checking individual subtasks<br>
+      C. To prefer fluent language over evidence<br>
+      D. To remove the need for output contracts</p>
+    </li>
+    <li>
+      <p>A team’s single-step responses miss required exceptions. Which decomposition benefit most directly addresses this?</p>
+      <p>A. Increased path uncertainty<br>
+      B. Verifiable stages that check coverage of required points<br>
+      C. Removal of all human oversight<br>
+      D. Guaranteed elimination of latency</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Clear contracts and completion criteria make subtasks executable and verifiable. A, C, and D reduce clarity and testability.</li>
+    <li><strong>Correct: B.</strong> Mapping dependencies shows what must run in sequence and what can run in parallel. A, C, and D overstate or misstate its role.</li>
+    <li><strong>Correct: A.</strong> Consolidation can be efficient when overhead exceeds the value of splitting. B, C, and D are conditions that often favor decomposition.</li>
+    <li><strong>Correct: B.</strong> Too many steps increase handoffs and can fragment context. A, C, and D ignore real trade-offs.</li>
+    <li><strong>Correct: A.</strong> Recomposition validation checks completeness and consistency across combined outputs. B, C, and D contradict good practice.</li>
+    <li><strong>Correct: B.</strong> Verifiable stages can explicitly check for required points and exceptions. A is unrelated, C is not implied, and D is unrealistic.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 8.</em></p>
+
+  <nav>
+    <a href="07-coordination-and-specialist-roles.html">&larr; Previous</a>
+    <a href="09-model-selection-routing-and-economics.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

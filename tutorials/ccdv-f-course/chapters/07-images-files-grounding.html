@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 7 — Images, Files, and Grounded Data</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 7</span>
+  <h1 id="chapter-7-images-files-and-grounded-data">Chapter 7 — Images, Files, and Grounded Data</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain how an image becomes a content block inside a message and why that differs from sending a plain text string.</li>
+<li>Describe how a model can read text from a photograph, and recognize when that is weaker than using text that already exists.</li>
+<li>Compare four ways of handing data to a model: inline content, a files API, retrieved passages with citations, and a runtime tool.</li>
+<li>Choose a delivery path using size, reuse, freshness, cost, and control as decision criteria.</li>
+<li>Define source grounding and predict how a well-designed system behaves when the supplied sources do not contain the answer.</li>
+<li>Decide between full context and retrieval by reasoning about context limits, price, and how often the data changes.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="beyond-the-text-only-message">Beyond the text-only message</h3>
+<p>Early requests treat a message as a string, but real applications rarely stay that tidy. A user uploads a screenshot, or a policy question must be answered from a document store. The request still uses the same roles, yet <code>content</code> can hold an ordered list of typed blocks: text, image, document, or tool-related content. Order matters because the model reads left to right, and an instruction is often placed next to the evidence it describes.</p>
+<p>Thinking in blocks rather than strings has two benefits. One turn can mix media, so a question can point at a picture and state what to look for in it. Metadata on each block, such as encoding or origin, helps logging and grounding. The model sees only what the application supplies, so a fact that was never sent cannot be assumed available.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A question asking "what should the application send so the model can see this photograph?" is really asking about content blocks and source encoding, not about a separate vision endpoint.</p>
+</blockquote>
+<h3 id="images-as-content-blocks">Images as content blocks</h3>
+<p>An image enters as a block whose <code>source</code> describes the bytes, either inline encoded data or a reference to a file uploaded earlier. Inline delivery reads, encodes, and labels the file in the message; the service decodes it next to the text. A file reference uploads once and reuses an identifier, avoiding repeated transfers when the same picture serves many questions.</p>
+<p>Three details decide whether the model can use the picture. Format and size must be accepted by the interface; oversized files waste bandwidth and context. Resolution matters more than file size: blurred small print may be unreadable. Relevance matters most, since every block shares the context budget. Cropping to the region of interest beats shrinking the whole image.</p>
+<p>A compact Python example shows the inline path:</p>
+<pre><code class="language-python">import base64
+from pathlib import Path
+from model_client import Client
+
+MODEL = &quot;your-model-id&quot;
+
+def image_blocks(image_path: str, question: str) -&gt; list[dict]:
+    encoded = base64.b64encode(Path(image_path).read_bytes()).decode(&quot;utf-8&quot;)
+    media = &quot;image/png&quot; if image_path.lower().endswith(&quot;.png&quot;) else &quot;image/jpeg&quot;
+    return [
+        {
+            &quot;type&quot;: &quot;image&quot;,
+            &quot;source&quot;: {
+                &quot;type&quot;: &quot;base64&quot;,
+                &quot;media_type&quot;: media,
+                &quot;data&quot;: encoded,
+            },
+        },
+        {&quot;type&quot;: &quot;text&quot;, &quot;text&quot;: question},
+    ]
+
+client = Client()
+reply = client.messages.create(
+    model=MODEL,
+    max_tokens=600,
+    messages=[
+        {
+            &quot;role&quot;: &quot;user&quot;,
+            &quot;content&quot;: image_blocks(&quot;receipt.png&quot;, &quot;Report the vendor and total as JSON.&quot;),
+        }
+    ],
+)
+print(reply.content[0].text)
+</code></pre>
+<p>The image block precedes the instruction here, mirroring a person handing over a picture and then asking about it. The <code>max_tokens</code> ceiling keeps a bounded extraction cost predictable. A production version would handle file errors and validate the returned JSON.</p>
+<h3 id="reading-text-from-a-photograph">Reading text from a photograph</h3>
+<p>Pulling printed or handwritten text out of a photograph is a frequent vision task, and it should be separated from ordinary text input. When the source already exists as text, sending that text is cheaper, faster, and easier to verify. Sending an image is justified when the information is genuinely visual: the layout carries meaning, the characters are not machine-readable, or the artifact exists only as a picture. Receipts, whiteboard sketches, diagrams, screenshots of an error dialog, and handwritten notes are typical cases.</p>
+<p>Vision-based extraction is probabilistic. Clear, well-lit type transcribes reliably; glare or a folded corner produces mistakes. Ask for structured output and validate it, and keep the original image beside the extracted result so a disputed value can be checked. For high-stakes fields, a confirmation step is cheaper than a wrong number reaching a downstream system.</p>
+<p>Layout carries meaning. A table readable as an image can lose its row and column relationships when flattened to text, so request that structure explicitly or use a document block that preserves pages. When only a few fields matter, cropping beats transcribing everything.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Sending a photograph of a paragraph when the paragraph is already available as text. It costs more and adds transcription risk for no gain.</p>
+</blockquote>
+<h3 id="four-ways-to-hand-data-to-a-model">Four ways to hand data to a model</h3>
+<p>The application can deliver evidence through several mechanisms, and each carries different trade-offs.</p>
+<p>Inline content puts bytes directly in the request. It needs no setup and suits a single small image or a short excerpt. The cost is that identical bytes are transmitted and processed on every call.</p>
+<p>A files API stores bytes once under an identifier, so requests carry a reference rather than the bytes. This suits stable assets reused across calls, but adds lifecycle work: tracking identifiers, permissions, and deletion.</p>
+<p>Retrieved passages move part of the work into a search step. The application finds relevant slices of a large collection and sends only those, with pointers back to their origin. Context stays small and answers can name sources.</p>
+<p>A tool supplies data when needed. The model asks for a lookup and the application returns a tool message, which suits data that is unknown in advance, changes often, or sits behind access control that should not be flattened into a prompt.</p>
+<table>
+<thead>
+<tr>
+<th>Delivery path</th>
+<th>Best fit</th>
+<th>Main strength</th>
+<th>Main cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Inline content</td>
+<td>One small image or a short text excerpt</td>
+<td>Nothing to set up; explicit in the request</td>
+<td>Bytes repeat on every call; consumes context</td>
+</tr>
+<tr>
+<td>Files API identifier</td>
+<td>Stable assets reused across many calls</td>
+<td>Upload once; cleaner requests</td>
+<td>Identifier lifecycle and retention rules</td>
+</tr>
+<tr>
+<td>Retrieved passages with citations</td>
+<td>Large or frequently updated knowledge bases</td>
+<td>Small context; answers can name sources</td>
+<td>Depends on search quality and source tracking</td>
+</tr>
+<tr>
+<td>Tool or lookup at runtime</td>
+<td>Unknown-in-advance or access-controlled data</td>
+<td>Fresh, permission-aware information</td>
+<td>Extra round trip and tool contract work</td>
+</tr>
+</tbody>
+</table>
+<h3 id="grounding-and-the-not-found-behavior">Grounding and the "not found" behavior</h3>
+<p>Grounding means tying a claim to evidence the model was given. An answer is grounded when a reader can trace each factual statement back to a supplied passage, image region, or tool result. Grounding is not an automatic property of a model; it is a property of a system design. The application supplies sources, instructs the model to answer only from them, asks for references, and checks that the references point to real material.</p>
+<p>A well-designed grounded system has a specific behavior when the answer is absent: it says so. "The supplied documents do not state a refund window" is a correct and useful response. A system that invents a number to fill the gap has failed, even if the sentence is fluent. Exam scenarios often describe a support assistant that must not invent policy; the expected reasoning is to retrieve relevant passages, require citations, and treat a missing passage as a valid outcome rather than a problem to hide.</p>
+<p>Four habits make this reliable in practice. Send a clear instruction that unanswered questions should be reported as unanswered. Keep source identifiers attached to every passage so citations can be checked. Give the model an explicit "no result" signal when a search or tool finds nothing, instead of an empty string that looks like missing data. Validate before display: if the reply cites identifiers that were never sent, reject it or retry under a bounded policy.</p>
+<blockquote>
+<p><strong>Try it:</strong> Ask a grounded question with the relevant passage removed. A trustworthy implementation should report that the information is unavailable, not offer a confident guess.</p>
+</blockquote>
+<h3 id="full-context-versus-retrieval">Full context versus retrieval</h3>
+<p>Two strategies compete when a question depends on a large body of material. Full context sends everything that might matter. It is simple and sometimes necessary when relationships across a whole document matter, but it strains the budget, costs more, and dilutes attention. Retrieval selects a subset first. It lowers cost and latency, supports freshness, and makes citations natural, but a missed passage produces a wrong answer that looks clean.</p>
+<p>Size, cost, and freshness decide the balance. If the whole corpus fits comfortably in the context window and rarely changes, full context is defensible and easier to reason about. If the corpus is large, grows daily, or is edited by many authors, retrieval wins because resending everything is expensive and quickly stale. Hybrid designs are common: send a stable core of instructions and reference material in every call, then retrieve the volatile portion for each question.</p>
+<table>
+<thead>
+<tr>
+<th>Lens</th>
+<th>Full context</th>
+<th>Retrieval</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Size</td>
+<td>Fits only when the corpus is small</td>
+<td>Scales to large or growing collections</td>
+</tr>
+<tr>
+<td>Cost per call</td>
+<td>Higher; all bytes are processed</td>
+<td>Lower; only selected passages are sent</td>
+</tr>
+<tr>
+<td>Freshness</td>
+<td>Requires resending to reflect changes</td>
+<td>Reads the current store at query time</td>
+</tr>
+<tr>
+<td>Failure mode</td>
+<td>Buried details and budget pressure</td>
+<td>Missing the right passage</td>
+</tr>
+<tr>
+<td>Grounding support</td>
+<td>Possible but citations are coarse</td>
+<td>Natural; each passage carries an identifier</td>
+</tr>
+</tbody>
+</table>
+<p>A useful rule is to pay for context only where it changes the answer. Stable instructions can be reused or cached; volatile facts should be fetched close to the moment of use. When an exam describes a knowledge base that "updates several times a day," that phrase is a strong signal for retrieval rather than a fixed prompt.</p>
+<h3 id="guardrails-for-visual-and-file-data">Guardrails for visual and file data</h3>
+<p>Images may contain personal data, location metadata, or credentials visible in a screenshot. Uploading sends that content to the provider and may place it in logs, so settle redaction and retention rules before shipping. Strip unneeded metadata, blur sensitive regions, and set how long uploaded files are kept.</p>
+<p>A files API identifier is not authorization; check that the caller may read the content before attaching it. Retrieved passages should carry source permissions so search never exposes a document the user cannot open. A citation helps only if the reader is entitled to follow it.</p>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal:</strong> Build a small image-extraction request and observe how evidence and instructions interact.</p>
+<ol>
+<li>Choose a clear photograph of a receipt or a simple form with a few printed fields.</li>
+<li>Write a function like <code>image_blocks</code> that encodes the file and places an image block before a text instruction.</li>
+<li>Ask for a strict JSON object with two fields and print the raw response.</li>
+<li>Repeat with a deliberately vague instruction, then with a precise one that names each field and its format.</li>
+<li>Repeat once with a crop containing only the relevant region.</li>
+</ol>
+<p><strong>Expected observation:</strong> The precise instruction produces more consistent output than the vague one, and the cropped image reduces wandering or invented fields. You should also see that the image is transmitted on every call, which is why repeated extraction of the same picture is a good candidate for a files API identifier.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A field service application lets technicians photograph a damaged part and ask what the warranty covers. The first design sends every photograph with a long warranty document embedded in the system prompt. Testing exposes two problems. Large photos push some requests toward the context limit and delay the first visible token. The warranty document is revised monthly, so answers drift out of date after each release.</p>
+<p><strong>Reasoning.</strong> The photograph is genuine visual evidence, so it stays as an image block, cropped to the damaged area. The warranty text is not visual and changes often, so embedding it is the wrong delivery path. Coverage depends on the part category and the current policy version, both of which can be looked up at query time. That suggests retrieval with citations, plus a firm rule that missing passages produce an explicit response rather than a guess.</p>
+<p><strong>Resolution.</strong> The redesigned flow uploads the photo once and reuses its identifier, retrieves the current policy clauses for the detected part category, and sends the image, the clauses, and an instruction that every claim must reference a clause identifier. When no clause matches, the assistant reports that coverage cannot be confirmed and opens a review ticket. The context shrinks, freshness follows the policy store, and the "not found" route becomes a feature instead of a silent failure.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Sending an image of text when the original text is already available.</li>
+<li>Assuming the model can reach a file or database that was never included in the request.</li>
+<li>Treating a fluent answer as grounded merely because a document was mentioned somewhere earlier.</li>
+<li>Reusing a files API identifier without checking that the caller is allowed to read the content.</li>
+<li>Sending an entire knowledge base in every request because retrieval seems more complicated.</li>
+<li>Reporting an empty tool result as though it proved the answer is "none."</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Rich messages carry ordered content blocks, so images and text can travel together in one user turn.</li>
+<li>Images arrive as encoded data or a files API reference; legibility, format, and relevance determine success.</li>
+<li>Extracting text from photos is best reserved for cases where layout or handwriting makes plain text unavailable.</li>
+<li>Inline content, files APIs, retrieved citations, and runtime tools fit different sizes, reuse patterns, and freshness needs.</li>
+<li>Grounding ties claims to supplied sources, and a correct system reports when those sources lack the answer.</li>
+<li>Full context suits small, stable corpora; retrieval suits large, changing ones and supports cheaper, fresher, cited answers.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A user uploads a screenshot of an error dialog and asks what the message says. Which message shape is most appropriate?</li>
+</ol>
+<ul>
+<li>A. A text-only message describing the screenshot</li>
+<li>B. A user message with an image block followed by a text instruction</li>
+<li>C. A system message containing the encoded bytes as plain text</li>
+<li>D. A tool definition that points at the user's local disk</li>
+</ul>
+<ol start="2">
+<li>Which change most improves extraction from a photograph of a small table?</li>
+</ol>
+<ul>
+<li>A. Raising the effort setting without changing the input</li>
+<li>B. Cropping to the table and asking for a structured format</li>
+<li>C. Sending the same photograph several times in one message</li>
+<li>D. Removing the text instruction so the model focuses only on the image</li>
+</ul>
+<ol start="3">
+<li>A knowledge base changes several times a day and is far larger than the context window. Which delivery path is the strongest default?</li>
+</ol>
+<ul>
+<li>A. Inline the entire knowledge base in the system prompt</li>
+<li>B. Upload everything once and never refresh it</li>
+<li>C. Retrieve relevant passages with citations at query time</li>
+<li>D. Expect the model to fetch the knowledge base from the internet</li>
+</ul>
+<ol start="4">
+<li>What should a grounded assistant do when no supplied passage addresses the question?</li>
+</ol>
+<ul>
+<li>A. Produce the most likely answer from general knowledge</li>
+<li>B. State that the supplied sources do not contain the answer</li>
+<li>C. Silently repeat the question back to the user</li>
+<li>D. Invent a citation so the response looks complete</li>
+</ul>
+<ol start="5">
+<li>Which statement about a files API identifier is true?</li>
+</ol>
+<ul>
+<li>A. It removes the need for any access control checks</li>
+<li>B. It guarantees the file will never appear in logs</li>
+<li>C. It lets a stable file be referenced without resending its bytes each call</li>
+<li>D. It makes the model automatically search the file's contents</li>
+</ul>
+<ol start="6">
+<li>A team needs answers from a stable two-page reference that fits comfortably in context and never changes. Which approach is reasonable?</li>
+</ol>
+<ul>
+<li>A. Send the full text with each request, possibly with a cached prefix</li>
+<li>B. Build a complex retrieval index regardless of size</li>
+<li>C. Convert the text to a photograph before sending it</li>
+<li>D. Omit the reference and rely on memory</li>
+</ul>
+<ol start="7">
+<li>Which is the main risk of a retrieval-based design?</li>
+</ol>
+<ul>
+<li>A. The model always refuses to answer</li>
+<li>B. The search step can miss the passage containing the correct answer</li>
+<li>C. Images cannot be included anywhere in the request</li>
+<li>D. Citations cannot be attached to retrieved text</li>
+</ul>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> A user turn can mix an image block with a text instruction, supplying both visual evidence and the question. A is wrong because a description cannot replace pixels. C is wrong because encoded bytes must be declared as an image source, not pasted as text. D is wrong because a tool definition describes a callable function; it does not grant access to a local disk.</p>
+</li>
+<li>
+<p><strong>B.</strong> Cropping raises the effective resolution of the relevant region, and a structured format makes the expected output explicit. A may help reasoning but does not fix illegible input. C wastes context without adding information. D removes the guidance that tells the model which fields matter.</p>
+</li>
+<li>
+<p><strong>C.</strong> Retrieval keeps context small, reflects recent updates, and provides identifiers for citations. A exceeds the budget and goes stale. B also goes stale. D is wrong because the model cannot browse arbitrary sources by itself.</p>
+</li>
+<li>
+<p><strong>B.</strong> Reporting the gap is the defining behavior of a grounded system. A substitutes general knowledge for evidence. C avoids the question. D fabricates a reference, which is worse than admitting uncertainty.</p>
+</li>
+<li>
+<p><strong>C.</strong> A files API identifier avoids repeated uploads for a stable asset. A is false because authorization stays the application's job. B is false because retention and logging depend on configuration. D is false because the model sees only what the application places in the request.</p>
+</li>
+<li>
+<p><strong>A.</strong> For a small, unchanging reference, full context is simple and reliable, and a cached prefix can reduce repeated cost. B adds machinery without benefit. C adds transcription risk. D removes the evidence entirely.</p>
+</li>
+<li>
+<p><strong>B.</strong> Retrieval's weak point is recall: if search misses the right passage, the answer will be wrong yet well formed. A is not inherent to retrieval. C is false because images and text can coexist. D is false because passages can carry identifiers that become citations.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 7.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="06-evaluations-first.html">&larr; Previous</a><a href="08-streaming-async.html">Next: Streaming, Async, and Real-Time Delivery &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

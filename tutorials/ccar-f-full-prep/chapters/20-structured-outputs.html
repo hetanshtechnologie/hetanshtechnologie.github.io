@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 20 — Structured Outputs and Deterministic Schemas</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;background:#f2f4f8;color:#1f2937;line-height:1.65;padding:24px}
+.chapter,.cover{max-width:860px;margin:0 auto 28px;background:#fff;border-radius:10px;padding:44px 52px;box-shadow:0 2px 14px rgba(30,41,59,.12)}
+.cover{text-align:center;padding-top:90px;padding-bottom:90px}
+.cover .eyebrow{font-family:Arial,sans-serif;text-transform:uppercase;letter-spacing:.16em;font-size:.72rem;color:#4f46e5;margin-bottom:32px}
+.cover h1{font-family:Arial,sans-serif;font-size:2.7rem;line-height:1.18;color:#312e81;border:0;padding:0;margin-bottom:24px}
+.cover .subtitle{font-size:1.2rem;color:#4b5563;margin-bottom:36px}
+.cover .meta{font-family:Arial,sans-serif;font-size:.9rem;color:#6b7280}
+.cover .fineprint{font-family:Arial,sans-serif;font-size:.75rem;color:#9ca3af;margin-top:24px}
+h1,h2,h3,h4{font-family:Arial,Helvetica,sans-serif;color:#312e81}
+h1{font-size:1.95rem;line-height:1.25;margin-bottom:22px;border-bottom:3px solid #6366f1;padding-bottom:10px}
+h2{font-size:1.4rem;margin:34px 0 12px}
+h3{font-size:1.12rem;margin:24px 0 8px;color:#4338ca}
+h4{font-size:1rem;margin:18px 0 6px}
+p{margin-bottom:14px}
+ul,ol{margin:10px 0 16px 26px}
+li{margin-bottom:5px}
+strong{color:#3730a3}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-family:Arial,sans-serif;font-size:.88rem}
+th,td{border:1px solid #dbe2f0;padding:8px 11px;text-align:left;vertical-align:top}
+th{background:#312e81;color:#fff;font-weight:600}
+td{background:#fafbff}
+pre{background:#1e2233;color:#e8ecf8;padding:15px 18px;border-radius:7px;overflow-x:auto;font-size:.82rem;margin:16px 0;tab-size:2}
+code{background:#e8e9fb;padding:2px 5px;border-radius:4px;font-size:.86rem;color:#3730a3}
+pre code{background:transparent;padding:0;color:inherit}
+blockquote{background:#eef0ff;border-left:4px solid #6366f1;padding:11px 16px;margin:16px 0;border-radius:0 7px 7px 0;font-size:.92rem}
+blockquote p{margin:0}
+a{color:#4338ca}
+nav{display:flex;justify-content:space-between;margin-top:34px;padding-top:16px;border-top:1px solid #dbe2f0;font-family:Arial,sans-serif;flex-wrap:wrap;gap:8px}
+nav a{background:#312e81;color:#fff;padding:8px 18px;border-radius:6px;font-size:.86rem;text-decoration:none}
+.book-toc{list-style:none;margin-left:0}
+.book-toc li{padding:7px 0;border-bottom:1px solid #e6eaf5}
+.back,.brand{font-family:Arial,sans-serif;font-size:.85rem;color:#4338ca;text-decoration:none;display:inline-block;margin-bottom:16px}
+.callout{background:#eef0ff;border-left:4px solid #6366f1;padding:12px 16px}
+.colophon{text-align:center;font-style:italic;color:#6b7280;margin:40px auto}
+@media(max-width:600px){body{padding:10px}.chapter,.cover{padding:22px 18px}.cover h1{font-size:1.9rem}}
+@media print{
+  body{background:#fff;padding:0;line-height:1.5;font-size:10.5pt}
+  .chapter,.cover{box-shadow:none;border-radius:0;max-width:none;margin:0;padding:0}
+  .cover{page-break-after:always;min-height:90vh}
+  .toc-page{page-break-after:always}
+  .chapter{page-break-before:always}
+  .cover+h1,.cover+h2{page-break-before:avoid}
+  h1,h2,h3{page-break-after:avoid}
+  table,pre,blockquote{page-break-inside:avoid}
+  nav,.back,.brand{display:none}
+  a{color:inherit;text-decoration:none}
+}
+
+</style>
+</head>
+<body>
+
+<div class="chapter">
+  <a class="back" href="../">&larr; Back to the Full Prep Course</a>
+  <h1 id="chapter-20-structured-outputs-and-deterministic-schemas">Chapter 20 — Structured Outputs and Deterministic Schemas</h1>
+<p>A language model is, at heart, a text generator. Yet almost every serious system built around one needs something stricter than text: a record that a program can parse, a decision that a database can store, a classification that a downstream service can route. This chapter is about the bridge between fluent prose and dependable data. You will learn how to describe the shape you want, how to make that shape enforceable rather than merely requested, and how to recover gracefully when the model drifts outside it.</p>
+<p>The exam treats structured output as a design decision, not a formatting trick. Questions will ask you which consumer is reading the result, how much strictness that consumer needs, and what should happen when validation fails. The ability to defend those choices matters more than memorising any particular schema syntax.</p>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain why machine consumers need predictable output shapes and identify what breaks when a model replies in prose.</li>
+<li>Define a schema using field names, data types, required fields, and constrained enumerations.</li>
+<li>Compare strict and flexible schemas and choose between them based on the needs of the downstream consumer.</li>
+<li>Design a validation and repair loop that corrects malformed output without concealing genuine errors.</li>
+<li>Recognise situations where free-form prose is the correct output rather than structured data.</li>
+<li>Read a JSON response shape and connect each field to the use it serves in a workflow.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="why-machine-consumers-need-structure">Why machine consumers need structure</h3>
+<p>When a person reads an answer, flexibility is a virtue; a paragraph can adapt and highlight what matters. When a program reads it, that flexibility is a liability. A program cannot reliably locate a decision in a paragraph whose wording changes between runs. It needs named slots at known positions with predictable types.</p>
+<p>Consider a workflow that triages incoming requests. The assistant decides which team should handle each one and how urgently. If it answers in prose, another component must scrape the sentence for a team name and a priority word. That scrape is fragile: a synonym or a changed sentence order breaks it, and the failure is silent because the program may extract the wrong value and act on it confidently.</p>
+<p>A structured output replaces the scrape with a contract. The producer agrees to fill specific fields, and the consumer reads only those fields. The contract does not guarantee the values are correct, but it guarantees they are locatable. That distinction is essential. Structure solves the problem of <em>where</em> a value lives and <em>what type</em> it is; it does not solve the problem of whether the value is true. Correctness still comes from good instructions, good inputs, and verification elsewhere in the system.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a question describes a downstream program that must parse a model result, treat a structured format as the default answer. Prose is rarely the right choice when a machine is the reader.</p>
+</blockquote>
+<h3 id="anatomy-of-a-schema">Anatomy of a schema</h3>
+<p>A schema is a description of an allowed data shape. It names each field, declares its type, states whether it is required, and may constrain the values it can hold. Common scalar types include strings, integers, numbers, booleans, and enumerations. Composite types include arrays and nested objects. A well-designed schema is small enough for a model to satisfy and precise enough for a consumer to trust.</p>
+<p>There are three layers to keep straight when you design one. The <em>semantic layer</em> is what the field means in the business or technical domain. The <em>type layer</em> is the machine representation chosen for that meaning. The <em>constraint layer</em> is the set of rules limiting what values are acceptable. Confusing these layers produces schemas that are either ambiguous or impossible to satisfy.</p>
+<p>For example, a field named <code>priority</code> in a triage system has a clear semantic meaning. Its type might be a string drawn from a fixed set rather than a free integer, because the downstream router expects labels, not numbers. Its constraint layer lists the allowed labels: <code>low</code>, <code>normal</code>, <code>high</code>, <code>critical</code>. Each layer answers a different question, and a reviewer should be able to inspect them independently.</p>
+<p>A schema also carries a quiet design cost. Every field you add is a promise the model must keep on every call. Fields that no consumer reads are pure overhead and a source of avoidable errors. Before adding a field, ask which component will read it and what it will do with the value. If nobody can answer, the field should not exist.</p>
+<h3 id="enums-required-fields-and-constraints">Enums, required fields, and constraints</h3>
+<p>Enumerations, usually called enums, are lists of permitted values for a field. They are the single most useful tool for turning a fuzzy judgement into a routable decision. Instead of asking for "the urgency" and hoping for a consistent word, you offer a closed set and require the model to choose one. Enums reduce the vocabulary the model must invent, which reduces variation and makes the output testable.</p>
+<p>Required fields are those a consumer cannot do without. Marking a field required tells the producer and the validator that a missing value is a failure, not an acceptable omission. Optional fields are appropriate when the information may genuinely not exist, such as an <code>escalation_reason</code> that only applies when a case is escalated. The key discipline is to align requiredness with the consumer's logic: if a downstream branch reads a field unconditionally, that field is required.</p>
+<p>Constraints go beyond type and presence. A numeric score may need to fall within a range, a list within a length bound, or a string within a fixed pattern. Each constraint removes a class of invalid outputs. The art is to constrain only what matters, because excessive constraints can push the model into contradictions when the input lacks enough information to satisfy them honestly.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Adding an enum value such as <code>unknown</code> to every field defeats the purpose of the enum. If most results are <code>unknown</code>, the field carries little information. Use an explicit unknown value only when genuine uncertainty is expected, and pair it with a rule about when to choose it.</p>
+</blockquote>
+<h3 id="strictness-versus-flexibility">Strictness versus flexibility</h3>
+<p>Not every structured output needs the same degree of rigidity. A strict schema rejects anything outside the declared shape: no extra fields, no missing required fields, no values outside the enums. A flexible schema tolerates additions and omissions, accepting a superset of the required fields. The right choice depends on how the consumer handles surprises.</p>
+<p>A consumer that maps fields directly into a typed database record benefits from strictness. An unexpected field or a wrong type is a genuine problem, and failing fast is healthier than storing a corrupted record. A consumer that displays a summary to a person can tolerate flexibility, because a human reading an extra field is not harmed. Strictness is a form of contract enforcement, and like any contract it is most valuable where the cost of a broken assumption is high.</p>
+<p>Strictness also affects reliability. Dense schemas with nested fields and tight constraints are harder to satisfy on unusual inputs, so validation rejects more outputs and repair loops raise latency and cost. A slightly looser schema with a good validator can behave better than a brittle strict one. A useful heuristic is to be strict at system boundaries and flexible in exploratory steps.</p>
+<table>
+<thead>
+<tr>
+<th>Decision factor</th>
+<th>Favour a strict schema</th>
+<th>Favour a flexible schema</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Primary reader</td>
+<td>A program or database</td>
+<td>A person or exploratory step</td>
+</tr>
+<tr>
+<td>Cost of a bad value</td>
+<td>High, with side effects</td>
+<td>Low, easily noticed</td>
+</tr>
+<tr>
+<td>Field stability</td>
+<td>Well understood and fixed</td>
+<td>Still evolving during design</td>
+</tr>
+<tr>
+<td>Input predictability</td>
+<td>Consistent and complete</td>
+<td>Noisy or incomplete</td>
+</tr>
+<tr>
+<td>Retry budget</td>
+<td>Generous enough for repair</td>
+<td>Tight, favour first-pass success</td>
+</tr>
+<tr>
+<td>Validation</td>
+<td>Automated and authoritative</td>
+<td>Human review or loose checks</td>
+</tr>
+</tbody>
+</table>
+<p>Notice that the table frames strictness as a spectrum rather than a virtue. A candidate who argues that stricter is always better has missed the engineering trade-off. The exam rewards matching the mechanism to the consumer and the failure cost.</p>
+<h3 id="validation-and-repair-loops">Validation and repair loops</h3>
+<p>Even with a clear schema, models occasionally return malformed data. A string appears where a number was expected. A required field is missing. A value falls outside the enum. A validation loop is the component that checks output against the schema before it reaches the consumer, and a repair loop is the component that asks the model to try again with feedback about what failed.</p>
+<p>A well-designed loop has three properties. First, the validator reports <em>specific</em> errors, naming the field and the rule that was violated. A generic "invalid output" message gives the repair step nothing to work with. Second, the number of retries is bounded. An unbounded repair loop can spin indefinitely on an input the model cannot handle, consuming budget without progress. Third, after the budget is exhausted, the failure is surfaced rather than silently patched. Quietly substituting a default value may keep the pipeline moving, but it hides a real problem from the people responsible for it.</p>
+<p>Repair prompts should include the original task, the rejected output, and the validation errors, asking for a corrected record. Resending only the error message loses context and often produces a correction that is wrong in a different way. Lowering randomness for the repair attempt can help, because the goal is conformance rather than creativity.</p>
+<blockquote>
+<p><strong>Try it:</strong> Take a schema with three fields, one of them an enum. Feed it an input that lacks enough information to choose an enum value confidently. Observe whether the model invents a value, chooses an <code>unknown</code> option, or refuses. Each outcome suggests a different design change.</p>
+</blockquote>
+<h3 id="when-prose-is-the-right-output">When prose is the right output</h3>
+<p>Structured output is powerful but not universal. Some deliverables are inherently narrative: an explanation, a recommendation with reasoning, a draft of a document, or an answer whose value lies in its nuance. Forcing these into a rigid schema strips away exactly what makes them useful. A field called <code>summary</code> containing a single paragraph is usually a sign that prose was needed and a schema was added for appearances.</p>
+<p>Prose fits when the reader is a person, the reasoning is part of the deliverable, or acceptable answers cannot be enumerated. It also fits early exploration, before you know which fields matter. A common pattern is prose for reasoning plus a small structured block for the final decision, giving both explanation and machine-readable output without pretending the explanation is data.</p>
+<p>The decision is really about the consumer again. If a program must act, give it structure. If a person must understand, give them prose, perhaps accompanied by a structured appendix. A question that asks you to choose between them will usually describe the reader clearly enough to decide.</p>
+<h3 id="a-worked-response-shape">A worked response shape</h3>
+<p>The following response shape illustrates several of the ideas above. It describes a decision record for an incoming request, with a required classification, a bounded priority enum, an optional reason, and a confidence field constrained to a range. Notice that no field exists without a reader.</p>
+<pre><code class="language-text">{
+  &quot;request_id&quot;: &quot;string, required, stable identifier from the caller&quot;,
+  &quot;category&quot;: &quot;enum: billing | technical | account | other&quot;,
+  &quot;priority&quot;: &quot;enum: low | normal | high | critical&quot;,
+  &quot;confidence&quot;: &quot;number between 0 and 1, required&quot;,
+  &quot;escalate&quot;: &quot;boolean, required, true only when human review is needed&quot;,
+  &quot;escalation_reason&quot;: &quot;string, optional, required when escalate is true&quot;,
+  &quot;evidence&quot;: &quot;array of at most five short strings quoting source text&quot;
+}
+</code></pre>
+<p>This shape maps cleanly onto a formal definition. <code>request_id</code> is copied from the caller rather than invented. <code>category</code> and <code>priority</code> are routing enums. <code>confidence</code> has an explicit range, preventing values like <code>95</code> when a fraction is expected. <code>escalate</code> is required unconditionally because the router branches on it. <code>escalation_reason</code> is conditional, a rule the validator enforces beyond type checking. <code>evidence</code> is bounded to discourage large excerpts.</p>
+<p>Conditional requirements are worth noting because they illustrate the limits of a basic schema. A plain type declaration cannot express "required when another field is true"; that rule belongs in application validation. Good design places each rule at the layer best able to enforce it: types and enums in the schema, cross-field rules in the validator, and judgements about correctness in review.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A compliance team wants an assistant to classify contract clauses in a batch of documents for a register that tracks legal review. The first prototype asks for the clause type and review need in prose, and a script searches for keywords. Testing reveals misreads: one answer uses a synonym the script misses, another lists two types in one sentence. The register fills with inconsistent entries and reviewers lose trust.</p>
+<p>An architect is asked to fix the problem. She begins by listing the consumers. The register needs a clause type, a review flag, and a short justification that a lawyer will read. A reporting job needs a risk tier. No other component reads the output. She therefore designs a compact record with exactly four fields: <code>clause_type</code> drawn from a fixed enum, <code>needs_review</code> as a boolean, <code>risk_tier</code> drawn from three ordered labels, and <code>justification</code> as a bounded string. She drops a proposed <code>notes</code> field because nothing consumes it.</p>
+<p>She then adds validation rules. The schema checks types and enums. A validator checks that <code>needs_review</code> is true whenever <code>risk_tier</code> is <code>high</code>, because the register's policy requires review for high-risk clauses. When validation fails, a repair step resends the clause text, the rejected record, and the specific error, asking for a corrected record. Retries are capped, and a fourth failure writes the item to a quarantine list for human handling instead of guessing.</p>
+<p>The improvement is not that the model became smarter; the interface between model and consumer became explicit. The keyword scrape disappeared, so wording no longer mattered. Fewer fields meant fewer promises to keep. Conditional rules moved into a layer that could enforce them, and failures became visible instead of silently corrupting the register. When the enum later gains a new clause type, one definition changes and the validator catches items still using the old vocabulary.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A scenario about inconsistent downstream parsing is usually testing structured output, not prompt wording. Rewriting the instruction to "be more consistent" is a weaker answer than introducing an enforceable contract.</p>
+</blockquote>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Asking for a structured format in the prompt but never validating it, then assuming conformance because most responses look correct.</li>
+<li>Designing fields for hypothetical future consumers instead of the components that read the output today.</li>
+<li>Using free strings where an enum would constrain the value and make routing deterministic.</li>
+<li>Treating a schema as a guarantee of correctness, when it only guarantees shape and type.</li>
+<li>Building an unbounded repair loop that retries indefinitely on inputs the model cannot handle.</li>
+<li>Silently substituting defaults on validation failure, which hides problems and erodes trust in the system.</li>
+<li>Forcing a rich explanation into a single prose field inside an otherwise rigid record, blurring the line between data and narrative.</li>
+<li>Omitting cross-field rules from the validator and expecting the schema alone to enforce conditional requirements.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Structured output turns a fluent answer into a locatable, typed record that a program can consume reliably.</li>
+<li>A schema defines field names, types, requiredness, and constraints; each decision should be tied to a real reader.</li>
+<li>Enums reduce vocabulary drift and make decisions routable, while conditional rules belong in validation rather than the basic type declaration.</li>
+<li>Strict schemas fit stable, high-stakes boundaries; flexible schemas fit exploration and human readers.</li>
+<li>Validation should report specific errors, bound retries, and surface persistent failures instead of hiding them.</li>
+<li>Prose remains the right choice when the reader is a person or the reasoning is part of the deliverable; combining prose reasoning with a compact decision record often works best.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>A workflow sends a model's result directly into a typed database column. The result currently arrives as prose. What is the strongest reason to introduce a structured schema?</li>
+</ol>
+<p>A. Prose is always longer and therefore more expensive to generate.
+B. A program needs named fields at predictable positions and known types to store the value safely.
+C. A schema guarantees that the model's judgement is correct.
+D. Databases cannot store plain text under any circumstances.</p>
+<ol start="2">
+<li>Which pair of fields is best expressed with enums rather than free strings?</li>
+</ol>
+<p>A. A free-text summary and a justification paragraph.
+B. A document identifier and a timestamp.
+C. A routing category and a priority level drawn from a fixed set of labels.
+D. A confidence score and a word count.</p>
+<ol start="3">
+<li>A schema declares <code>escalation_reason</code> as a string but does not say when it is needed. The business rule is that it must be present whenever <code>escalate</code> is true. Where should this rule be enforced?</li>
+</ol>
+<p>A. In the schema's string type declaration alone.
+B. In application validation that checks the relationship between fields.
+C. By asking the model to remember the rule and hope it complies.
+D. By removing the field entirely to avoid complexity.</p>
+<ol start="4">
+<li>Which situation most strongly favours a flexible schema over a strict one?</li>
+</ol>
+<p>A. The output feeds a payment execution service with severe side effects.
+B. The output is stored in a rigid relational schema with no optional columns.
+C. The output is read by an engineer exploring a new problem where the fields are still changing.
+D. The output must be parsed by a downstream service that rejects unknown fields.</p>
+<ol start="5">
+<li>After a validation failure, what should a well-designed repair loop do?</li>
+</ol>
+<p>A. Retry without limit until the output happens to validate.
+B. Replace the invalid field with a default value and continue silently.
+C. Resend the task, the rejected output, and the specific validation error, with a bounded retry budget.
+D. Discard the schema and accept the malformed output.</p>
+<ol start="6">
+<li>A reviewer proposes forcing a nuanced legal recommendation into a record with ten short fields. What is the most likely problem with this design?</li>
+</ol>
+<p>A. Structured records cannot contain boolean values.
+B. The reasoning is part of the deliverable, so compression into rigid fields strips away what makes the answer useful.
+C. Models are incapable of producing more than five fields.
+D. Enums cannot be used in legal domains.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B</strong> is correct because the defining benefit of structure is a predictable contract between producer and consumer; a typed store needs named fields with known types. <strong>A</strong> is wrong because length is not the core issue and prose is not always longer. <strong>C</strong> is wrong because a schema enforces shape, not truth. <strong>D</strong> is wrong because databases can store text; the problem is reliable extraction, not storage capability.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because a routing category and a fixed set of priority labels are exactly the kind of closed vocabulary enums constrain. <strong>A</strong> is wrong because summaries and justifications are narrative and benefit from free text. <strong>B</strong> is wrong because identifiers and timestamps are typed values, not choices from a set. <strong>D</strong> is wrong because a score and a count are numeric values where ranges, not enums, are the right constraint.</p>
+</li>
+<li>
+<p><strong>B</strong> is correct because cross-field conditions are application rules that a basic type declaration cannot express. <strong>A</strong> is wrong because a string type says nothing about presence conditions. <strong>C</strong> is wrong because relying on the model to remember a rule is exactly what validation exists to replace. <strong>D</strong> is wrong because removing a needed field loses information the business rule requires.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because exploration with evolving fields tolerates additions and changes, making flexibility useful. <strong>A</strong> is wrong because severe side effects call for strict validation. <strong>B</strong> is wrong because a rigid store rejects unexpected shapes. <strong>D</strong> is wrong because a service that rejects unknown fields demands strictness.</p>
+</li>
+<li>
+<p><strong>C</strong> is correct because specific feedback with a bounded budget gives the model a fair chance to correct itself without risking an endless loop. <strong>A</strong> is wrong because unbounded retries waste budget and may never succeed. <strong>B</strong> is wrong because silent defaults hide real failures. <strong>D</strong> is wrong because accepting malformed output defeats the purpose of the contract.</p>
+</li>
+<li>
+<p><strong>B</strong> is correct because when reasoning is the value of the deliverable, rigid compression destroys it. <strong>A</strong> is wrong because booleans are perfectly valid in structured records. <strong>C</strong> is wrong because there is no such fixed limit on field count. <strong>D</strong> is wrong because enums are domain-neutral and can be used in legal contexts.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 20.</em></p>
+  <nav><a href="19-prompting-fundamentals.html">&larr; Previous</a><span></span><a href="21-quality-batch-review.html">Next &rarr;</a></nav>
+</div>
+
+</body>
+</html>

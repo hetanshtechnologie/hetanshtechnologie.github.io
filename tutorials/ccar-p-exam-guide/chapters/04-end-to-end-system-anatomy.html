@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 4 — End-to-End Anatomy of an AI Solution</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 4 — End-to-End Anatomy of an AI Solution</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Describe the major layers of an end-to-end AI-enabled solution and the responsibility of each layer.</li>
+    <li>Trace a request lifecycle from intake through orchestration, knowledge access, generation, checks, and delivery.</li>
+    <li>Explain how interfaces, contracts, and trust boundaries support reliability, safety, and accountability.</li>
+    <li>Identify where feedback loops operate and how they enable evaluation, improvement, and governance.</li>
+    <li>Recognize architectural gaps that arise when components are designed or operated in isolation.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>The system beyond the model</h3>
+  <p>It is common to equate an AI application with the model that produces outputs. In practice, the model is one component within a broader system that includes input handling, orchestration, knowledge access, tools, policy controls, observability, and feedback mechanisms. User-visible outcomes—quality, safety, latency, cost, and trust—emerge from interactions among these parts. An architect who focuses only on model capability may overlook the sources of most production issues.</p>
+  <p>An end-to-end perspective clarifies dependencies and trade-offs. Improving grounding may require changes to ingestion and retrieval rather than prompting alone. Reducing latency may involve routing, caching, or time budgets across multiple steps. Meeting audit requirements may depend on correlation identifiers, provenance, and data-handling controls outside the model. Scenario questions often describe symptoms at the surface whose causes reside in other layers; locating the responsible layer is a core diagnostic skill.</p>
+  <p>This chapter presents a conceptual anatomy adaptable to many domains. Implementations vary, but the responsibilities—receiving requests, deciding actions, gathering information, generating outputs, enforcing boundaries, and learning from results—are broadly consistent.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> When diagnosing an issue, identify which layer owns the failing responsibility. Effective remedies address the source layer rather than only its symptoms.</p>
+  </div>
+
+  <h3>Core layers and responsibilities</h3>
+  <p>A layered view separates concerns while acknowledging collaboration. Each layer contributes specific capabilities and introduces specific risks if underdesigned. The appropriate depth of each layer depends on the use case, impact, and constraints.</p>
+
+  <table>
+    <tr>
+      <th>Layer</th>
+      <th>Primary responsibility</th>
+      <th>Typical components</th>
+      <th>Risk if weak</th>
+    </tr>
+    <tr>
+      <td>Experience and intake</td>
+      <td>Capture intent and context</td>
+      <td>UI/API, validation, session handling</td>
+      <td>Ambiguous requests, unsafe or malformed inputs</td>
+    </tr>
+    <tr>
+      <td>Orchestration</td>
+      <td>Coordinate steps and decisions</td>
+      <td>Routing, workflow/agent logic, state management</td>
+      <td>Wrong sequencing, uncontrolled loops, poor recovery</td>
+    </tr>
+    <tr>
+      <td>Model core</td>
+      <td>Generate, transform, or classify</td>
+      <td>Model endpoints, instructions, decoding settings</td>
+      <td>Low quality, inconsistency, unmanaged cost/latency</td>
+    </tr>
+    <tr>
+      <td>Knowledge and tools</td>
+      <td>Provide grounded information and actions</td>
+      <td>Retrieval indexes, connectors, tool interfaces</td>
+      <td>Stale or irrelevant context, unauthorized actions</td>
+    </tr>
+    <tr>
+      <td>Policy and safety</td>
+      <td>Enforce boundaries and protections</td>
+      <td>Input/output checks, filters, approval gates</td>
+      <td>Harmful output, data exposure, policy violations</td>
+    </tr>
+    <tr>
+      <td>Observability and feedback</td>
+      <td>Make behavior visible and improvable</td>
+      <td>Logs, metrics, traces, evaluation pipelines</td>
+      <td>Blind spots, slow diagnosis, stagnant quality</td>
+    </tr>
+  </table>
+
+  <p>Not every solution requires the same sophistication in every layer. A low-risk internal aid may use simple routing and limited tools, while a high-impact operational system may require strict approvals, rich tracing, and robust fallback behavior. The architectural question is whether each necessary responsibility is adequately handled for the intended use.</p>
+
+  <h3>Tracing the request lifecycle</h3>
+  <p>Understanding the lifecycle of a request reveals where to apply controls, measure performance, and debug failures. Although implementations differ, a common sequence includes the following stages.</p>
+  <ol>
+    <li><strong>Intake:</strong> Receive input and capture relevant context such as user role, session state, and metadata.</li>
+    <li><strong>Validation and preparation:</strong> Check format, size, and policy constraints; normalize or classify the request.</li>
+    <li><strong>Planning or routing:</strong> Determine the path—direct response, retrieval, tool use, multi-step flow, or escalation.</li>
+    <li><strong>Information gathering:</strong> Retrieve documents or invoke tools to obtain facts or perform actions under permissions.</li>
+    <li><strong>Generation or decision:</strong> Produce an output using instructions and provided context, with appropriate controls on depth and format.</li>
+    <li><strong>Policy checks and post-processing:</strong> Evaluate outputs against safety, compliance, and quality rules; redact or format as needed.</li>
+    <li><strong>Delivery and logging:</strong> Return the response and record telemetry for monitoring, evaluation, and audit.</li>
+  </ol>
+  <p>In adaptive or agentic designs, planning, gathering, and generation may iterate. Iteration increases flexibility but also increases the need for budgets, explicit stopping conditions, and traceability. Without these, systems can become slow, costly, or difficult to explain.</p>
+
+  <pre><code class="language-text">[Input] -&gt; [Validate] -&gt; [Route/Plan] -&gt; (Retrieve/Tools &lt;-&gt; Model)
+      -&gt; [Policy &amp; Output Checks] -&gt; [Response]
+                       \-&gt; [Logs / Metrics / Traces / Feedback]</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Sketch the request flow for a system you know. Mark decision points, external data access, and output checks. Missing marks often indicate missing controls or visibility.</p>
+  </div>
+
+  <h3>Interfaces, contracts, and trust boundaries</h3>
+  <p>Components interact through interfaces such as APIs, schemas, prompts, tool definitions, and data formats. A contract specifies expectations and guarantees: inputs, outputs, error conditions, limits, and semantics. Clear contracts reduce ambiguity and make failures observable. For example, a retrieval response that includes source identifiers and timestamps supports grounding and freshness checks; an unstructured response without provenance does not.</p>
+  <p>Boundaries define where trust changes and where controls must apply. User input is untrusted. External documents and tool results may be partially trusted depending on origin and integrity. Internal configuration and policies should be controlled. Treating all inputs as equally trustworthy creates exposure to injection, leakage, and unreliable behavior. Data boundaries also matter for privacy and compliance: architects must understand what data enters prompts, what is stored, what crosses service or regional boundaries, and who can access telemetry.</p>
+
+  <table>
+    <tr>
+      <th>Boundary or contract</th>
+      <th>What it clarifies</th>
+      <th>Benefit</th>
+      <th>Example control</th>
+    </tr>
+    <tr>
+      <td>Input validation</td>
+      <td>Allowed formats and required fields</td>
+      <td>Early rejection of invalid requests</td>
+      <td>Size limits, type checks</td>
+    </tr>
+    <tr>
+      <td>Tool interface</td>
+      <td>Parameters, permissions, error modes</td>
+      <td>Predictable and auditable actions</td>
+      <td>Least-privilege scopes, timeouts</td>
+    </tr>
+    <tr>
+      <td>Retrieval response</td>
+      <td>Content, source, time, relevance</td>
+      <td>Grounding and freshness assessment</td>
+      <td>Provenance metadata</td>
+    </tr>
+    <tr>
+      <td>Output contract</td>
+      <td>Structure and constraints</td>
+      <td>Easier validation and integration</td>
+      <td>Structured formats, policy checks</td>
+    </tr>
+    <tr>
+      <td>Telemetry schema</td>
+      <td>What is recorded and correlated</td>
+      <td>Faster diagnosis and accountability</td>
+      <td>Redaction, trace identifiers</td>
+    </tr>
+  </table>
+
+  <h3>Feedback loops and continuous improvement</h3>
+  <p>End-to-end systems evolve. Data changes, usage patterns shift, and operating conditions vary. Feedback loops connect observed behavior to evaluation and redesign. Without them, teams cannot determine whether the system remains aligned with goals and constraints.</p>
+  <p>Different loops operate at different speeds. Online signals—user corrections, escalation rates, latency changes, and guardrail triggers—support rapid detection and response. Offline evaluation—curated test sets, regression checks, and pre-release comparisons—supports controlled assessment. Governance reviews—audits, policy updates, and incident postmortems—support accountability and long-term alignment. Effective loops require actionable signals linked to owners and thresholds, not just data collection.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Collecting logs and metrics without correlation, ownership, or review processes. Telemetry that is not interpreted does not improve reliability or safety.</p>
+  </div>
+
+  <p>Closing the loop also requires balance. Improvements should be validated against a holistic metric set to avoid optimizing one dimension at the expense of others. For example, increasing answer coverage should not degrade grounding or violate data boundaries.</p>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>An organization deploys an assistant to help field technicians diagnose equipment issues using manuals and service history. Early trials reveal three problems: some answers cite irrelevant manual sections, responses are occasionally slow during peak periods, and supervisors cannot determine why a specific recommendation was produced. The initial response is to rewrite prompts to improve answer quality.</p>
+
+  <h3>Analysis</h3>
+  <p>The symptoms map to different layers. Irrelevant citations indicate issues in the knowledge layer, such as ingestion, metadata, chunking, or retrieval relevance. Slow responses suggest orchestration or integration concerns, including unbounded tool calls, missing time budgets, or lack of fallback behavior. Inability to explain recommendations indicates an observability gap: without correlated traces and provenance, diagnosis and accountability are limited. Prompt changes alone cannot supply missing metadata, enforce execution limits, or create traceability.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect proposes layered improvements. Ingestion is updated to capture source, equipment model, and revision information, and retrieval returns provenance and relevance signals. Orchestration introduces timeouts, fallbacks, and routing considerations to protect responsiveness. Observability adds correlation identifiers across intake, retrieval, tool use, generation, and checks, along with metrics for relevance, step latency, and escalation rates.</p>
+  <p>Feedback loops are defined: offline evaluations test diagnostic accuracy on representative cases, and online reviews examine traces for slow or poorly grounded responses. This approach addresses root causes at the responsible layers and establishes the visibility needed for continuous improvement and accountable operation.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Treating the model as the entire system and overlooking orchestration, knowledge, policy, and observability layers.</li>
+    <li>Lacking clear contracts and provenance, which undermines grounding, validation, and debugging.</li>
+    <li>Allowing untrusted inputs or tool results to influence decisions without appropriate boundaries and checks.</li>
+    <li>Collecting telemetry without correlation, ownership, or action thresholds.</li>
+    <li>Relying on a single feedback mechanism instead of combining online signals, offline evaluation, and reviews.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>End-to-end AI solutions consist of multiple layers whose interactions determine quality, safety, latency, and cost.</li>
+    <li>Tracing the request lifecycle reveals where to apply controls, measure performance, and diagnose failures.</li>
+    <li>Clear interfaces, contracts, and trust boundaries enable reliable integration and accountable data handling.</li>
+    <li>Feedback loops at different speeds are essential for sustaining alignment with goals and constraints.</li>
+    <li>Effective remedies address responsibilities at the correct layer rather than isolated symptoms.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>Why is it risky to equate an AI solution with its model alone?</p>
+      <p>A. Models cannot operate without specialized hardware<br>
+      B. Outcomes depend on multiple interacting layers beyond generation<br>
+      C. Observability is relevant only during development<br>
+      D. Retrieval and tools remove the need for evaluation</p>
+    </li>
+    <li>
+      <p>What is the primary purpose of the planning or routing stage in a request lifecycle?</p>
+      <p>A. To store all inputs permanently<br>
+      B. To determine the appropriate handling path, such as direct response, retrieval, or escalation<br>
+      C. To bypass policy checks for speed<br>
+      D. To guarantee that no external information is required</p>
+    </li>
+    <li>
+      <p>What benefit does provenance metadata in retrieval results provide?</p>
+      <p>A. It ensures responses are always concise<br>
+      B. It eliminates the need for access controls<br>
+      C. It supports grounding, freshness assessment, and traceability<br>
+      D. It prevents all model errors</p>
+    </li>
+    <li>
+      <p>Which situation most clearly indicates an observability gap?</p>
+      <p>A. Correlated traces exist across major steps<br>
+      B. Supervisors cannot determine why a specific recommendation was produced<br>
+      C. Retrieval returns source and timestamp information<br>
+      D. Offline evaluations run before release</p>
+    </li>
+    <li>
+      <p>How do online signals and offline evaluation complement each other?</p>
+      <p>A. Online signals replace curated test sets<br>
+      B. Offline evaluation is useful only after retirement<br>
+      C. Online signals enable rapid detection while offline evaluation supports controlled assessment<br>
+      D. They serve identical purposes and are interchangeable</p>
+    </li>
+    <li>
+      <p>Slow responses occur because external tool calls have no time limits. Which layer most directly owns this issue?</p>
+      <p>A. Experience and intake<br>
+      B. Orchestration and integration<br>
+      C. Policy and safety<br>
+      D. Governance review</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Quality, safety, latency, and cost emerge from interactions among intake, orchestration, knowledge, policy, and observability. A is irrelevant, C is false, and D incorrectly dismisses evaluation.</li>
+    <li><strong>Correct: B.</strong> Routing determines how the request should be handled. A is not a routing purpose, C wrongly bypasses controls, and D is unrealistic for many requests.</li>
+    <li><strong>Correct: C.</strong> Provenance enables grounding, freshness assessment, and explainability. A and B are incorrect, and D overstates its effect.</li>
+    <li><strong>Correct: B.</strong> Inability to explain a recommendation signals insufficient tracing or visibility. A, C, and D describe supportive practices.</li>
+    <li><strong>Correct: C.</strong> Online signals provide timely feedback while offline evaluation enables systematic assessment. A and B dismiss one mechanism, and D ignores their different roles.</li>
+    <li><strong>Correct: B.</strong> Managing sequencing, timeouts, and fallbacks is an orchestration responsibility. A, C, and D do not directly implement execution limits.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 4.</em></p>
+
+  <nav>
+    <a href="03-value-metrics-and-signals.html">&larr; Previous</a>
+    <a href="05-augmented-and-deterministic-flows.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

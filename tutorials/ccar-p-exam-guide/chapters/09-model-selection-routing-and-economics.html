@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 9 — Model Selection, Routing, and Operating Economics</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 9 — Model Selection, Routing, and Operating Economics</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Evaluate model choices based on capability, latency, cost, reliability, and fit for the task rather than reputation alone.</li>
+    <li>Explain when and how routing or fallback strategies can balance quality and operating constraints.</li>
+    <li>Estimate and interpret cost drivers in model-backed systems, including request volume, context size, and output length.</li>
+    <li>Use evidence from representative evaluation to justify model selection and changes.</li>
+    <li>Recognize risks of over-optimization, under-provisioning, and unmonitored model substitutions.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Model choice as an architectural decision</h3>
+  <p>Selecting a model is often treated as a product preference, but in professional architecture it is a system decision with implications for quality, responsiveness, cost, risk, and operability. Different model tiers typically offer different balances of reasoning capability, speed, context handling, and price. A highly capable option may improve performance on ambiguous or complex tasks but increase latency and spend. A faster, lower-cost option may handle routine tasks efficiently but struggle with nuance or multi-step reasoning. The correct choice depends on what the system must achieve under its stated constraints.</p>
+  <p>Model selection should therefore begin with task characterization. What kinds of inputs will the system receive? How variable are they? What level of accuracy is required? How quickly must responses arrive? What is the acceptable cost per successful outcome? How severe are the consequences of errors? Answers to these questions define the evaluation criteria. Without them, teams default to intuition or marketing claims, which rarely predict performance in a specific domain.</p>
+  <p>It is also important to separate capability from suitability. A model that performs well on broad benchmarks may be unnecessary for structured extraction or classification tasks and insufficient for specialized reasoning without appropriate context and controls. Suitability emerges from the interaction of model behavior, instructions, context, tools, and validation—not from model identity alone.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> Choose the smallest or most economical option that reliably meets the task and risk requirements. Escalate capability only when evidence shows it is needed.</p>
+  </div>
+
+  <h3>Capability, latency, and cost trade-offs</h3>
+  <p>Three dimensions dominate many selection decisions: capability, latency, and cost. Capability refers to how well the model performs the required tasks—understanding intent, reasoning, following instructions, and producing useful outputs. Latency refers to response time, including time to first output and total completion time, which affects user experience and system throughput. Cost reflects the resources consumed per request and at scale, often influenced by input size, output size, and request volume.</p>
+  <p>These dimensions interact. Requests that require long context or detailed outputs consume more resources and take longer. Attempts to improve quality by adding reasoning steps or larger prompts can increase both latency and cost. Conversely, aggressive cost reduction can degrade quality or push more work to human review. Architects must evaluate trade-offs in the context of the full workflow: a slightly slower generation step may be acceptable if it eliminates downstream rework, while a small quality gain may be unjustified if it doubles operating expense.</p>
+
+  <table>
+    <tr>
+      <th>Dimension</th>
+      <th>What to assess</th>
+      <th>Typical levers</th>
+      <th>Risk of overemphasis</th>
+    </tr>
+    <tr>
+      <td>Capability</td>
+      <td>Task success on representative cases</td>
+      <td>Model tier, instructions, context quality</td>
+      <td>Unnecessary spend and latency</td>
+    </tr>
+    <tr>
+      <td>Latency</td>
+      <td>Responsiveness and throughput needs</td>
+      <td>Model choice, prompt size, caching, routing</td>
+      <td>Reduced quality or incomplete reasoning</td>
+    </tr>
+    <tr>
+      <td>Cost</td>
+      <td>Spend per request and at scale</td>
+      <td>Routing, batching, output limits, reuse</td>
+      <td>Higher error rates and rework</td>
+    </tr>
+    <tr>
+      <td>Reliability</td>
+      <td>Consistency and failure behavior</td>
+      <td>Validation, fallbacks, constrained formats</td>
+      <td>Operational fragility if ignored</td>
+    </tr>
+  </table>
+
+  <h3>Routing and fallback strategies</h3>
+  <p>Not all requests within a system have the same difficulty. Routing strategies direct requests to different handling paths based on characteristics such as complexity, risk, or required capability. Simple, well-structured requests may be handled by a faster, lower-cost option, while ambiguous or high-stakes requests may be routed to a more capable option or to a path with additional checks. This approach aligns resources with need, improving overall efficiency without uniformly lowering quality.</p>
+  <p>Fallback strategies define what happens when a preferred path fails or performs inadequately. A fallback may involve retrying with adjusted parameters, escalating to a more capable option, simplifying the task, or handing off to a human. Fallbacks should be deliberate and bounded; uncontrolled retries can multiply cost and latency. The choice of fallback depends on the failure type: a transient service issue suggests retry, while a low-confidence or policy-sensitive result suggests escalation or review.</p>
+  <p>Routing and fallback logic introduce their own complexity and must be observable. Misrouting can silently degrade quality or inflate cost. Metrics such as route distribution, success rates by path, and fallback frequency help determine whether the strategy is working as intended. Like any architectural mechanism, routing should be justified by measured benefit.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Routing requests without clear criteria or monitoring. Poorly tuned routing can send hard cases to weak paths or easy cases to expensive paths, undermining both quality and efficiency.</p>
+  </div>
+
+  <h3>Understanding operating economics</h3>
+  <p>Operating economics in model-backed systems are driven by workload patterns and design choices. Key drivers typically include the number of requests, the size of inputs (including instructions and context), the size of outputs, and the number of model invocations per request. Multi-step workflows, retries, and verbose outputs can multiply consumption quickly. Understanding these drivers allows architects to estimate cost, identify optimization opportunities, and set guardrails.</p>
+  <p>Cost should be considered per successful outcome, not merely per request. A cheaper path that produces frequent errors may generate rework, escalations, or user dissatisfaction that outweighs savings. Conversely, an efficient design that improves first-pass success can reduce total cost even if individual requests are more resource-intensive. This perspective aligns economic decisions with value delivery.</p>
+  <p>Capacity and rate considerations also matter. Peak demand, concurrency limits, and external dependencies affect responsiveness and reliability. Economic planning therefore intersects with performance engineering: caching, batching where appropriate, prompt efficiency, and bounded outputs can improve both cost and latency when applied thoughtfully.</p>
+
+  <pre><code class="language-python"># Illustrative cost reasoning (conceptual values)
+def estimated_request_cost(input_tokens, output_tokens, calls, price_in, price_out):
+    per_call = (input_tokens * price_in) + (output_tokens * price_out)
+    return per_call * calls
+
+# Compare two designs for 10,000 monthly tasks
+baseline = estimated_request_cost(1800, 500, calls=1, price_in=0.000001, price_out=0.000003)
+multi_step = estimated_request_cost(2200, 350, calls=3, price_in=0.000001, price_out=0.000003)
+
+print({"baseline_per_task": baseline, "multi_step_per_task": multi_step})</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Estimate cost per successful task for a current or hypothetical workflow. Include retries and human rework where relevant; this often changes which option is truly economical.</p>
+  </div>
+
+  <h3>Evidence-based selection and change management</h3>
+  <p>Model selection and routing policies should be validated with representative evaluation. Test sets should reflect real task distributions, edge cases, and constraints, not only easy or generic examples. Metrics should cover quality, latency, cost, and failure behavior. A change that improves one dimension while degrading another may be unacceptable depending on priorities. Documenting results and rationale supports transparent decision-making and future review.</p>
+  <p>Change management is essential because model behavior and system conditions evolve. Substituting a model, adjusting prompts, or altering routing thresholds can have unintended effects. Controlled rollouts, regression evaluation, and monitoring help detect regressions early. When possible, maintain the ability to revert or fall back to a known-good configuration. Treating model choice as a governed configuration rather than an ad hoc tweak reduces operational risk.</p>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A support organization plans to introduce an assistant that drafts responses to customer inquiries. Most inquiries are routine and follow known patterns, but a smaller portion involves complex cases requiring careful interpretation of multiple policies. The organization has strict expectations for response quality on complex cases, a target response time for interactive use, and a limited operating budget. A proposal suggests using a single high-capability option for all requests to maximize quality.</p>
+
+  <h3>Analysis</h3>
+  <p>The workload is mixed: routine cases prioritize efficiency and speed, while complex cases prioritize capability and accuracy. Using the most capable option for every request may satisfy quality goals but risks exceeding latency and budget constraints, especially at volume. Conversely, using a lower-cost option for all requests may undermine quality on complex cases. The criteria—capability needs, latency tolerance, cost limits, and impact of errors—vary by request type, which suggests a differentiated strategy.</p>
+  <p>Key design questions include how to classify request complexity reliably, what thresholds trigger escalation, and how to handle uncertain classifications. The team must also define success in economic terms, such as cost per resolved inquiry, and include guardrails for quality on complex cases. Evidence from representative evaluation is needed before committing to a routing policy.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect proposes a routed design. An initial classification step identifies routine inquiries that match known patterns and routes them to a faster, lower-cost handling path with structured outputs and validation. Inquiries flagged as complex or uncertain are routed to a higher-capability path with additional grounding and checks. If the routine path produces low-confidence results or fails validation, the request escalates to the higher-capability path or to human review based on risk.</p>
+  <p>The team evaluates both paths on a representative sample, measuring task success, response time, escalation rate, and cost per resolved inquiry. Budgets and monitoring are established for route distribution and fallback frequency. This approach aligns resource use with task difficulty, protects quality where it matters most, and provides evidence to justify operating costs.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Selecting a model based on general reputation without evaluating performance on representative tasks.</li>
+    <li>Using one handling path for all requests despite clear differences in complexity and risk.</li>
+    <li>Optimizing for per-request cost while ignoring cost per successful outcome and rework.</li>
+    <li>Deploying routing or fallback logic without criteria, budgets, and monitoring.</li>
+    <li>Changing models or thresholds without regression evaluation and rollback options.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Model selection is an architectural decision balancing capability, latency, cost, and reliability for specific tasks.</li>
+    <li>Routing and fallback strategies can align resources with request difficulty when guided by clear criteria and monitoring.</li>
+    <li>Operating economics depend on volume, context and output size, and calls per request; cost per successful outcome is the key measure.</li>
+    <li>Evidence from representative evaluation should justify selection, routing, and configuration changes.</li>
+    <li>Governed change management and observability reduce the risk of unintended regressions.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>What should primarily drive model selection in a professional architecture context?</p>
+      <p>A. General popularity of the model<br>
+      B. Fit to task requirements, constraints, and evidence from evaluation<br>
+      C. Always choosing the highest-capability option<br>
+      D. Minimizing cost without regard to outcomes</p>
+    </li>
+    <li>
+      <p>When is request routing most beneficial?</p>
+      <p>A. When all requests have identical complexity and risk<br>
+      B. When requests vary in difficulty and can be directed to appropriate handling paths<br>
+      C. When no monitoring is available<br>
+      D. When fallback behavior is undefined</p>
+    </li>
+    <li>
+      <p>Which measure best reflects operating efficiency in many support scenarios?</p>
+      <p>A. Cost per request only<br>
+      B. Cost per successful outcome, including rework effects<br>
+      C. Number of model calls regardless of results<br>
+      D. Output length per response</p>
+    </li>
+    <li>
+      <p>What is a key risk of uncontrolled retries as a fallback strategy?</p>
+      <p>A. Reduced observability of route distribution<br>
+      B. Multiplied latency and cost without guaranteed improvement<br>
+      C. Improved classification accuracy by default<br>
+      D. Elimination of the need for validation</p>
+    </li>
+    <li>
+      <p>Why is representative evaluation important before changing models or routing thresholds?</p>
+      <p>A. It guarantees identical behavior in all future conditions<br>
+      B. It reveals trade-offs across quality, latency, cost, and failure behavior<br>
+      C. It removes the need for monitoring after deployment<br>
+      D. It focuses only on easy cases</p>
+    </li>
+    <li>
+      <p>A team routes simple tasks to an economical path and complex tasks to a higher-capability path. What must accompany this design?</p>
+      <p>A. No criteria for classification<br>
+      B. Clear routing criteria, budgets, and monitoring of outcomes<br>
+      C. Removal of validation on the economical path<br>
+      D. Unlimited retries on all paths</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Selection should be based on task fit, constraints, and measured evidence. A, C, and D ignore important dimensions of suitability and trade-offs.</li>
+    <li><strong>Correct: B.</strong> Routing adds value when workload difficulty varies and paths can be matched accordingly. A reduces its benefit, while C and D increase risk.</li>
+    <li><strong>Correct: B.</strong> Cost per successful outcome accounts for quality and rework, aligning economics with value. A, C, and D are incomplete or misleading measures.</li>
+    <li><strong>Correct: B.</strong> Retries can increase time and spend without resolving underlying issues. A is unrelated, C is incorrect, and D is false.</li>
+    <li><strong>Correct: B.</strong> Representative evaluation exposes multidimensional effects and trade-offs. A and C overstate certainty, and D contradicts good practice.</li>
+    <li><strong>Correct: B.</strong> Effective routing requires defined criteria, limits, and observability. A, C, and D undermine control and reliability.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 9.</em></p>
+
+  <nav>
+    <a href="08-decomposing-complex-work.html">&larr; Previous</a>
+    <a href="10-instruction-design-and-refinement.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

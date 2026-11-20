@@ -1,0 +1,189 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>24. Building an MCP Server in Python</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>24. Building an MCP Server in Python</h1>
+
+<p>The fastest way to understand a protocol is to implement a small server. In this chapter we build one that exposes a single useful tool — looking up a term in a local glossary — and then extend it with a resource. The goal is not a production service but a working mental model: how handlers are registered, what the process does when launched, how to talk to it from a client, and which mistakes surface immediately.</p>
+
+<h2>A Minimal Server End to End</h2>
+
+<p>A server has three jobs: declare what it offers, execute requests for those offerings, and move messages over a transport. The framework supplies the message framing and version handling; you supply the declarations and handlers. Here is a complete first version using an in-memory glossary:</p>
+
+<pre><code>import asyncio
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import TextContent, Tool
+
+GLOSSARY = {
+    "idempotent": "Repeating an operation has the same effect as doing it once.",
+    "context": "The information available to a model while it decides.",
+}
+
+app = Server("glossary-server")
+
+
+async def list_tools():
+    return [
+        Tool(
+            name="define_term",
+            description=("Return the definition of one glossary term. "
+                         "Use for exact term lookup; does not search prose."),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "term": {"type": "string", "minLength": 1,
+                             "maxLength": 80}
+                },
+                "required": ["term"],
+                "additionalProperties": False,
+            },
+        )
+    ]
+
+
+async def call_tool(name, arguments):
+    if name != "define_term":
+        raise ValueError("unknown tool: " + name)
+    term = arguments["term"].strip().lower()
+    if len(term) &gt; 80:
+        return [TextContent(type="text",
+                            text="INVALID_ARGUMENT: term too long")]
+    if term not in GLOSSARY:
+        return [TextContent(type="text",
+                            text="NOT_FOUND: " + arguments["term"])]
+    return [TextContent(type="text", text=GLOSSARY[term])]
+
+
+async def main():
+    async with stdio_server() as (reader, writer):
+        await app.run(reader, writer, app.create_initialization_options())
+
+
+if __name__ == "__main__":
+    asyncio.run(main())</code></pre>
+
+<p>The important structural point is that declaration and execution are separate functions. <code>list_tools</code> returns metadata; <code>call_tool</code> receives a name plus arguments. The framework calls the first during discovery and the second during invocation. Notice also that the "not found" case returns a text item rather than raising: it is a normal outcome with a stable prefix, not a crash.</p>
+
+<h2>Registering Handlers</h2>
+
+<p>Most frameworks let you register handlers either by decorating functions or by passing them to a server object. Both styles do the same thing — they put your function in a dispatch table keyed by operation. Explicit registration is easier to inspect in a small server; decorators scale better when a module contributes many handlers.</p>
+
+<pre><code>@app.list_tools()
+async def handle_list():
+    return await list_tools()
+
+
+@app.call_tool()
+async def handle_call(name, arguments):
+    result = await call_tool(name, arguments)
+    return result
+
+
+def dispatch(name):
+    if name == "define_term":
+        return define_term
+    if name == "search_terms":
+        return search_terms
+    raise KeyError("unregistered tool: " + name)</code></pre>
+
+<p>Three rules keep handlers maintainable. Validate arguments inside the handler even though a schema exists — the schema is a contract for callers, not a substitute for defensive code. Return content objects in the shape the framework expects, with explicit content types. And keep each handler short: delegate to ordinary functions that you can unit-test without a protocol session.</p>
+
+<p>Descriptions belong with declarations, not buried in handler code. If a tool's description and its implementation disagree, the model will be routed according to the description and then surprised by the result. Treat that pair as one artefact and review them together.</p>
+
+<div class="tip">Use a dictionary of handlers instead of a long chain of <code>if</code> statements once you pass five tools. A lookup table makes it obvious which names are legal and simplifies testing.</div>
+
+<h2>Running the Server Locally</h2>
+
+<p>A local server is launched as a child process by the host. Communication happens over standard input and output, which means those streams are reserved for protocol messages. Any diagnostic text must go to standard error or a file; a stray <code>print()</code> on stdout corrupts the message stream and usually looks like a mysterious parse failure.</p>
+
+<pre><code>{
+  "mcpServers": {
+    "glossary": {
+      "command": "python",
+      "args": ["-m", "glossary_server"],
+      "env": {"GLOSSARY_DATA": "./data/terms.json"}
+    }
+  }
+}</code></pre>
+
+<p>Start the process once with a simple client before connecting it to a full application. Confirm that initialization succeeds, that the tool list contains exactly what you expect, and that one call returns the right text. Configuration such as file paths and timeouts should arrive through environment variables, not hardcoded constants, so the same server can run in a developer's workspace and in a test harness.</p>
+
+<div class="warn">Never log request bodies containing user data to stdout. Use structured logging to stderr with a request ID, and keep sensitive values out of both logs and error strings.</div>
+
+<h2>Testing With a Client</h2>
+
+<p>A client test exercises the whole path: spawn the process, initialize a session, list tools, invoke one, and close cleanly. This catches registration mistakes, schema errors, and transport issues that unit tests of the handler cannot see.</p>
+
+<pre><code>async def smoke_test(session):
+    tools = await session.list_tools()
+    names = [t.name for t in tools.tools]
+    assert names == ["define_term"], names
+
+    result = await session.call_tool(
+        "define_term", {"term": "Idempotent"})
+    text = result.content[0].text
+    assert "same effect" in text, text
+
+    missing = await session.call_tool(
+        "define_term", {"term": "not-a-term"})
+    assert missing.content[0].text.startswith("NOT_FOUND")</code></pre>
+
+<p>Add three layers of tests. Unit tests call your handler functions directly with valid, invalid, and edge-case arguments. Contract tests assert that the advertised schema matches what the handler actually accepts — a schema that omits a required field is a common bug. Session tests run the smoke test above against a real spawned process. Keep the session test fast enough to run on every change; if it takes more than a few seconds, developers will stop running it.</p>
+
+<h2>Common Mistakes</h2>
+
+<p>Most first servers fail in predictable ways. The table below maps symptoms to causes so that debugging starts in the right place.</p>
+
+<table>
+<thead><tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr></thead>
+<tbody>
+<tr><td>Parse error during startup</td><td>Logging written to stdout</td><td>Send diagnostics to stderr</td></tr>
+<tr><td>Tool never appears in the list</td><td>Handler not registered</td><td>Check decorator or dispatch table</td></tr>
+<tr><td>Call rejected before handler runs</td><td>Arguments violate the declared schema</td><td>Match schema to handler expectations</td></tr>
+<tr><td>Model chooses the wrong tool</td><td>Vague or overlapping description</td><td>Add object, scope, and negative clause</td></tr>
+<tr><td>Hang on larger requests</td><td>Blocking call inside async handler</td><td>Run blocking work in a thread or task</td></tr>
+<tr><td>Errors vanish into a stack trace</td><td>Exception escapes the handler</td><td>Return a structured failure payload</td></tr>
+</tbody>
+</table>
+
+<p>Two subtler issues appear later. Global mutable state — a cache or counter kept in the server process — makes results depend on call order and breaks under concurrent clients. And unbounded operations, such as reading an entire directory tree, can exhaust memory before any timeout fires. Bound every operation with a limit and return a clear "result truncated" signal when the limit is reached.</p>
+
+<h2>Hardening the First Version</h2>
+
+<p>Once the smoke test passes, add four things before sharing the server. Wrap external calls in timeouts and return a typed error payload with a code, retryability, and remediation hint. Validate and normalise inputs inside handlers: trim strings, enforce maximum lengths, and reject unexpected keys. Emit structured logs with a request ID, tool name, duration, and outcome category. Finally, version the tool names or descriptions when behaviour changes, so a host that cached an older list can detect the mismatch.</p>
+
+<p>These steps are small but they change the character of the server. Instead of a demo that works when everything goes right, you get a component that fails informatively — which is what a model-facing tool needs, because the model's next decision depends on the quality of the failure.</p>
+
+<div class="exercise"><strong>Exercise 24.1 — Extend the server.</strong> Add a <code>search_terms</code> tool that accepts a substring and returns up to five matching terms with a <code>truncated</code> flag. Write its schema and handler, then describe how its description must differ from <code>define_term</code> so a model routes between them correctly. Add one unit test for an empty query and one for a query with more than five matches.</div>
+
+<div class="exercise"><strong>Exercise 24.2 — Debug a broken server.</strong> A colleague's server initializes, lists one tool, and then times out on every call. The handler works when called directly in a test. List five plausible causes ordered by likelihood, state which log or test would confirm each, and explain the fix. Include at least one cause related to the async boundary and one related to argument validation.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+  <li>What three jobs does a minimal server perform, and which parts does the framework supply?</li>
+  <li>Why should declarations and execution be kept as separate functions?</li>
+  <li>Why must diagnostic output go to stderr rather than stdout in a stdio server?</li>
+  <li>What does a session smoke test catch that a handler unit test cannot?</li>
+  <li>Name two hardening steps that improve the error information available to a model.</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+  <li>A server declares capabilities, executes calls, and delegates message framing to the framework.</li>
+  <li>Handlers should validate arguments, return typed content, and delegate real work to testable functions.</li>
+  <li>Local stdio servers reserve stdout for protocol traffic; use stderr for logs and environment variables for config.</li>
+  <li>Layer unit, contract, and session tests to catch schema, registration, and transport faults.</li>
+  <li>Harden with timeouts, structured errors, bounded operations, request IDs, and version awareness.</li>
+</ul>
+
+<nav><a href="23-mcp-fundamentals.html">&larr; Previous</a><span></span><a href="25-exposing-tools-resources.html">Next: Exposing Tools and Resources &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

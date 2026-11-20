@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../images/apple-touch-icon.png">
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9334539225953790" crossorigin="anonymous"></script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-1RVMWL4SDK"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-1RVMWL4SDK');</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 2 — How a Language Model Produces Text</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+
+<div class="chapter">
+  <a href="../../../" class="site-logo"><img src="../../../images/logo.png" alt="Hetansh Technologie"></a>
+<a class="back" href="../../">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 2</span>
+  <h1 id="chapter-2-how-a-language-model-produces-text">Chapter 2 — How a Language Model Produces Text</h1>
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain generation as repeated next-token prediction from a probability distribution.</li>
+<li>Treat the context window as one shared hard budget and reserve space for instructions, history, data, tools, thinking, and the answer.</li>
+<li>Describe how sampling controls shape output and why identical prompts can differ.</li>
+<li>Distinguish extended thinking from adaptive thinking and explain what a thinking block is.</li>
+<li>Use effort and fast-mode controls for their distinct purposes.</li>
+<li>Read usage metadata and write assertions that tolerate legitimate variation.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="one-token-at-a-time">One token at a time</h3>
+<p>The most useful picture of a language model is not a librarian retrieving an answer but a prediction machine working on small pieces of text called tokens. A token may be a short word, a fragment of a longer word, a punctuation mark, or a space before a word. Your prompt is converted into token identifiers; the model receives a numbered sequence, not letters.</p>
+<p>Given that sequence, the model computes a probability distribution over its vocabulary: a ranked guess about what comes next. One token is drawn, appended, and the calculation runs again. The paragraph you read is thousands of such decisions. No step consults a table of correct sentences; each guess is conditioned on everything before it. That is why a small wording change can ripple through the rest of the answer.</p>
+<p>The mechanics explain several quirks. Output arrives incrementally because generation is sequential, so streaming simply forwards each new piece. Character-level tasks are awkward because the processing unit is a chunk of characters, not a character. Spelling a word backwards or counting a letter can fail even in a capable model. When a requirement depends on exact string manipulation, put that step in ordinary code and let the model call it.</p>
+<p>Output length is also a design decision. Each token requires another pass, so verbose answers cost more, occupy more of the window, and delay the user. The right length is the shortest that satisfies the task's acceptance criteria.</p>
+<blockquote>
+<p><strong>Exam note:</strong> For exact counting, reversal, or character-level accuracy, the strong answer moves that step into a deterministic tool. The model predicts tokens; it is not a string utility.</p>
+</blockquote>
+<h3 id="the-context-window-is-one-hard-budget">The context window is one hard budget</h3>
+<p>The context window is the total tokens the model can consider for one request. Input and output do not have separate allowances. Instructions, tool definitions, history, retrieved documents, tool results, thinking blocks, and the answer all compete for the same space. Fill it with source material and the response is cut off mid-thought.</p>
+<p>Budget each region before writing code. Instructions are small and stable, which also makes them reusable across calls. History grows without bound unless trimmed or summarized. Retrieved documents are the largest, most variable region and deserve the tightest cap. Tool definitions are fixed overhead on every call; exposing twenty when three suffice means paying for seventeen unused definitions. Tool results can be surprisingly verbose.</p>
+<p>The most common omission is the response reserve. Decide how many tokens the answer may take, subtract that from the window, and treat the remainder as the input ceiling. Thinking tokens complicate this because they are generated before visible text and count toward the same output cap. A maximum sized for a short answer with no thinking can be exhausted by reasoning alone.</p>
+<table>
+<thead>
+<tr>
+<th>Region</th>
+<th>Example allowance in a 16,000-token window</th>
+<th>Controlled by</th>
+<th>Failure if unchecked</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>System and task instructions</td>
+<td>1,200</td>
+<td>Prompt author</td>
+<td>Less room for evidence; unstable reusable prefix</td>
+</tr>
+<tr>
+<td>Tool definitions</td>
+<td>800</td>
+<td>Tool designer</td>
+<td>Fixed overhead on every call</td>
+</tr>
+<tr>
+<td>Conversation history</td>
+<td>2,000</td>
+<td>Session logic</td>
+<td>Old turns crowd out current evidence</td>
+</tr>
+<tr>
+<td>Retrieved documents</td>
+<td>6,000</td>
+<td>Retrieval settings</td>
+<td>Relevant passage lost in padding</td>
+</tr>
+<tr>
+<td>Tool results</td>
+<td>1,500</td>
+<td>Output contract</td>
+<td>Noisy results dominate the window</td>
+</tr>
+<tr>
+<td>Thinking reserve</td>
+<td>2,000</td>
+<td>Model configuration</td>
+<td>Reasoning consumes the answer's space</td>
+</tr>
+<tr>
+<td>Response reserve</td>
+<td>2,000</td>
+<td>Maximum output setting</td>
+<td>Truncated or incomplete answers</td>
+</tr>
+<tr>
+<td>Safety margin</td>
+<td>500</td>
+<td>Engineering convention</td>
+<td>Overflow when estimates are wrong</td>
+</tr>
+</tbody>
+</table>
+<p>The allowances sum exactly to the window; a budget that does not add up is a wish. Pre-call counting is approximate because tokenization depends on exact characters, so keep the margin and use the matching tokenizer where available. After the call, feed reported usage back to calibrate estimates. Order matters too: durable rules near the beginning, the immediate task near the end, reference material between, because long middles are easier to overlook.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Filling the window with documents and wondering why the answer is truncated. Reserve output space before assembling the input.</p>
+</blockquote>
+<h3 id="sampling-and-the-sources-of-variation">Sampling and the sources of variation</h3>
+<p>At each step the model produces probabilities, not a command. A sampler chooses the token. At one extreme it always takes the most likely token, often called greedy or temperature-zero behavior. At the other it draws more freely, producing varied prose. Temperature rescales the distribution before selection; top-p or nucleus sampling limits the draw to the smallest set whose combined probability reaches a threshold.</p>
+<p>Variation has two independent sources. The sampler is one: when several tokens are plausible, a randomized draw can choose differently across runs. The serving environment is the other: models run on fleets, routing shifts, and providers improve backends. A platform may therefore describe a low-randomness setting as best-effort reproducibility rather than a guarantee, because model version and serving path are outside your control.</p>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>What it changes</th>
+<th>Typical use</th>
+<th>What it does not do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Greedy or temperature zero</td>
+<td>Selects the most likely token</td>
+<td>Extraction and classification</td>
+<td>Freeze version or infrastructure</td>
+</tr>
+<tr>
+<td>Higher temperature</td>
+<td>Flattens the distribution</td>
+<td>Brainstorming, varied phrasing</td>
+<td>Improve factual accuracy</td>
+</tr>
+<tr>
+<td>Top-p nucleus</td>
+<td>Restricts the probability mass</td>
+<td>Balance variety and coherence</td>
+<td>Guarantee a fixed token set</td>
+</tr>
+<tr>
+<td>Maximum output tokens</td>
+<td>Caps generated tokens</td>
+<td>Length and cost limits</td>
+<td>Tell the model what to include</td>
+</tr>
+<tr>
+<td>Version pinning</td>
+<td>Fixes the serving snapshot</td>
+<td>Reproducible evaluations</td>
+<td>Remove sampler randomness</td>
+</tr>
+</tbody>
+</table>
+<p>A test that asserts byte-identical prose will be flaky by design. Assert properties instead: valid JSON, a required field, a category from an allowed set, a citation to supplied text, a length bound. For truly stable output, reduce randomness, fix the prompt, and pin the model where possible. Design for variation rather than assuming it vanished.</p>
+<blockquote>
+<p><strong>Exam note:</strong> Lowering randomness narrows one source of change; pinning narrows another. Neither turns a probabilistic generator into a deterministic function.</p>
+</blockquote>
+<h3 id="thinking-as-a-visible-content-block">Thinking as a visible content block</h3>
+<p>Some models spend extra computation before answering. In the manual form called extended thinking, a request sets a thinking budget and the response contains thinking content blocks ahead of text blocks. The budget is a target, not a promise; the hard ceiling remains the maximum output setting, and thinking tokens are billed as output. A minimum applies, and the budget must leave room for the visible answer.</p>
+<p>Adaptive thinking changes who decides. The model evaluates each request, determines whether thinking is useful, and chooses its depth. A simple factual turn may produce no thinking block; a multi-step diagnostic turn may produce a long one. Thinking can also appear between tool calls so the model can examine a result before choosing the next action. Because a turn can legitimately have no block, code must never assume one is present.</p>
+<p>A thinking block is generated content separated from the canonical answer. It may carry a signature to pass back unchanged on later turns, and its visible summary can be omitted on some models. The text shown is a condensed summary, not a raw internal transcript. Treat it as a signal about how much work occurred, not a full explanation.</p>
+<p>Thinking pays off when a careful person would pause, write intermediate values, and check cases: reconciling figures, applying conflicting policies, diagnosing from weak signals. It wastes time on direct lookup, simple classification, and short rewrites. Measure the choice on a small representative set rather than trusting intuition.</p>
+<blockquote>
+<p><strong>Try it:</strong> Run twenty examples twice, changing only whether thinking is enabled. Record accuracy and ninety-fifth-percentile latency. Unchanged accuracy with doubled latency is a measured decision.</p>
+</blockquote>
+<h3 id="effort-budgets-and-fast-mode">Effort, budgets, and fast mode</h3>
+<p>Effort and thinking are separate controls. Thinking decides whether and how reasoning blocks occur; effort sets how much work the model puts into the whole response, including text, tool calls, and thinking. It belongs in the output configuration, not inside the thinking object, and ranges from low through medium and high to extended and maximum levels on supporting models. Effort is soft guidance, not a token count.</p>
+<p>So to cut cost on a thinking-enabled workload, lower effort first, because it scales the entire response down. For a hard ceiling, change maximum output tokens. If responses keep ending with a truncation reason, either give more room or ask for less work; which is right depends on whether the missing reasoning was needed. Lower effort also yields terser tool calls, useful in agent loops where each call consumes budget.</p>
+<p>Fast mode addresses delivery, not depth. It runs the same model on a faster inference configuration, increasing output tokens per second rather than reducing time to the first token. It is a paid acceleration, not a smaller model or a reasoning setting. Long streamed answers benefit most; a short answer slow to start is not rescued by faster tokens. Some modes restrict features or require explicit opt-in, so check eligibility before assuming the benefit.</p>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>Axis changed</th>
+<th>Hard or soft</th>
+<th>Best reason to use it</th>
+<th>Main trap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Thinking configuration</td>
+<td>Whether reasoning blocks occur</td>
+<td>Mode with budget targets</td>
+<td>Tasks rewarding intermediate checks</td>
+<td>Assuming a block each turn</td>
+</tr>
+<tr>
+<td>Effort level</td>
+<td>Work across the response</td>
+<td>Soft guidance</td>
+<td>Matching depth to difficulty</td>
+<td>Treating it as a token cap</td>
+</tr>
+<tr>
+<td>Maximum output tokens</td>
+<td>Generated token ceiling</td>
+<td>Hard limit</td>
+<td>Cost and length bounds</td>
+<td>Setting it too low for thinking plus text</td>
+</tr>
+<tr>
+<td>Fast mode</td>
+<td>Token delivery speed</td>
+<td>Option with restrictions</td>
+<td>Long streamed answers</td>
+<td>Expecting faster first tokens</td>
+</tr>
+</tbody>
+</table>
+<p>A pseudocode sketch makes the loop concrete; it is for reading, not pasting into a client.</p>
+<pre><code class="language-python"># Illustrative pseudocode: one response, token by token.
+def generate(prompt_tokens, settings, max_output):
+    window = settings.context_window
+    if len(prompt_tokens) + settings.think_reserve + max_output &gt; window:
+        raise BudgetError(&quot;reserve room for thinking and the answer&quot;)
+
+    sequence = list(prompt_tokens)
+    for _ in range(max_output):
+        distribution = model_next_token(sequence)
+        candidate = sample(distribution,
+                           temperature=settings.temperature,
+                           top_p=settings.top_p)
+        if candidate == END_OF_TURN:
+            break
+        sequence.append(candidate)
+        yield decode(candidate)   # streaming forwards each piece
+</code></pre>
+<p>The budget check comes first, sampling is an explicit step, and yielding each token is what makes streaming possible. Real clients add retries, signatures, and usage accounting around the same shape.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Expecting fast mode to make a hard task easier. It changes delivery speed, not reasoning depth or context budget.</p>
+</blockquote>
+<h3 id="usage-metadata-closes-the-loop">Usage metadata closes the loop</h3>
+<p>Responses normally carry usage figures: input tokens processed, output tokens generated, and often a breakdown separating thinking tokens from visible text. These numbers turn the budget table from a plan into a measurement. Compare the tokenizer estimate made before the call with the reported input count; a persistent gap means the estimation method needs adjustment. Compare the response reserve with reported output; frequent truncation reasons mean the reserve was too small or effort was too high for that task.</p>
+<pre><code class="language-json">{
+  &quot;usage&quot;: {
+    &quot;input_tokens&quot;: 8120,
+    &quot;output_tokens&quot;: 1730,
+    &quot;output_tokens_details&quot;: { &quot;thinking_tokens&quot;: 940 }
+  },
+  &quot;stop_reason&quot;: &quot;end_turn&quot;
+}
+</code></pre>
+<p>In this example more than half the generated tokens were reasoning rather than visible answer, yet all of them counted against the output cap and the bill. A team that budgeted only for a four-hundred-word reply would be surprised by the cost of the same reply under adaptive thinking. The remedy is not to abandon thinking but to record the split, set the cap for thinking plus text, and review the numbers by task type. A classification route might show almost no thinking, while a policy-conflict route shows a large share; one global setting then looks obviously wrong.</p>
+<p>Usage data also supports honest comparisons. When two prompt versions are evaluated, record the version alongside the token counts, because a quality gain that triples output is a different trade from one that costs nothing. When latency is reported, measure both time to first token and time to completion; a mode that opens quickly can still finish slowly. Together these fields turn a vague claim such as "this prompt is cheaper" into a checkable statement about tokens, cost, and tail latency.</p>
+<blockquote>
+<p><strong>Exam note:</strong> If a scenario gives you a usage report with a high thinking-token share and a truncated answer, the two facts belong together. Raise the output ceiling or lower effort; do not blame the prompt alone.</p>
+</blockquote>
+<h2 id="practice-lab">Practice lab</h2>
+<p><strong>Goal:</strong> Observe sampling variation and verify a token budget.</p>
+<p><strong>Steps:</strong></p>
+<ol>
+<li>Create a scratch branch and a file <code>token_notes.md</code>.</li>
+<li>Write a fixed prompt and a made-up next-token distribution: three candidates at 0.6, 0.3, and 0.1.</li>
+<li>Simulate ten draws by hand or with a short random script, recording each chosen token.</li>
+<li>Compare the sequences; they share a distribution but will differ.</li>
+<li>Fill the eight-row budget table for a 16,000-token window and confirm the sum.</li>
+<li>Cut the response reserve by 500 and choose which region to shrink to keep the total valid.</li>
+</ol>
+<p><strong>Expected observation:</strong> Identical inputs plus a random sampler yield different sequences, while a greedy rule would not. The budget sums exactly, and moving space forces a conscious trade — the same trade scenario items ask about.</p>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p>A support application answers questions from a 9,000-token policy manual. It sends the whole manual, the last thirty turns, and a 4,000-token maximum output. Users report truncated answers and inconsistent wording for the same rule. The team proposes a larger model.</p>
+<p>The symptoms are different. Truncation is a budget problem; variation is a sampling and versioning problem. A larger model addresses neither and costs more, so the proposal fails the constraint check.</p>
+<p>They rebuild the budget: cap and rank manual sections, reduce history to four turns plus a summary, declare a thinking reserve only for policy conflicts, set the response reserve from the answer contract, and keep a safety margin. For variation they lower randomness, pin the version, and replace string equality with checks for the rule identifier, a citation, and a length bound. A small ambiguous set keeps flexible wording.</p>
+<p><strong>Resolution:</strong> Reserve output space and fix test design before changing models. The larger model would have added cost without touching either cause.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Believing the model retrieves answers rather than predicting tokens.</li>
+<li>Treating input and output as separate allowances.</li>
+<li>Forgetting the response reserve before filling the window.</li>
+<li>Assuming a thinking block exists on every turn.</li>
+<li>Passing effort inside the thinking configuration.</li>
+<li>Treating effort as a hard cap instead of soft guidance.</li>
+<li>Expecting fast mode to change reasoning or first-token speed.</li>
+<li>Asserting byte-identical prose in tests.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>Generation is repeated next-token prediction conditioned on the preceding sequence.</li>
+<li>Token boundaries explain poor character-level counting; use code for exact work.</li>
+<li>The window is shared and must include reserves for thinking and the answer.</li>
+<li>Sampling and serving changes both create variation; reproducibility is best-effort.</li>
+<li>Extended thinking uses a budget and emits blocks; adaptive thinking is decided per request.</li>
+<li>Effort is soft guidance; maximum output tokens are the hard ceiling.</li>
+<li>Fast mode increases tokens per second, not depth or first-token speed.</li>
+<li>Assert properties such as schema, fields, and citations rather than exact wording.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<ol>
+<li>Why is exact character counting unreliable for a language model?</li>
+</ol>
+<p>A. Because it cannot read numbers.
+B. Because it processes tokens, chunks of characters, rather than characters.
+C. Because counting needs higher temperature.
+D. Because thinking blocks replace text.</p>
+<ol start="2">
+<li>A full document leaves no room for the answer. What is the most direct fix?</li>
+</ol>
+<p>A. Raise temperature.
+B. Reserve output space and rank or trim the input.
+C. Enable fast mode.
+D. Raise effort.</p>
+<ol start="3">
+<li>Which statement about adaptive thinking is accurate?</li>
+</ol>
+<p>A. Every turn must begin with a block.
+B. The model decides per request, so a turn may have no block.
+C. It is an effort level.
+D. It removes the output ceiling.</p>
+<ol start="4">
+<li>Which control gives a strict per-request spending ceiling?</li>
+</ol>
+<p>A. Effort, because it is a hard budget.
+B. The thinking summary display.
+C. Maximum output tokens, because it is a hard cap.
+D. Fast mode, because it costs less.</p>
+<ol start="5">
+<li>What does fast mode primarily change?</li>
+</ol>
+<p>A. Reasoning depth.
+B. Vocabulary size.
+C. The speed at which output tokens arrive.
+D. Input token price only.</p>
+<ol start="6">
+<li>Which assertion suits extraction of a policy identifier from supplied text?</li>
+</ol>
+<p>A. Exact match to a memorized sentence.
+B. A valid identifier from the allowed set plus a citation to the text.
+C. At least two thousand tokens.
+D. A thinking block must appear.</p>
+<ol start="7">
+<li>A usage report shows 940 thinking tokens out of 1,730 generated tokens and a truncated answer. What is the most direct response?</li>
+</ol>
+<p>A. Increase temperature so the answer finishes sooner.
+B. Raise the output ceiling or lower effort so thinking plus text fits.
+C. Remove all citations from the prompt.
+D. Switch to batch processing for this interactive request.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<ol>
+<li>
+<p><strong>B.</strong> Tokens are chunks, so character operations misalign with processing steps. A is false; models handle numeric text. C confuses sampling with counting. D is unrelated.</p>
+</li>
+<li>
+<p><strong>B.</strong> Input and output share one window, so reserve space and reduce or rank sources. A changes wording only. C changes delivery speed. D may consume more of the cap.</p>
+</li>
+<li>
+<p><strong>B.</strong> Adaptive thinking delegates the decision to each request, so absence is valid. A is the opposite. C confuses a mode with effort. D is false because the cap remains.</p>
+</li>
+<li>
+<p><strong>C.</strong> Maximum output is a hard ceiling; effort is soft guidance. A reverses that. B affects display, not generation. D is a premium acceleration, not a discount.</p>
+</li>
+<li>
+<p><strong>C.</strong> Fast mode uses a quicker inference configuration for the same model. A is governed by thinking and effort. B is unrelated. D misstates pricing.</p>
+</li>
+<li>
+<p><strong>B.</strong> Property checks accept varied wording while verifying the decision and grounding. A is brittle. C imposes irrelevant length. D assumes a block that may be absent.</p>
+</li>
+<li>
+<p><strong>B.</strong> Thinking and text share the output cap, so either more room or less work addresses truncation. A changes selection, not length allocation. C weakens grounding without fixing the cap. D adds delay on an interactive path.</p>
+</li>
+</ol>
+<hr />
+<p><em>End of chapter 2.</em></p>
+  <nav><a href="../index.html">&larr; Index</a><a href="01-getting-oriented.html">&larr; Previous</a><a href="03-developer-platform.html">Next: The Developer Platform and Reading Its Code &rarr;</a></nav>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../../js/feedback.js"></script>
+<script src="../../js/progress.js"></script>
+<script src="../../../js/analytics-tracker.js" defer></script>
+</body>
+</html>

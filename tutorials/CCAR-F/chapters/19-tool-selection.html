@@ -1,0 +1,113 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>19. How Models Select Tools</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>19. How Models Select Tools</h1>
+
+<p>Before an agent can use a tool, it must decide that this tool, right now, is the right one. That decision is made from a compact description of the tool's purpose and parameters, not from reading its implementation. Tool selection is therefore a design problem in documentation: the words you publish about a tool are the routing instructions the model follows. This chapter explains what the model sees, what it weighs, and how to diagnose routes that go wrong.</p>
+
+<h2>Descriptions Are Routing Instructions</h2>
+
+<p>At decision time the model typically sees a tool's name, a short description, and a parameter schema. It does not see your intent, your architecture diagram, or the comment in the source file that explains the tool's real purpose. If the description says "handles data", the model has almost no information; if it says "reads the current subscription balance for one account; does not modify billing", the model has a precise route.</p>
+
+<p>A good description answers four questions in two or three sentences: what operation is performed, on what object, under what conditions it is appropriate, and what it explicitly does <em>not</em> do. The negative clause is disproportionately valuable because it separates neighbouring tools. Compare a weak pair — <code>search</code> described as "search the system" and <code>lookup</code> described as "look things up" — with a strong pair: <code>find_customer_orders</code> described as "list order IDs for a customer in the last 90 days; use for discovery, not for full order details", and <code>get_order_detail</code> described as "return line items and payment status for one known order ID; requires an ID from find_customer_orders".</p>
+
+<p>The second pair encodes a workflow. It tells the model that one tool produces the input the other consumes, and that using the detail tool with a guessed ID is inappropriate. Descriptions can therefore express preconditions and sequencing, not just capability. Keep them short enough to be read at a glance, but specific enough to rule out the wrong choice.</p>
+
+<div class="tip">Write descriptions as if they were routing rules for a new colleague: verb, object, scope, and boundary. Avoid "utility", "helper", "various", and "general-purpose" — these words carry no routing signal.</div>
+
+<h2>Signals the Model Weighs</h2>
+
+<p>Tool selection is not a lookup of keywords; it is a judgement over several signals. Understanding the signals lets you strengthen the useful ones and remove misleading ones.</p>
+
+<ul>
+  <li><strong>Name semantics.</strong> A name like <code>archive_thread</code> suggests a write even before the description is read. Names that sound similar invite confusion.</li>
+  <li><strong>Description overlap with the request.</strong> Words shared between the user's task and the tool description raise the chance of selection, but superficial overlap can mislead — "invoice" appears in both billing and document tools.</li>
+  <li><strong>Parameter affordance.</strong> If the user supplied a customer ID and one tool has a <code>customer_id</code> parameter while another needs a free-text query, the structured tool becomes more attractive.</li>
+  <li><strong>Stated outcome.</strong> Descriptions that name the returned artefact — IDs, counts, a boolean, a summary — help the model match the tool to its next step.</li>
+  <li><strong>Contextual precedent.</strong> Tools used successfully earlier in the same conversation, or shown in an example, gain and keep attention.</li>
+  <li><strong>Catalog order and grouping.</strong> Order is a weak but real signal; when two tools are nearly indistinguishable, the earlier one often wins.</li>
+</ul>
+
+<p>No single signal dominates. A poorly named tool can still be chosen on the strength of its description, and a well-described tool can be ignored when the required argument is missing from the conversation. This is why selection failures are rarely fixed by changing one word; they usually require aligning name, description, schema, and available context.</p>
+
+<h2>Where Ambiguity Creeps In</h2>
+
+<p>Ambiguity is not a property of language alone; it is a property of the catalog. The most common source is overlapping capability. Two tools that both "search customers" — one against the CRM and one against the data warehouse — force the model to guess which source the user meant. Unless the descriptions state freshness, authority, and cost, the choice is arbitrary.</p>
+
+<p>A second source is generic naming. Tools called <code>get_data</code>, <code>run</code>, or <code>process</code> give the model nothing to discriminate on. A third is hidden preconditions: a tool requires an ID obtained from another tool, but its description does not say so, so the model calls it with a fabricated value. A fourth is multi-intent requests. "Find the failing orders and email the supplier" contains a discovery step and a communication step; a model that jumps straight to the communication action has skipped a necessary stage.</p>
+
+<p>Finally, catalogs drift. A tool is deprecated, its scope narrows after a policy change, or a new tool is added with 90 percent overlapping purpose. The old description remains, so the model keeps routing to behaviour that no longer matches. Selection quality decays silently unless catalogs are reviewed on a schedule.</p>
+
+<div class="warn">If two tools can satisfy the same request and nothing in their descriptions distinguishes them, the model will choose inconsistently. Inconsistency in logs is a catalog design defect, not a model defect.</div>
+
+<h2>Selection Heuristics</h2>
+
+<p>Given a choice, a reliable agent tends to follow a small set of heuristics. Encoding these in descriptions and instructions makes behaviour predictable.</p>
+
+<table>
+<thead><tr><th>Heuristic</th><th>How to express it</th></tr></thead>
+<tbody>
+<tr><td>Specific before general</td><td>"Use only for exact order IDs; for partial names use find_customer_orders"</td></tr>
+<tr><td>Read before write</td><td>"Requires an ID returned by a read tool; never guess identifiers"</td></tr>
+<tr><td>Local before remote</td><td>"Reads the checked-out repository; no network access"</td></tr>
+<tr><td>Cheap before expensive</td><td>"Cached values up to 5 minutes old; use before the live API"</td></tr>
+<tr><td>Ask when truly tied</td><td>"If both billing and shipping records match, ask which the user means"</td></tr>
+</tbody>
+</table>
+
+<p>These heuristics mirror good engineering instincts: gather evidence before acting, prefer reversible operations, and avoid unnecessary cost. When the model has no such guidance, it may choose the shortest path to a plausible answer rather than the safest path to a correct one.</p>
+
+<h2>Controlling Selection</h2>
+
+<p>There are four levers for controlling which tools get used, in increasing order of force. The first is <strong>description engineering</strong> — the cheapest lever and the first thing to try. The second is <strong>scoping</strong>: expose only the tools relevant to the current agent or task, so ambiguous neighbours are never candidates. The third is <strong>structured routing</strong>: a planner step that emits an explicit tool name, validated by a schema before execution. The fourth is <strong>API-level constraints</strong>, such as a parameter that restricts the candidate set to a single tool for a turn.</p>
+
+<pre><code>route = {"tool": "get_order_detail", "reason": "known_order_id",
+         "preconditions_met": True}
+if not route["preconditions_met"] or budget_ms &lt; 100:
+    ask_user("Which source should I use?")
+else:
+    execute(route["tool"], arguments)</code></pre>
+
+<p>Each lever has a cost. Aggressive scoping can remove a tool the agent unexpectedly needs. A separate planner adds a call and a failure mode. API-level constraints reduce flexibility and can trap the agent if the correct tool was excluded. Use the lightest lever that fixes the observed problem, and document why a stronger one was or was not adopted.</p>
+
+<div class="note">Never rely on a single instruction such as "always prefer tool A" to resolve a structural overlap. Either the descriptions distinguish the tools or they do not; an extra sentence in a system prompt is not a durable fix.</div>
+
+<h2>Analyzing Selection Failures</h2>
+
+<p>Treat selection as a measurable behaviour. Log, for each decision, the user request, the candidate tool names and descriptions visible at that moment, the tool chosen, the arguments, and whether the step advanced the task. Over a few hundred runs, patterns appear: a pair of tools confused more than ten percent of the time, a tool never selected despite being correct, or a particular phrasing that reliably triggers the wrong route.</p>
+
+<p>Build a simple confusion table from those logs: rows are intended tools, columns are selected tools, cells are counts. Off-diagonal entries with high counts identify description pairs to rewrite or scopes to separate. After changing a description, replay the same set of requests and compare the table. This turns tool selection from guesswork into an engineering loop with a baseline and a result.</p>
+
+<div class="exercise"><strong>Exercise 19.1 — Rewrite for routing.</strong> You publish two tools: <code>query</code> ("query records") and <code>fetch</code> ("fetch data"). Users report that order-history questions sometimes hit the accounting table. Rewrite both descriptions with verb, object, scope, precondition, and an explicit negative clause. Add one example request that should route to each, and explain which signal your rewrite strengthens.</div>
+
+<div class="exercise"><strong>Exercise 19.2 — Diagnose a misroute.</strong> An agent has <code>send_email</code> and <code>draft_email</code>. Logs show that 30 percent of "prepare a update for the team" requests call <code>send_email</code>. Build a confusion table with four requests and two intended tools, identify the signal most likely causing the errors, and propose two fixes at different lever levels. State what you would measure to confirm the fix worked.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+  <li>What four questions should a tool description answer to function as a routing instruction?</li>
+  <li>List three signals the model weighs when choosing among tools, and explain how parameter shape can influence the choice.</li>
+  <li>Why does overlapping capability produce inconsistent selection rather than a single predictable wrong answer?</li>
+  <li>Name the four levers for controlling selection, from lightest to strongest.</li>
+  <li>How does a confusion table turn selection failures into measurable engineering work?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+  <li>Tool descriptions are routing instructions; write verb, object, scope, precondition, and explicit boundaries.</li>
+  <li>Selection combines name semantics, description overlap, parameter affordance, returned artefacts, precedent, and ordering.</li>
+  <li>Ambiguity usually comes from catalog structure — overlapping tools, generic names, hidden preconditions, and drift.</li>
+  <li>Prefer specific over general, read over write, local over remote, and cheap over expensive; encode these in descriptions.</li>
+  <li>Use the lightest control that works, and track selection quality with a confusion table over logged decisions.</li>
+</ul>
+
+<nav><a href="18-enforcement-and-oversight.html">&larr; Previous</a><span></span><a href="20-tool-schemas.html">Next: Input Schemas and Strict Validation &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>

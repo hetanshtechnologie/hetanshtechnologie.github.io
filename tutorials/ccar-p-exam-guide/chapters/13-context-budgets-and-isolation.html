@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 13 — Context Budgets, Compaction, and Isolation</title>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+  <a class="back" href="../index.html">&larr; Back to Index</a>
+  <h1>Chapter 13 — Context Budgets, Compaction, and Isolation</h1>
+
+  <h2>Learning objectives</h2>
+  <ul>
+    <li>Explain why context is a finite, performance-sensitive resource in model-backed systems.</li>
+    <li>Apply strategies for selecting, ordering, compacting, and refreshing context to preserve relevance.</li>
+    <li>Distinguish working context from durable state and decide what information belongs in each.</li>
+    <li>Use isolation techniques, including delegated subtasks, to prevent context pollution and overload.</li>
+    <li>Evaluate trade-offs between completeness, recency, latency, and cost when managing context.</li>
+  </ul>
+
+  <h2>Key concepts</h2>
+
+  <h3>Context as a finite budget</h3>
+  <p>Every request to a language model operates within a limited context window: the combined space available for instructions, user input, retrieved information, tool results, and prior conversation. This space is not merely a storage limit; it is a budget that affects quality, latency, and cost. Larger contexts can provide more information but often increase processing time and expense, and they can dilute attention if irrelevant material displaces what matters. Effective architecture treats context as a scarce resource to be allocated deliberately rather than a container to be filled indiscriminately.</p>
+  <p>Context budgeting begins with prioritization. Not all information has equal value for a given task. Core instructions, the current request, and the most relevant evidence typically deserve priority over verbose history or marginally related material. Architects should ask: what must the model know to produce a correct, safe, and useful response right now? What can be summarized, referenced, or retrieved later? These questions shift context management from accumulation to curation.</p>
+  <p>Budget pressure grows in multi-turn interactions and multi-step workflows. Each turn may add messages, and each tool call may return data. Without active management, the working set becomes cluttered with stale or redundant content, increasing the risk of missed constraints, inconsistent behavior, and higher operating costs. Designing for long-running or complex tasks therefore requires explicit policies for retention, compaction, and reset.</p>
+
+  <div class="note">
+    <p><strong>Exam note:</strong> More context is not always better. Prefer relevant, well-structured context over exhaustive inclusion; manage growth with selection, compaction, and isolation.</p>
+  </div>
+
+  <h3>Selecting and ordering relevant information</h3>
+  <p>Selection determines what enters the context. Relevance should be judged against the current objective, constraints, and required evidence. For knowledge-intensive tasks, retrieval systems can supply candidate passages, but inclusion should be filtered by relevance, diversity, and freshness rather than raw quantity. For conversational tasks, recent turns and unresolved decisions are usually more important than distant exchanges. Metadata—such as source, timestamp, or confidence—can help prioritize what to include and how to interpret it.</p>
+  <p>Ordering also influences effectiveness. Critical instructions and task definitions should be easy to locate. Supporting evidence should be presented clearly, with attribution where possible, so the model can distinguish sources and assess applicability. Grouping related information and removing duplicates reduces noise. While different systems behave differently, a general principle holds: structured, relevant, and unambiguous context supports more reliable behavior than a large, unordered dump of material.</p>
+  <p>Selection policies should account for trust. Untrusted content—such as user-supplied documents or external pages—may be relevant but should be handled carefully, separated from core instructions, and limited to what is necessary. Including untrusted material without boundaries can introduce safety risks as well as confusion. Context curation is therefore both a quality practice and a protective control.</p>
+
+  <table>
+    <tr>
+      <th>Context element</th>
+      <th>Include when</th>
+      <th>Limit or exclude when</th>
+      <th>Management tactic</th>
+    </tr>
+    <tr>
+      <td>Core instructions/policy</td>
+      <td>Always required for behavior and boundaries</td>
+      <td>Never excluded; avoid duplication</td>
+      <td>Keep concise, stable, and prominent</td>
+    </tr>
+    <tr>
+      <td>Current request and goals</td>
+      <td>Essential for every response</td>
+      <td>Redundant restatements</td>
+      <td>Normalize and clarify once</td>
+    </tr>
+    <tr>
+      <td>Retrieved evidence</td>
+      <td>Directly relevant and trustworthy for the task</td>
+      <td>Low relevance, stale, or excessive volume</td>
+      <td>Rank, filter, and cite key passages</td>
+    </tr>
+    <tr>
+      <td>Conversation history</td>
+      <td>Needed for continuity and unresolved decisions</td>
+      <td>Old, resolved, or irrelevant turns</td>
+      <td>Summarize or window recent context</td>
+    </tr>
+    <tr>
+      <td>Tool results</td>
+      <td>Required for the next decision or output</td>
+      <td>Large raw outputs after extraction</td>
+      <td>Extract key fields; store details externally</td>
+    </tr>
+  </table>
+
+  <h3>Compaction, summarization, and context editing</h3>
+  <p>As interactions grow, compaction preserves continuity without retaining every token. <strong>Summarization</strong> condenses prior exchanges or intermediate results into key facts, decisions, constraints, and open questions. <strong>Selective retention</strong> keeps specific items verbatim—such as identifiers, agreed requirements, or policy constraints—while discarding filler. <strong>Context editing</strong> removes outdated or superseded information so the working set reflects the current state. These techniques reduce size and noise but introduce a risk: important details can be lost or distorted during compression.</p>
+  <p>To manage this risk, compaction should be purposeful. Summaries can be structured around categories that matter for the task (goals, confirmed facts, decisions, pending items, risks). Critical data that must remain exact—numbers, identifiers, citations, or explicit constraints—should be preserved explicitly rather than paraphrased. When feasible, external storage can hold full artifacts while the context carries references or concise extracts. This approach maintains access to detail without burdening every request.</p>
+  <p>Compaction policies should also consider timing. Compact too early and you may lose information needed for imminent steps; compact too late and you pay unnecessary cost or hit limits. Triggers can include token thresholds, turn counts, task phase transitions, or detection of redundancy. Like other architectural controls, compaction strategies should be evaluated against task outcomes to ensure they preserve what matters.</p>
+
+  <div class="warning">
+    <p><strong>Common mistake:</strong> Summarizing away critical constraints, identifiers, or evidence details. Preserve exact values and authoritative references outside summaries when they affect correctness or accountability.</p>
+  </div>
+
+  <h3>Working context versus durable state</h3>
+  <p>Not all information belongs in the prompt. <strong>Working context</strong> is the transient set of information needed for the current reasoning step. <strong>Durable state</strong> is information that must persist across steps, sessions, or processes—such as user preferences (where appropriate), task records, retrieved document stores, or audit logs. Conflating the two leads to bloated prompts and fragile designs. A sound architecture stores durable information in appropriate systems and injects only relevant slices into working context when needed.</p>
+  <p>Separating these concerns improves scalability and control. External state can be queried, updated, versioned, and governed with access controls. Working context can remain focused and efficient. For example, instead of carrying an entire case history in every request, the system can retrieve a summary and the most relevant recent events. Instead of retaining all tool outputs in the conversation, it can store results and pass forward extracted findings with references.</p>
+
+  <table>
+    <tr>
+      <th>Information type</th>
+      <th>Best location</th>
+      <th>Reason</th>
+      <th>Risk if misplaced</th>
+    </tr>
+    <tr>
+      <td>Current task instructions</td>
+      <td>Working context</td>
+      <td>Needed for immediate behavior</td>
+      <td>Omission causes drift or errors</td>
+    </tr>
+    <tr>
+      <td>Full document corpus</td>
+      <td>Durable store/index</td>
+      <td>Too large and reusable</td>
+      <td>Context overflow, high cost</td>
+    </tr>
+    <tr>
+      <td>Key decisions and constraints</td>
+      <td>Both (state + injected summary)</td>
+      <td>Must persist and guide current step</td>
+      <td>Lost constraints or inconsistency</td>
+    </tr>
+    <tr>
+      <td>Raw tool logs</td>
+      <td>Durable logs</td>
+      <td>Audit and debugging value</td>
+      <td>Noise and exposure in prompts</td>
+    </tr>
+    <tr>
+      <td>Extracted findings for next step</td>
+      <td>Working context</td>
+      <td>Directly supports next action</td>
+      <td>Repeated work if missing</td>
+    </tr>
+  </table>
+
+  <h3>Isolation and delegated subtasks</h3>
+  <p>Isolation limits the spread of irrelevant or risky information by giving subtasks their own bounded contexts. In delegated designs, a worker can focus on a specific question—such as searching a subset of sources or analyzing one document—without inheriting the entire conversation history. The worker returns a concise result, allowing the coordinator to integrate findings without absorbing all intermediate material. This reduces context pollution and can improve both focus and efficiency.</p>
+  <p>Isolation also supports safety and control. Untrusted content can be confined to a subtask that has restricted capabilities, limiting its ability to influence broader behavior. Similarly, sensitive data can be exposed only to components that require it. Boundaries must be explicit: what the subtask receives, what it may do, and what it returns. Poorly designed isolation can fragment necessary information, so handoffs should include sufficient summaries and references to maintain coherence.</p>
+
+  <pre><code class="language-json">{
+  "context_policy": {
+    "max_working_items": 12,
+    "priority_order": ["system_instructions", "current_goal", "constraints", "top_evidence", "recent_decisions"],
+    "compaction": {
+      "trigger": "token_threshold_or_phase_change",
+      "preserve_verbatim": ["identifiers", "policy_constraints", "source_citations"],
+      "summary_sections": ["confirmed_facts", "open_questions", "next_actions"]
+    },
+    "isolation": {
+      "use_delegated_subtask_for": ["large_document_review", "exploratory_search"],
+      "return_format": ["key_findings", "evidence_refs", "uncertainties"]
+    }
+  }
+}</code></pre>
+
+  <div class="tip">
+    <p><strong>Try it:</strong> Review a long interaction trace and label each context element as essential now, summarize, store externally, or discard. This exercise often reveals easy wins in cost and clarity.</p>
+  </div>
+
+  <h2>Worked scenario</h2>
+  <h3>Context</h3>
+  <p>A project team uses an assistant to support preparation of weekly status briefs. Over the course of a session, users paste meeting notes, request document lookups, refine drafts, and ask follow-up questions. After several iterations, the assistant begins to miss earlier constraints, repeats resolved points, and responses become slower and more expensive. The full transcript, including large tool outputs and intermediate drafts, is being included in each new request.</p>
+
+  <h3>Analysis</h3>
+  <p>The symptoms indicate context overload and poor curation. Accumulating raw history and tool results consumes the budget with low-value or redundant material, crowding out critical instructions and current priorities. The loss of earlier constraints suggests that important information is either buried or degraded. Latency and cost increases are consistent with growing context size. The task does not require every prior token to be present; it requires continuity of goals, decisions, constraints, and the latest relevant evidence.</p>
+  <p>A better design separates durable artifacts (full notes, drafts, lookup results) from working context. The working set should carry the current objective, a structured summary of confirmed decisions and constraints, and only the most relevant excerpts for the next step. Exploratory lookups can be handled in isolated subtasks that return concise findings. Compaction should preserve exact identifiers, dates, and agreed commitments while summarizing narrative detail.</p>
+
+  <h3>Resolution</h3>
+  <p>The architect introduces a context policy. Each turn includes core instructions, the current request, a maintained “session brief” (goals, decisions, constraints, open questions), and selected evidence for the immediate task. Full meeting notes and tool outputs are stored externally; the assistant receives extracted highlights with references. After major phase changes—such as completing a draft—the session brief is updated and older conversational detail is compacted. Large document reviews run as delegated subtasks that return key findings and citations.</p>
+  <p>These changes restore focus on relevant information, reduce token usage, and improve consistency with stated constraints. The team monitors response quality, latency, and cost to confirm that compaction preserves necessary detail. When a summary omits an important point, the policy is adjusted to preserve that category verbatim, demonstrating iterative refinement of context management.</p>
+
+  <h2>Common mistakes</h2>
+  <ul>
+    <li>Treating the context window as unlimited storage and appending all history and tool outputs.</li>
+    <li>Failing to prioritize relevant information, allowing low-value content to displace critical instructions or evidence.</li>
+    <li>Compacting aggressively without preserving exact constraints, identifiers, or source references.</li>
+    <li>Storing durable artifacts only in transient context instead of in appropriate external state.</li>
+    <li>Avoiding isolation and forcing one context to handle large exploratory work, causing pollution and overload.</li>
+  </ul>
+
+  <h2>Chapter summary</h2>
+  <ul>
+    <li>Context is a finite budget that affects quality, latency, and cost; it must be curated, not merely accumulated.</li>
+    <li>Effective selection and ordering prioritize relevant, trustworthy information and present it clearly.</li>
+    <li>Compaction and editing control growth but require safeguards to preserve critical details and constraints.</li>
+    <li>Separating working context from durable state improves scalability, governance, and focus.</li>
+    <li>Isolation and delegated subtasks prevent context pollution by bounding scope and returning concise results.</li>
+  </ul>
+
+  <h2>Checkpoint questions</h2>
+  <ol>
+    <li>
+      <p>Why is adding more context not always beneficial?</p>
+      <p>A. Models cannot process structured information<br>
+      B. Irrelevant or excessive context can increase cost, latency, and reduce focus on key information<br>
+      C. Context has no effect on response quality<br>
+      D. Shorter contexts always produce better answers</p>
+    </li>
+    <li>
+      <p>What is the main risk of aggressive summarization?</p>
+      <p>A. Reduced storage requirements<br>
+      B. Loss or distortion of critical details such as constraints or identifiers<br>
+      C. Improved traceability<br>
+      D. Faster retrieval from external systems</p>
+    </li>
+    <li>
+      <p>Which information is generally best kept in durable state rather than repeated in every prompt?</p>
+      <p>A. The current request’s immediate objective<br>
+      B. Core safety instructions needed every time<br>
+      C. Full document corpora and raw historical logs<br>
+      D. A concise summary of decisions needed now</p>
+    </li>
+    <li>
+      <p>How does isolation through delegated subtasks help context management?</p>
+      <p>A. By giving every subtask the entire conversation history<br>
+      B. By bounding exploratory work and returning concise findings to the coordinator<br>
+      C. By eliminating the need for summarization<br>
+      D. By guaranteeing identical outputs across runs</p>
+    </li>
+    <li>
+      <p>Which practice best preserves continuity during long interactions?</p>
+      <p>A. Append every message and tool output without filtering<br>
+      B. Maintain a structured summary of goals, decisions, constraints, and open questions<br>
+      C. Remove all prior context after each turn<br>
+      D. Replace instructions with retrieved documents</p>
+    </li>
+    <li>
+      <p>When should exact values be preserved verbatim rather than paraphrased in summaries?</p>
+      <p>A. When they are identifiers, constraints, or evidence references affecting correctness or accountability<br>
+      B. When they make the summary longer<br>
+      C. Only when the user explicitly requests poetry<br>
+      D. Never, because summaries should always be abstract</p>
+    </li>
+  </ol>
+
+  <h3>Answers and rationale</h3>
+  <ol>
+    <li><strong>Correct: B.</strong> Excessive or irrelevant context can dilute attention and increase resource use. A and C are false, and D is an overgeneralization.</li>
+    <li><strong>Correct: B.</strong> Summarization can omit or alter important details if not managed carefully. A may be a benefit but not a risk; C and D are unrelated.</li>
+    <li><strong>Correct: C.</strong> Large corpora and raw logs are better stored externally and accessed selectively. A and D are often needed in working context, and B is typically required in prompts but should be managed concisely.</li>
+    <li><strong>Correct: B.</strong> Isolation limits scope and prevents intermediate material from overwhelming the main context. A causes pollution, C is unrealistic, and D is not guaranteed.</li>
+    <li><strong>Correct: B.</strong> A structured, maintained summary preserves essential continuity efficiently. A causes overload, C destroys continuity, and D removes necessary guidance.</li>
+    <li><strong>Correct: A.</strong> Exact values critical to correctness or accountability must be preserved. B, C, and D do not provide valid criteria.</li>
+  </ol>
+
+  <hr>
+  <p class="footer-note"><em>End of chapter 13.</em></p>
+
+  <nav>
+    <a href="12-layered-guardrails-and-input-safety.html">&larr; Previous</a>
+    <a href="14-caching-and-reuse-efficiency.html">Next &rarr;</a>
+  </nav>
+</div>
+</body>
+</html>

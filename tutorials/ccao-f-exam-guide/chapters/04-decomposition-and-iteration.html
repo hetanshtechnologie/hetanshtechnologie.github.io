@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 4 — Decomposing Work: Step Chains and Iteration — CCAO-F Exam Guide</title>
+<link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+<div class="chapter">
+<a href="../../../" style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;margin-bottom:14px;"><img src="../../../images/logo.png" alt="Hetansh Technologie" style="height:100px;width:auto;vertical-align:middle;border-radius:10px;object-fit:contain;position:relative;top:20px;"></a>
+<a href="../" style="display:inline-block;margin-bottom:12px;font-size:.9rem;color:#3b82f6;text-decoration:none;">&larr; Back to Tutorials</a>
+  <span class="tag">Chapter 4</span>
+  <h1>Decomposing Work: Step Chains and Iteration</h1>
+  <!-- BOOK-CONTENT-START -->
+<h2 id="learning-objectives">Learning objectives</h2>
+<ul>
+<li>Explain why one large request usually produces weaker and harder-to-check work than a sequence of smaller requests.</li>
+<li>Break a goal into ordered steps, each with a defined input, action, and output.</li>
+<li>Build a chain in which one step's output becomes the next step's input.</li>
+<li>Decide how many steps a task needs and place checkpoints where they catch the most risk.</li>
+<li>Tell which steps can run in parallel and which have a fixed order.</li>
+<li>Refine output with specific, named feedback instead of "make it better," keep a log of prompt versions, and measure whether iteration helped.</li>
+</ul>
+<h2 id="key-concepts">Key concepts</h2>
+<h3 id="why-a-single-large-request-often-fails">Why a single large request often fails</h3>
+<p>It is tempting to hand an assistant one enormous instruction: research a market, compare the options, write a recommendation, and format it as a one-page brief. The request sounds reasonable, but it concentrates several different kinds of work into a single turn, and each kind has its own standard. Research wants sources and dates. Comparison wants one criterion applied evenly to every option. A recommendation wants a decision rule. A brief wants a defined audience and format. When all of these are asked for at once, the response typically satisfies some and silently drops others — sources go undated, criteria shift between options, or the recommendation arrives without a stated reason.</p>
+<p>The second problem is inspection. A single block of text gives you a result but no diagnostic trail. If the brief is unconvincing, you cannot tell whether the research was shallow, the criteria were weak, or the writing buried the point. The usual response is to rewrite the whole request and hope for a better result, which is slow and unreliable.</p>
+<p>The third problem is error propagation. In an unbroken answer, an early mistake is carried forward silently. If the first paragraph misstates a figure, every later sentence inherits it, and fluent writing makes the error harder to notice. Splitting the work does not prevent errors, but it exposes each one at the moment it is made, before it spreads.</p>
+<p>Decomposition is an inventory exercise, not a clever trick: list the distinct jobs hidden inside a request, then give each its own turn so it can be done and checked on its own terms. The candidate who builds this habit will find that many exam scenarios become straightforward, because the correct option is usually the one that isolates a checkable piece of work rather than bundling it with everything else.</p>
+<blockquote>
+<p><strong>Exam note:</strong> A scenario describing a long, multi-part request with a disappointing result is almost always testing decomposition. Choose the option that separates the work into ordered, checkable steps, not the one that merely rewrites a longer single prompt.</p>
+</blockquote>
+<h3 id="what-decomposition-actually-means">What decomposition actually means</h3>
+<p>Decomposition turns one goal into a small set of ordered steps, each with three things: an input it consumes, an action it performs, and an output it produces. That definition gives you a test for whether you have decomposed well. If you cannot say what a step consumes and what it produces, the step is still too vague.</p>
+<p>Consider the goal "prepare a summary of a research topic for a team briefing." A weak decomposition would be "gather information, then write the summary," because the first step hides most of the difficulty. A better version names the outputs:</p>
+<ol>
+<li>Collect candidate sources, noting origin and date for each.</li>
+<li>Screen for relevance and reliability, discarding the rest.</li>
+<li>Extract key claims and supporting figures from what remains.</li>
+<li>Group the claims into themes and note where sources disagree.</li>
+<li>Draft a short summary organized around those themes.</li>
+<li>Check the draft against the extracted claims for unsupported statements.</li>
+</ol>
+<p>Each step produces something tangible: a source list, a screened list, a claim set, a theme map, a draft, and a checked draft. The steps are not only smaller; they are different in kind. Collecting differs from screening, screening from extracting, extracting from writing. That difference is what makes separate steps worthwhile. Splitting one action into ten identical fragments adds overhead without adding control.</p>
+<p>A reliable rule is to split where the <em>success criterion</em> changes. Screening is judged by relevance and reliability; drafting is judged by clarity and audience fit. Because the standards differ, the activities deserve separate instructions and separate checks. When the standard stays the same, keep the activities together. This also shows why decomposition is not the same as length control. Asking for shorter paragraphs is a formatting instruction; asking for the source list first, then the screened list, then the claims, creates intermediate artifacts that can be inspected.</p>
+<h3 id="chaining-steps-output-becomes-input">Chaining steps: output becomes input</h3>
+<p>Once work is split, the steps must be connected. In a prompt chain, the output of one step becomes the input of the next. That is the defining feature of chaining and what turns a list of tasks into a pipeline.</p>
+<p>The connection matters twice. It preserves context without repetition: the second step receives the curated output of the first rather than being told the whole background again. And it creates a stable handoff: each step gets a bounded, named input, which clarifies its job and makes its output easier to evaluate.</p>
+<p>A three-step chain for a research-to-summary task can be sketched like this:</p>
+<pre><code class="language-text">STEP 1 — COLLECT
+Input:  topic statement plus any supplied documents
+Action: list candidate sources with title, origin, and date; flag unsigned items
+Output: SOURCE LIST (one line per candidate)
+
+STEP 2 — SCREEN AND EXTRACT
+Input:  SOURCE LIST from Step 1
+Action: keep only relevant, dated sources; extract two or three strongest claims
+        from each; mark any claim the source does not clearly support
+Output: CLAIM SHEET (claim | source | date | confidence label)
+
+STEP 3 — DRAFT AND CHECK
+Input:  CLAIM SHEET from Step 2
+Action: write a 200-word summary by theme; use only claims on the sheet; append
+        a list of anything the sheet could not support
+Output: DRAFT SUMMARY plus SUPPORT GAPS
+</code></pre>
+<p>Each step names its input and output, so the handoff is unambiguous, and the outputs carry labels that later steps can reference precisely. The final step is limited to claims on the sheet, which keeps the summary grounded in what was actually collected. It also produces a second artifact — the support gaps — that records where the evidence ran out. A well-designed chain delivers not only an answer but a description of the answer's limits.</p>
+<p>Chaining changes how you write each prompt too. Because the input is already curated, later prompts can be short and narrow; you point at a named artifact and give one instruction. This is why chains often use fewer words overall than one enormous prompt, despite taking more turns.</p>
+<blockquote>
+<p><strong>Try it:</strong> Take a request you would normally send in one message. Write down the intermediate artifact you would want after each stage. If you cannot name the artifact, you have not yet found the real step boundary.</p>
+</blockquote>
+<h3 id="deciding-how-many-steps-are-enough">Deciding how many steps are enough</h3>
+<p>More steps are not automatically better. Each one adds a turn, a handoff, and a chance to introduce a copying error. The goal is the smallest number of steps that makes the risky parts of the work individually checkable.</p>
+<p>Three signals help you decide. The first is <em>heterogeneity</em>: are the activities genuinely different in kind? Collecting and screening are, so they justify separate steps; screening and underlining important lines are not. The second is <em>checkability</em>: would you want to inspect the intermediate result before continuing? A bad source list would ruin everything downstream, so it earns its own step and checkpoint. The third is <em>branching</em>: does the next action depend on a decision made in the previous one? If the summary structure depends on which themes emerged, theme-building must finish before drafting starts.</p>
+<p>When all three signals are absent, one step is enough. When all three are present, a separate step is warranted. Most tasks fall between the two, and the right answer is usually three to six steps rather than two or twenty.</p>
+<p>A related idea is the "smallest checkable unit." Comparing three options could mean one extraction step per option followed by a comparison, or one step extracting all three with shared criteria. Decide by asking whether a mistake in one option would be hard to spot among the three. If it would, separate them; if the extractions are mechanical and uniform, keep them together and spend the saved step checking the comparison.</p>
+<p>Over-decomposition has a cost that exam questions like to test. A chain of fifteen micro-steps can lose the overall goal, with nobody responsible for whether the pieces still answer the request. If a chain grows long, add a final assembly step whose only job is to confirm that the outputs add up to what was asked.</p>
+<h3 id="checkpoints-between-steps">Checkpoints between steps</h3>
+<p>A checkpoint is a deliberate pause at which a person inspects an intermediate output before it is passed forward. Checkpoints make a chain safe. Without them, chaining merely moves an error downstream; with them, the error is caught close to its source.</p>
+<p>Not every step needs one. Ask instead: "If this output is wrong, how expensive is it to fix after the next step has used it?" An error in a source list is cheap to fix when the list is produced and expensive after a summary has been written from it, so that is a high-value checkpoint. A formatting choice is cheap to fix at any time and needs no formal pause.</p>
+<p>Checkpoints should be tied to a specific test, not to a feeling that things look fine. Effective tests are short and objective:</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Main risk</th>
+<th>Checkpoint test</th>
+<th>Checked by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Collect sources</td>
+<td>Missing dates, invented titles</td>
+<td>Every line has an origin and a date</td>
+<td>Analyst</td>
+</tr>
+<tr>
+<td>Screen and extract</td>
+<td>Unsupported claims</td>
+<td>Each claim traces to a source line</td>
+<td>Analyst</td>
+</tr>
+<tr>
+<td>Compare options</td>
+<td>Criteria drift</td>
+<td>Same criteria applied to all options</td>
+<td>Reviewer</td>
+</tr>
+<tr>
+<td>Draft summary</td>
+<td>Ungrounded sentences</td>
+<td>No sentence lacks a claim-sheet entry</td>
+<td>Team lead</td>
+</tr>
+<tr>
+<td>Assemble final brief</td>
+<td>Original goal lost</td>
+<td>Brief answers each part of the request</td>
+<td>Team lead</td>
+</tr>
+</tbody>
+</table>
+<p>A checkpoint with a written test is repeatable: a colleague can apply it, and the same test can be used on the next run of the pipeline. The "checked by" column matters as much as the test. A checkpoint performed by the person who produced the output is useful for mechanical errors but weaker for judgment calls. When a decision is consequential, assign the check to a different role, applying the human review boundary inside the chain rather than only at its end.</p>
+<blockquote>
+<p><strong>Common mistake:</strong> Treating a checkpoint as a quick glance. Without a written test, a checkpoint tends to become a rubber stamp, especially late in a long chain when the reviewer wants to move on.</p>
+</blockquote>
+<h3 id="order-versus-parallelism">Order versus parallelism</h3>
+<p>Some steps must run in sequence; others can safely run together. Knowing which is which shortens a workflow without weakening it.</p>
+<p>Order is fixed when one step consumes another's output. You cannot screen a source list before it exists, or draft from claims not yet extracted. These are dependencies, and no scheduling removes them. Ignoring a dependency produces invented inputs, which is worse than producing nothing.</p>
+<p>Parallelism is safe when steps consume the same input and produce independent outputs. Extracting the same fields from three documents uses shared criteria and no step feeds another, so the three extractions can run together and be merged later. Checking a draft for tone and checking it for factual support are likewise independent reviews of one fixed text.</p>
+<p>The trap is assuming independence where a hidden dependency exists. "Summarize each report, then identify contradictions between them" allows the summaries in parallel, but the contradiction check cannot start until all summaries exist. Sending all four tasks at once produces a contradiction analysis built on incomplete or guessed content. The safe pattern is: parallelize where inputs are fixed and outputs independent, and keep the sequence wherever one output feeds another.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Parallel?</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Extract the same fields from several documents</td>
+<td>Yes</td>
+<td>Shared criteria, no output feeds another</td>
+</tr>
+<tr>
+<td>Screen sources, then draft from the screened set</td>
+<td>No</td>
+<td>Drafting depends on the screening result</td>
+</tr>
+<tr>
+<td>Check tone and factual support of one draft</td>
+<td>Yes</td>
+<td>Two independent reviews of fixed text</td>
+</tr>
+<tr>
+<td>Build themes, then organize a summary around them</td>
+<td>No</td>
+<td>Structure depends on the themes</td>
+</tr>
+<tr>
+<td>Translate one brief into three languages</td>
+<td>Yes</td>
+<td>Each uses the same source</td>
+</tr>
+<tr>
+<td>Translate, then check consistency across versions</td>
+<td>No</td>
+<td>Consistency check needs all versions</td>
+</tr>
+</tbody>
+</table>
+<p>Parallelism also helps verification. When independent steps use the same criteria, disagreement between their outputs is informative: one extraction reporting a figure the others contradict is a signal to investigate. Sequential chains offer fewer such cross-checks, because each step sees only what the previous one passed along.</p>
+<h3 id="iterative-refinement-feedback-that-names-the-gap">Iterative refinement: feedback that names the gap</h3>
+<p>A chain moves work forward through different activities; iteration improves one output by cycling back to it. Both take several turns, but they solve different problems. Chaining answers "what comes next?" Iteration answers "what exactly is wrong with this, and how should it change?"</p>
+<p>The quality of iteration is determined almost entirely by the quality of feedback. "Make it better," "improve this," and "try again" supply no usable signal. They may produce a different version, but different is not the same as better, and there is no way to tell whether the real problem was addressed. Compare two pieces of feedback on a draft summary:</p>
+<ul>
+<li>Weak: "This isn't quite right. Make it better."</li>
+<li>Strong: "In the second paragraph, remove the 30 percent figure — the claim sheet does not contain it — or label it unsupported. Then shorten the opening from four sentences to two."</li>
+</ul>
+<p>The strong version does three things: it points to a location, identifies a defect, and gives a corrective action with a limit. The revision is verifiable by looking at the second paragraph and counting the opening sentences.</p>
+<p>A dependable structure for feedback has four parts: location, observation, instruction, constraint. "In the comparison table, the third row uses a different unit from the first two. Convert it to the same unit and keep the table to five rows." Location is the table, observation the unit mismatch, instruction the conversion, constraint the row limit.</p>
+<p>Iteration works best when feedback is anchored to a standard outside the response. A rubric, a set of required sections, a source document, or the original request all provide that anchor. "Make it more concise" is subjective; "reduce it to 150 words and keep the three headings" is objective. Convert subjective preferences into measurable properties wherever possible.</p>
+<p>There is also a limit. After two or three rounds with no clear improvement, the problem is usually in the instruction or the underlying material, not the drafting. That is the moment to step back and check whether an earlier step supplied the wrong input. Polishing a broken foundation is a common way to waste time.</p>
+<blockquote>
+<p><strong>Exam note:</strong> When a question asks how to improve a weak response, prefer the option giving specific, bounded feedback over the one requesting a general improvement. Specificity is the hallmark of good iteration and is easy to test.</p>
+</blockquote>
+<h3 id="keeping-a-change-log">Keeping a change log</h3>
+<p>When a prompt or chain is revised more than once, it is easy to lose track of what changed and why. A change log is a short record of versions, reasons, and effects. It prevents accidental regression by letting you return to an earlier version, supports reuse by showing which version produced the accepted result, and makes measurement possible by letting you compare outcomes instead of relying on memory.</p>
+<p>A minimal log records four fields: version, what changed, why, and what happened. The last field should be as concrete as the evidence allows — an error count, a word count, a pass or fail against a checklist — rather than a general impression.</p>
+<pre><code class="language-text">PROMPT: Screening step for source list
+V1  Prompt: &quot;Keep the relevant sources.&quot;
+    Result: 8 of 12 retained; no reasons for exclusion.
+V2  Added date filter and one exclusion reason each.
+    Why: undated sources in V1 could not be audited.
+    Result: 5 of 12 retained; every exclusion explained.
+V3  Added: flag sources with no named organization.
+    Why: two V2 sources were anonymous posts.
+    Result: one more flagged for a human decision.
+</code></pre>
+<p>Each version builds on the observed weakness of the last, which is the log's deeper purpose: it forces you to state a reason, and a revision without a reason is usually a guess. For chains, also log changes to the <em>handoff</em> between steps. Changing a step's output format from a table to prose can break the next step even when its prompt looks fine.</p>
+<h3 id="measuring-whether-iteration-improved-the-result">Measuring whether iteration improved the result</h3>
+<p>Iteration costs time and attention, so it is worth asking whether it paid off. Define a small checklist and score each version against the same items. For a summary, that might be: required sections present, no unsupported figures, correct length, correct register, and a stated uncertainty note. A change that lifts the score from three to five is clearly useful; a change that leaves it at three but improves prose may still help, but only if polish was the goal.</p>
+<p>When one output is hard to score, compare two candidates side by side against a rubric. The comparison makes differences that are invisible when judging each alone. Treat the assistant's own self-assessment as a clue about omissions, not as independent evidence.</p>
+<p>Measure the right thing. A revision that improves readability while introducing a factual error is a net loss for most work tasks, so keep accuracy checks separate from style checks. Not every inconsistency should be "fixed": if two credible sources genuinely disagree, forcing agreement creates a cleaner answer and a worse one. The correct refinement labels the disagreement. A measurement system that rewards smoothness alone pushes toward the wrong edit.</p>
+<h3 id="one-shot-chained-and-iterative-approaches-compared">One-shot, chained, and iterative approaches compared</h3>
+<p>The three approaches are not rivals; each fits a different situation, and a mature workflow often combines them.</p>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>One-shot</th>
+<th>Chained</th>
+<th>Iterative</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Structure</td>
+<td>One request, one response</td>
+<td>Ordered steps with named handoffs</td>
+<td>Repeated revisions of one output</td>
+</tr>
+<tr>
+<td>Best for</td>
+<td>Simple, low-risk, well-specified tasks</td>
+<td>Multi-stage work with distinct activities</td>
+<td>Refining against a known standard</td>
+</tr>
+<tr>
+<td>Main strength</td>
+<td>Fast and cheap</td>
+<td>Checkable intermediate artifacts</td>
+<td>Targeted improvement</td>
+</tr>
+<tr>
+<td>Main weakness</td>
+<td>Hard to diagnose when wrong</td>
+<td>More turns and copying effort</td>
+<td>Can polish a fundamentally wrong answer</td>
+</tr>
+<tr>
+<td>Error visibility</td>
+<td>Low — one block of text</td>
+<td>High — each step inspected</td>
+<td>Medium — only the revision is seen</td>
+</tr>
+<tr>
+<td>Verification point</td>
+<td>Only at the end</td>
+<td>At each checkpoint</td>
+<td>After each revision</td>
+</tr>
+</tbody>
+</table>
+<p>One-shot requests trade control for speed, chains trade speed for visibility, and iteration trades speed for refinement. The choice depends on the cost of being wrong and the number of distinct activities hidden in the task. A low-stakes formatting change suits one shot; a research pipeline with consequential figures suits a chain; a draft that is accurate but aimed at the wrong audience suits iteration. Many real tasks combine all three, and exam questions tend to reward recognizing that combination rather than insisting one method is universally best. Treat any answer claiming a single approach is always correct as a warning sign.</p>
+<blockquote>
+<p><strong>Exam note:</strong> High-stakes decisions, untrusted sources, or tasks with several distinct activities point to a chain with checkpoints. A single output that misses a known requirement points instead to iteration with specific feedback.</p>
+</blockquote>
+<h2 id="worked-scenario">Worked scenario</h2>
+<p><strong>Situation.</strong> An analyst is asked to prepare a one-page briefing for a team lead on whether a proposed process change is worth piloting. Three documents arrive: an internal proposal, a spreadsheet of historical results, and informal meeting notes. The analyst's first attempt is one long prompt asking for "a briefing with a recommendation based on the attached files." The result reads well but contains a figure absent from every document and treats the meeting notes as settled fact.</p>
+<p><strong>Diagnosis.</strong> The single prompt mixed four activities — reading, separating evidence from opinion, weighing options, and writing — while offering no way to inspect any of them. The invented figure appeared during drafting, where the model tried to make the narrative complete. The notes were treated as facts because nothing asked for their status to be labeled. Neither error could be located in a single block of text.</p>
+<p><strong>Redesign.</strong> The analyst rebuilds the work as a short chain with checkpoints:</p>
+<pre><code class="language-text">1. INVENTORY: list each document, its date if shown, and whether its contents
+   are data, proposal, or opinion.  -&gt; MATERIAL MAP
+   Check: every document accounted for; opinion labeled.
+
+2. EVIDENCE: extract only claims and figures actually written in the documents;
+   record the source and status of each; infer no numbers.  -&gt; EVIDENCE TABLE
+   Check: each figure traced to a document; no invented figures.
+
+3. DECIDE: state a rule for recommending a pilot, apply it, and list supporting
+   evidence and blockers.  -&gt; DECISION NOTE
+   Check: rule stated before the recommendation.
+
+4. BRIEF: write one page for a team lead; recommendation first; evidence and
+   &quot;what we do not know&quot; sections; use only evidence-table claims.
+   -&gt; DRAFT BRIEF plus OPEN QUESTIONS
+</code></pre>
+<p><strong>Execution and refinement.</strong> Step 1 reveals that the meeting notes are undated and mostly opinion. Step 2 yields eleven claims, of which four are data, five are proposals, and two are opinion; the invented figure never appears because inference is forbidden. At Step 3 the analyst sees that the proposed rule — one improving data point is enough — is too weak, and revises it before applying it, logging the change with its reason. The first draft is accurate but buries the recommendation in paragraph three. The analyst iterates with named feedback: "Move the recommendation to the first sentence, cut the background from 180 words to 60, and leave the 'what we do not know' section unchanged."</p>
+<p><strong>Result.</strong> The team lead receives a brief whose recommendation traces to a stated rule and a small evidence table, with open questions listed separately. When asked where a figure came from, the analyst points to the evidence table rather than reconstructing the conversation. The process took four steps, one upstream rule change, and one targeted revision — far easier to audit than the original prompt.</p>
+<p><strong>Why this matters for the exam.</strong> The scenario combines familiar exam features: multiple documents, a mix of fact and opinion, a consequential recommendation, and a fluent but wrong first attempt. The remedy is to isolate risky activities, make their outputs inspectable, and give feedback that names a specific gap. Notice that the analyst corrected the decision rule rather than endlessly rewriting the final brief. Knowing when to go upstream is a higher-level skill than polishing downstream, and it is frequently tested.</p>
+<h2 id="common-mistakes">Common mistakes</h2>
+<ul>
+<li>Sending one large request for a multi-stage task and hoping the result is internally consistent.</li>
+<li>Splitting a task into steps without naming what each produces, leaving handoffs vague.</li>
+<li>Chaining steps in the wrong order, forcing a later step to use an input that does not exist.</li>
+<li>Running dependent steps in parallel and accepting a result built on guessed inputs.</li>
+<li>Treating checkpoints as a quick glance rather than applying a short, written test.</li>
+<li>Using "make it better" as feedback, which supplies no usable direction.</li>
+<li>Iterating on wording when the real problem is an unsupported claim or flawed rule upstream.</li>
+<li>Judging improvement by impression instead of applying the same checklist to each version.</li>
+<li>Adding more steps when one step's instruction is actually unclear.</li>
+</ul>
+<h2 id="chapter-summary">Chapter summary</h2>
+<ul>
+<li>One large request mixes different standards, hides diagnosis, and lets early errors spread silently.</li>
+<li>Decomposition creates ordered steps with a defined input, action, and output; split where the success criterion changes.</li>
+<li>In a chain, each step's output becomes the next step's input, so prompts stay short and grounded in a named artifact.</li>
+<li>Use the smallest number of steps that makes risky work checkable, and add an assembly step if a long chain might lose the goal.</li>
+<li>Place checkpoints where errors would be costly later, and attach a specific test and a checker to each.</li>
+<li>Parallelize only steps with fixed inputs and independent outputs; preserve order wherever one step depends on another.</li>
+<li>Refine with feedback naming a location, observation, instruction, and constraint.</li>
+<li>Log versions with reasons and effects, including changes to handoff formats.</li>
+<li>Measure each version against the same checklist, keeping accuracy separate from style.</li>
+<li>One-shot, chained, and iterative methods suit different tasks; mature workflows combine them.</li>
+</ul>
+<h2 id="checkpoint-questions">Checkpoint questions</h2>
+<p><strong>1. An analyst asks the assistant to review five contracts and flag unusual clauses. The result summarizes all five but defines "unusual" differently for each. What is the best fix?</strong></p>
+<p>A. Ask for a more concise summary.
+B. Restate the request with a stronger warning to be careful.
+C. Define one criterion for "unusual," then apply it to each contract in a separate step and compare.
+D. Combine the five contracts into one document and ask again.</p>
+<p><strong>2. Which is the clearest example of a prompt chain?</strong></p>
+<p>A. Asking for a draft, then a shorter version of the same draft.
+B. Asking for sources, passing that list into a prompt that extracts claims, then passing the claims into a drafting prompt.
+C. Asking for three different summaries of one article in a single message.
+D. Asking for a summary and a critique in the same response.</p>
+<p><strong>3. A workflow has four steps: collect sources, screen sources, draft a summary, check the draft for tone. Which pair can safely run in parallel?</strong></p>
+<p>A. Collect and screen sources.
+B. Screen sources and draft the summary.
+C. Draft the summary and check its tone.
+D. Check tone and check factual support of the same finished draft.</p>
+<p><strong>4. Which refinement feedback is most likely to produce a useful revision?</strong></p>
+<p>A. "Make this better."
+B. "Improve the tone and try to be more accurate."
+C. "In paragraph two, remove the unsourced figure, then reduce the introduction to two sentences."
+D. "Rewrite the whole thing from scratch."</p>
+<p><strong>5. What is the main purpose of a checkpoint between two steps?</strong></p>
+<p>A. To make the response sound more polished.
+B. To inspect an intermediate output before an error spreads.
+C. To reduce the number of steps in the workflow.
+D. To let the assistant grade its own work.</p>
+<p><strong>6. After three revisions a draft is smoother but still rests on a flawed rule set in an earlier step. What should the analyst do?</strong></p>
+<p>A. Keep refining the wording until it reads well.
+B. Ask for a different draft using the same rule.
+C. Revisit and correct the earlier step, then rebuild what depends on it.
+D. Accept the draft because polish is the main goal.</p>
+<p><strong>7. Which change-log entry is most useful to a later reviewer?</strong></p>
+<p>A. "V2 — improved."
+B. "V2 — changed the prompt; looks better."
+C. "V2 — added a date filter and a reason for each exclusion; V1 had undated sources; retained sources fell from eight to five."
+D. "V2 — the assistant suggested this version."</p>
+<p><strong>8. A colleague claims chaining is always better than a single prompt. What is the best response?</strong></p>
+<p>A. Agree, because more steps always produce better answers.
+B. Disagree, because simple low-risk tasks may not justify the overhead and the method depends on the task.
+C. Agree, but only when the chain has more than ten steps.
+D. Disagree, because iteration is always superior to chaining.</p>
+<h3 id="answers-and-rationale">Answers and rationale</h3>
+<p><strong>1. Correct answer: C.</strong> A shared standard applied consistently is exactly what a lack of common definition calls for, and separate steps make the application auditable. Option A addresses length, not the problem. Option B adds emphasis without a standard, so the inconsistency likely returns. Option D changes the input format but leaves the definition undefined.</p>
+<p><strong>2. Correct answer: B.</strong> Each step consumes the named output of the previous one: sources feed extraction, extraction feeds drafting. Option A is iteration on one output. Option C produces parallel independent summaries, not a connected sequence. Option D combines two activities in one response, the opposite of decomposition.</p>
+<p><strong>3. Correct answer: D.</strong> Both checks consume the same finished text and neither needs the other's result. Option A fails because screening needs the collected sources. Option B fails because drafting depends on which sources survive screening. Option C fails because a tone check needs the finished draft as input; it can be paired with a support check only after drafting ends.</p>
+<p><strong>4. Correct answer: C.</strong> It names a location, an observation, an instruction, and a constraint, and the result can be verified. Option A gives no signal. Option B is subjective with no test for "more accurate." Option D discards useful work and says nothing about what was wrong.</p>
+<p><strong>5. Correct answer: B.</strong> The point is to catch an error near its source before later steps build on it. Option A confuses a checkpoint with polishing. Option C is wrong because checkpoints add pauses rather than remove steps. Option D is wrong because a meaningful checkpoint is a human inspection against a test.</p>
+<p><strong>6. Correct answer: C.</strong> When the defect sits in an earlier step, fix it upstream and rebuild what depends on it; polishing cannot repair a flawed rule. Option A wastes effort on surface features. Option B reproduces the same flawed structure with new words. Option D accepts a known defect and mistakes polish for correctness.</p>
+<p><strong>7. Correct answer: C.</strong> It records what changed, why, and the observed effect, so a reviewer can understand and reproduce the decision. Option A records almost nothing. Option B gives neither reason nor outcome. Option D treats a suggestion as justification, which is not evidence the change helped.</p>
+<p><strong>8. Correct answer: B.</strong> Method choice depends on the task: simple low-risk requests can be handled in one shot, while multi-stage consequential work benefits from a chain. Option A makes an absolute claim ignoring overhead. Option C invents an arbitrary threshold. Option D makes the opposite absolute claim, which the comparison table rejects.</p>
+<hr />
+<p><em>End of chapter 4.</em></p>
+  <!-- BOOK-CONTENT-END -->
+
+  <nav>
+    <a href="03-context-and-instructions.html">&larr; Previous</a>
+    <a href="../index.html">Back to Index</a>
+    <a href="05-task-family-playbooks.html">Next &rarr;</a>
+  </nav>
+</div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/feedback.js"></script>
+  <script src="../../js/access.js"></script>
+  <script src="../../js/tts.js"></script>
+  <script src="../../../js/analytics-tracker.js" defer></script>
+  <script src="../../js/progress.js"></script>
+</body>
+</html>

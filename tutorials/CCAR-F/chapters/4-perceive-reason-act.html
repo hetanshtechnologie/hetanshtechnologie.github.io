@@ -1,0 +1,110 @@
+<!DOCTYPE html><html lang="en"><head>
+<link rel="icon" type="image/png" sizes="32x32" href="../../../images/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="../../../images/favicon-16.png">
+<link rel="apple-touch-icon" href="../../../images/apple-touch-icon.png">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>4. The Observe–Decide–Act Loop</title>
+<link rel="stylesheet" href="../styles.css">
+</head><body><div class="chapter">
+<a class="back" href="../index.html">&larr; Back to Index</a>
+<h1>4. The Observe–Decide–Act Loop</h1>
+
+<p>An agent does not produce one answer; it conducts a sequence. Each pass through that sequence has the same skeleton: observe the current situation, decide on an action, act, and observe the result. The output of one pass becomes the input of the next. Understanding this loop as a data-flow problem — rather than as a mysterious conversation — makes it possible to reason about state, cost, and failures precisely.</p>
+
+<h2>The four phases of one iteration</h2>
+
+<p>Name the phases so you can discuss them: <strong>perception</strong> gathers the relevant facts; <strong>decision</strong> selects the next action; <strong>action</strong> invokes a tool or emits a response; <strong>observation</strong> captures what changed. A fifth activity, updating state, runs alongside them. Every phase should be visible in your logs, because a loop that cannot be inspected cannot be debugged.</p>
+
+<p>Consider a simple goal: "confirm whether order ORD-104827 can be shipped today." Iteration one perceives the user request and the current time, decides to look up the order, calls <code>get_order_status</code>, and observes "pending, warehouse = Berlin, stock = 0." Iteration two perceives that observation, decides to check a second system, calls <code>get_stock_level</code>, and observes "restock expected 16:00." Iteration three perceives the new fact, decides the goal is satisfied, and answers with a qualified yes. Three iterations, two tools, one answer.</p>
+
+<p>The loop is not a straight line. Observations can invalidate earlier decisions, forcing a branch rather than a continuation. If <code>get_stock_level</code> had returned "unknown," iteration three might decide to query a different source instead of answering. This ability to revise is the reason a loop exists; a pipeline would have committed to its next stage regardless.</p>
+
+<div class="note"><strong>Naming convention.</strong> This book uses "perceive, decide, act, observe" and "observe–decide–act" interchangeably for the same cycle. The observation phase closes one iteration and feeds the next, so the ordering is circular rather than linear.</div>
+
+<h2>Perception: deciding what enters the loop</h2>
+
+<p>Perception is not passive. The system must choose which facts are relevant, and that choice has a cost. Everything placed in the context window consumes tokens and competes for attention; a stale or irrelevant document can steer a decision as effectively as a correct one. Good perception is a filtering problem: present the smallest set of facts sufficient for the next decision.</p>
+
+<p>Sources typically include the user's request, the system instructions, the tool catalog, prior observations in this session, and retrieved external material. Each has a different trust level. The user's request is authoritative about intent but may contain mistakes. Tool output is authoritative about the system it queried but may be stale. Retrieved documents are untrusted content: they may describe facts, but they must not be allowed to issue instructions to the loop.</p>
+
+<table>
+<tr><th>Source</th><th>Trust for facts</th><th>Trust for instructions</th><th>Typical risk</th></tr>
+<tr><td>User request</td><td>Medium</td><td>High for goal, low for policy</td><td>Ambiguous or conflicting intent</td></tr>
+<tr><td>System instructions</td><td>High</td><td>High</td><td>Overly long or contradictory</td></tr>
+<tr><td>Tool output</td><td>High within scope</td><td>None</td><td>Staleness, partial results</td></tr>
+<tr><td>Retrieved documents</td><td>Medium</td><td>None</td><td>Embedded adversarial text</td></tr>
+<tr><td>Prior observations</td><td>High if recorded</td><td>None</td><td>Drift after compaction</td></tr>
+</table>
+
+<p>Mark boundaries explicitly in the material you assemble. When a retrieved passage says "ignore previous instructions," the loop should treat those words as data to be summarised, not as a command. Delimiting untrusted text and stating the rule once in the system instructions is more reliable than hoping the model intuits the distinction.</p>
+
+<h2>Deciding: from state to action</h2>
+
+<p>The decision phase maps the current state to one of several actions: call a tool, ask the user a clarifying question, produce a final answer, or escalate. The quality of that mapping depends on three things — a clear goal statement, accurate state, and an action space whose options do not overlap. If the goal is "reduce the error rate," the loop has no termination criterion and will wander. If the goal is "identify the deployment that raised the error rate above 2 percent and report its ID," the loop has something it can check.</p>
+
+<p>Write goals with a verification condition attached. "Find the missing invoice" is vague; "find invoice ORD-104827 or report that three named systems contain no record of it" is verifiable. The difference shows up in the loop: with the second goal, the system can recognise when it has exhausted its sources and stop. With the first, it keeps searching indefinitely.</p>
+
+<div class="exercise"><strong>Exercise 4.1 — Annotate a loop.</strong> A helper is asked to "explain why the nightly job failed." It reads the job log, sees a database timeout, queries the database health endpoint, sees high latency, checks the deployment history, finds a config change at 02:10, and reports the finding. Label each of the five actions with the phase it belongs to, note one observation that changed the next decision, and rewrite the goal so the loop has an explicit stopping condition.</div>
+
+<h2>Acting and observing: closing the loop</h2>
+
+<p>An action is only useful if its result returns to the loop in a usable form. Tool results should be structured, bounded in size, and labelled with the tool that produced them. A 400-line log dump pushed into context can crowd out the goal; a summary with line references and an error count preserves what matters. The general rule is to return the smallest result that supports the next decision, with a pointer to the full data if needed.</p>
+
+<p>Observation also means noticing absence. If a query returns zero rows, the loop must distinguish "no matching records" from "the query was malformed." Many failed runs come from treating an empty result as a fact and proceeding down the wrong branch. Include result counts and status codes in the observation so absence is interpreted correctly.</p>
+
+<p>When an action fails, the observation should carry a retry classification: transient, permanent, or policy-denied. A transient timeout may be retried; a validation error should change the arguments; a policy denial should stop that path and escalate. Conflating these categories produces loops that retry forbidden actions or give up on recoverable ones.</p>
+
+<pre><code>observation:
+  tool: get_stock_level
+  call_id: "c-7f21"
+  status: partial
+  data:
+    warehouse: Berlin
+    available_units: 0
+    restock_eta: "2026-11-21T16:00:00Z"
+  meta:
+    rows_returned: 1
+    stale_seconds: 42
+    retry_class: none
+    source: inventory_api_v2</code></pre>
+
+<div class="tip">Attach a <code>call_id</code> to every action and repeat it in the observation. When two tools return similar data, the identifier prevents the loop from attributing a result to the wrong call — a subtle error that is almost invisible in a plain-text transcript.</div>
+
+<h2>State updates and continuity between iterations</h2>
+
+<p>A loop is stateless only if you make it so. In practice you maintain a working state: the goal, the actions taken, the key observations, the remaining budget, and the current best hypothesis. This state must be updated deliberately after each iteration. If you rely on the entire conversation as memory, important facts get buried; if you keep a structured summary, you can carry it forward compactly.</p>
+
+<p>Distinguish three kinds of state. <em>Ephemeral</em> state lives only within one run — the current plan and scratch results. <em>Session</em> state persists across turns in the same conversation — facts the user confirmed earlier. <em>Durable</em> state survives failures and restarts — a task record in an external store. Mixing them causes bugs: a task that resumes after a crash and repeats a refund because the "already done" fact lived only in the lost conversation.</p>
+
+<p>Choose a small set of fields and update them at a fixed point in each iteration. A minimal working record might contain <code>goal</code>, <code>step_count</code>, <code>completed_actions</code>, <code>open_questions</code>, and <code>last_result_digest</code>. Keeping it small is a feature: a compact state can be injected into context cheaply and can be persisted after every step without much overhead.</p>
+
+<h2>Traceability: making the loop explainable</h2>
+
+<p>Traceability is the ability to reconstruct why the system did what it did. It matters for debugging, for audit, and for improvement. A useful trace records, for every iteration, the state at the start, the action selected, the tool arguments, the observation, the state update, and the reason for continuing or stopping. The "reason" field need not be a long essay; a short category such as <code>goal_met</code>, <code>budget_exhausted</code>, or <code>awaiting_clarification</code> is enough.</p>
+
+<p>Traces also reveal waste. If 60 percent of runs call <code>search_knowledge_base</code> twice with nearly identical queries, the tool description or the perception filter needs work. If escalations happen mostly after a particular tool's <code>partial</code> result, that tool's contract needs a clearer success signal. Aggregate trace statistics, not single anecdotes, should drive changes to the loop.</p>
+
+<div class="exercise"><strong>Exercise 4.2 — Design a trace record.</strong> Specify eight fields for one iteration of a loop that resolves customer address updates. Your record must let an auditor answer: what did the system know, what did it do, what came back, and why did it continue? Include one field that captures an idempotency key and one that records the stop reason. List two questions the trace cannot answer and say what you would add.</div>
+
+<h2>Check your understanding</h2>
+<ol>
+<li>Name the four phases of one iteration and explain how observation connects iterations.</li>
+<li>Why is perception a filtering problem rather than a matter of including everything available?</li>
+<li>What is the difference between a transient failure, a permanent failure, and a policy denial?</li>
+<li>Why must durable state live outside the conversation when write actions are involved?</li>
+<li>What does a trace need to record to support both debugging and audit?</li>
+</ol>
+
+<h2>Summary</h2>
+<ul>
+<li>An iteration consists of perception, decision, action, observation, and a deliberate state update.</li>
+<li>Perception should include the smallest sufficient set of facts, with clear trust boundaries for untrusted content.</li>
+<li>Goals need verification conditions so the loop can recognise success or exhaustion.</li>
+<li>Tool results should be structured, bounded, labelled with a call identifier, and classified for retry.</li>
+<li>Keep ephemeral, session, and durable state separate; persist completion facts before risky actions.</li>
+<li>Traces record state, action, result, and stop reason, and aggregate statistics reveal systemic waste.</li>
+</ul>
+
+<nav><a href="3-tools-as-foundation.html">&larr; Tools as the Basis of Agency</a><span></span><a href="5-loop-control.html">Next: Stopping, Iterating, and Escalating &rarr;</a></nav>
+</div><script src="../../js/progress.js"></script></body></html>
