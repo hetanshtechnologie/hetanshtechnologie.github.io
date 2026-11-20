@@ -1,18 +1,3 @@
-import { sb, CARD } from '../config.js';
-import {
-  state, loadTemplates, loadLatestInvitation, loadGuestBatches, loadGuests,
-  selectBatch, inviteLimit, currentPlan, planFeature, designFor, detailsFor,
-  loadPlan, loadJobs
-} from '../store.js';
-import {
-  ensureFonts, prepareAssets, renderExportCanvas, renderPreview
-} from '../renderer.js';
-import {
-  escapeHtml, escapeAttr, toast, formatDate, formatDateTime, canvasToBlob,
-  downloadBlob, safeName, sleep
-} from '../utils.js';
-import { t, getLang } from '../i18n.js';
-
 let cancelRequested = false;
 let running = false;
 let zipBlob = null;
@@ -37,7 +22,7 @@ function swiftStep(activeIndex) {
   return `<div class="steps">${steps.map(([n, label], i) => `<div class="step ${i < activeIndex ? 'done' : i === activeIndex ? 'active' : ''}"><span class="n">${i < activeIndex ? '✓' : n}</span>${escapeHtml(label)}</div>`).join('')}</div>`;
 }
 
-export async function render(container) {
+async function renderGenerate(container) {
   const [templates] = await Promise.all([
     loadTemplates(),
     loadPlan().catch(() => null)
@@ -200,7 +185,7 @@ export async function render(container) {
   container.querySelector('#gen-batch').addEventListener('change', async (event) => {
     selectBatch(event.target.value || null);
     await loadGuests(state.selectedBatchId, true).catch(() => []);
-    await render(container);
+    await renderGenerate(container);
   });
 
   container.querySelector('#gen-cloud').addEventListener('change', () => {});

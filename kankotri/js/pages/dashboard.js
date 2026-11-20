@@ -1,8 +1,4 @@
-import { state, loadGuestBatches, loadJobs, loadLatestInvitation, inviteLimit, currentPlan, isPaidPlan } from '../store.js';
-import { escapeHtml, formatDateTime, formatDate, statusBadge, emptyState, initials } from '../utils.js';
-import { t, getLang } from '../i18n.js';
-
-export async function render(container) {
+async function renderDashboard(container) {
   const [batches, jobs] = await Promise.all([
     loadGuestBatches(true).catch(() => []),
     loadJobs(24, true).catch(() => [])

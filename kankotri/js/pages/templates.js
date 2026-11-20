@@ -1,13 +1,6 @@
-import { loadTemplates, canUseTemplate, setSelectedTemplate, selectedTemplate, templateKey, state } from '../store.js';
-import { renderThumbnail, renderPreview, prepareAssets, ensureFonts } from '../renderer.js';
-import { escapeHtml, escapeAttr, openModal, toast, debounce, loadingBlock, emptyState } from '../utils.js';
-import { t, getLang } from '../i18n.js';
-import { openUpgrade } from './pricing.js';
-import { PAGE_SIZE, CATEGORIES } from '../config.js';
-
 const thumbCache = new Map();
 
-export async function render(container) {
+async function renderTemplates(container) {
   const templates = await loadTemplates(true);
   const lang = getLang();
   let search = '';

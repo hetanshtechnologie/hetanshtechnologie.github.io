@@ -1,12 +1,3 @@
-import { sb, CATEGORIES, DEFAULT_DESIGN, EDGE_URL } from '../config.js';
-import { state, isAdmin, loadPlans, loadTemplates } from '../store.js';
-import {
-  escapeHtml, escapeAttr, toast, loadingBlock, emptyState, statusBadge,
-  formatDateTime, formatCurrency, openModal, confirmDialog, avatarHtml,
-  initials, safeName, formatDate
-} from '../utils.js';
-import { t, getLang } from '../i18n.js';
-
 const FEATURE_KEYS = [
   ['all_templates', 'All templates'],
   ['hd_export', 'HD 3× export'],
@@ -392,7 +383,7 @@ async function openTemplateEditor(tpl) {
   void close;
 }
 
-async function renderTemplates(panel) {
+async function renderTemplatesAdmin(panel) {
   panel.innerHTML = loadingBlock(t('common.loading'));
   const { data, error } = await sb.from('templates').select('*').order('created_at', { ascending: false });
   if (error) {
@@ -683,13 +674,13 @@ async function showTab(tab) {
   panel.innerHTML = loadingBlock(t('common.loading'));
   if (tab === 'overview') await renderOverview(panel);
   else if (tab === 'users') await renderUsers(panel);
-  else if (tab === 'templates') await renderTemplates(panel);
+  else if (tab === 'templates') await renderTemplatesAdmin(panel);
   else if (tab === 'plans') await renderPlans(panel);
   else if (tab === 'payments') await renderPayments(panel);
   else if (tab === 'audit') await renderAudit(panel);
 }
 
-export async function render(container) {
+async function renderAdmin(container) {
   if (!isAdmin()) {
     container.innerHTML = `<div class="alert alert-danger">${escapeHtml('Admin access only. Ask an existing admin to promote your account.')}</div>`;
     return;

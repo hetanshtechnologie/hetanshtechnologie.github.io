@@ -1,13 +1,3 @@
-import { sb } from '../config.js';
-import {
-  state, loadJobs, planFeature, loadLatestInvitation
-} from '../store.js';
-import {
-  escapeHtml, escapeAttr, toast, loadingBlock, emptyState, statusBadge,
-  formatDateTime, openModal, confirmDialog, downloadBlob, whatsappLink
-} from '../utils.js';
-import { t, getLang } from '../i18n.js';
-
 async function signedUrl(path, seconds = 3600) {
   if (!path) return null;
   const { data, error } = await sb.storage.from('invitations').createSignedUrl(path, seconds);
@@ -143,7 +133,7 @@ function jobCard(job) {
     </div>`;
 }
 
-export async function render(container) {
+async function renderHistory(container) {
   container.innerHTML = loadingBlock(t('common.loading'));
   let jobs = [];
   try {

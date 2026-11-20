@@ -1,15 +1,4 @@
-import { sb } from '../config.js';
-import {
-  state, loadProfile, loadPlan, loadGuestBatches, currentPlan, inviteLimit,
-  isAdmin, isSuspended, setTheme, signOut
-} from '../store.js';
-import {
-  escapeHtml, escapeAttr, toast, formatDate, formatCurrency, statusBadge,
-  avatarHtml, initials, loadingBlock, confirmDialog
-} from '../utils.js';
-import { t, getLang, setLang } from '../i18n.js';
-
-export async function render(container) {
+async function renderProfile(container) {
   container.innerHTML = loadingBlock(t('common.loading'));
   const batches = await loadGuestBatches(true).catch(() => []);
   await loadPlan().catch(() => null);

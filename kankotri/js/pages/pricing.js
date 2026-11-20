@@ -1,10 +1,3 @@
-import { sb, RAZORPAY_ENABLED } from '../config.js';
-import { state, loadPlans, loadProfile, loadPlan, currentPlan, planFeatureList } from '../store.js';
-import {
-  escapeHtml, toast, openModal, formatCurrency, formatDate, loadingBlock
-} from '../utils.js';
-import { t, getLang } from '../i18n.js';
-
 const FEATURE_ROWS = [
   ['all_templates', 'All invitation templates'],
   ['hd_export', 'HD 3× export'],
@@ -69,7 +62,7 @@ function featureLabel(key) {
   return row?.[1] || key;
 }
 
-export function openUpgrade(message) {
+function openUpgrade(message) {
   const plans = state.plans || [];
   const body = `
     <div class="alert alert-warning mb-3">${escapeHtml(message || t('upgrade.copy', { plan: currentPlan().name, limit: currentPlan().invite_limit }))}</div>
@@ -104,7 +97,7 @@ export function openUpgrade(message) {
   });
 }
 
-export async function render(container) {
+async function renderPricing(container) {
   container.innerHTML = loadingBlock(t('common.loading'));
   const [plans] = await Promise.all([
     loadPlans(true).catch(() => []),
@@ -152,7 +145,7 @@ export async function render(container) {
   });
 }
 
-export async function buyPlan(plan) {
+async function buyPlan(plan) {
   if (!plan || Number(plan.price) <= 0) {
     toast('Free plan is already available to every account.', 'info');
     return;

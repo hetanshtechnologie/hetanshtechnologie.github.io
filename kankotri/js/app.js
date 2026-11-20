@@ -1,33 +1,13 @@
-import { sb } from './config.js';
-import {
-  state, loadProfile, loadPlan, loadTemplates, loadGuestBatches, loadLatestInvitation,
-  initPreferences, setTheme, getTheme, signOut, isAdmin, isSuspended,
-  currentPlan, inviteLimit, restoreCustomFont
-} from './store.js';
-import { t, getLang, setLang, applyTranslations } from './i18n.js';
-import {
-  toast, openModal, escapeHtml, escapeAttr, initials, loadingBlock, isEmail
-} from './utils.js';
-import * as Dashboard from './pages/dashboard.js';
-import * as Templates from './pages/templates.js';
-import * as Guests from './pages/guests.js';
-import * as Customize from './pages/customize.js';
-import * as Generate from './pages/generate.js';
-import * as History from './pages/history.js';
-import * as Pricing from './pages/pricing.js';
-import * as Profile from './pages/profile.js';
-import * as Admin from './pages/admin.js';
-
 const ROUTES = {
-  dashboard: { title: 'dashboard.title', subtitle: 'dashboard.subtitle', page: Dashboard },
-  templates: { title: 'templates.title', subtitle: 'templates.subtitle', page: Templates },
-  'upload-guests': { title: 'guests.title', subtitle: 'guests.subtitle', page: Guests },
-  customize: { title: 'customize.title', subtitle: 'customize.subtitle', page: Customize },
-  generate: { title: 'generate.title', subtitle: 'generate.subtitle', page: Generate },
-  history: { title: 'history.title', subtitle: 'history.subtitle', page: History },
-  pricing: { title: 'pricing.title', subtitle: 'pricing.subtitle', page: Pricing },
-  profile: { title: 'profile.title', subtitle: 'profile.subtitle', page: Profile },
-  admin: { title: 'admin.title', subtitle: 'admin.subtitle', page: Admin, adminOnly: true }
+  dashboard: { title: 'dashboard.title', subtitle: 'dashboard.subtitle', page: { render: renderDashboard } },
+  templates: { title: 'templates.title', subtitle: 'templates.subtitle', page: { render: renderTemplates } },
+  'upload-guests': { title: 'guests.title', subtitle: 'guests.subtitle', page: { render: renderGuests } },
+  customize: { title: 'customize.title', subtitle: 'customize.subtitle', page: { render: renderCustomize } },
+  generate: { title: 'generate.title', subtitle: 'generate.subtitle', page: { render: renderGenerate } },
+  history: { title: 'history.title', subtitle: 'history.subtitle', page: { render: renderHistory } },
+  pricing: { title: 'pricing.title', subtitle: 'pricing.subtitle', page: { render: renderPricing } },
+  profile: { title: 'profile.title', subtitle: 'profile.subtitle', page: { render: renderProfile } },
+  admin: { title: 'admin.title', subtitle: 'admin.subtitle', page: { render: renderAdmin }, adminOnly: true }
 };
 
 const DEFAULT_ROUTE = 'dashboard';

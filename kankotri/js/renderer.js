@@ -1,6 +1,3 @@
-import { CARD, DEFAULT_DETAILS, DEFAULT_DESIGN } from './config.js';
-import { loadImage, formatDate } from './utils.js';
-
 const W = CARD.width;
 const H = CARD.height;
 
@@ -69,7 +66,7 @@ function scriptOrSerif(text, design, details) {
   return design?.layout === 'modern' ? latinFont(design, details) : 'Great Vibes';
 }
 
-export async function ensureFonts() {
+async function ensureFonts() {
   if (!document.fonts) return;
   try {
     await document.fonts.ready;
@@ -80,7 +77,7 @@ export async function ensureFonts() {
   }
 }
 
-export function makeQrDataUrl(text, size = 8) {
+function makeQrDataUrl(text, size = 8) {
   try {
     if (typeof window.qrcode !== 'function' || !text) return null;
     const qr = window.qrcode(0, 'M');
@@ -92,7 +89,7 @@ export function makeQrDataUrl(text, size = 8) {
   }
 }
 
-export async function prepareAssets({ details = {}, template = {}, qrText } = {}) {
+async function prepareAssets({ details = {}, template = {}, qrText } = {}) {
   const assets = { logo: null, background: null, qr: null, customFont: null };
   const tasks = [];
   if (details.logo_url) {
@@ -567,7 +564,7 @@ function layoutPositions(layout) {
   return { cx: 540, guestY: 300, eventY: 398, brideY: 540, ampY: 630, groomY: 715, msgY: 815, detailsY: 1000, align: 'center' };
 }
 
-export function drawCard(ctx, options = {}, assets = {}) {
+function drawCard(ctx, options = {}, assets = {}) {
   const details = { ...DEFAULT_DETAILS, ...(options.details || {}) };
   const design = { ...DEFAULT_DESIGN, ...(options.design || {}) };
   const guest = options.guest || {};
@@ -746,7 +743,7 @@ export function drawCard(ctx, options = {}, assets = {}) {
   }
 }
 
-export async function renderPreview(canvas, opts = {}) {
+async function renderPreview(canvas, opts = {}) {
   if (!canvas) return null;
   await ensureFonts();
   const assets = opts.assets || await prepareAssets({
@@ -765,7 +762,7 @@ export async function renderPreview(canvas, opts = {}) {
   return canvas;
 }
 
-export async function renderThumbnail(canvas, template, details = {}, lang = 'gu') {
+async function renderThumbnail(canvas, template, details = {}, lang = 'gu') {
   const opts = {
     details: { ...DEFAULT_DETAILS, ...details, language: lang, show_qr: false },
     design: template.design,
@@ -787,7 +784,7 @@ export async function renderThumbnail(canvas, template, details = {}, lang = 'gu
   return canvas;
 }
 
-export async function renderExportCanvas(canvas, opts = {}, scale = 3) {
+async function renderExportCanvas(canvas, opts = {}, scale = 3) {
   await ensureFonts();
   canvas.width = Math.round(W * scale);
   canvas.height = Math.round(H * scale);
@@ -799,7 +796,7 @@ export async function renderExportCanvas(canvas, opts = {}, scale = 3) {
   return canvas;
 }
 
-export function cardShareText(details, guest, lang = 'gu') {
+function cardShareText(details, guest, lang = 'gu') {
   const d = { ...DEFAULT_DETAILS, ...details };
   if (lang === 'gu') {
     return [

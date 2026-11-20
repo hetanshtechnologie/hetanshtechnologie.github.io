@@ -1,18 +1,3 @@
-import { sb, DEFAULT_DETAILS, PREMIUM_FONT_OPTIONS, CATEGORIES } from '../config.js';
-import {
-  state, loadTemplates, loadLatestInvitation, loadGuests, loadGuestBatches,
-  selectedTemplate, setSelectedTemplate, templateKey, canUseTemplate,
-  designFor, detailsFor, planFeature, currentPlan, inviteLimit,
-  saveCustomFont, restoreCustomFont, uploadLogo, loadPlan
-} from '../store.js';
-import { renderPreview, prepareAssets, ensureFonts, makeQrDataUrl, cardShareText } from '../renderer.js';
-import {
-  escapeHtml, escapeAttr, toast, debounce, formatDate, downloadBlob,
-  openModal, confirmDialog
-} from '../utils.js';
-import { t, getLang } from '../i18n.js';
-import { openUpgrade } from './pricing.js';
-
 let currentCanvas = null;
 let previewTimer = null;
 
@@ -29,14 +14,14 @@ const MESSAGE_IDEAS = {
   ]
 };
 
-export function sampleGuest() {
+function sampleGuest() {
   if (state.guests?.length) {
     return state.guests[0];
   }
   return { guest_name: getLang() === 'gu' ? 'મહેમાન' : 'Guest', family_name: getLang() === 'gu' ? 'પરિવાર' : 'Family' };
 }
 
-export function collectDetailsFromForm(root) {
+function collectDetailsFromForm(root) {
   const value = (sel) => root.querySelector(sel)?.value?.trim() || '';
   const checked = (sel) => !!root.querySelector(sel)?.checked;
   return {
@@ -81,7 +66,7 @@ function swatches(design) {
   return (design.bg || []).concat([design.accent, design.gold]).map(color => `<span class="color-swatch" style="background:${escapeAttr(color)}" title="${escapeAttr(color)}"></span>`).join('');
 }
 
-export async function render(container) {
+async function renderCustomize(container) {
   const [templates] = await Promise.all([
     loadTemplates(),
     loadPlan().catch(() => null)

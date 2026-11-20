@@ -1,5 +1,3 @@
-import { STORAGE_KEYS } from './config.js';
-
 const EN = {
   'boot.tagline': 'Crafting personalised invitations...',
   'app.tagline': 'Invitation studio',
@@ -456,11 +454,11 @@ const DICTS = { en: EN, gu: GU };
 let current = localStorage.getItem(STORAGE_KEYS.lang) || 'en';
 if (!DICTS[current]) current = 'en';
 
-export function getLang() {
+function getLang() {
   return current;
 }
 
-export function setLang(lang) {
+function setLang(lang) {
   current = DICTS[lang] ? lang : 'en';
   localStorage.setItem(STORAGE_KEYS.lang, current);
   document.documentElement.lang = current;
@@ -469,7 +467,7 @@ export function setLang(lang) {
   return current;
 }
 
-export function t(key, vars = {}) {
+function t(key, vars = {}) {
   let text = DICTS[current]?.[key] || EN[key] || key;
   Object.entries(vars).forEach(([name, value]) => {
     text = text.replace(new RegExp(`\\{${name}\\}`, 'g'), String(value));
@@ -477,7 +475,7 @@ export function t(key, vars = {}) {
   return text;
 }
 
-export function applyTranslations(root = document) {
+function applyTranslations(root = document) {
   root.querySelectorAll('[data-i18n]').forEach(el => {
     el.textContent = t(el.getAttribute('data-i18n'));
   });

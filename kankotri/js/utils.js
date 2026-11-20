@@ -1,8 +1,6 @@
-export const $ = (sel, root = document) => root.querySelector(sel);
-export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-export const on = (el, event, handler, opts) => el && el.addEventListener(event, handler, opts);
+const on = (el, event, handler, opts) => el && el.addEventListener(event, handler, opts);
 
-export function escapeHtml(value) {
+function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -11,19 +9,19 @@ export function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-export function escapeAttr(value) {
+function escapeAttr(value) {
   return escapeHtml(value).replace(/`/g, '&#96;');
 }
 
-export function clamp(value, min, max) {
+function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-export function sleep(ms) {
+function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-export function debounce(fn, wait = 250) {
+function debounce(fn, wait = 250) {
   let timer;
   return function debounced(...args) {
     clearTimeout(timer);
@@ -31,7 +29,7 @@ export function debounce(fn, wait = 250) {
   };
 }
 
-export function initials(name) {
+function initials(name) {
   return String(name || '?')
     .trim()
     .split(/\s+/)
@@ -41,12 +39,12 @@ export function initials(name) {
     .toUpperCase() || '?';
 }
 
-export function truncate(value, length = 32) {
+function truncate(value, length = 32) {
   const text = String(value ?? '');
   return text.length > length ? `${text.slice(0, length - 1)}…` : text;
 }
 
-export function toast(message, type = 'success', duration = 3200) {
+function toast(message, type = 'success', duration = 3200) {
   const root = document.getElementById('toasts');
   if (!root) return;
   const node = document.createElement('div');
@@ -61,7 +59,7 @@ export function toast(message, type = 'success', duration = 3200) {
   }, duration);
 }
 
-export function openModal({ title = '', subtitle = '', body = '', footer = '', size = '', onMount = null, closable = true } = {}) {
+function openModal({ title = '', subtitle = '', body = '', footer = '', size = '', onMount = null, closable = true } = {}) {
   const root = document.getElementById('modal-root');
   if (!root) return () => {};
   root.classList.remove('hidden');
@@ -107,7 +105,7 @@ export function openModal({ title = '', subtitle = '', body = '', footer = '', s
   return close;
 }
 
-export function confirmDialog(message, { title = 'Please confirm', confirmText = 'Confirm', cancelText = 'Cancel', danger = false } = {}) {
+function confirmDialog(message, { title = 'Please confirm', confirmText = 'Confirm', cancelText = 'Cancel', danger = false } = {}) {
   return new Promise(resolve => {
     const close = openModal({
       title,
@@ -134,7 +132,7 @@ export function confirmDialog(message, { title = 'Please confirm', confirmText =
   });
 }
 
-export function formatDate(value, lang = 'en') {
+function formatDate(value, lang = 'en') {
   if (!value) return '';
   const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00`) : new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
@@ -147,7 +145,7 @@ export function formatDate(value, lang = 'en') {
   }
 }
 
-export function formatDateTime(value, lang = 'en') {
+function formatDateTime(value, lang = 'en') {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
@@ -160,7 +158,7 @@ export function formatDateTime(value, lang = 'en') {
   }
 }
 
-export function formatCurrency(amount, lang = 'en') {
+function formatCurrency(amount, lang = 'en') {
   try {
     return new Intl.NumberFormat(lang === 'gu' ? 'gu-IN' : 'en-IN', {
       style: 'currency', currency: 'INR', maximumFractionDigits: 0
@@ -170,12 +168,12 @@ export function formatCurrency(amount, lang = 'en') {
   }
 }
 
-export function todayStamp(date = new Date()) {
+function todayStamp(date = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function fileNameForGuest(name, index = 0) {
+function fileNameForGuest(name, index = 0) {
   const base = String(name || 'Guest')
     .normalize('NFKD')
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
@@ -184,11 +182,11 @@ export function fileNameForGuest(name, index = 0) {
   return base ? `${base}.png` : `Guest_${index + 1}.png`;
 }
 
-export function safeName(name) {
+function safeName(name) {
   return String(name || 'Guest').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').trim() || 'Guest';
 }
 
-export function randomId() {
+function randomId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = Math.random() * 16 | 0;
@@ -197,7 +195,7 @@ export function randomId() {
   });
 }
 
-export function loadImage(src) {
+function loadImage(src) {
   return new Promise((resolve, reject) => {
     if (!src) return resolve(null);
     const img = new Image();
@@ -208,7 +206,7 @@ export function loadImage(src) {
   });
 }
 
-export function readFileAsArrayBuffer(file) {
+function readFileAsArrayBuffer(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -217,7 +215,7 @@ export function readFileAsArrayBuffer(file) {
   });
 }
 
-export function readFileAsDataURL(file) {
+function readFileAsDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -226,7 +224,7 @@ export function readFileAsDataURL(file) {
   });
 }
 
-export function canvasToBlob(canvas, type = 'image/png', quality = 0.95) {
+function canvasToBlob(canvas, type = 'image/png', quality = 0.95) {
   return new Promise((resolve, reject) => {
     if (canvas.toBlob) {
       canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Canvas export failed')), type, quality);
@@ -241,7 +239,7 @@ export function canvasToBlob(canvas, type = 'image/png', quality = 0.95) {
   });
 }
 
-export function dataURLToBlob(dataUrl) {
+function dataURLToBlob(dataUrl) {
   const [head, data] = String(dataUrl).split(',');
   const mime = /:(.*?);/.exec(head)?.[1] || 'image/png';
   const binary = atob(data || '');
@@ -250,9 +248,9 @@ export function dataURLToBlob(dataUrl) {
   return new Blob([bytes], { type: mime });
 }
 
-export const dataUrlToBlob = dataURLToBlob;
+const dataUrlToBlob = dataURLToBlob;
 
-export function downloadBlob(blob, filename) {
+function downloadBlob(blob, filename) {
   if (typeof window.saveAs === 'function') {
     window.saveAs(blob, filename);
     return;
@@ -267,7 +265,7 @@ export function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-export function bytesLabel(bytes) {
+function bytesLabel(bytes) {
   const value = Number(bytes || 0);
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
@@ -275,16 +273,16 @@ export function bytesLabel(bytes) {
   return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-export function setHtml(el, html) {
+function setHtml(el, html) {
   if (el) el.innerHTML = html;
   return el;
 }
 
-export function loadingBlock(label = 'Loading…') {
+function loadingBlock(label = 'Loading…') {
   return `<div class="loading-block"><span class="spinner"></span><span>${escapeHtml(label)}</span></div>`;
 }
 
-export function emptyState({ title, copy, action = '', mark = 'કં' }) {
+function emptyState({ title, copy, action = '', mark = 'કં' }) {
   return `<div class="empty">
     <div class="e-mark">${escapeHtml(mark)}</div>
     <h3>${escapeHtml(title)}</h3>
@@ -293,11 +291,11 @@ export function emptyState({ title, copy, action = '', mark = 'કં' }) {
   </div>`;
 }
 
-export function badge(text, variant = '') {
+function badge(text, variant = '') {
   return `<span class="badge ${variant ? `badge-${variant}` : ''}">${escapeHtml(text)}</span>`;
 }
 
-export function avatarHtml(profile, cls = '') {
+function avatarHtml(profile, cls = '') {
   const name = profile?.full_name || profile?.email || 'Guest';
   if (profile?.avatar_url) {
     return `<span class="avatar ${cls}"><img src="${escapeAttr(profile.avatar_url)}" alt="${escapeAttr(name)}"></span>`;
@@ -305,7 +303,7 @@ export function avatarHtml(profile, cls = '') {
   return `<span class="avatar ${cls}">${escapeHtml(initials(name))}</span>`;
 }
 
-export function statusBadge(status) {
+function statusBadge(status) {
   const map = {
     completed: ['Completed', 'success'],
     processing: ['Processing', 'info'],
@@ -324,52 +322,52 @@ export function statusBadge(status) {
   return badge(label, variant);
 }
 
-export function csvEscape(value) {
+function csvEscape(value) {
   const text = String(value ?? '');
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-export function triggerDownloadText(text, filename, type = 'text/csv;charset=utf-8') {
+function triggerDownloadText(text, filename, type = 'text/csv;charset=utf-8') {
   downloadBlob(new Blob([text], { type }), filename);
 }
 
-export function normalizeHeader(value) {
+function normalizeHeader(value) {
   return String(value || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
 }
 
-export function parseNumeric(value) {
+function parseNumeric(value) {
   const n = Number(String(value ?? '').replace(/[^\d.-]/g, ''));
   return Number.isFinite(n) ? n : 0;
 }
 
-export function sortByDateDesc(items, field = 'created_at') {
+function sortByDateDesc(items, field = 'created_at') {
   return [...items].sort((a, b) => new Date(b[field] || 0) - new Date(a[field] || 0));
 }
 
-export function isEmail(value) {
+function isEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
-export function isMobile(value) {
+function isMobile(value) {
   return /^[+]?[\d\s-]{7,18}$/.test(String(value || '').trim());
 }
 
-export function canonicalMobile(value) {
+function canonicalMobile(value) {
   const digits = String(value || '').replace(/\D/g, '');
   if (!digits) return '';
   return digits.length > 10 ? digits : `91${digits.slice(-10)}`;
 }
 
-export function whatsappLink(mobile, text) {
+function whatsappLink(mobile, text) {
   const number = canonicalMobile(mobile);
   return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
 }
 
-export function mailtoLink(email, subject, body) {
+function mailtoLink(email, subject, body) {
   return `mailto:${encodeURIComponent(email || '')}?subject=${encodeURIComponent(subject || '')}&body=${encodeURIComponent(body || '')}`;
 }
 
-export async function withTimeout(promise, ms = 20000, message = 'Request timed out') {
+async function withTimeout(promise, ms = 20000, message = 'Request timed out') {
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(message)), ms);

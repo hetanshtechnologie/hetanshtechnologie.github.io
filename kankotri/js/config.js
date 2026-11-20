@@ -1,23 +1,23 @@
-export const SUPABASE_URL = 'https://vgipghqejzbcoighktij.supabase.co';
-export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnaXBnaHFlanpiY29pZ2hrdGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MjQ2MjIsImV4cCI6MjA5NTMwMDYyMn0.KoDwAZarGWOLwKXOwycA8wuIiIrksvZy7dyaO0-ehUo';
-export const EDGE_URL = `${SUPABASE_URL}/functions/v1`;
-export const RAZORPAY_ENABLED = true;
+const SUPABASE_URL = 'https://vgipghqejzbcoighktij.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnaXBnaHFlanpiY29pZ2hrdGlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3MjQ2MjIsImV4cCI6MjA5NTMwMDYyMn0.KoDwAZarGWOLwKXOwycA8wuIiIrksvZy7dyaO0-ehUo';
+const EDGE_URL = `${SUPABASE_URL}/functions/v1`;
+const RAZORPAY_ENABLED = true;
 
-export const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
 });
 
-export const CARD = {
+const CARD = {
   width: 1080,
   height: 1350,
   previewWidth: 540,
   previewHeight: 675
 };
 
-export const MAX_GUESTS = 10000;
-export const PAGE_SIZE = 8;
+const MAX_GUESTS = 10000;
+const PAGE_SIZE = 8;
 
-export const CATEGORIES = [
+const CATEGORIES = [
   'Gujarati Wedding',
   'Hindu Wedding',
   'Reception',
@@ -27,14 +27,14 @@ export const CATEGORIES = [
   'Birthday'
 ];
 
-export const STORAGE_KEYS = {
+const STORAGE_KEYS = {
   theme: 'kankotri_theme',
   lang: 'kankotri_lang',
   font: 'kankotri_custom_font',
   lastTemplate: 'kankotri_last_template'
 };
 
-export const DEFAULT_DETAILS = {
+const DEFAULT_DETAILS = {
   event_name: 'Wedding Celebration',
   bride_name: 'Riya',
   groom_name: 'Aarav',
@@ -50,7 +50,7 @@ export const DEFAULT_DETAILS = {
   show_qr: true
 };
 
-export const DEFAULT_DESIGN = {
+const DEFAULT_DESIGN = {
   bg: ['#FFF8E7', '#F3DFC1'],
   accent: '#B76E79',
   gold: '#D4AF37',
@@ -61,7 +61,7 @@ export const DEFAULT_DESIGN = {
   font: 'Cormorant Garamond'
 };
 
-export const FALLBACK_TEMPLATES = [
+const FALLBACK_TEMPLATES = [
   { key: 'local-1', name: 'Ganesha Kankotri', category: 'Gujarati Wedding', is_premium: false, design: { bg: ['#FFF8E7', '#F3DFC1'], accent: '#B76E79', gold: '#D4AF37', text: '#5A2A2A', border: 'mandala', ornament: 'ganesh', layout: 'classic', font: 'Cormorant Garamond' } },
   { key: 'local-2', name: 'Marigold Mangal', category: 'Gujarati Wedding', is_premium: false, design: { bg: ['#FFF4DC', '#F7C873'], accent: '#C0392B', gold: '#D4AF37', text: '#6B1D1D', border: 'floral', ornament: 'floral', layout: 'royal', font: 'Playfair Display' } },
   { key: 'local-3', name: 'Rani Pink Garba', category: 'Gujarati Wedding', is_premium: true, design: { bg: ['#FFF0F5', '#F5B7C7'], accent: '#B76E79', gold: '#C9A227', text: '#7A1F3D', border: 'paisley', ornament: 'mandala', layout: 'classic', font: 'Cormorant Garamond' } },
@@ -76,7 +76,7 @@ export const FALLBACK_TEMPLATES = [
   { key: 'local-12', name: 'Celebration Gold', category: 'Birthday', is_premium: true, design: { bg: ['#FFF9E8', '#F2D48A'], accent: '#B8860B', gold: '#D4AF37', text: '#4A3000', border: 'minimal', ornament: 'sparkle', layout: 'modern', font: 'Playfair Display' } }
 ];
 
-export const PREMIUM_FONT_OPTIONS = [
+const PREMIUM_FONT_OPTIONS = [
   { value: '', label: 'Template default' },
   { value: 'Cormorant Garamond', label: 'Cormorant Garamond' },
   { value: 'Playfair Display', label: 'Playfair Display' },

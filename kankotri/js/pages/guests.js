@@ -1,16 +1,3 @@
-import { sb, MAX_GUESTS } from '../config.js';
-import {
-  state, loadGuestBatches, loadGuests, selectBatch, inviteLimit, currentPlan,
-  loadPlan, currentBatch
-} from '../store.js';
-import {
-  escapeHtml, escapeAttr, toast, emptyState, confirmDialog, openModal,
-  formatDateTime, formatDate, triggerDownloadText, readFileAsArrayBuffer,
-  normalizeHeader, loadingBlock
-} from '../utils.js';
-import { t, getLang } from '../i18n.js';
-import { openUpgrade } from './pricing.js';
-
 let parsed = null;
 let parseError = '';
 
@@ -146,7 +133,7 @@ function batchesHtml(batches) {
     </div>`).join('');
 }
 
-export async function render(container) {
+async function renderGuests(container) {
   await loadPlan().catch(() => null);
   const batches = await loadGuestBatches(true);
   const limit = inviteLimit();

@@ -1,7 +1,3 @@
-import { sb, STORAGE_KEYS, FALLBACK_TEMPLATES, DEFAULT_DESIGN, DEFAULT_DETAILS } from './config.js';
-import { getLang, setLang } from './i18n.js';
-import { loadImage, readFileAsDataURL } from './utils.js';
-
 const FREE_PLAN = {
   id: null,
   name: 'Free',
@@ -27,7 +23,7 @@ const FREE_PLAN = {
   }
 };
 
-export const state = {
+const state = {
   user: null,
   profile: null,
   plan: null,
@@ -50,32 +46,9 @@ function cacheKey(userId, suffix) {
   return `kankotri_${suffix}_${userId}`;
 }
 
-export async function loadProfile(user = state.user) {
+async function loadProfile(user = state.user) {
   if (!user) return null;
   state.user = user;
-  let { data, error } = await sb.from('profiles').select('*').eq('id', user.id).maybeSingle();
-  if (error) throw error;
-  if (!data) {
-    const meta = user.user_metadata || {};
-    const payload = {
-      id: user.id,
-      email: user.email,
-      full_name: meta.full_name || meta.name || (user.email || '').split('@')[0],
-      avatar_url: meta.avatar_url || meta.picture || null,
-      provider: user.app_metadata?.provider || 'email',
-      role: 'user'
-    };
-    const inserted = await sb.from('profiles').insert(payload).select('*').single();
-    if (inserted.error) {
-      const retry = await sb.from('profiles').select('*').eq('id', user.id).maybeSingle();
-      if (retry.error) throw retry.error;
-      data = retry.data;
-    } else {
-      data = inserted.data;
-    }
-  }
-export async function loadProfile(user = state.user) {
-  if (!user) return null;
   try {
     let { data, error } = await sb.from('profiles').select('*').eq('id', user.id).maybeSingle();
     if (error && error.code !== 'PGRST116') throw error;
@@ -128,7 +101,7 @@ export async function loadProfile(user = state.user) {
   }
 }
 
-export async function loadPlan() {
+async function loadPlan() {
   try {
     const { data } = await sb.rpc('get_my_plan');
     state.plan = data || FREE_PLAN;
@@ -141,34 +114,34 @@ export async function loadPlan() {
   }
 }
 
-export function currentPlan() {
+function currentPlan() {
   return state.plan || FREE_PLAN;
 }
 
-export function isAdmin() {
+function isAdmin() {
   return state.profile?.role === 'admin';
 }
 
-export function isSuspended() {
+function isSuspended() {
   return !!state.profile?.is_suspended;
 }
 
-export function inviteLimit() {
+function inviteLimit() {
   const limit = Number(currentPlan().invite_limit ?? 20);
   return limit > 0 ? limit : 20;
 }
 
-export function planFeature(key) {
+function planFeature(key) {
   const features = currentPlan().features || {};
   if (key in features) return !!features[key];
   return false;
 }
 
-export function isPaidPlan() {
+function isPaidPlan() {
   return Number(currentPlan().price || 0) > 0;
 }
 
-export async function loadPlans(force = false) {
+async function loadPlans(force = false) {
   if (state.plansLoaded && !force) return state.plans;
   try {
     const { data, error } = await sb.from('plans').select('*').order('price', { ascending: true });
@@ -183,15 +156,15 @@ export async function loadPlans(force = false) {
   }
 }
 
-export function freePlan() {
+function freePlan() {
   return state.plans.find(p => Number(p.price) === 0) || FREE_PLAN;
 }
 
-export function planById(id) {
+function planById(id) {
   return state.plans.find(p => p.id === id) || FREE_PLAN;
 }
 
-export async function loadTemplates(force = false) {
+async function loadTemplates(force = false) {
   if (state.templatesLoaded && !force) return state.templates;
   try {
     const { data, error } = await sb.from('templates').select('*').eq('is_active', true).order('created_at', { ascending: true });
@@ -224,35 +197,35 @@ export async function loadTemplates(force = false) {
   }
 }
 
-export function templateKey(template) {
+function templateKey(template) {
   return String(template?.id || template?.key || '');
 }
 
-export function selectedTemplate() {
+function selectedTemplate() {
   return state.selectedTemplate || state.templates[0] || null;
 }
 
-export function setSelectedTemplate(template) {
+function setSelectedTemplate(template) {
   state.selectedTemplate = template;
   localStorage.setItem(STORAGE_KEYS.lastTemplate, templateKey(template));
   return template;
 }
 
-export function canUseTemplate(template) {
+function canUseTemplate(template) {
   if (!template) return true;
   if (!template.is_premium) return true;
   return planFeature('all_templates');
 }
 
-export function designFor(template) {
+function designFor(template) {
   return { ...DEFAULT_DESIGN, ...(template?.design || {}) };
 }
 
-export function detailsFor(details) {
+function detailsFor(details) {
   return { ...DEFAULT_DETAILS, ...(details || {}) };
 }
 
-export async function loadGuestBatches(force = false) {
+async function loadGuestBatches(force = false) {
   if (!state.user) return [];
   if (state.guestBatchesLoaded && !force) return state.guestBatches;
   try {
@@ -278,25 +251,19 @@ export async function loadGuestBatches(force = false) {
     return state.guestBatches;
   }
 }
-  if (!state.selectedBatchId && state.guestBatches.length) {
-    state.selectedBatchId = state.guestBatches[0].id;
-    localStorage.setItem('kankotri_batch', state.selectedBatchId);
-  }
-  return state.guestBatches;
-}
 
-export function selectBatch(id) {
+function selectBatch(id) {
   state.selectedBatchId = id;
   state.guests = [];
   if (id) localStorage.setItem('kankotri_batch', id);
   else localStorage.removeItem('kankotri_batch');
 }
 
-export function currentBatch() {
+function currentBatch() {
   return state.guestBatches.find(b => b.id === state.selectedBatchId) || null;
 }
 
-export async function loadGuests(batchId = state.selectedBatchId, force = false) {
+async function loadGuests(batchId = state.selectedBatchId, force = false) {
   if (!batchId) return [];
   if (!force && state.guests.length && state.guests[0]?.batch_id === batchId) return state.guests;
   try {
@@ -323,11 +290,8 @@ export async function loadGuests(batchId = state.selectedBatchId, force = false)
     return [];
   }
 }
-  state.guests = all;
-  return all;
-}
 
-export async function loadLatestInvitation(force = false) {
+async function loadLatestInvitation(force = false) {
   if (!state.user) return null;
   if (state.invitation && !force) return state.invitation;
   try {
@@ -362,7 +326,7 @@ export async function loadLatestInvitation(force = false) {
   }
 }
 
-export async function loadJobs(limit = 60, force = false) {
+async function loadJobs(limit = 60, force = false) {
   if (!state.user) return [];
   if (state.jobs.length && !force) return state.jobs;
   try {
@@ -381,29 +345,29 @@ export async function loadJobs(limit = 60, force = false) {
   }
 }
 
-export async function signOut() {
+async function signOut() {
   await sb.auth.signOut();
 }
 
-export function setTheme(theme) {
+function setTheme(theme) {
   const next = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem(STORAGE_KEYS.theme, next);
   return next;
 }
 
-export function getTheme() {
+function getTheme() {
   return document.documentElement.getAttribute('data-theme') || 'light';
 }
 
-export function initPreferences() {
+function initPreferences() {
   const theme = localStorage.getItem(STORAGE_KEYS.theme) || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   setTheme(theme);
   const lang = localStorage.getItem(STORAGE_KEYS.lang) || 'en';
   setLang(lang);
 }
 
-export async function saveCustomFont(file) {
+async function saveCustomFont(file) {
   if (!file) throw new Error('Choose a font file');
   if (file.size > 3 * 1024 * 1024) throw new Error('Font must be smaller than 3 MB');
   const dataUrl = await readFileAsDataURL(file);
@@ -418,7 +382,7 @@ export async function saveCustomFont(file) {
   return record;
 }
 
-export async function registerCustomFont(record) {
+async function registerCustomFont(record) {
   if (!record?.dataUrl) return null;
   try {
     const face = new FontFace(record.name, `url(${record.dataUrl})`);
@@ -431,7 +395,7 @@ export async function registerCustomFont(record) {
   }
 }
 
-export async function restoreCustomFont() {
+async function restoreCustomFont() {
   if (!state.user) return null;
   try {
     const raw = localStorage.getItem(cacheKey(state.user.id, 'font'));
@@ -445,7 +409,7 @@ export async function restoreCustomFont() {
   }
 }
 
-export async function uploadLogo(file) {
+async function uploadLogo(file) {
   if (!file) throw new Error('Choose a logo image');
   if (file.size > 2 * 1024 * 1024) throw new Error('Logo must be smaller than 2 MB');
   const dataUrl = await readFileAsDataURL(file);
@@ -453,7 +417,7 @@ export async function uploadLogo(file) {
   return dataUrl;
 }
 
-export function planFeatureList(plan) {
+function planFeatureList(plan) {
   const f = plan?.features || {};
   return [
     ['All templates', f.all_templates],
@@ -474,6 +438,6 @@ export function planFeatureList(plan) {
   ];
 }
 
-export function language() {
+function language() {
   return getLang();
 }
